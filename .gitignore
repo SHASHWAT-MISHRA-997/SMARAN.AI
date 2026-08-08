@@ -1,3 +1,8 @@
+# Security & Environment
+.env
+.env.local
+*.env
+
 # Dependencies
 frontend/node_modules/
 frontend/dist/
@@ -5,7 +10,7 @@ backend/venv/
 .venv/
 node_modules/
 
-# Release Zip Archives & Large Binaries (Upload via GitHub Releases)
+# Release Zip Archives & Large Binaries
 *.zip
 
 # Runtime data & build caches
