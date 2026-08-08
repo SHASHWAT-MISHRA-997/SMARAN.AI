@@ -1,0 +1,661 @@
+import React, { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  MessageSquare, Plus, Trash2, X, LogOut, Moon, Sun,
+  ShieldAlert, Settings, Pencil, Check, Brain,
+  ChevronLeft, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck
+} from 'lucide-react';
+import ModelHubModal from './ModelHubModal';
+import DeveloperModal from './DeveloperModal';
+import { useTheme } from '../context/ThemeContext';
+import { API_BASE } from '../context/AuthContext';
+import { parseJsonResponse } from '../utils/api';
+
+
+/* â”€â”€â”€ Tooltip â€” uses React Portal so it's NEVER clipped by parent overflow â”€â”€ */
+const Tip = ({ label, children }) => {
+  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const ref = useRef(null);
+
+  const handleEnter = () => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setPos({
+        top: rect.top + rect.height / 2,
+        left: rect.right + 10,   // 10px gap to the right of the button
+      });
+    }
+    setShow(true);
+  };
+
+  return (
+    <div ref={ref} onMouseEnter={handleEnter} onMouseLeave={() => setShow(false)}>
+      {children}
+      {show && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: pos.top,
+            left: pos.left,
+            transform: 'translateY(-50%)',
+            zIndex: 99999,
+            pointerEvents: 'none',
+          }}
+          className="whitespace-nowrap px-3 py-1.5 rounded-lg
+            bg-zinc-900 text-white text-[11px] font-bold shadow-2xl
+            border border-zinc-700/80
+            animate-in fade-in zoom-in-95 duration-100"
+        >
+          {/* Arrow pointing left */}
+          <span
+            style={{
+              position: 'absolute',
+              right: '100%',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              borderTop: '5px solid transparent',
+              borderBottom: '5px solid transparent',
+              borderRight: '6px solid #18181b',
+            }}
+          />
+          {label}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+};
+
+
+/* â”€â”€â”€ Collapsed Icon Button (icon + tiny label below) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+const RailBtn = ({ icon, label, onClick, active = false, danger = false, violet = false }) => (
+  <Tip label={label}>
+    <button
+      onClick={onClick}
+      className={`
+        flex flex-col items-center justify-center gap-1 w-12 h-12 rounded-xl
+        transition-all duration-200 cursor-pointer group relative
+        ${active
+          ? 'bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-400/40'
+          : danger
+            ? 'text-rose-400 hover:bg-rose-500/15 hover:text-rose-300'
+            : violet
+              ? 'text-violet-400 hover:bg-violet-500/15 hover:text-violet-300'
+              : 'text-zinc-400 hover:bg-zinc-700/60 hover:text-white'
+        }
+      `}
+    >
+      <span className="w-5 h-5 flex items-center justify-center">{icon}</span>
+    </button>
+  </Tip>
+);
+
+
+/* â”€â”€â”€ Main Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+const Sidebar = ({
+  token, user, sessions, activeSessionId, setActiveSessionId,
+  onCreateSession, onDeleteSession, onRenameSession,
+  activeCollections, setActiveCollections,
+  onNavigate, activeView, logout, onExpandChange,
+}) => {
+  const { theme, toggleTheme } = useTheme();
+
+  const [expanded, setExpanded] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Editing
+  const [editingSessionId, setEditingSessionId] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  // Memory
+  const [isMemoryOpen, setIsMemoryOpen] = useState(false);
+  const [memoryFacts, setMemoryFacts] = useState([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryToast, setMemoryToast] = useState(null);
+
+  // Model Hub Modal
+  const [isModelHubOpen, setIsModelHubOpen] = useState(false);
+
+  // Developer Modal
+  const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
+
+  const fetchMemoryFacts = async () => {
+    setMemoryLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/memory`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await parseJsonResponse(res);
+        setMemoryFacts(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setMemoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isMemoryOpen) {
+      fetchMemoryFacts();
+    }
+  }, [isMemoryOpen]);
+
+  const handleDeleteFact = async (id) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/memory/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setMemoryFacts((prev) => prev.filter((fact) => fact.id !== id));
+        setMemoryToast('Fact deleted.');
+      } else {
+        setMemoryToast('Failed to delete fact.');
+      }
+    } catch (err) {
+      console.error(err);
+      setMemoryToast('Failed to delete fact.');
+    } finally {
+      setTimeout(() => setMemoryToast(null), 3000);
+    }
+  };
+
+  const handleClearAllMemory = async () => {
+    if (!window.confirm("Are you sure you want to clear ALL memory facts? This cannot be undone.")) return;
+    setMemoryLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/memory/clear`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setMemoryFacts([]);
+        setMemoryToast('All memory cleared.');
+        setIsMemoryOpen(false);
+      } else {
+        setMemoryToast('Failed to clear memory.');
+      }
+    } catch (err) {
+      console.error(err);
+      setMemoryToast('Failed to clear memory.');
+    } finally {
+      setMemoryLoading(false);
+      setTimeout(() => setMemoryToast(null), 3000);
+    }
+  };
+
+  useEffect(() => { if (onExpandChange) onExpandChange(expanded); }, [expanded]);
+
+  const handleStartEdit = (e, session) => { e.stopPropagation(); setEditingSessionId(session.id); setEditTitle(session.title); };
+  const handleSave = (id) => { if (editTitle.trim()) onRenameSession(id, editTitle.trim()); setEditingSessionId(null); };
+  const handleCancel = () => setEditingSessionId(null);
+
+  useEffect(() => { fetchCollections(); }, []);
+  const fetchCollections = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/collections`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        await parseJsonResponse(res);
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleSessionClick = (id) => { setActiveSessionId(id); onNavigate('chat'); setMobileOpen(false); };
+
+  /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+     MEMORY VAULT MODAL â€” Full screen overlay
+  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  const memoryModal = isMemoryOpen && (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+      <div className="bg-[#1e1f20] border border-zinc-800 rounded-3xl w-full max-w-xl flex flex-col max-h-[80vh] shadow-[0_0_50px_rgba(99,102,241,0.15)] overflow-hidden">
+        {/* Header */}
+        <div className="p-5 border-b border-zinc-800/80 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-violet-500/10 flex items-center justify-center text-violet-400">
+              <Brain className="w-4 h-4" />
+            </div>
+            <div className="text-left">
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">AI Memory Vault</h3>
+              <p className="text-[10px] text-zinc-500 font-semibold uppercase mt-0.5">Selective memory facts dashboard</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsMemoryOpen(false)}
+            className="text-zinc-500 hover:text-white p-1 hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Content list */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {memoryLoading && memoryFacts.length === 0 ? (
+            <div className="py-8 flex flex-col items-center justify-center space-y-2">
+              <span className="w-6 h-6 rounded-full border-2 border-t-transparent border-violet-400 animate-spin" />
+              <span className="text-xs text-zinc-500 font-bold uppercase tracking-wider">Querying Vault...</span>
+            </div>
+          ) : memoryFacts.length === 0 ? (
+            <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
+              <span className="text-3xl"><Database className="w-8 h-8 text-zinc-600" /></span>
+              <div>
+                <p className="text-xs font-black text-zinc-400 uppercase">Vault is empty</p>
+                <p className="text-[10px] text-zinc-600 mt-1 max-w-xs font-bold leading-normal">
+                  The AI has not recorded any profile preferences or project tags for you yet.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {memoryFacts.map((fact) => (
+                <div
+                  key={fact.id}
+                  className="flex items-start justify-between gap-3 p-3.5 bg-zinc-900/50 hover:bg-zinc-900 border border-zinc-800 rounded-2xl transition-all group/fact text-left"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-zinc-300 font-semibold leading-relaxed whitespace-pre-wrap">{fact.fact}</p>
+                    <span className="text-[9px] text-zinc-600 font-mono block mt-1.5">
+                      Recorded on {new Date(fact.created_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteFact(fact.id)}
+                    title="Erase this memory fact"
+                    className="text-zinc-600 hover:text-rose-400 p-1.5 hover:bg-rose-500/10 rounded-xl transition-all cursor-pointer opacity-0 group-hover/fact:opacity-100 shrink-0"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-zinc-800/80 bg-zinc-950/20 flex items-center justify-between shrink-0">
+          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+            {memoryFacts.length} total facts stored
+          </span>
+          {memoryFacts.length > 0 && (
+            <button
+              onClick={handleClearAllMemory}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600/10 border border-rose-500/20 text-rose-400 text-[11px] font-black uppercase tracking-wider hover:bg-rose-600 hover:text-white transition-all cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Wipe Vault
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ——————————————————————————————————————————————————————————————————————————————————————————————————————
+     DESKTOP — Collapsed (icon rail) ↔ Expanded (full panel)
+  —————————————————————————————————————————————————————————————————————————————————————————————————————— */
+  const sidebarDesktop = (
+    <aside className={`
+      hidden md:flex flex-col shrink-0 h-screen sticky top-0 z-40
+      bg-[#1a1b1e] border-r border-zinc-800
+      transition-all duration-300 ease-in-out
+      ${expanded ? 'w-[268px]' : 'w-[64px]'}
+    `}>
+
+      {/* — TOP: Logo + Toggle — */}
+      <div className={`
+        flex items-center border-b border-zinc-800 shrink-0 h-[60px]
+        ${expanded ? 'px-4 justify-between' : 'flex-col justify-center gap-0 px-0'}
+      `}>
+        {/* Logo icon — always visible */}
+        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-orange-600 to-zinc-900 flex items-center justify-center text-white font-black text-sm shadow-lg shrink-0 select-none">
+          <Bot className="w-4.5 h-4.5 text-white" />
+        </div>
+
+        {/* Brand text — only expanded */}
+        {expanded && (
+          <div className="ml-2.5 flex-1 min-w-0 animate-in fade-in duration-200">
+            <div className="text-sm font-black tracking-wider uppercase leading-none">
+              <span className="text-orange-500">SMARAN</span>
+              <span className="text-white ml-1">AI</span>
+            </div>
+          </div>
+        )}
+
+        {/* Toggle button */}
+        {expanded ? (
+          <Tip label="Collapse sidebar">
+            <button
+              onClick={() => setExpanded(false)}
+              className="ml-2 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-700/60 transition-all cursor-pointer"
+            >
+              <PanelLeftClose className="w-4.5 h-4.5" />
+            </button>
+          </Tip>
+        ) : (
+          <Tip label="Expand sidebar">
+            <button
+              onClick={() => setExpanded(true)}
+              className="mt-1 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-700/60 transition-all cursor-pointer"
+            >
+              <PanelLeftOpen className="w-4.5 h-4.5" />
+            </button>
+          </Tip>
+        )}
+      </div>
+
+      {/* — NEW CONVERSATION button — */}
+      <div className={`shrink-0 ${expanded ? 'p-3' : 'flex justify-center py-3 px-2'}`}>
+        {expanded ? (
+          <button
+            onClick={() => { onCreateSession(); onNavigate('chat'); }}
+            className="w-full flex items-center justify-center gap-2 bg-zinc-800/60 hover:bg-zinc-700/70 text-zinc-200 font-bold text-xs uppercase tracking-wider rounded-full py-2.5 border border-zinc-700/40 hover:border-indigo-500/30 transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4 text-indigo-400" />
+            New Conversation
+          </button>
+        ) : (
+          <RailBtn
+            icon={<Plus className="w-5 h-5" />}
+            label="New Conversation"
+            onClick={() => { onCreateSession(); onNavigate('chat'); }}
+            active={false}
+          />
+        )}
+      </div>
+
+      {/* — CHAT HISTORY — */}
+      <div className={`flex-1 overflow-y-auto ${expanded ? 'px-3 py-1' : 'px-2 py-1 flex flex-col items-center gap-1'}`}>
+        {expanded && (
+          <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest px-2 mb-2">
+            Chat History
+          </span>
+        )}
+
+        {sessions.length === 0 && expanded && (
+          <p className="text-xs text-zinc-600 italic px-2 py-1 font-bold">No conversations yet.</p>
+        )}
+
+        {sessions.map((s) => {
+          const isActive = activeSessionId === s.id && activeView === 'chat';
+          const isEditing = editingSessionId === s.id;
+          const isConfirmDel = confirmDeleteId === s.id;
+
+          if (!expanded) {
+            return (
+              <Tip key={s.id} label={s.title || 'Chat'}>
+                <button
+                  onClick={() => handleSessionClick(s.id)}
+                  className={`
+                    w-12 h-10 flex items-center justify-center rounded-xl transition-all cursor-pointer
+                    ${isActive
+                      ? 'bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-400/30'
+                      : 'text-zinc-500 hover:bg-zinc-700/60 hover:text-white'}
+                  `}
+                >
+                  <MessageSquare className="w-4.5 h-4.5" />
+                </button>
+              </Tip>
+            );
+          }
+
+          return (
+            <div
+              key={s.id}
+              onClick={() => !isEditing && handleSessionClick(s.id)}
+              className={`
+                group w-full flex items-center justify-between rounded-full px-3 py-2 text-xs font-bold
+                cursor-pointer transition-all duration-200 border mb-1
+                ${isActive
+                  ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/20'
+                  : 'text-zinc-400 hover:bg-zinc-800/60 border-transparent hover:text-zinc-200'}
+              `}
+            >
+              {isEditing ? (
+                <div className="flex items-center gap-1.5 w-full" onClick={e => e.stopPropagation()}>
+                  <input
+                    type="text" value={editTitle}
+                    onChange={e => setEditTitle(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleSave(s.id); if (e.key === 'Escape') handleCancel(); }}
+                    autoFocus
+                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 text-white"
+                  />
+                  <button onClick={() => handleSave(s.id)} className="p-0.5 text-emerald-400 hover:bg-emerald-500/10 rounded cursor-pointer"><Check className="w-3.5 h-3.5" /></button>
+                  <button onClick={handleCancel} className="p-0.5 text-rose-400 hover:bg-rose-500/10 rounded cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <MessageSquare className="w-3.5 h-3.5 shrink-0 text-zinc-500 group-hover:text-indigo-400 transition-colors" />
+                    <span className="truncate">{s.title}</span>
+                  </div>
+                  {isConfirmDel ? (
+                    <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                      <span className="text-[10px] font-black text-rose-400 uppercase">Delete?</span>
+                      <button onClick={() => { onDeleteSession(s.id); setConfirmDeleteId(null); }} className="p-0.5 text-rose-400 hover:bg-rose-500/10 rounded cursor-pointer"><Check className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => setConfirmDeleteId(null)} className="p-0.5 text-zinc-500 hover:bg-zinc-800 rounded cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button onClick={e => handleStartEdit(e, s)} className="p-0.5 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                      <button onClick={e => { e.stopPropagation(); setConfirmDeleteId(s.id); }} className="p-0.5 text-zinc-500 hover:text-rose-400 hover:bg-zinc-800 rounded cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* — FOOTER — */}
+      <div className={`
+        border-t border-zinc-800 shrink-0
+        ${expanded ? 'p-3 space-y-1.5' : 'flex flex-col items-center gap-1 py-3 px-2'}
+      `}>
+
+        {/* Memory toast */}
+        {memoryToast && expanded && (
+          <div className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold animate-in fade-in duration-300">
+            <Brain className="w-3.5 h-3.5 shrink-0" /> {memoryToast}
+          </div>
+        )}
+
+        {/* Manage Memory */}
+        {expanded ? (
+          <button onClick={() => setIsMemoryOpen(true)}
+            className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8 hover:border-violet-700/30 transition-all">
+            <Brain className="w-4 h-4 shrink-0" />
+            Manage AI Memory
+          </button>
+        ) : (
+          <RailBtn
+            icon={<Brain className="w-5 h-5" />}
+            label="AI Memory Vault"
+            onClick={() => setIsMemoryOpen(true)}
+            violet
+          />
+        )}
+
+        {/* Admin */}
+        {user?.role === 'admin' && (
+          expanded ? (
+            <button
+              onClick={() => { onNavigate('admin'); setMobileOpen(false); }}
+              className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border cursor-pointer transition-all ${activeView === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'text-rose-400 border-transparent hover:bg-rose-500/8 hover:border-rose-700/30'}`}
+            >
+              <ShieldAlert className="w-4 h-4 shrink-0" /> Admin Control Board
+            </button>
+          ) : (
+            <RailBtn icon={<ShieldAlert className="w-5 h-5" />} label="Admin Control Board"
+              onClick={() => onNavigate('admin')} active={activeView === 'admin'} danger />
+          )
+        )}
+
+        {/* Model Hub Catalog Button */}
+        {expanded ? (
+          <button onClick={() => setIsModelHubOpen(true)} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/10 mb-1">
+            <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
+          </button>
+        ) : (
+          <RailBtn icon={<Boxes className="w-5 h-5 text-indigo-400" />} label="Model Catalog & Matrix" onClick={() => setIsModelHubOpen(true)} />
+        )}
+
+        {/* Settings / Theme / Logout */}
+        {expanded ? (
+          <div className="flex items-center gap-2">
+            <button onClick={() => onNavigate('settings')}
+              className="p-2.5 border border-zinc-800 hover:bg-zinc-800/60 text-zinc-400 hover:text-white rounded-xl transition-all cursor-pointer" title="Settings">
+              <Settings className="w-4 h-4" />
+            </button>
+            <button onClick={toggleTheme}
+              className="p-2.5 border border-zinc-800 hover:bg-zinc-800/60 text-zinc-400 hover:text-white rounded-xl transition-all cursor-pointer">
+              {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
+            </button>
+            <button onClick={logout}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 border border-zinc-800 hover:bg-rose-500/10 hover:border-rose-700/30 text-rose-400 text-xs font-black rounded-xl cursor-pointer transition-all">
+              <LogOut className="w-3.5 h-3.5" /> Sign Out
+            </button>
+          </div>
+        ) : (
+          <>
+            <RailBtn icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => onNavigate('settings')} />
+            <RailBtn
+              icon={theme === 'dark' ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-indigo-400" />}
+              label={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+              onClick={toggleTheme}
+            />
+            <RailBtn icon={<LogOut className="w-5 h-5" />} label="Sign Out" onClick={logout} danger />
+          </>
+        )}
+      </div>
+    </aside>
+  );
+
+  /* ——————————————————————————————————————————————————————————————————————————————————————————————————————
+     MOBILE
+  —————————————————————————————————————————————————————————————————————————————————————————————————————— */
+  const mobileSidebar = (
+    <>
+      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-[#1a1b1e] border-b border-zinc-800 shrink-0 z-30">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-orange-600 to-zinc-900 flex items-center justify-center text-white font-extrabold shadow-md"><Bot className="w-4.5 h-4.5" /></div>
+          <span className="font-black text-sm tracking-wide select-none">
+            <span className="text-orange-500">SMARAN</span>
+            <span className="text-white"> AI</span>
+          </span>
+        </div>
+        <button onClick={() => setMobileOpen(true)} className="text-zinc-400 hover:text-white p-1.5 rounded-xl bg-zinc-800 border border-zinc-700 cursor-pointer">
+          <Menu className="w-5 h-5" />
+        </button>
+      </div>
+
+      {mobileOpen && <div onClick={() => setMobileOpen(false)} className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-40" />}
+
+      <aside className={`md:hidden fixed top-0 bottom-0 left-0 w-[268px] bg-[#1a1b1e] border-r border-zinc-800 flex flex-col z-50 transition-transform duration-300 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-4 flex items-center justify-between border-b border-zinc-800">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-orange-600 to-zinc-900 flex items-center justify-center text-white font-black text-sm shadow-md"><Bot className="w-5 h-5" /></div>
+            <div>
+              <div className="text-sm font-black tracking-wider uppercase leading-none">
+                <span className="text-orange-500">SMARAN</span><span className="text-white ml-1">AI</span>
+              </div>
+            </div>
+          </div>
+          <button onClick={() => setMobileOpen(false)} className="text-zinc-500 hover:text-white cursor-pointer"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-3 shrink-0">
+          <button onClick={() => { onCreateSession(); onNavigate('chat'); setMobileOpen(false); }}
+            className="w-full flex items-center justify-center gap-2 bg-zinc-800/60 hover:bg-zinc-700/70 text-zinc-200 font-bold text-xs uppercase tracking-wider rounded-full py-2.5 border border-zinc-700/40 transition-all cursor-pointer">
+            <Plus className="w-4 h-4 text-indigo-400" /> New Conversation
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-3 py-1 space-y-1">
+          <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest px-2 mb-2">Chat History</span>
+          {sessions.length === 0 ? (
+            <p className="text-xs text-zinc-600 italic px-2 py-1 font-bold">No conversations yet.</p>
+          ) : sessions.map(s => (
+            <div key={s.id} onClick={() => handleSessionClick(s.id)}
+              className={`group w-full flex items-center justify-between rounded-full px-3 py-2 text-xs font-bold cursor-pointer transition-all border ${activeSessionId === s.id && activeView === 'chat' ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/20' : 'text-zinc-400 hover:bg-zinc-800/60 border-transparent'}`}>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-zinc-500" />
+                <span className="truncate">{s.title}</span>
+              </div>
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={e => handleStartEdit(e, s)} className="p-0.5 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                <button onClick={e => { e.stopPropagation(); onDeleteSession(s.id); }} className="p-0.5 text-zinc-500 hover:text-rose-400 hover:bg-zinc-800 rounded cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="p-3 border-t border-zinc-800 space-y-1.5 shrink-0">
+          <button onClick={() => { setIsModelHubOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/8">
+            <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
+          </button>
+          <button onClick={() => { setIsMemoryOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8">
+            <Brain className="w-4 h-4 shrink-0" /> Manage AI Memory
+          </button>
+          <button onClick={() => { setIsDeveloperOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8">
+            <UserCheck className="w-4 h-4 shrink-0 text-cyan-400" /> About Developer
+          </button>
+          {user?.role === 'admin' && (
+            <button onClick={() => { onNavigate('admin'); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-rose-400 hover:bg-rose-500/8">
+              <ShieldAlert className="w-4 h-4 shrink-0" /> Admin Control Board
+            </button>
+          )}
+          <div className="flex items-center gap-2">
+            <button onClick={() => onNavigate('settings')} className="p-2.5 border border-zinc-800 text-zinc-400 hover:text-white rounded-xl cursor-pointer"><Settings className="w-4 h-4" /></button>
+            <button onClick={toggleTheme} className="p-2.5 border border-zinc-800 text-zinc-400 hover:text-white rounded-xl cursor-pointer">
+              {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
+            </button>
+            <button onClick={logout} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 border border-zinc-800 hover:bg-rose-500/10 text-rose-400 text-xs font-black rounded-xl cursor-pointer">
+              <LogOut className="w-3.5 h-3.5" /> Sign Out
+            </button>
+          </div>
+
+          <div 
+            onClick={() => setIsDeveloperOpen(true)}
+            className="pt-2 border-t border-zinc-800/60 text-center cursor-pointer hover:bg-zinc-800/40 py-1.5 rounded-xl transition-all"
+            title="Click to view Developer Profile & Architecture"
+          >
+            <div className="text-[10px] font-semibold text-zinc-500">
+              Developed by <span className="font-extrabold text-indigo-400 hover:underline">SHASHWAT MISHRA</span>
+            </div>
+            <div className="flex items-center justify-center gap-2 mt-1 text-[10px]">
+              <a href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-cyan-400 hover:underline font-bold">
+                LinkedIn 🔗
+              </a>
+              <span className="text-zinc-600">•</span>
+              <a href="https://shashwatmishra-portfolio.netlify.app/" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-purple-400 hover:underline font-bold">
+                Portfolio 🌐
+              </a>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+
+  return (
+    <>
+      {sidebarDesktop}
+      {mobileSidebar}
+      {memoryModal}
+      <ModelHubModal
+        isOpen={isModelHubOpen}
+        onClose={() => setIsModelHubOpen(false)}
+        token={token}
+      />
+      <DeveloperModal
+        isOpen={isDeveloperOpen}
+        onClose={() => setIsDeveloperOpen(false)}
+      />
+    </>
+  );
+};
+
+export default Sidebar;

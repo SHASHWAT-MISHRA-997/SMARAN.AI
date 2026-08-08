@@ -1,0 +1,24 @@
+{
+  "short_name": "SMARAN AI",
+  "name": "SMARAN.AI - Universal Offline Enterprise AI",
+  "description": "Enterprise-ready offline AI knowledge management platform for robotics documents.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#4f46e5",
+  "background_color": "#030712",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}

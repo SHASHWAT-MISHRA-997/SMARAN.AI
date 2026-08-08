@@ -1,0 +1,31 @@
+# Dependencies
+frontend/node_modules/
+frontend/dist/
+backend/venv/
+.venv/
+node_modules/
+
+# Release Zip Archives & Large Binaries (Upload via GitHub Releases)
+*.zip
+
+# Runtime data & build caches
+backend/data/
+data/
+build/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log

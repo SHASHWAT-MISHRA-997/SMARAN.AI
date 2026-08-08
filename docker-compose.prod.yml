@@ -1,0 +1,45 @@
+services:
+  # Service 1: Ollama LLM & Embedding Engine
+  ollama:
+    image: ollama/ollama:latest
+    container_name: gmr-ollama
+    ports:
+      - "11435:11434"
+    volumes:
+      - ${USERPROFILE}/.ollama:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Service 2: Unified SMARAN AI Web App
+  app:
+    image: shashwatmishra062/smaran-ai:latest
+    container_name: smaran-ai
+    ports:
+      - "${GMR_PORT:-3003}:8000"
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - JWT_SECRET=gmr-robotics-local-security-secret-key-98765
+      - DEFAULT_LLM_MODEL=qwen2.5:14b
+      - DEFAULT_EMBEDDING_MODEL=nomic-embed-text
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./backend/data:/app/data
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  backend_data:
