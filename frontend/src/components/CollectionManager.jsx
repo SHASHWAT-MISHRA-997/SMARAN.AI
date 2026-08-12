@@ -138,33 +138,68 @@ const CollectionManager = ({ token }) => {
     }
   };
 
-  const traverseFileTree = (item, fileList) => {
-    return new Promise((resolve) => {
-      if (item.isFile) {
+  const readAllDirEntries = (dirReader) => {
+    return new Promise((resolve, reject) => {
+      let allEntries = [];
+      const readBatch = () => {
+        dirReader.readEntries((batch) => {
+          if (!batch || batch.length === 0) {
+            resolve(allEntries);
+          } else {
+            allEntries = allEntries.concat(batch);
+            readBatch();
+          }
+        }, reject);
+      };
+      readBatch();
+    });
+  };
+
+  const traverseFileTree = async (item, fileList) => {
+    if (item.isFile) {
+      return new Promise((resolve) => {
         item.file((file) => {
+          const relPath = item.fullPath.startsWith('/') ? item.fullPath.substring(1) : item.fullPath;
           Object.defineProperty(file, 'webkitRelativePath', {
-            value: item.fullPath.substring(1),
+            value: relPath,
             writable: true
           });
           fileList.push(file);
           resolve();
         });
-      } else if (item.isDirectory) {
-        const dirReader = item.createReader();
-        dirReader.readEntries(async (entries) => {
-          const entriesQueue = [];
-          for (let i = 0; i < entries.length; i++) {
-            entriesQueue.push(traverseFileTree(entries[i], fileList));
-          }
-          await Promise.all(entriesQueue);
-          resolve();
-        });
-      }
-    });
+      });
+    } else if (item.isDirectory) {
+      const dirReader = item.createReader();
+      const entries = await readAllDirEntries(dirReader);
+      const entriesQueue = entries.map((entry) => traverseFileTree(entry, fileList));
+      await Promise.all(entriesQueue);
+    }
   };
 
   const processAndUploadFiles = async (filesList) => {
     if (!filesList || filesList.length === 0 || !activeCol) return;
+
+    const IGNORED_DIR_PATTERNS = [
+      '/node_modules/', '/.git/', '/.venv/', '/venv/', '/__pycache__/', 
+      '/dist/', '/build/', '/.next/', '/.idea/', '/.vscode/', '/.pytest_cache/',
+      '/data/', '/SMARAN.AI_Release/', '/brain/', '/.antigravity/', '/out/', '/coverage/'
+    ];
+    const FORBIDDEN_EXTS = [
+      '.exe', '.dll', '.so', '.dylib', '.bin', '.iso', '.dmg', '.pkg', '.deb', '.rpm', '.class', '.pyc', '.pyo', '.o', '.a', '.lib', '.obj', '.zip', '.tar', '.gz', '.7z', '.rar', '.gguf'
+    ];
+
+    const validFiles = filesList.filter(file => {
+      if (!file || file.name === '.' || file.name === '..' || file.size === 0) return false;
+      const relPath = '/' + (file.webkitRelativePath || file.name).replace(/\\/g, '/');
+      if (IGNORED_DIR_PATTERNS.some(pat => relPath.includes(pat))) return false;
+
+      const ext = '.' + file.name.split('.').pop().toLowerCase();
+      if (FORBIDDEN_EXTS.includes(ext)) return false;
+      return true;
+    });
+
+    if (validFiles.length === 0) return;
+
     setUploading(true);
     setError(null);
 
@@ -172,14 +207,14 @@ const CollectionManager = ({ token }) => {
     let failCount = 0;
     let errorDetails = [];
 
-    for (let i = 0; i < filesList.length; i++) {
-      const file = filesList[i];
-      if (file.name === '.' || file.name === '..' || file.size === 0) continue;
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
+      const relativePath = file.webkitRelativePath || file.name;
 
-      setUploadProgress(`Processing ${i + 1} of ${filesList.length}: "${file.name}"...`);
+      setUploadProgress(`Processing ${i + 1} of ${validFiles.length}: "${relativePath}"...`);
 
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', file, relativePath);
 
       try {
         const res = await fetch(`${API_BASE}/api/collections/${activeCol.id}/upload`, {
@@ -191,14 +226,14 @@ const CollectionManager = ({ token }) => {
           successCount++;
         } else {
           const errData = await res.json();
-          console.error(`Upload failed for ${file.name}:`, errData);
+          console.error(`Upload failed for ${relativePath}:`, errData);
           failCount++;
-          errorDetails.push(errData.detail || `Upload failed for ${file.name}`);
+          errorDetails.push(errData.detail || `Upload failed for ${relativePath}`);
         }
       } catch (err) {
-        console.error(`Network error uploading ${file.name}:`, err);
+        console.error(`Network error uploading ${relativePath}:`, err);
         failCount++;
-        errorDetails.push(`Network error for "${file.name}"`);
+        errorDetails.push(`Network error for "${relativePath}"`);
       }
     }
 
@@ -394,7 +429,7 @@ const CollectionManager = ({ token }) => {
                       className="hidden"
                       multiple
                       onChange={handleFileUpload}
-                      accept=".pdf,.csv,.xlsx,.docx,.pptx,.txt,.md,.xml,.py,.cpp,.h,.json,.yaml,.yml,.log,.html,.htm,.mp3,.wav,.m4a,.ogg,.flac,.png,.jpg,.jpeg,.webp,.bmp,.tiff"
+                      accept=".pdf,.csv,.tsv,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.txt,.md,.markdown,.xml,.rst,.adoc,.rtf,.ipynb,.py,.js,.jsx,.ts,.tsx,.c,.cpp,.cc,.cxx,.h,.hpp,.cs,.java,.kt,.kts,.go,.rs,.php,.rb,.swift,.m,.mm,.sh,.bash,.zsh,.bat,.cmd,.ps1,.sql,.r,.scala,.dart,.lua,.pl,.json,.jsonc,.json5,.yaml,.yml,.toml,.ini,.env,.conf,.config,.properties,.log,.html,.htm,.css,.scss,.sass,.less,.vue,.svelte,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.avi,.mkv,.webm,.mov,.flv,.png,.jpg,.jpeg,.webp,.bmp,.tiff,.gif,.svg"
                       disabled={uploading}
                     />
                   </label>

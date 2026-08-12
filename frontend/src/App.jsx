@@ -6,6 +6,7 @@ import CollectionManager from './components/CollectionManager';
 import AdminDashboard from './components/AdminDashboard';
 import SettingsModal from './components/SettingsModal';
 import RightPanel from './components/RightPanel';
+import StarfieldCanvas from './components/StarfieldCanvas';
 import { Bot, User, Lock, ArrowRight, ShieldCheck, KeyRound, Orbit } from 'lucide-react';
 import { API_BASE } from './context/AuthContext';
 import { parseJsonResponse } from './utils/api';
@@ -21,6 +22,8 @@ const App = () => {
   // Navigation & View state
   const [activeView, setActiveView] = useState('chat'); // 'chat', 'collections', 'admin'
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isModelHubOpen, setIsModelHubOpen] = useState(false);
+  const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [activeCollections, setActiveCollections] = useState([]);
@@ -33,10 +36,20 @@ const App = () => {
     const saved = localStorage.getItem('showRightPanel');
     return saved !== 'false'; // defaults to true if not set
   });
+  const [sidebarPosition, setSidebarPosition] = useState(() => {
+    const saved = localStorage.getItem('sm_sidebar_position');
+    return saved === 'right' ? 'right' : 'left';
+  });
+  const [performancePosition, setPerformancePosition] = useState(() => {
+    const saved = localStorage.getItem('sm_performance_position');
+    return ['left', 'right', 'hidden'].includes(saved) ? saved : 'right';
+  });
 
   useEffect(() => {
     localStorage.setItem('showRightPanel', showRightPanel);
   }, [showRightPanel]);
+  useEffect(() => { localStorage.setItem('sm_sidebar_position', sidebarPosition); }, [sidebarPosition]);
+  useEffect(() => { localStorage.setItem('sm_performance_position', performancePosition); }, [performancePosition]);
 
   // Keyboard Shortcuts (Mousetrap-style pure JS offline implementation)
   useEffect(() => {
@@ -290,8 +303,8 @@ const App = () => {
               <Orbit className="w-14 h-14 text-purple-600/20 dark:text-purple-500/30 absolute animate-spin" style={{ animationDuration: '8s' }} />
             </div>
             <h1 className="text-2xl font-black tracking-wider uppercase leading-none mt-2 select-none flex items-center justify-center">
-              <span className="text-[#ea580c] dark:text-[#f97316]">SMARAN</span>
-              <span className="text-zinc-950 dark:text-white ml-1.5">AI</span>
+              <span className="bg-gradient-to-r from-amber-400 via-orange-500 to-indigo-400 bg-clip-text text-transparent font-extrabold">SMARAN</span>
+              <span className="text-white font-extrabold ml-1.5 px-2 py-0.5 rounded-lg bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500 text-sm shadow-[0_0_12px_rgba(99,102,241,0.5)]">.AI</span>
             </h1>
           </div>
 
@@ -610,7 +623,8 @@ const App = () => {
 
   // Logged In Application Screen (Fully Adaptive background)
   return (
-    <div className="h-screen w-full flex flex-col md:flex-row bg-[#ffffff] dark:bg-[#131314] text-[#1f1f1f] dark:text-[#e3e3e3] overflow-hidden font-sans relative transition-colors duration-300">
+    <div className="h-screen w-full flex flex-col md:flex-row bg-[#ffffff] dark:bg-[#0c0c0e] text-[#1f1f1f] dark:text-[#e3e3e3] overflow-hidden font-sans relative transition-colors duration-300">
+      <StarfieldCanvas />
 
       {/* Sidebar Panel */}
       <Sidebar
@@ -628,10 +642,16 @@ const App = () => {
         activeView={activeView}
         logout={logout}
         onExpandChange={setSidebarExpanded}
+        isModelHubOpen={isModelHubOpen}
+        setIsModelHubOpen={setIsModelHubOpen}
+        isDeveloperOpen={isDeveloperOpen}
+        setIsDeveloperOpen={setIsDeveloperOpen}
+        onModelChange={setSelectedModel}
+        position={sidebarPosition}
       />
 
       {/* Main Workspace Frame */}
-      <main className="flex-1 flex flex-col overflow-hidden relative z-10 glass-panel border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-850/50">
+      <main className="order-2 flex-1 flex flex-col overflow-hidden relative z-10 glass-panel border-t md:border-t-0 border-zinc-200 dark:border-zinc-850/50">
         {activeView === 'chat' && (
           <ChatArea
             token={token}
@@ -641,6 +661,8 @@ const App = () => {
             selectedModel={selectedModel}
             turboMode={turboMode}
             onTogglePanel={() => setShowRightPanel((v) => !v)}
+            onOpenModelHub={() => setIsModelHubOpen(true)}
+            onOpenDeveloper={() => setIsDeveloperOpen(true)}
           />
         )}
         
@@ -656,7 +678,7 @@ const App = () => {
       </main>
 
       {/* Right side Task Manager / Brand panel — desktop only */}
-      {token && <RightPanel token={token} showPanel={showRightPanel} onClose={() => setShowRightPanel(false)} />}
+      {token && <RightPanel token={token} selectedModel={selectedModel} showPanel={showRightPanel && performancePosition !== 'hidden'} position={performancePosition} onClose={() => setShowRightPanel(false)} />}
 
       {/* Settings Dialog Overlay */}
       <SettingsModal
@@ -667,6 +689,10 @@ const App = () => {
         selectedModel={selectedModel}
         turboMode={turboMode}
         onTurboModeChange={setTurboMode}
+        sidebarPosition={sidebarPosition}
+        onSidebarPositionChange={setSidebarPosition}
+        performancePosition={performancePosition}
+        onPerformancePositionChange={(value) => { setPerformancePosition(value); if (value !== 'hidden') setShowRightPanel(true); }}
       />
     </div>
   );

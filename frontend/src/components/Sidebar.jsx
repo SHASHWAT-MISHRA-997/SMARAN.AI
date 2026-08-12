@@ -1,13 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  MessageSquare, Plus, Trash2, X, LogOut, Moon, Sun,
+  MessageSquare, Plus, Trash2, X, LogOut,
   ShieldAlert, Settings, Pencil, Check, Brain,
   ChevronLeft, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck
 } from 'lucide-react';
 import ModelHubModal from './ModelHubModal';
 import DeveloperModal from './DeveloperModal';
-import { useTheme } from '../context/ThemeContext';
 import { API_BASE } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
 
@@ -98,9 +97,12 @@ const Sidebar = ({
   onCreateSession, onDeleteSession, onRenameSession,
   activeCollections, setActiveCollections,
   onNavigate, activeView, logout, onExpandChange,
+  isModelHubOpen: externalModelHubOpen,
+  setIsModelHubOpen: externalSetIsModelHubOpen,
+  isDeveloperOpen: externalDeveloperOpen,
+  setIsDeveloperOpen: externalSetIsDeveloperOpen,
+  onModelChange, position = 'left',
 }) => {
-  const { theme, toggleTheme } = useTheme();
-
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -115,11 +117,15 @@ const Sidebar = ({
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryToast, setMemoryToast] = useState(null);
 
-  // Model Hub Modal
-  const [isModelHubOpen, setIsModelHubOpen] = useState(false);
+  // Model Hub Modal (Controlled externally or fallback to internal)
+  const [internalModelHubOpen, setInternalModelHubOpen] = useState(false);
+  const isModelHubOpen = externalModelHubOpen !== undefined ? externalModelHubOpen : internalModelHubOpen;
+  const setIsModelHubOpen = externalSetIsModelHubOpen || setInternalModelHubOpen;
 
-  // Developer Modal
-  const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
+  // Developer Modal (Controlled externally or fallback to internal)
+  const [internalDeveloperOpen, setInternalDeveloperOpen] = useState(false);
+  const isDeveloperOpen = externalDeveloperOpen !== undefined ? externalDeveloperOpen : internalDeveloperOpen;
+  const setIsDeveloperOpen = externalSetIsDeveloperOpen || setInternalDeveloperOpen;
 
   const fetchMemoryFacts = async () => {
     setMemoryLoading(true);
@@ -292,54 +298,72 @@ const Sidebar = ({
     </div>
   );
 
-  /* ——————————————————————————————————————————————————————————————————————————————————————————————————————
-     DESKTOP — Collapsed (icon rail) ↔ Expanded (full panel)
-  —————————————————————————————————————————————————————————————————————————————————————————————————————— */
+
+  /* 3D Motion Animated Logo Component */
+  const Logo3DMotion = ({ size = "md" }) => {
+    const isSm = size === "sm";
+    const containerClass = isSm ? "w-8 h-8" : "w-10 h-10";
+    const iconClass = isSm ? "w-4 h-4" : "w-5 h-5";
+
+    return (
+      <div className={`relative ${containerClass} flex items-center justify-center shrink-0 select-none group cursor-pointer`}>
+        <div className="absolute inset-0 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-500 to-indigo-500 opacity-90 blur-[3px] animate-pulse group-hover:scale-110 transition-transform duration-500" />
+        <div className="relative w-full h-full rounded-xl bg-gradient-to-br from-zinc-950 via-zinc-900 to-black p-0.5 border border-amber-500/40 flex items-center justify-center shadow-[0_0_18px_rgba(249,115,22,0.4)] overflow-hidden">
+          <span className="absolute w-2 h-2 rounded-full bg-amber-400 animate-ping opacity-75" />
+          <span className="relative text-amber-400 flex items-center justify-center">
+            <Brain className={`${iconClass} filter drop-shadow-[0_2px_8px_rgba(249,115,22,0.7)] animate-pulse`} />
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  /* DESKTOP — Collapsed (icon rail) ↔ Expanded (full panel) */
   const sidebarDesktop = (
     <aside className={`
-      hidden md:flex flex-col shrink-0 h-screen sticky top-0 z-40
-      bg-[#1a1b1e] border-r border-zinc-800
+      hidden md:flex flex-col shrink-0 z-40
+      bg-[#f3f4f6] dark:bg-[#1a1b1e] text-zinc-900 dark:text-zinc-100
+      ${position === 'right' ? 'md:order-3 h-screen sticky top-0 border-l border-zinc-300/70 dark:border-zinc-800' : 'md:order-1 h-screen sticky top-0 border-r border-zinc-300/70 dark:border-zinc-800'}
       transition-all duration-300 ease-in-out
       ${expanded ? 'w-[268px]' : 'w-[64px]'}
     `}>
 
-      {/* — TOP: Logo + Toggle — */}
+      {/* TOP: 3D Motion Logo + Toggle */}
       <div className={`
-        flex items-center border-b border-zinc-800 shrink-0 h-[60px]
-        ${expanded ? 'px-4 justify-between' : 'flex-col justify-center gap-0 px-0'}
+        flex items-center border-b border-zinc-300/60 dark:border-zinc-800/80 shrink-0 h-[64px] bg-zinc-200/50 dark:bg-zinc-950/40 backdrop-blur-md
+        ${expanded ? 'px-4 justify-between' : 'justify-center px-0'}
       `}>
-        {/* Logo icon — always visible */}
-        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-orange-600 to-zinc-900 flex items-center justify-center text-white font-black text-sm shadow-lg shrink-0 select-none">
-          <Bot className="w-4.5 h-4.5 text-white" />
-        </div>
-
-        {/* Brand text — only expanded */}
-        {expanded && (
-          <div className="ml-2.5 flex-1 min-w-0 animate-in fade-in duration-200">
-            <div className="text-sm font-black tracking-wider uppercase leading-none">
-              <span className="text-orange-500">SMARAN</span>
-              <span className="text-white ml-1">AI</span>
-            </div>
-          </div>
-        )}
-
-        {/* Toggle button */}
         {expanded ? (
-          <Tip label="Collapse sidebar">
-            <button
-              onClick={() => setExpanded(false)}
-              className="ml-2 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-700/60 transition-all cursor-pointer"
-            >
-              <PanelLeftClose className="w-4.5 h-4.5" />
-            </button>
-          </Tip>
+          <>
+            {/* 3D Motion Animated Logo */}
+            <Logo3DMotion size="sm" />
+
+            {/* Brand text */}
+            <div className="ml-2.5 flex-1 min-w-0 animate-in fade-in duration-200 select-none flex items-center">
+              <div className="text-sm sm:text-base font-black tracking-wider uppercase leading-none flex items-center">
+                <span className="bg-gradient-to-r from-amber-400 via-orange-500 to-indigo-400 bg-clip-text text-transparent font-extrabold filter drop-shadow-[0_0_10px_rgba(249,115,22,0.5)]">SMARAN</span>
+                <span className="text-white font-extrabold ml-1 px-1.5 py-0.5 rounded-md bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500 text-[10px] shadow-[0_0_10px_rgba(99,102,241,0.5)]">.AI</span>
+              </div>
+            </div>
+
+            {/* Collapse toggle button */}
+            <Tip label="Collapse sidebar">
+              <button
+                onClick={() => setExpanded(false)}
+                className="ml-2 p-2 rounded-xl text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-white bg-zinc-200/80 dark:bg-zinc-900/80 hover:bg-indigo-600/20 border border-zinc-300/70 dark:border-zinc-800 hover:border-indigo-500/50 shadow-xs hover:scale-105 transition-all cursor-pointer"
+              >
+                <PanelLeftClose className="w-4.5 h-4.5" />
+              </button>
+            </Tip>
+          </>
         ) : (
+          /* Collapsed State: Clean centered expand button */
           <Tip label="Expand sidebar">
             <button
               onClick={() => setExpanded(true)}
-              className="mt-1 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-700/60 transition-all cursor-pointer"
+              className="p-2.5 rounded-xl text-indigo-600 dark:text-indigo-400 hover:text-white bg-zinc-200/80 dark:bg-zinc-900/80 hover:bg-indigo-600 border border-zinc-300 dark:border-zinc-800 hover:border-indigo-500 shadow-xs hover:scale-105 transition-all cursor-pointer flex items-center justify-center"
             >
-              <PanelLeftOpen className="w-4.5 h-4.5" />
+              <PanelLeftOpen className="w-5 h-5" />
             </button>
           </Tip>
         )}
@@ -451,13 +475,13 @@ const Sidebar = ({
 
       {/* — FOOTER — */}
       <div className={`
-        border-t border-zinc-800 shrink-0
+        border-t border-zinc-200 dark:border-zinc-800 shrink-0
         ${expanded ? 'p-3 space-y-1.5' : 'flex flex-col items-center gap-1 py-3 px-2'}
       `}>
 
         {/* Memory toast */}
         {memoryToast && expanded && (
-          <div className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold animate-in fade-in duration-300">
+          <div className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold animate-in fade-in duration-300">
             <Brain className="w-3.5 h-3.5 shrink-0" /> {memoryToast}
           </div>
         )}
@@ -465,7 +489,7 @@ const Sidebar = ({
         {/* Manage Memory */}
         {expanded ? (
           <button onClick={() => setIsMemoryOpen(true)}
-            className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8 hover:border-violet-700/30 transition-all">
+            className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-violet-600 dark:text-violet-400 hover:bg-violet-500/10 hover:border-violet-500/20 transition-all">
             <Brain className="w-4 h-4 shrink-0" />
             Manage AI Memory
           </button>
@@ -483,7 +507,7 @@ const Sidebar = ({
           expanded ? (
             <button
               onClick={() => { onNavigate('admin'); setMobileOpen(false); }}
-              className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border cursor-pointer transition-all ${activeView === 'admin' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'text-rose-400 border-transparent hover:bg-rose-500/8 hover:border-rose-700/30'}`}
+              className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border cursor-pointer transition-all ${activeView === 'admin' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' : 'text-rose-600 dark:text-rose-400 border-transparent hover:bg-rose-500/10 hover:border-rose-500/20'}`}
             >
               <ShieldAlert className="w-4 h-4 shrink-0" /> Admin Control Board
             </button>
@@ -495,37 +519,37 @@ const Sidebar = ({
 
         {/* Model Hub Catalog Button */}
         {expanded ? (
-          <button onClick={() => setIsModelHubOpen(true)} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/10 mb-1">
-            <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
+          <button onClick={() => setIsModelHubOpen(true)} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 mb-1">
+            <Boxes className="w-4 h-4 shrink-0 text-indigo-500 dark:text-indigo-400" /> Model Catalog & Cloud APIs
           </button>
         ) : (
-          <RailBtn icon={<Boxes className="w-5 h-5 text-indigo-400" />} label="Model Catalog & Matrix" onClick={() => setIsModelHubOpen(true)} />
+          <RailBtn icon={<Boxes className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />} label="Model Catalog & Cloud APIs" onClick={() => setIsModelHubOpen(true)} />
+        )}
+
+        {/* About Developer Modal Button */}
+        {expanded ? (
+          <button onClick={() => setIsDeveloperOpen(true)} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 mb-1">
+            <UserCheck className="w-4 h-4 shrink-0 text-cyan-500 dark:text-cyan-400" /> About Developer
+          </button>
+        ) : (
+          <RailBtn icon={<UserCheck className="w-5 h-5 text-cyan-400" />} label="About Developer" onClick={() => setIsDeveloperOpen(true)} />
         )}
 
         {/* Settings / Theme / Logout */}
         {expanded ? (
           <div className="flex items-center gap-2">
             <button onClick={() => onNavigate('settings')}
-              className="p-2.5 border border-zinc-800 hover:bg-zinc-800/60 text-zinc-400 hover:text-white rounded-xl transition-all cursor-pointer" title="Settings">
+              className="p-2.5 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-xl transition-all cursor-pointer" title="Settings">
               <Settings className="w-4 h-4" />
             </button>
-            <button onClick={toggleTheme}
-              className="p-2.5 border border-zinc-800 hover:bg-zinc-800/60 text-zinc-400 hover:text-white rounded-xl transition-all cursor-pointer">
-              {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
-            </button>
             <button onClick={logout}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 border border-zinc-800 hover:bg-rose-500/10 hover:border-rose-700/30 text-rose-400 text-xs font-black rounded-xl cursor-pointer transition-all">
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 border border-zinc-200 dark:border-zinc-800 hover:bg-rose-500/10 hover:border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-black rounded-xl cursor-pointer transition-all">
               <LogOut className="w-3.5 h-3.5" /> Sign Out
             </button>
           </div>
         ) : (
           <>
             <RailBtn icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => onNavigate('settings')} />
-            <RailBtn
-              icon={theme === 'dark' ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-indigo-400" />}
-              label={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-              onClick={toggleTheme}
-            />
             <RailBtn icon={<LogOut className="w-5 h-5" />} label="Sign Out" onClick={logout} danger />
           </>
         )}
@@ -540,10 +564,10 @@ const Sidebar = ({
     <>
       <div className="md:hidden flex items-center justify-between px-4 py-3 bg-[#1a1b1e] border-b border-zinc-800 shrink-0 z-30">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-orange-600 to-zinc-900 flex items-center justify-center text-white font-extrabold shadow-md"><Bot className="w-4.5 h-4.5" /></div>
-          <span className="font-black text-sm tracking-wide select-none">
-            <span className="text-orange-500">SMARAN</span>
-            <span className="text-white"> AI</span>
+          <Logo3DMotion size="sm" />
+          <span className="font-black text-sm tracking-wide select-none flex items-center ml-1">
+            <span className="bg-gradient-to-r from-amber-400 via-orange-500 to-indigo-400 bg-clip-text text-transparent">SMARAN</span>
+            <span className="text-white ml-1 px-1 rounded bg-gradient-to-r from-indigo-600 to-purple-600 text-[10px]">.AI</span>
           </span>
         </div>
         <button onClick={() => setMobileOpen(true)} className="text-zinc-400 hover:text-white p-1.5 rounded-xl bg-zinc-800 border border-zinc-700 cursor-pointer">
@@ -556,10 +580,11 @@ const Sidebar = ({
       <aside className={`md:hidden fixed top-0 bottom-0 left-0 w-[268px] bg-[#1a1b1e] border-r border-zinc-800 flex flex-col z-50 transition-transform duration-300 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-4 flex items-center justify-between border-b border-zinc-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-orange-600 to-zinc-900 flex items-center justify-center text-white font-black text-sm shadow-md"><Bot className="w-5 h-5" /></div>
+            <Logo3DMotion size="sm" />
             <div>
-              <div className="text-sm font-black tracking-wider uppercase leading-none">
-                <span className="text-orange-500">SMARAN</span><span className="text-white ml-1">AI</span>
+              <div className="text-sm font-black tracking-wider uppercase leading-none flex items-center">
+                <span className="bg-gradient-to-r from-amber-400 via-orange-500 to-indigo-400 bg-clip-text text-transparent font-extrabold">SMARAN</span>
+                <span className="text-white font-extrabold ml-1 px-1.5 py-0.5 rounded-md bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500 text-[10px]">.AI</span>
               </div>
             </div>
           </div>
@@ -609,9 +634,6 @@ const Sidebar = ({
           )}
           <div className="flex items-center gap-2">
             <button onClick={() => onNavigate('settings')} className="p-2.5 border border-zinc-800 text-zinc-400 hover:text-white rounded-xl cursor-pointer"><Settings className="w-4 h-4" /></button>
-            <button onClick={toggleTheme} className="p-2.5 border border-zinc-800 text-zinc-400 hover:text-white rounded-xl cursor-pointer">
-              {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
-            </button>
             <button onClick={logout} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 border border-zinc-800 hover:bg-rose-500/10 text-rose-400 text-xs font-black rounded-xl cursor-pointer">
               <LogOut className="w-3.5 h-3.5" /> Sign Out
             </button>

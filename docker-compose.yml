@@ -1,44 +1,26 @@
+# SMARAN.AI - Windows NVIDIA GPU single-container deployment
 name: smaran-ai
-
 services:
-  # vLLM OpenAI-Compatible Inference Server (Qwen 3 VL 4B Vision Model)
-  inference-server:
-    image: vllm/vllm-openai:v0.8.5.post1
-    container_name: smaran-inference
-    ports:
-      - "8001:8000"
-    volumes:
-      - smaran_models:/root/.cache/huggingface
-    environment:
-      - VLLM_USE_V1=0
-    command: --model Qwen/Qwen3-4B-AWQ --port 8000 --host 0.0.0.0 --max-model-len 8192 --gpu-memory-utilization 0.90 --trust-remote-code --dtype=half --quantization awq
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  # Monolithic App Container (FastAPI Backend + Vite Frontend)
   app:
-    build: .
-    image: shashwatmishra062/smaran-ai:latest
-    container_name: smaran-app
+    image: shashwatmishra062/smaran-ai:app-v1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smaran-ai
     ports:
-      - "3003:3003"
+      - 3003:3003
     environment:
-      - JWT_SECRET=gmr-robotics-local-security-secret-key-98765
-      - ACTIVE_MODEL=Qwen/Qwen3-4B-AWQ
-      - INFERENCE_ENGINE=vllm
-      - VLLM_URL=http://smaran-inference:8000/v1
-      - DATA_DIR=/app/data
+      JWT_SECRET: gmr-robotics-local-security-secret-key-98765
+      ACTIVE_MODEL: Qwen/Qwen3-4B-AWQ
+      INFERENCE_ENGINE: vllm
+      MAX_MODEL_LEN: 2048
+      VLLM_URL: http://127.0.0.1:8000/v1
+      DATA_DIR: /app/data
+      HF_HOME: /root/.cache/huggingface
+      VLLM_GPU_MEMORY_UTILIZATION: 0.75
     volumes:
-      - ./backend/app:/app/app
-      - ./backend/frontend_dist:/app/frontend_dist
-      - smaran_data:/app/data
       - smaran_models:/root/.cache/huggingface
+      - smaran_data:/app/data
     restart: unless-stopped
     deploy:
       resources:
@@ -49,5 +31,9 @@ services:
               capabilities: [gpu]
 
 volumes:
-  smaran_data:
   smaran_models:
+    external: true
+    name: smaran-ai_smaran_models
+  smaran_data:
+    external: true
+    name: smaran-ai_smaran_data

@@ -1,5 +1,5 @@
 """
-Vision Handler Module for Grey Matter AI.
+Vision Handler Module for SMARAN.AI.
 Handles PDF-to-image conversion, image encoding, and vLLM vision model calls.
 
 Uses vLLM's OpenAI-compatible /v1/chat/completions endpoint with image_url content blocks.

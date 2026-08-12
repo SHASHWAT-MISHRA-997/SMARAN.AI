@@ -32,6 +32,25 @@
   animation: drift-delayed 30s ease-in-out infinite;
 }
 
+/* Starfield twinkle and nebula motion animations */
+@keyframes twinkle {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+@keyframes nebula-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50% { opacity: 0.75; transform: scale(1.08); }
+}
+
+.animate-twinkle {
+  animation: twinkle 3s ease-in-out infinite;
+}
+
+.animate-nebula {
+  animation: nebula-pulse 10s ease-in-out infinite;
+}
+
 /* Premium Scrollbars */
 ::-webkit-scrollbar {
   width: 5px;
@@ -174,4 +193,29 @@ pre {
 .neon-bar {
   background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899);
   box-shadow: 0 0 8px rgba(139, 92, 246, 0.4), 0 0 18px rgba(168, 85, 247, 0.2);
+}
+
+/* Native response-language menu: force readable contrast in every browser theme. */
+.response-language-select {
+  color-scheme: light;
+}
+
+.response-language-select option {
+  color: #18181b !important;
+  background-color: #ffffff !important;
+  font-weight: 700;
+}
+
+.dark .response-language-select {
+  color-scheme: dark;
+}
+
+.dark .response-language-select option {
+  color: #fafafa !important;
+  background-color: #18181b !important;
+}
+
+.response-language-select option:checked {
+  color: #ffffff !important;
+  background-color: #4f46e5 !important;
 }

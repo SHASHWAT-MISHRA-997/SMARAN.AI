@@ -1,5 +1,5 @@
 """
-Grey Matter AI — Intelligent Inference Engine Bootstrapper
+SMARAN.AI — Intelligent Inference Engine Bootstrapper
 ===========================================================
 Runs at container startup. Automatically:
   1. Detects full device specs: CPU, system RAM, GPU name, VRAM
@@ -639,7 +639,7 @@ def main():
         return
 
     logger.info("=" * 70)
-    logger.info("Grey Matter AI — Intelligent Model Selection Bootstrapper v3.0")
+    logger.info("SMARAN.AI — Intelligent Model Selection Bootstrapper v3.0")
     logger.info("8 Preferred Models | Auto-adapts to hardware changes")
     logger.info(f"Host: {socket.gethostname()}")
     logger.info("=" * 70)

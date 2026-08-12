@@ -1,7 +1,7 @@
 @echo off
-title GMR AI — Build and Push to Docker Hub
+title SMARAN.AI — Build and Push to Docker Hub
 echo ===================================================
-echo           GMR AI - DOCKER DEPLOYMENT v2.2
+echo           SMARAN.AI - DOCKER DEPLOYMENT v2.2
 echo ===================================================
 echo.
 echo This script will build the latest unified web container

@@ -1,8 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, Brain } from 'lucide-react';
+import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, Brain, Languages, UserCheck, Boxes } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
 import ArtifactRenderer from './ArtifactRenderer';
+
+const LANGUAGES = [
+  { code: 'en', name: 'English', native: 'English', flag: '🇬🇧' },
+  { code: 'hi', name: 'Hindi', native: 'हिंदी', flag: '🇮🇳' },
+  { code: 'gu', name: 'Gujarati', native: 'ગુજરાતી', flag: '🇮🇳' },
+  { code: 'pa', name: 'Punjabi', native: 'ਪੰਜਾਬੀ', flag: '🇮🇳' },
+  { code: 'mr', name: 'Marathi', native: 'मराठी', flag: '🇮🇳' },
+  { code: 'ta', name: 'Tamil', native: 'தமிழ்', flag: '🇮🇳' },
+  { code: 'te', name: 'Telugu', native: 'తెలుగు', flag: '🇮🇳' },
+  { code: 'ml', name: 'Malayalam', native: 'മലയാളം', flag: '🇮🇳' },
+  { code: 'kn', name: 'Kannada', native: 'ಕನ್ನಡ', flag: '🇮🇳' },
+];
 
 const isChartSpec = (value) => (
   value &&
@@ -52,12 +64,24 @@ const parseChartSpec = (value) => {
 
 // Never expose Markdown control characters to employees when a model produces
 // an incomplete marker such as "**Heading".
-const cleanPlainText = (value) => String(value || '')
-  .replace(/\*\*/g, '')
-  .replace(/__/g, '');
 
-// ── Think / Reasoning Block ───────────────────────────────────────────────────
+//  Think / Reasoning Block 
 // Renders the AI's chain-of-thought in a collapsible glassmorphism panel.
+const cleanPlainText = (value) => {
+  let text = String(value || '');
+  const score = (input) => (input.match(/[]/g) || []).length;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const repaired = decodeURIComponent(escape(text));
+      if (score(repaired) >= score(text)) break;
+      text = repaired;
+    } catch (_) {
+      break;
+    }
+  }
+  return text.replace(/\*\*/g, '').replace(/__/g, '');
+};
+
 const ThinkBlock = ({ content }) => {
   const [open, setOpen] = React.useState(false);
   if (!content || !content.trim()) return null;
@@ -102,7 +126,7 @@ const ThinkBlock = ({ content }) => {
 const MarkdownText = ({ text }) => {
   if (!text) return null;
 
-  // ── Extract <think>…</think> reasoning blocks ─────────────────────────────
+  //  Extract <think></think> reasoning blocks 
   // These are streamed by DeepSeek-R1, Nemotron, and other CoT models.
   const thinkMatches = [];
   const thinkRegex = /<think>([\s\S]*?)<\/think>/gi;
@@ -210,6 +234,21 @@ const MarkdownText = ({ text }) => {
     blockLines.forEach((line, lineIdx) => {
       const trimmed = line.trim();
 
+      const imageMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      if (imageMatch) {
+        flushTable(lineIdx);
+        flushList(lineIdx);
+        const imageSrc = imageMatch[2].startsWith('/') ? `${API_BASE}${imageMatch[2]}` : imageMatch[2];
+        elements.push(
+          <a key={`image-${lineIdx}`} href={imageSrc} target="_blank" rel="noopener noreferrer"
+            className="block my-4 max-w-2xl overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl">
+            <img src={imageSrc} alt={imageMatch[1] || 'Locally generated image'}
+              className="w-full h-auto object-contain bg-zinc-100 dark:bg-zinc-950" loading="lazy" />
+          </a>
+        );
+        return;
+      }
+
       if (trimmed.startsWith('|')) {
         flushList(lineIdx);
         const cols = trimmed.split('|').filter((_, i, arr) => i > 0 && i < arr.length - 1);
@@ -289,42 +328,42 @@ const cleanMathFormula = (mathStr) => {
 
   // Replace common LaTeX operations and notations with readable symbols.
   cleaned = cleaned.replace(/\\left|\\right/g, '');
-  cleaned = cleaned.replace(/\\sqrt\{([^{}]+)\}/g, '√($1)');
+  cleaned = cleaned.replace(/\\sqrt\{([^{}]+)\}/g, '($1)');
   cleaned = cleaned.replace(/\\text\{([^}]+)\}/g, '$1'); // Remove \text{...} wrappers
-  cleaned = cleaned.replace(/\\times/g, ' × ');
-  cleaned = cleaned.replace(/\\div/g, ' ÷ ');
-  cleaned = cleaned.replace(/\\pm/g, ' ± ');
-  cleaned = cleaned.replace(/\\cdot/g, ' · ');
-  cleaned = cleaned.replace(/\\approx/g, ' ≈ ');
-  cleaned = cleaned.replace(/\\neq/g, ' ≠ ');
-  cleaned = cleaned.replace(/\\leq/g, ' ≤ ');
-  cleaned = cleaned.replace(/\\geq/g, ' ≥ ');
-  cleaned = cleaned.replace(/\\infty/g, '∞');
-  cleaned = cleaned.replace(/\\rightarrow/g, '→');
-  cleaned = cleaned.replace(/\\sum/g, 'Σ');
-  cleaned = cleaned.replace(/\\prod/g, 'Π');
-  cleaned = cleaned.replace(/\\int/g, '∫');
+  cleaned = cleaned.replace(/\\times/g, '  ');
+  cleaned = cleaned.replace(/\\div/g, '  ');
+  cleaned = cleaned.replace(/\\pm/g, '  ');
+  cleaned = cleaned.replace(/\\cdot/g, '  ');
+  cleaned = cleaned.replace(/\\approx/g, '  ');
+  cleaned = cleaned.replace(/\\neq/g, '  ');
+  cleaned = cleaned.replace(/\\leq/g, '  ');
+  cleaned = cleaned.replace(/\\geq/g, '  ');
+  cleaned = cleaned.replace(/\\infty/g, '');
+  cleaned = cleaned.replace(/\\rightarrow/g, '');
+  cleaned = cleaned.replace(/\\sum/g, '');
+  cleaned = cleaned.replace(/\\prod/g, '');
+  cleaned = cleaned.replace(/\\int/g, '');
   
   // Greek Symbols & SI Units
-  cleaned = cleaned.replace(/\\Delta/g, 'Δ');
-  cleaned = cleaned.replace(/\\mu/g, 'μ');
-  cleaned = cleaned.replace(/\\alpha/g, 'α');
-  cleaned = cleaned.replace(/\\beta/g, 'β');
-  cleaned = cleaned.replace(/\\gamma/g, 'γ');
-  cleaned = cleaned.replace(/\\theta/g, 'θ');
-  cleaned = cleaned.replace(/\\pi/g, 'π');
-  cleaned = cleaned.replace(/\\sigma/g, 'σ');
-  cleaned = cleaned.replace(/\\lambda/g, 'λ');
-  cleaned = cleaned.replace(/\\omega/g, 'ω');
-  cleaned = cleaned.replace(/\\phi/g, 'φ');
-  cleaned = cleaned.replace(/\\psi/g, 'ψ');
-  cleaned = cleaned.replace(/\\eta/g, 'η');
-  cleaned = cleaned.replace(/\\rho/g, 'ρ');
-  cleaned = cleaned.replace(/\\tau/g, 'τ');
-  cleaned = cleaned.replace(/\\degC/g, '°C');
-  cleaned = cleaned.replace(/\\degree/g, '°');
-  cleaned = cleaned.replace(/\\circ/g, '°');
-  cleaned = cleaned.replace(/\^\s*°/g, '°');
+  cleaned = cleaned.replace(/\\Delta/g, '');
+  cleaned = cleaned.replace(/\\mu/g, '');
+  cleaned = cleaned.replace(/\\alpha/g, '');
+  cleaned = cleaned.replace(/\\beta/g, '');
+  cleaned = cleaned.replace(/\\gamma/g, '');
+  cleaned = cleaned.replace(/\\theta/g, '');
+  cleaned = cleaned.replace(/\\pi/g, '');
+  cleaned = cleaned.replace(/\\sigma/g, '');
+  cleaned = cleaned.replace(/\\lambda/g, '');
+  cleaned = cleaned.replace(/\\omega/g, '');
+  cleaned = cleaned.replace(/\\phi/g, '');
+  cleaned = cleaned.replace(/\\psi/g, '');
+  cleaned = cleaned.replace(/\\eta/g, '');
+  cleaned = cleaned.replace(/\\rho/g, '');
+  cleaned = cleaned.replace(/\\tau/g, '');
+  cleaned = cleaned.replace(/\\degC/g, 'C');
+  cleaned = cleaned.replace(/\\degree/g, '');
+  cleaned = cleaned.replace(/\\circ/g, '');
+  cleaned = cleaned.replace(/\^\s*/g, '');
   
   // Fractions: \frac{num}{den} -> (num / den). Repeating handles common nested fractions.
   for (let i = 0; i < 4; i += 1) {
@@ -334,18 +373,18 @@ const cleanMathFormula = (mathStr) => {
   }
   
   // Superscripts & Subscripts
-  const superscript = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ' };
+  const superscript = { '0': '', '1': '', '2': '', '3': '', '4': '', '5': '', '6': '', '7': '', '8': '', '9': '', '+': '', '-': '', '=': '', '(': '', ')': '', n: '', i: '' };
   const toSuperscript = (value) => [...value].map(char => superscript[char] || char).join('');
   cleaned = cleaned.replace(/\^\{([^}]+)\}/g, (_, value) => toSuperscript(value));
-  cleaned = cleaned.replace(/\^2/g, '²');
-  cleaned = cleaned.replace(/\^3/g, '³');
-  cleaned = cleaned.replace(/\^x/g, 'ˣ');
-  cleaned = cleaned.replace(/\^n/g, 'ⁿ');
+  cleaned = cleaned.replace(/\^2/g, '');
+  cleaned = cleaned.replace(/\^3/g, '');
+  cleaned = cleaned.replace(/\^x/g, '');
+  cleaned = cleaned.replace(/\^n/g, '');
   
   // Clean backslashes, escape underscores, spaces
   cleaned = cleaned.replace(/\\([ _&%#${}])/g, '$1'); 
   cleaned = cleaned.replace(/\\/g, ''); 
-  cleaned = cleaned.replace(/\*/g, ' × ');
+  cleaned = cleaned.replace(/\*/g, '  ');
   
   return cleaned.trim();
 };
@@ -430,37 +469,37 @@ const CodeBlock = ({ code, language }) => {
   );
 };
 
-// ── Live pipeline step indicator — shown while AI is processing ──────────────
+// Live pipeline step indicator shown while AI is processing
 const THINKING_STEPS = [
   {
     icon: '🔍',
-    title: 'Analyzing Query Intent',
-    desc: 'Tokenizing your message & identifying key entities...',
+    title: 'Scanning Input & URL Detection',
+    desc: 'Extracting video IDs, web links, and file metadata...',
     color: 'indigo',
   },
   {
-    icon: '📚',
-    title: 'Querying Knowledge Base',
-    desc: 'Searching ChromaDB vector space + BM25 text index...',
+    icon: '⚡',
+    title: 'Fetching Live Web & Video Evidence',
+    desc: 'Retrieving YouTube transcripts, subtitles, and website pages...',
+    color: 'amber',
+  },
+  {
+    icon: '🧠',
+    title: 'Neural Model Inference Routing',
+    desc: 'Querying vLLM / Ollama local neural weights in VRAM...',
     color: 'violet',
   },
   {
-    icon: '⚖️',
-    title: 'Reranking Context Blocks',
-    desc: 'Applying Reciprocal Rank Fusion (RRF) on retrieved chunks...',
-    color: 'purple',
+    icon: '✍️',
+    title: 'Synthesizing Factual Response',
+    desc: 'Generating accurate, grounded response token-by-token...',
+    color: 'emerald',
   },
   {
-    icon: '🔒',
-    title: 'Acquiring Inference Slot',
-    desc: 'Waiting for local GPU/CPU inference semaphore lock...',
+    icon: '🛡️',
+    title: 'Fact Grounding & Citation Audit',
+    desc: 'Verifying evidence sources & formatting visual preview cards...',
     color: 'blue',
-  },
-  {
-    icon: '🤖',
-    title: 'Generating Response',
-    desc: 'Local model synthesizing answer token-by-token...',
-    color: 'indigo',
   },
 ];
 
@@ -471,7 +510,7 @@ const ThinkingIndicator = () => {
   React.useEffect(() => {
     const stepTimer = setInterval(() => {
       setStep((prev) => (prev < THINKING_STEPS.length - 1 ? prev + 1 : prev));
-    }, 1800);
+    }, 1500);
     const ticker = setInterval(() => setElapsed((e) => e + 0.1), 100);
     return () => {
       clearInterval(stepTimer);
@@ -480,73 +519,165 @@ const ThinkingIndicator = () => {
   }, []);
 
   const current = THINKING_STEPS[step];
-  const progress = ((step / (THINKING_STEPS.length - 1)) * 100).toFixed(0);
+  const progress = (((step + 1) / THINKING_STEPS.length) * 100).toFixed(0);
 
   return (
-    <div className="space-y-3 w-full max-w-[520px] mt-4 text-left" aria-live="polite" aria-label="AI is processing">
-      {/* Main status card */}
-      <div className="flex items-start gap-3 rounded-2xl border border-indigo-400/25 bg-indigo-500/8 dark:bg-indigo-500/10 px-4 py-3.5 shadow-[0_0_24px_rgba(99,102,241,0.12)]">
-        {/* Pulsing dot */}
-        <span className="relative flex h-4 w-4 mt-0.5 shrink-0">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-70" />
-          <span className="relative inline-flex h-4 w-4 rounded-full bg-indigo-500" />
+    <div className="space-y-3 w-full max-w-[560px] my-4 text-left" aria-live="polite" aria-label="AI is processing">
+      {/* Main status card with glowing border & glassmorphism */}
+      <div className="flex items-start gap-3 rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-50 via-white to-violet-50 dark:from-indigo-950/30 dark:via-zinc-900/60 dark:to-indigo-950/30 p-4 shadow-[0_0_30px_rgba(99,102,241,0.2)] backdrop-blur-md">
+        {/* Glowing pulsing orb */}
+        <span className="relative flex h-5 w-5 mt-0.5 shrink-0">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75" />
+          <span className="relative inline-flex h-5 w-5 rounded-full bg-gradient-to-tr from-amber-500 via-indigo-500 to-purple-500 shadow-sm" />
         </span>
 
         <div className="flex-1 min-w-0">
           {/* Step title */}
-          <p className="text-sm font-black text-indigo-700 dark:text-indigo-300 leading-tight">
-            {current.icon} {current.title}…
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-black text-indigo-700 dark:text-indigo-200 leading-tight uppercase tracking-wider flex items-center gap-1.5">
+              <span>{current.icon}</span>
+              <span>{current.title}...</span>
+            </p>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-700 dark:text-indigo-300 shrink-0">
+              Step {step + 1}/{THINKING_STEPS.length}
+            </span>
+          </div>
+
           {/* Step description */}
-          <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">
+          <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-400 mt-1 leading-snug">
             {current.desc}
           </p>
-          {/* Progress bar */}
-          <div className="mt-2.5 h-1 w-full rounded-full bg-indigo-200/30 dark:bg-indigo-900/30 overflow-hidden">
+
+          {/* Animated Gradient Progress bar */}
+          <div className="mt-3 h-2 w-full rounded-full bg-zinc-200 dark:bg-zinc-800/80 overflow-hidden p-0.5 border border-zinc-300 dark:border-zinc-700/50">
             <div
-              className="h-full rounded-full bg-indigo-500 transition-all duration-[1800ms] ease-linear"
+              className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-purple-500 to-amber-500 transition-all duration-[1500ms] ease-out shadow-[0_0_10px_rgba(139,92,246,0.6)]"
               style={{ width: `${progress}%` }}
             />
           </div>
-          {/* Step count + elapsed */}
-          <div className="flex items-center justify-between mt-1.5">
-            <div className="flex gap-1">
+
+          {/* Step count + live timer */}
+          <div className="flex items-center justify-between mt-2">
+            <div className="flex gap-1.5 items-center">
               {THINKING_STEPS.map((_, i) => (
                 <span
                   key={i}
-                  className={`h-1.5 w-1.5 rounded-full transition-all duration-300 ${
+                  className={`h-2 w-2 rounded-full transition-all duration-300 ${
                     i < step
-                      ? 'bg-indigo-500'
+                      ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
                       : i === step
-                      ? 'bg-indigo-400 animate-pulse'
-                      : 'bg-indigo-200/30 dark:bg-indigo-800/30'
+                      ? 'bg-amber-400 animate-pulse ring-2 ring-amber-400/40'
+                      : 'bg-zinc-300 dark:bg-zinc-700/50'
                   }`}
                 />
               ))}
             </div>
-            <span className="text-[10px] font-mono text-zinc-400 dark:text-zinc-500">
+            <span className="text-[10px] font-mono font-black text-amber-400/90 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
               {elapsed.toFixed(1)}s elapsed
             </span>
           </div>
         </div>
 
-        {/* Bouncing dots */}
+        {/* Live bouncing dots */}
         <span className="flex gap-1 mt-1 shrink-0" aria-hidden="true">
-          <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:-0.3s]" />
+          <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-400 [animation-delay:-0.3s]" />
           <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:-0.15s]" />
-          <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400" />
+          <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-purple-400" />
         </span>
       </div>
 
       {/* Shimmer skeleton lines */}
-      <div className="h-3.5 w-full rounded-full animate-gemini-shimmer" />
-      <div className="h-3.5 w-[88%] rounded-full animate-gemini-shimmer" />
-      <div className="h-3.5 w-[64%] rounded-full animate-gemini-shimmer" />
+      <div className="h-3 w-full rounded-full bg-gradient-to-r from-zinc-200 via-indigo-300/60 to-zinc-200 dark:from-zinc-800 dark:via-indigo-900/40 dark:to-zinc-800 animate-pulse" />
+      <div className="h-3 w-[88%] rounded-full bg-gradient-to-r from-zinc-200 via-purple-300/60 to-zinc-200 dark:from-zinc-800 dark:via-purple-900/40 dark:to-zinc-800 animate-pulse" />
     </div>
   );
 };
 
-// ── Per-message row with Gemini-style copy / re-use actions ─────────────────
+const MediaPreviewCard = ({ text }) => {
+  if (!text || typeof text !== 'string') return null;
+
+  // Detect ALL YouTube video IDs
+  const ytRegex = /(?:youtube\.com\/(?:watch\?[^\s]*?v=|shorts\/|live\/)|youtu\.be\/)([\w-]{6,})/gi;
+  const videoIds = [];
+  let m;
+  while ((m = ytRegex.exec(text)) !== null) {
+    if (!videoIds.includes(m[1])) videoIds.push(m[1]);
+  }
+
+  // Detect all Web URLs (excluding YouTube)
+  const allUrls = text.match(/https?:\/\/[^\s<>\]\[\)\(]+/gi) || [];
+  const webUrls = allUrls.filter(u => !u.includes('youtube.com') && !u.includes('youtu.be'));
+  const cleanWebUrls = webUrls.map(u => u.replace(/[.,;:!?)]+$/, '')).filter((v, i, a) => a.indexOf(v) === i);
+
+  if (videoIds.length === 0 && cleanWebUrls.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-3 w-full max-w-none text-left">
+      {videoIds.map((vid, idx) => (
+        <div key={idx} className="w-full rounded-2xl border border-red-500/40 bg-gradient-to-br from-red-950/30 via-zinc-950 to-zinc-900 overflow-hidden shadow-[0_0_25px_rgba(239,68,68,0.2)] transition-all hover:border-red-500/60">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-red-500/10 border-b border-red-500/20 text-xs font-bold text-red-400">
+            <span className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/20 border border-red-500/30 text-red-400 font-extrabold text-[11px] shrink-0 shadow-xs">
+              <svg className="w-4 h-4 text-red-500 fill-current" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+              YouTube Video {idx + 1}
+            </span>
+            <a
+              href={`https://www.youtube.com/watch?v=${vid}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:bg-red-600 px-3 py-1 rounded-full bg-red-500/80 text-white font-extrabold text-[11px] flex items-center gap-1.5 shadow-md transition-all shrink-0 cursor-pointer"
+            >
+              Watch on YouTube ↗
+            </a>
+          </div>
+          <div className="relative aspect-video w-full bg-black">
+            <iframe
+              src={`https://www.youtube-nocookie.com/embed/${vid}`}
+              title={`YouTube Video Player ${idx + 1}`}
+              className="absolute inset-0 w-full h-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      ))}
+
+      {cleanWebUrls.length > 0 && (
+        <div className="space-y-3 w-full max-w-none text-left">
+          {cleanWebUrls.map((url, idx) => (
+            <div key={idx} className="rounded-2xl border border-indigo-500/40 bg-gradient-to-br from-indigo-950/30 via-zinc-950 to-zinc-900 p-4 shadow-[0_0_25px_rgba(99,102,241,0.2)] transition-all hover:border-indigo-500/60">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <img
+                    src={`https://www.google.com/s2/favicons?domain=${(() => { try { return new URL(url).hostname; } catch(_) { return 'website'; } })()}&sz=64`}
+                    alt="Website Favicon"
+                    className="w-4 h-4 rounded shrink-0 bg-white p-0.5"
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                  <span className="text-xs font-black text-indigo-400 truncate tracking-wide">
+                    {(() => { try { return new URL(url).hostname; } catch(_) { return url; } })()}
+                  </span>
+                </div>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] flex items-center gap-1.5 shadow-md transition-all shrink-0 cursor-pointer"
+                >
+                  Visit Website ↗
+                </a>
+              </div>
+              <p className="text-xs text-zinc-300 font-mono truncate">
+                {url}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+//  Per-message row with Gemini-style copy / re-use actions 
 const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
   const [copied, setCopied] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
@@ -605,19 +736,21 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
         msg.role === 'user' ? 'justify-end' : 'justify-start'
       }`}
     >
-      {/* AI avatar */}
+      {/* 3D AI Avatar Badge — self-start ensures no vertical stretching */}
       {msg.role !== 'user' && (
-        <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center shrink-0 font-black mt-1 transition-all duration-500 ${
-          msg.isLoading
-            ? 'bg-indigo-500/15 dark:bg-indigo-500/20 shadow-[0_0_18px_rgba(99,102,241,0.35)] dark:shadow-[0_0_22px_rgba(139,92,246,0.45)] ring-2 ring-indigo-400/30 dark:ring-indigo-500/40'
-            : 'bg-[#f0f4f9] dark:bg-[#2f2f30]'
-        }`}>
-          🤖
+        <div className="relative shrink-0 self-start h-8 sm:h-9 mt-1 select-none group cursor-pointer">
+          <div className={`absolute inset-0 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-amber-500 blur-[3px] transition-all duration-300 ${
+            msg.isLoading ? 'animate-pulse opacity-100' : 'opacity-60 group-hover:opacity-100'
+          }`} />
+          <div className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-zinc-950 via-zinc-900 to-black border border-indigo-500/40 flex items-center justify-center shadow-[0_0_14px_rgba(99,102,241,0.35)] overflow-hidden">
+            <span className="absolute w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping opacity-75" />
+            <Bot className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-indigo-300 filter drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]" />
+          </div>
         </div>
       )}
 
       <div className={`flex flex-col min-w-0 ${
-        msg.role === 'user' ? 'items-end max-w-[90%] sm:max-w-[80%]' : 'items-start w-full'
+        msg.role === 'user' ? 'items-end max-w-[90%] sm:max-w-[620px]' : 'items-start w-full'
       }`}>
         {/* Bubble */}
         <div className={`p-4 ${
@@ -689,10 +822,13 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
                   </div>
                 </div>
               ) : (
-                <p className="text-sm font-bold whitespace-pre-wrap leading-relaxed text-left">
-                  {/* Parse out the 📎 [Uploaded filename.png] text visual indicator to clean up bubble view if we rendered the image above */}
-                  {msg.content.replace(/^📎\s*\[Uploaded\s+[^\]]+\]\s*/, '')}
-                </p>
+                <>
+                  <p className="text-sm font-bold whitespace-pre-wrap leading-relaxed text-left">
+                    {/* Parse out the  [Uploaded filename.png] text visual indicator to clean up bubble view if we rendered the image above */}
+                    {msg.content.replace(/^\s*\[Uploaded\s+[^\]]+\]\s*/, '')}
+                  </p>
+                  <MediaPreviewCard text={msg.content} />
+                </>
               )}
             </div>
           ) : (
@@ -700,27 +836,33 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
               <MarkdownText text={msg.content} />
 
               {!msg.isLoading && msg.content && (
-                <div className="mt-4 p-3 rounded-xl border border-indigo-500/20 dark:border-purple-500/20 bg-zinc-50/50 dark:bg-zinc-900/60 select-none shadow-sm flex flex-col gap-1.5 w-full select-all">
-                  <div className="text-[9px] font-black text-indigo-600 dark:text-purple-400 uppercase tracking-widest flex items-center gap-1.5 border-b border-zinc-200 dark:border-zinc-800 pb-1 mb-1">
+                <div className="mt-4 overflow-hidden rounded-2xl border border-indigo-500/20 dark:border-purple-500/20 bg-gradient-to-br from-indigo-50/70 via-white/70 to-purple-50/70 dark:from-indigo-950/35 dark:via-zinc-900/80 dark:to-purple-950/30 select-none shadow-[0_12px_32px_-18px_rgba(99,102,241,0.65)] ring-1 ring-white/40 dark:ring-white/5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_38px_-18px_rgba(99,102,241,0.75)] flex flex-col gap-1.5 w-full select-all">
+                  <div className="px-3 pt-3 text-[9px] font-black text-indigo-600 dark:text-purple-400 uppercase tracking-widest flex items-center gap-1.5 border-b border-indigo-200/60 dark:border-indigo-800/40 pb-2 mb-1">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Verified Transparency Metrics (vLLM Engine)
+                    Verified Execution Metrics
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] font-mono text-zinc-650 dark:text-zinc-400">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-4 gap-y-2 px-3 pb-3 text-[10px] font-mono text-zinc-650 dark:text-zinc-400 [&>div]:min-w-0 [&>div]:break-words">
                     <div>
                       <span className="text-zinc-400 dark:text-zinc-500">Model:</span>{" "}
-                      <span className="font-bold text-zinc-950 dark:text-zinc-200">{msg.model_used || msg.modelUsed || 'Qwen3-4B-AWQ'}</span>
+                      <span className="font-bold text-zinc-950 dark:text-zinc-200">{msg.model_used || msg.modelUsed || 'Not reported'}</span>
                     </div>
                     <div>
                       <span className="text-zinc-400 dark:text-zinc-500">Tokens:</span>{" "}
                       <span className="font-bold text-zinc-950 dark:text-zinc-200">
-                        {msg.tokenCount || msg.token_count || 0}
+                        {msg.tokenCount || msg.token_count || (msg.content ? msg.content.split(/\s+/).length : 0)}
                         {msg.prompt_tokens ? ` (+${msg.prompt_tokens} prompt)` : ""}
                       </span>
                     </div>
                     <div>
-                      <span className="text-zinc-400 dark:text-zinc-500">Context:</span>{" "}
+                      <span className="text-zinc-400 dark:text-zinc-500">Context Window:</span>{" "}
                       <span className="font-bold text-zinc-950 dark:text-zinc-200">
-                        {msg.total_context || msg.totalContext || 8192}
+                        {(() => {
+                          const val = msg.total_context || msg.totalContext || msg.ctx_window || 32768;
+                          const num = typeof val === 'number' ? val : (parseInt(val) || 32768);
+                          const formattedNum = num >= 1000 ? `${(num / 1024).toFixed(0)}K Tokens (${num.toLocaleString()} tokens)` : `${num} Tokens`;
+                          const refCount = Array.isArray(msg.references) ? msg.references.length : (msg.references ? 1 : 0);
+                          return refCount > 0 ? `${formattedNum} • ${refCount} Source(s)` : formattedNum;
+                        })()}
                       </span>
                     </div>
                     <div>
@@ -739,7 +881,7 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
           )}
         </div>
 
-        {/* ── Gemini-style action bar — visible on row hover ── */}
+        {/*  Gemini-style action bar  visible on row hover  */}
         {!msg.isLoading && msg.content && !isEditing && (
           <div className={`flex items-center gap-0.5 mt-1.5 px-1 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 ${
             msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'
@@ -812,7 +954,7 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
   );
 };
 
-const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel }) => {
+const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenDeveloper }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -828,10 +970,62 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [pasteTableData, setPasteTableData] = useState('');
   // Gemini-style Live Web Search Toggle
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
-  // RAG Mode Toggle — Combination (RAG On / Direct AI Mode)
+  // RAG Mode Toggle  Combination (RAG On / Direct AI Mode)
   const [isRagEnabled, setIsRagEnabled] = useState(true);
-  // Model readiness — polling until model is downloaded
+  // Model readiness  polling until model is downloaded
   const [modelStatus, setModelStatus] = useState({ ready: true, downloading: false, status_msg: '', display_name: '' });
+  // Language selector - English, Hindi
+  const [selectedLanguage, setSelectedLanguage] = useState('en');
+  const [translatedResponse, setTranslatedResponse] = useState(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const translateTimerRef = useRef(null);
+  // Auto-translate input text to selected language
+  const autoTranslateInput = async (text) => {
+    if (!text || selectedLanguage === 'en') return text;
+    
+    try {
+      const targetLang = selectedLanguage;
+      const sourceLang = 'auto';
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data && data[0] && data[0][0] && data[0][0][0]) {
+        return data[0][0][0];
+      }
+    } catch (e) {
+      console.error('Auto-translate failed:', e);
+    }
+    return text;
+  };
+
+  const handleInputChange = async (e) => {
+    const text = e.target.value;
+    setInput(text);
+    
+    // Auto-translate if language is not English
+    if (selectedLanguage !== 'en' && text.trim()) {
+      if (translateTimerRef.current) {
+        clearTimeout(translateTimerRef.current);
+      }
+      translateTimerRef.current = setTimeout(async () => {
+        setIsTranslating(true);
+        const translated = await autoTranslateInput(text);
+        if (translated !== text) {
+          setInput(translated);
+        }
+        setIsTranslating(false);
+      }, 500);
+    }
+  };
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (translateTimerRef.current) {
+        clearTimeout(translateTimerRef.current);
+      }
+    };
+  }, []);
 
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
@@ -841,18 +1035,72 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const incomingQueueRef = useRef([]);
   const typewriterTimerRef = useRef(null);
 
-  useEffect(() => {
-    const displayMap = {
-      'auto': 'Auto (Smart Model Router)',
-      'Qwen/Qwen3-4B-AWQ': 'Qwen 3 4B AWQ (Quantized)',
-      'Qwen/Qwen3-4B': 'Qwen 3 4B (Full Precision)',
-      'nvidia/Nemotron-Mini-4B-Instruct': 'Nemotron-3 Nano 4B (NVIDIA Instruct)',
-      'nemotron-mini:4b': 'Nemotron-3 Nano 4B (NVIDIA Instruct)',
-      'Qwen/Qwen3-8B': 'Qwen 3 8B (High Precision Reasoning)',
-      'qwen3:8b': 'Qwen 3 8B (High Precision Reasoning)',
+  const getCloudRoutingPayload = () => {
+    if (!selectedModel?.startsWith('cloud:')) return {};
+    const [, provider, ...modelParts] = selectedModel.split(':');
+    const model = modelParts.join(':');
+    let apiKeys = {};
+    let cachedModels = {};
+    try { apiKeys = JSON.parse(localStorage.getItem('sm_cloud_api_keys') || '{}'); } catch (_) {}
+    try { cachedModels = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}'); } catch (_) {}
+    const isEligible = (providerId, modelId) => (
+      providerId !== 'openrouter' || modelId === 'openrouter/free' || modelId.endsWith(':free')
+    );
+    const automaticFallback = localStorage.getItem('sm_cloud_auto_fallback') !== 'false';
+    const manualOnlyProviders = new Set(['openai', 'anthropic', 'gemini']);
+    const fallbacks = automaticFallback
+      ? Object.entries(cachedModels).flatMap(([providerId, models]) =>
+          (manualOnlyProviders.has(providerId) ? [] : (Array.isArray(models) ? models : []))
+            .filter((modelId) => apiKeys[providerId] && isEligible(providerId, modelId))
+            .map((modelId) => ({ provider: providerId, model: modelId, api_key: apiKeys[providerId] }))
+        ).filter((route) => route.provider !== provider || route.model !== model).slice(0, 12)
+      : [];
+    return {
+      cloud_provider: provider,
+      cloud_model: model,
+      cloud_api_key: apiKeys[provider] || '',
+      cloud_fallbacks: fallbacks,
     };
-    setActiveModelDisplay(displayMap[selectedModel] || selectedModel);
+  };
+
+  const displayMap = {
+    'auto': 'Auto (Smart Model Router)',
+    'Qwen/Qwen3-4B-AWQ': 'Qwen 3 4B AWQ (Quantized)',
+    'Qwen/Qwen3-4B': 'Qwen 3 4B (Full Precision)',
+    'nvidia/Nemotron-Mini-4B-Instruct': 'Nemotron-3 Nano 4B (NVIDIA Instruct)',
+    'nemotron-mini:4b': 'Nemotron-3 Nano 4B (NVIDIA Instruct)',
+    'Qwen/Qwen3-8B': 'Qwen 3 8B (High Precision Reasoning)',
+    'qwen3:8b': 'Qwen 3 8B (High Precision Reasoning)',
+  };
+
+  const resolveDisplayName = (modelId) => {
+    if (!modelId) return activeModelDisplay;
+    if (modelId === 'auto') return 'LOCAL · Auto Router';
+    if (modelId.startsWith('cloud:')) {
+      const [, provider, ...parts] = modelId.split(':');
+      return `Cloud API · ${provider.toUpperCase()} · ${parts.join(':')}`;
+    }
+    const direct = displayMap[modelId];
+    if (direct) return direct;
+    const lowered = modelId.toLowerCase();
+    if (lowered.includes('qwen3') && lowered.includes('4b')) return 'Qwen 3 4B AWQ (Quantized)';
+    if (lowered.includes('qwen3') && lowered.includes('8b')) return 'Qwen 3 8B (High Precision Reasoning)';
+    if (lowered.includes('nemotron')) return 'Nemotron-3 Nano 4B (NVIDIA Instruct)';
+    if (lowered.includes('phi-3.5') || lowered.includes('phi3.5')) return 'Phi-3.5 Vision 4.2B (Microsoft Vision)';
+    if (lowered.includes('phi-3') || lowered.includes('phi3')) return 'Phi-3 Mini 3.8B (Microsoft Instruct)';
+    if (lowered.includes('llama')) return 'Llama 3.1 8B (Core)';
+    return modelId;
+  };
+
+  useEffect(() => {
+    setActiveModelDisplay(resolveDisplayName(selectedModel));
   }, [selectedModel]);
+
+  useEffect(() => {
+    if (lastUsedModel && lastUsedModel !== selectedModel) {
+      setActiveModelDisplay(resolveDisplayName(lastUsedModel));
+    }
+  }, [lastUsedModel]);
 
   // Poll model download status every 5s until ready
   useEffect(() => {
@@ -866,7 +1114,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           const data = await res.json();
           setModelStatus(data);
           if (data.ready) {
-            // Model is ready — stop polling
+            // Model is ready  stop polling
             clearInterval(interval);
           }
         }
@@ -904,19 +1152,19 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     }
   };
 
-  const fetchUploadedFiles = async () => {
+  const fetchUploadedFiles = async (collectionIds = activeCollections) => {
     // CRITICAL: Never show files if there is no active session.
     // Without a session_id filter the backend returns ALL documents across all
-    // sessions — which causes old uploaded files to reappear after chat history
+    // sessions  which causes old uploaded files to reappear after chat history
     // is deleted or when a new session is being created.
-    if (!token || !activeSessionId || activeCollections.length === 0) {
+    if (!token || !activeSessionId || collectionIds.length === 0) {
       setUploadedFiles([]);
       return;
     }
     try {
       const allDocs = [];
-      for (const colId of activeCollections) {
-        // Always pass session_id — only files uploaded in THIS session are shown.
+      for (const colId of collectionIds) {
+        // Always pass session_id  only files uploaded in THIS session are shown.
         const url = `${API_BASE}/api/collections/${colId}/documents?session_id=${activeSessionId}`;
         const res = await fetch(url, {
           headers: { Authorization: `Bearer ${token}` },
@@ -926,7 +1174,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           allDocs.push(...docs);
         }
       }
-      setUploadedFiles(allDocs);
+      
+      const uniqueDocs = Array.from(
+        new Map(allDocs.map((doc) => [doc.id, doc])).values()
+      ).sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+      setUploadedFiles(uniqueDocs);
     } catch (err) {
       console.error(err);
     }
@@ -1031,14 +1283,18 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       }
 
       setIsRagEnabled(true);
+      setIsWebSearchEnabled(false);
       // Add collection to search contexts if not checked
-      if (!activeCollections.includes(targetCollectionId)) {
-        setActiveCollections([...activeCollections, targetCollectionId]);
-      } else {
-        fetchUploadedFiles();
+      const nextActiveCollections = activeCollections.includes(targetCollectionId)
+        ? activeCollections
+        : [...activeCollections, targetCollectionId];
+      if (nextActiveCollections !== activeCollections) {
+        setActiveCollections(nextActiveCollections);
       }
+      // Refresh visible session-file chips after every successful upload, including the first Quick Upload.
+      await fetchUploadedFiles(nextActiveCollections);
       
-      setDirectUploadMessage(`🟢 Successfully parsed and indexed ${files.length} document(s)!`);
+      setDirectUploadMessage(` Successfully parsed and indexed ${files.length} document(s)!`);
       setTimeout(() => {
         setDirectUploadMessage(null);
       }, 4000);
@@ -1058,15 +1314,28 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     setDirectUploading(true);
     let uploadedCount = 0;
     
-    // Filter supported files
-    const supportedExtensions = ['.pdf', '.csv', '.xlsx', '.docx', '.pptx', '.txt', '.md', '.xml', '.py', '.cpp', '.h', '.json', '.yaml', '.yml', '.log', '.html', '.htm'];
+    // Ignore build artifacts, virtual environments, and system VCS directories
+    const IGNORED_DIR_PATTERNS = [
+      '/node_modules/', '/.git/', '/.venv/', '/venv/', '/__pycache__/', 
+      '/dist/', '/build/', '/.next/', '/.idea/', '/.vscode/', '/.pytest_cache/',
+      '/data/', '/SMARAN.AI_Release/', '/brain/', '/.antigravity/', '/out/', '/coverage/'
+    ];
+    const FORBIDDEN_EXTS = [
+      '.exe', '.dll', '.so', '.dylib', '.bin', '.iso', '.dmg', '.pkg', '.deb', '.rpm', '.class', '.pyc', '.pyo', '.o', '.a', '.lib', '.obj', '.zip', '.tar', '.gz', '.7z', '.rar', '.gguf'
+    ];
+
     const validFiles = files.filter(file => {
+      if (!file || file.size === 0) return false;
+      const relPath = '/' + (file.webkitRelativePath || file.name).replace(/\\/g, '/');
+      if (IGNORED_DIR_PATTERNS.some(pat => relPath.includes(pat))) return false;
+      
       const ext = '.' + file.name.split('.').pop().toLowerCase();
-      return supportedExtensions.includes(ext);
+      if (FORBIDDEN_EXTS.includes(ext)) return false;
+      return true;
     });
 
     if (validFiles.length === 0) {
-      alert("No supported documents found in the selected folder.");
+      alert("No valid files found in the selected folder.");
       setDirectUploading(false);
       return;
     }
@@ -1111,13 +1380,14 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       return;
     }
 
-    // 2. Upload each file sequentially
+    // 2. Upload each file sequentially while preserving relative subfolder path
     for (let i = 0; i < validFiles.length; i++) {
       const file = validFiles[i];
-      setDirectUploadMessage(`Ingesting folder files: ${i + 1} of ${validFiles.length} ("${file.name}")...`);
+      const relativePath = file.webkitRelativePath || file.name;
+      setDirectUploadMessage(`Ingesting folder files: ${i + 1} of ${validFiles.length} ("${relativePath}")...`);
       
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', file, relativePath);
       if (activeSessionId) {
         formData.append('session_id', activeSessionId);
       }
@@ -1132,7 +1402,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           uploadedCount++;
         }
       } catch (err) {
-        console.error(`Failed to upload ${file.name}:`, err);
+        console.error(`Failed to upload ${relativePath}:`, err);
       }
     }
 
@@ -1143,7 +1413,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       fetchUploadedFiles();
     }
 
-    setDirectUploadMessage(`🟢 Successfully ingested ${uploadedCount} of ${validFiles.length} files from folder!`);
+    setDirectUploadMessage(` Successfully ingested ${uploadedCount} of ${validFiles.length} files from folder!`);
     setTimeout(() => {
       setDirectUploadMessage(null);
     }, 4000);
@@ -1218,6 +1488,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       setDirectUploadMessage(`Ingesting pasted CSV data table as "${fileName}"...`);
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('session_id', activeSessionId);
 
       const uploadRes = await fetch(`${API_BASE}/api/collections/${targetCollectionId}/upload`, {
         method: 'POST',
@@ -1227,11 +1498,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
       if (uploadRes.ok) {
         if (!activeCollections.includes(targetCollectionId)) {
-          setActiveCollections([...activeCollections, targetCollectionId]);
-        } else {
-          fetchUploadedFiles();
-        }
-        setDirectUploadMessage(`🟢 Successfully ingested table "${fileName}"!`);
+        setActiveCollections([...activeCollections, targetCollectionId]);
+      }
+      // Refresh visible session-file chips after every successful upload, including the first Quick Upload.
+      await fetchUploadedFiles();
+        setDirectUploadMessage(` Successfully ingested table "${fileName}"!`);
         setTimeout(() => setDirectUploadMessage(null), 4000);
       } else {
         const errData = await parseJsonResponse(uploadRes);
@@ -1305,10 +1576,12 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             body: JSON.stringify({
               session_id: activeSessionId,
               prompt: newText.trim(),
-              collections: activeCollections,
+              collections: isRagEnabled ? activeCollections : [],
               model: selectedModel,
               turbo: turboMode,
               web_search: isWebSearchEnabled,
+              rag_enabled: isRagEnabled,
+              ...getCloudRoutingPayload(),
             }),
           });
 
@@ -1389,6 +1662,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                               total_context: parsed.total_context,
                               context_remaining: parsed.context_remaining,
                               execution_time_sec: parsed.execution_time_sec,
+                              responseTimeMs: parsed.response_time_ms,
+                              model_used: parsed.model_routed || msg.model_used,
+                              execution_source: parsed.execution_source || msg.execution_source,
                               local_datetime: parsed.local_datetime,
                             }
                           : msg
@@ -1445,6 +1721,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     e.preventDefault();
     if (!input.trim() || streaming || !activeSessionId || !modelStatus.ready) return;
 
+    if (translateTimerRef.current) {
+      clearTimeout(translateTimerRef.current);
+    }
+    setIsTranslating(false);
+
     const userPrompt = input.trim();
     
     setInput('');
@@ -1473,6 +1754,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setTimeout(scrollToBottom, 50);
 
+    let accumulatedResponse = '';
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
@@ -1487,6 +1769,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           model: selectedModel,
           turbo: turboMode,
           web_search: isWebSearchEnabled,
+          rag_enabled: isRagEnabled,
+          target_language: selectedLanguage === 'en' ? undefined : selectedLanguage,
+          ...getCloudRoutingPayload(),
         }),
       });
 
@@ -1498,7 +1783,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder('utf-8');
-      let accumulatedResponse = '';
       let references = [];
       let tokenCount = 0;
 
@@ -1538,12 +1822,25 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                       ? { 
                           ...msg, 
                           responseTimeMs: parsed.response_time_ms,
-                          // Map tokens_per_sec from the final backend metadata payload
                           tokensPerSec: parsed.tokens_per_sec || msg.tokensPerSec
                         } 
                       : msg
                   )
                 );
+              }
+              if (parsed.translated_response && selectedLanguage !== 'en') {
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? { ...msg, content: parsed.translated_response, originalContent: parsed.original_response || accumulatedResponse }
+                      : msg
+                  )
+                );
+                accumulatedResponse = parsed.translated_response;
+                if (typewriterTimerRef.current) {
+                  clearInterval(typewriterTimerRef.current);
+                  typewriterTimerRef.current = null;
+                }
               }
               if (parsed.token) {
                 tokenCount += 1;
@@ -1571,7 +1868,15 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                 }
               }
               if (parsed.error) {
-                incomingQueueRef.current.push(`\n\n[Error: ${parsed.error}]`);
+                const visibleError = `Request failed: ${parsed.error}`;
+                accumulatedResponse += visibleError;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? { ...msg, content: accumulatedResponse, isLoading: false }
+                      : msg
+                  )
+                );
               }
             } catch (err) {
               console.error('Partial buffer line parse skipped', err);
@@ -1589,6 +1894,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         )
       );
     } finally {
+      if (typewriterTimerRef.current) {
+        clearInterval(typewriterTimerRef.current);
+        typewriterTimerRef.current = null;
+      }
+      if (incomingQueueRef.current.length > 0) {
+        accumulatedResponse += incomingQueueRef.current.join('');
+        incomingQueueRef.current = [];
+      }
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessage.id
+            ? { ...msg, content: accumulatedResponse || msg.content, isLoading: false }
+            : msg
+        )
+      );
       setStreaming(false);
       streamingRef.current = false;
     }
@@ -1596,44 +1916,45 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
   return (
     <div className="flex flex-col h-full bg-zinc-50/50 dark:bg-[#0c0c0e]/40 relative overflow-hidden transition-colors duration-300">
-      {/* Background glows — clamped so they never cause horizontal scroll */}
+      {/* Background glows  clamped so they never cause horizontal scroll */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
         <div className="absolute top-[45%] left-[55%] -translate-x-1/2 -translate-y-1/2 w-[400px] sm:w-[700px] h-[400px] sm:h-[700px] rounded-full blur-[120px] sm:blur-[160px] animate-drift-1 bg-[radial-gradient(circle,rgba(99,102,241,0.12)_0%,rgba(139,92,246,0.18)_40%,transparent_70%)] dark:bg-[radial-gradient(circle,rgba(79,70,229,0.2)_0%,rgba(139,92,246,0.3)_40%,transparent_70%)]" />
         <div className="absolute top-[30%] left-[25%] w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] rounded-full blur-[80px] sm:blur-[120px] animate-drift-2 bg-[radial-gradient(circle,rgba(59,130,246,0.08)_0%,rgba(6,182,212,0.1)_50%,transparent_70%)] dark:bg-[radial-gradient(circle,rgba(30,58,138,0.18)_0%,rgba(15,118,110,0.15)_50%,transparent_70%)]" />
         <div className="absolute bottom-[15%] right-[20%] w-[250px] sm:w-[400px] h-[250px] sm:h-[400px] rounded-full blur-[90px] sm:blur-[130px] animate-drift-1 bg-[radial-gradient(circle,rgba(236,72,153,0.06)_0%,rgba(168,85,247,0.08)_50%,transparent_70%)] dark:bg-[radial-gradient(circle,rgba(236,72,153,0.12)_0%,rgba(168,85,247,0.18)_50%,transparent_70%)]" />
       </div>
 
-      {/* Top Banner Status */}
-      <div className="px-4 sm:px-6 py-3 sm:py-4 bg-white dark:bg-[#131314]/50 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-900 flex flex-row items-center justify-between text-[11px] sm:text-xs text-zinc-900 dark:text-zinc-400 select-none font-bold transition-colors duration-300 gap-2 overflow-hidden shrink-0 relative z-10">
-        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-          <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-650 dark:text-indigo-400 animate-pulse shrink-0" />
-          <span className="truncate flex items-center gap-1">
-            Engine:
-            <strong className="text-zinc-950 dark:text-zinc-200 font-extrabold font-mono bg-zinc-100 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 px-1.5 py-0.5 rounded-md text-[10px] sm:text-xs whitespace-nowrap">
+      {/* 3D Glowing Top Engine Banner */}
+      <div className="px-4 sm:px-6 py-2.5 sm:py-3 bg-white/80 dark:bg-zinc-950/60 backdrop-blur-xl border-b border-zinc-200 dark:border-zinc-800/80 flex flex-row items-center justify-between text-[11px] sm:text-xs text-zinc-800 dark:text-zinc-300 select-none font-bold transition-all duration-300 gap-3 overflow-hidden shrink-0 relative z-10 shadow-xs">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="relative flex items-center justify-center shrink-0">
+            <span className="absolute w-3 h-3 rounded-full bg-indigo-500 animate-ping opacity-75" />
+            <Sparkles className="relative w-4 h-4 text-indigo-600 dark:text-indigo-400 filter drop-shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
+          </div>
+          <div className="flex items-center gap-2 truncate">
+            <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[10px] sm:text-xs uppercase tracking-wider">AI Engine:</span>
+            <span className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse mr-1.5" />
               {activeModelDisplay}
-            </strong>
-          </span>
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-500 animate-ping shrink-0" />
-          <span className="text-zinc-900 dark:text-zinc-400 font-extrabold uppercase tracking-wider text-[9px] sm:text-[10px] whitespace-nowrap">
-            <span className="inline sm:hidden">Online</span>
-            <span className="hidden sm:inline">Local Index Sync Node Online</span>
-          </span>
+
+        <div className="flex items-center gap-2.5 shrink-0">
           {/* Performance Panel Toggle */}
           {onTogglePanel && (
             <button
               onClick={onTogglePanel}
               title="Toggle Performance Panel"
-              className="ml-1 p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer"
+              className="p-2 rounded-xl bg-indigo-50 dark:bg-zinc-900 hover:bg-indigo-100 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-zinc-800 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 shadow-xs hover:scale-105 transition-all cursor-pointer flex items-center gap-1.5 font-bold text-xs"
             >
-              <LayoutDashboard className="w-3.5 h-3.5" />
+              <LayoutDashboard className="w-4 h-4" />
+              <span className="hidden md:inline text-[11px]">Performance</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Model Downloading Banner — shown when AI model is still being pulled */}
+      {/* Model Downloading Banner  shown when AI model is still being pulled */}
       {!modelStatus.ready && (
         <div className="shrink-0 z-20 relative">
           <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-300 dark:border-amber-800/60">
@@ -1644,7 +1965,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-black text-amber-800 dark:text-amber-300 truncate">
-                {modelStatus.status_msg || 'AI Model is downloading — please wait...'}
+                {modelStatus.status_msg || 'AI Model is downloading  please wait...'}
               </p>
               {modelStatus.progress_pct > 0 && (
                 <div className="mt-1.5 w-full max-w-md bg-amber-200 dark:bg-amber-950/20 rounded-full h-1.5 overflow-hidden">
@@ -1675,7 +1996,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         {messages.length === 0 ? (
           <div className="min-h-full flex flex-col items-center justify-start sm:justify-center text-center max-w-2xl mx-auto w-full space-y-4 sm:space-y-6 px-2 py-6 sm:py-8 select-none animate-in fade-in slide-in-from-bottom-4 duration-500">
             
-            {/* Animated Gradient Icon — hidden on very small screens to save space */}
+            {/* Animated Gradient Icon  hidden on very small screens to save space */}
             <div className="relative hidden sm:block">
               <div className="absolute inset-0 w-16 h-16 sm:w-24 sm:h-24 rounded-[20px] sm:rounded-[28px] bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 opacity-25 dark:opacity-40 blur-xl animate-pulse" />
               <div className="relative w-16 h-16 sm:w-24 sm:h-24 rounded-[20px] sm:rounded-[28px] bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 p-[2px] shadow-[0_0_40px_rgba(99,102,241,0.3)] dark:shadow-[0_0_50px_rgba(139,92,246,0.4)]">
@@ -1690,51 +2011,51 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight select-none">
                 <span className="bg-gradient-to-r from-[#ea580c] via-[#f97316] to-[#fbbf24] bg-clip-text text-transparent">SMARAN</span>
                 {' '}
-                <span className="bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">AI</span>
+                <span className="bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">.AI</span>
               </h1>
               <p className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-md mx-auto font-semibold">
-                Meet SMARAN AI, your personal AI assistant.
+                Meet SMARAN.AI, your personal AI assistant.
               </p>
             </div>
 
-            {/* Prompt Cards — single col on mobile, 2-col on sm+ */}
+            {/* Prompt Cards  single col on mobile, 2-col on sm+ */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4 w-full select-none">
               {[
                 {
-                  title: "Summarize Inventory Stock",
-                  subtitle: "Get a high-level summary of store item counts, categories, and top suppliers.",
-                  prompt: "Provide a detailed summary of the store inventory based on the uploaded data. What are the main categories of items, who are the key suppliers, and what is the total item count?",
-                  icon: "💡",
-                  gradient: "from-amber-500/20 to-orange-500/20 dark:from-amber-500/10 dark:to-orange-500/10",
-                  borderHover: "hover:border-amber-400/50 dark:hover:border-amber-500/30",
-                  glowHover: "hover:shadow-[0_0_30px_rgba(245,158,11,0.15)] dark:hover:shadow-[0_0_35px_rgba(245,158,11,0.2)]"
+                  title: "🎥 YouTube Video Intelligence",
+                  subtitle: "Extract video transcript, key timestamps, visual context, and ask anything about the video.",
+                  prompt: "Explain what happens inside this YouTube video: https://youtu.be/B1PUBlhd9Yg",
+                  icon: "▶",
+                  gradient: "from-red-500/20 via-orange-500/20 to-amber-500/20 dark:from-red-500/15 dark:to-amber-500/15",
+                  borderHover: "hover:border-red-500/50 dark:hover:border-red-500/40",
+                  glowHover: "hover:shadow-[0_0_30px_rgba(239,68,68,0.25)]"
                 },
                 {
-                  title: "Low Stock Alert Analysis",
-                  subtitle: "Find which items in the store are currently below their minimum stock limits.",
-                  prompt: "Identify and list all items in the inventory where the closing stock is less than the specified minimum stock limit. Suggest which items need reordering.",
-                  icon: "🛠️",
-                  gradient: "from-blue-500/20 to-cyan-500/20 dark:from-blue-500/10 dark:to-cyan-500/10",
-                  borderHover: "hover:border-blue-400/50 dark:hover:border-blue-500/30",
-                  glowHover: "hover:shadow-[0_0_30px_rgba(59,130,246,0.15)] dark:hover:shadow-[0_0_35px_rgba(59,130,246,0.2)]"
+                  title: "🌐 Real-Time Web & Website Scraper",
+                  subtitle: "Analyze live web page URLs, portfolio sites, documentation, or search internet facts.",
+                  prompt: "Analyze the content of this portfolio website: https://shashwatmishra-portfolio.netlify.app/",
+                  icon: "🌐",
+                  gradient: "from-blue-500/20 via-cyan-500/20 to-teal-500/20 dark:from-blue-500/15 dark:to-teal-500/15",
+                  borderHover: "hover:border-cyan-400/50 dark:hover:border-cyan-500/40",
+                  glowHover: "hover:shadow-[0_0_30px_rgba(6,182,212,0.25)]"
                 },
                 {
-                  title: "Visualize Stock Distribution",
-                  subtitle: "Request a cost breakdown chart to visualize total inventory stock value.",
-                  prompt: "Show a bar chart visualization of the total value of stock grouped by brand and category. List the values and counts.",
+                  title: "📄 Deep RAG Document Intelligence",
+                  subtitle: "Query complex PDF invoices, Word docs, Excel BoMs, or multi-page technical manuals.",
+                  prompt: "Summarize the key findings, data tables, and metrics across all uploaded documents in this chat.",
                   icon: "📊",
-                  gradient: "from-emerald-500/20 to-teal-500/20 dark:from-emerald-500/10 dark:to-teal-500/10",
-                  borderHover: "hover:border-emerald-400/50 dark:hover:border-emerald-500/30",
-                  glowHover: "hover:shadow-[0_0_30px_rgba(16,185,129,0.15)] dark:hover:shadow-[0_0_35px_rgba(16,185,129,0.2)]"
+                  gradient: "from-emerald-500/20 via-teal-500/20 to-indigo-500/20 dark:from-emerald-500/15 dark:to-indigo-500/15",
+                  borderHover: "hover:border-emerald-400/50 dark:hover:border-emerald-500/40",
+                  glowHover: "hover:shadow-[0_0_30px_rgba(16,185,129,0.25)]"
                 },
                 {
-                  title: "Context & System Info",
-                  subtitle: "Find out which knowledge collections and files are currently active.",
-                  prompt: "What knowledge collections and documents are currently loaded into my active RAG context? Summarize their contents.",
-                  icon: "🔍",
-                  gradient: "from-purple-500/20 to-pink-500/20 dark:from-purple-500/10 dark:to-pink-500/10",
-                  borderHover: "hover:border-purple-400/50 dark:hover:border-purple-500/30",
-                  glowHover: "hover:shadow-[0_0_30px_rgba(168,85,247,0.15)] dark:hover:shadow-[0_0_35px_rgba(168,85,247,0.2)]"
+                  title: "🧠 AI Memory & Model Matrix",
+                  subtitle: "Store persistent user preferences, compare vLLM vs Ollama models, and run multi-agent reasoning.",
+                  prompt: "What long-term memory facts do you have stored about me, and which AI inference engine is active right now?",
+                  icon: "🧠",
+                  gradient: "from-purple-500/20 via-indigo-500/20 to-pink-500/20 dark:from-purple-500/15 dark:to-pink-500/15",
+                  borderHover: "hover:border-purple-400/50 dark:hover:border-purple-500/40",
+                  glowHover: "hover:shadow-[0_0_30px_rgba(168,85,247,0.25)]"
                 }
               ].map((card, idx) => (
                 <div
@@ -1803,30 +2124,51 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
       {/* Uploaded Files Chips (Gemini style) */}
       {uploadedFiles.length > 0 && (
-        <div className="max-w-4xl mx-auto px-6 py-2 flex flex-wrap gap-2 select-none animate-in fade-in slide-in-from-bottom-1 duration-200 text-left">
-          {uploadedFiles.map((f) => (
-            <div
-              key={f.id}
-              className="flex items-center gap-2 px-3 py-1.5 bg-[#f0f4f9] dark:bg-[#2f2f30] border border-zinc-200/60 dark:border-zinc-800/80 rounded-full text-xs font-semibold text-zinc-850 dark:text-zinc-200"
+        <div className="max-w-4xl mx-auto px-6 py-2 select-none animate-in fade-in slide-in-from-bottom-1 duration-200 text-left">
+          <div className="flex items-center justify-between mb-1.5 px-1">
+            <span className="text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5 text-indigo-500" />
+              Active Session Files ({uploadedFiles.length})
+            </span>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!window.confirm("Remove all active files from this chat session?")) return;
+                for (const f of uploadedFiles) {
+                  await handleDeleteUploadedFile(f.id);
+                }
+              }}
+              className="text-[10px] font-bold text-rose-500 hover:text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
             >
-              <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-[#8ab4f8]" />
-              <span className="max-w-[150px] truncate">{f.name}</span>
-              <button
-                type="button"
-                onClick={() => handleDeleteUploadedFile(f.id)}
-                className="p-0.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-full text-zinc-500 hover:text-rose-600 transition-colors cursor-pointer"
-                title="Delete file from database"
+              Clear All Files
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
+            {uploadedFiles.map((f) => (
+              <div
+                key={f.id}
+                title={f.name}
+                className="flex items-center gap-2 px-3 py-1 bg-[#f0f4f9] dark:bg-[#2f2f30] border border-zinc-200/60 dark:border-zinc-800/80 rounded-full text-xs font-semibold text-zinc-850 dark:text-zinc-200 hover:border-indigo-500/40 transition-all"
               >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-          ))}
+                <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-[#8ab4f8] shrink-0" />
+                <span className="max-w-[200px] truncate">{f.name}</span>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteUploadedFile(f.id)}
+                  className="p-0.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-full text-zinc-500 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
+                  title="Delete file from database"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {/* Input Box Console */}
       <div className="px-3 sm:px-5 pb-4 sm:pb-5 pt-2 bg-transparent shrink-0 relative z-10">
-        <form onSubmit={handleSend} className="max-w-4xl mx-auto flex items-center bg-[#f0f4f9] dark:bg-[#1e1f20] border border-zinc-200/50 dark:border-zinc-800/80 rounded-[28px] sm:rounded-[32px] px-3 sm:px-4 py-1.5 sm:py-2 focus-within:ring-2 focus-within:ring-indigo-500/30 dark:focus-within:ring-indigo-500/20 focus-within:border-indigo-400/40 dark:focus-within:border-indigo-500/30 transition-all shadow-xs focus-within:shadow-[0_0_25px_rgba(99,102,241,0.12)] dark:focus-within:shadow-[0_0_30px_rgba(99,102,241,0.15)]">
+        <form onSubmit={handleSend} className="max-w-4xl mx-auto flex items-center gap-1.5 bg-gradient-to-r from-zinc-100/95 via-white/90 to-indigo-50/80 dark:from-zinc-950/95 dark:via-zinc-900/95 dark:to-indigo-950/45 border border-indigo-300/60 dark:border-indigo-500/35 rounded-[26px] sm:rounded-[30px] px-3 sm:px-4 py-2 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.75)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all">
           
           {/* Attach File */}
           <button
@@ -1864,7 +2206,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           {/* RAG Mode Toggle (Combination: RAG + Direct Chat) */}
           <button
             type="button"
-            onClick={() => setIsRagEnabled(!isRagEnabled)}
+            onClick={() => {
+              const nextRagState = !isRagEnabled;
+              setIsRagEnabled(nextRagState);
+              if (nextRagState) setIsWebSearchEnabled(false);
+            }}
             disabled={!activeSessionId || directUploading}
             className={`px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1.5 text-xs font-black ${
               isRagEnabled
@@ -1880,30 +2226,34 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           {/* Gemini-Style Live Web Search Toggle */}
           <button
             type="button"
-            onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+            onClick={() => {
+              const nextWebState = !isWebSearchEnabled;
+              setIsWebSearchEnabled(nextWebState);
+              if (nextWebState) setIsRagEnabled(false);
+            }}
             disabled={!activeSessionId || directUploading}
             className={`px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1.5 text-xs font-black ${
               isWebSearchEnabled
                 ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/40 shadow-xs'
                 : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
             }`}
-            title={isWebSearchEnabled ? 'Live Web Search ON' : 'Turn Web Search ON'}
+            title={isWebSearchEnabled ? 'Live Web Search is ON ? click to turn it OFF' : 'Live Web Search is OFF ? click to turn it ON'}
           >
             <Globe className={`w-4 h-4 ${isWebSearchEnabled ? 'animate-pulse text-blue-500 dark:text-blue-400' : ''}`} />
-            <span className="text-[11px] font-extrabold">{isWebSearchEnabled ? 'Web ON' : 'Search'}</span>
+            <span className="text-[11px] font-extrabold">{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
           </button>
           
-          {/* Single unified hidden file input — accepts ALL file types */}
+          {/* Single unified hidden file input  accepts ALL file types */}
           <input
             type="file"
             ref={fileInputRef}
             onChange={handleDirectFileUpload}
-            accept=".pdf,.csv,.xlsx,.docx,.pptx,.txt,.md,.xml,.py,.cpp,.h,.json,.yaml,.yml,.log,.html,.htm,.png,.jpg,.jpeg,.webp,.bmp,.tiff"
+            accept=".pdf,.csv,.tsv,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.txt,.md,.markdown,.xml,.rst,.adoc,.rtf,.ipynb,.py,.js,.jsx,.ts,.tsx,.c,.cpp,.cc,.cxx,.h,.hpp,.cs,.java,.kt,.kts,.go,.rs,.php,.rb,.swift,.m,.mm,.sh,.bash,.zsh,.bat,.cmd,.ps1,.sql,.r,.scala,.dart,.lua,.pl,.json,.jsonc,.json5,.yaml,.yml,.toml,.ini,.env,.conf,.config,.properties,.log,.html,.htm,.css,.scss,.sass,.less,.vue,.svelte,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.avi,.mkv,.webm,.mov,.flv,.png,.jpg,.jpeg,.webp,.bmp,.tiff,.gif,.svg"
             multiple
             className="hidden"
           />
 
-          {/* Recursive directory upload input — accepts entire folders and subfolders */}
+          {/* Recursive directory upload input  accepts entire folders and subfolders */}
           <input
             type="file"
             ref={folderInputRef}
@@ -1916,7 +2266,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
           <textarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={(e) => {
               const isShortcut = e.ctrlKey || e.metaKey;
               if (isShortcut) {
@@ -1935,17 +2285,41 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             onCut={(e) => e.stopPropagation()}
             placeholder={
               activeSessionId
-                ? 'Ask SMARAN AI...'
+                ? isWebSearchEnabled
+                  ? 'Search and ask the live web...'
+                  : isRagEnabled
+                    ? 'Ask from uploaded files only...'
+                    : 'Ask SMARAN.AI directly...'
                 : 'Start a new conversation'
             }
             disabled={!activeSessionId || streaming || directUploading}
             rows={1}
             className="flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-sm text-zinc-900 dark:text-zinc-200 font-semibold resize-none max-h-28 py-2 px-2"
           />
+          {isTranslating && (
+            <span className="text-[10px] text-indigo-500 animate-pulse shrink-0">Translating...</span>
+          )}
+          {/* Language Selector */}
+          <select
+            value={selectedLanguage}
+            onChange={(e) => setSelectedLanguage(e.target.value)}
+            className="response-language-select text-[10px] font-extrabold text-zinc-700 dark:text-zinc-200 bg-gradient-to-r from-white to-indigo-50 dark:from-zinc-900 dark:to-indigo-950/70 border border-indigo-300/80 dark:border-indigo-500/45 rounded-2xl px-3 py-2 outline-none cursor-pointer shrink-0 transition-all duration-300 hover:border-violet-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:shadow-[0_0_22px_rgba(99,102,241,0.38)] hover:-translate-y-0.5 focus:border-violet-400 focus:ring-2 focus:ring-violet-500/35"
+            title="Response Language"
+          >
+            <option value="en">English (EN)</option>
+            <option value="hi">Hindi (HI)</option>
+            <option value="gu">Gujarati (GU)</option>
+            <option value="pa">Punjabi (PA)</option>
+            <option value="mr">Marathi (MR)</option>
+            <option value="ta">Tamil (TA)</option>
+            <option value="te">Telugu (TE)</option>
+            <option value="ml">Malayalam (ML)</option>
+            <option value="kn">Kannada (KN)</option>
+          </select>
           <button
             type="submit"
             disabled={!activeSessionId || !input.trim() || streaming || directUploading}
-            className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-850 text-[#1967d2] dark:text-[#8ab4f8] disabled:text-zinc-400 dark:disabled:text-zinc-650 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
+            className="p-2.5 text-white bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 disabled:from-zinc-300 disabled:to-zinc-400 dark:disabled:from-zinc-700 dark:disabled:to-zinc-800 rounded-full shadow-[0_0_18px_rgba(139,92,246,0.38)] hover:shadow-[0_0_28px_rgba(139,92,246,0.62)] hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none shrink-0"
           >
             <Send className="w-5 h-5" />
           </button>

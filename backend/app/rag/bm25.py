@@ -2,6 +2,17 @@ import math
 import re
 from typing import List, Dict, Any
 
+STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "been", "but", "by",
+    "can", "could", "did", "do", "does", "for", "from", "had", "has",
+    "have", "how", "i", "if", "in", "into", "is", "it", "its", "may",
+    "me", "my", "of", "on", "or", "our", "please", "should", "that",
+    "the", "their", "them", "there", "these", "they", "this", "those",
+    "to", "us", "was", "we", "were", "what", "when", "where", "which",
+    "who", "why", "will", "with", "would", "you", "your", "about",
+    "tell", "explain", "answer", "question", "give"
+}
+
 class BM25Searcher:
     def __init__(self, corpus: List[Dict[str, Any]], k1: float = 1.5, b: float = 0.75):
         """
@@ -27,7 +38,7 @@ class BM25Searcher:
         text = text.lower()
         # Find alphanumeric characters, underscores, and hyphens (helps with ROS2 node names e.g., standard_pub_node)
         tokens = re.findall(r'[a-zA-Z0-9_\-]+', text)
-        return tokens
+        return [token for token in tokens if token not in STOP_WORDS]
 
     def _initialize(self):
         if not self.corpus:

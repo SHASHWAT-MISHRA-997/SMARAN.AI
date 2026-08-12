@@ -109,6 +109,12 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
     turbo: bool = False
     web_search: bool = False
+    rag_enabled: bool = False
+    target_language: Optional[str] = "en"  # Default English
+    cloud_provider: Optional[str] = None
+    cloud_model: Optional[str] = None
+    cloud_api_key: Optional[str] = None
+    cloud_fallbacks: List[dict] = []
 
 class VisionChatRequest(BaseModel):
     """Schema for vision-based chat requests (image analysis)."""
@@ -210,3 +216,23 @@ class UserMemoryResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+# --- Translation Schemas ---
+class TranslationRequest(BaseModel):
+    text: str
+    target_language: str = "en"
+    source_language: Optional[str] = "auto"
+
+class TranslationResponse(BaseModel):
+    original_text: str
+    translated_text: str
+    source_language: str
+    target_language: str
+
+class LanguageDetectionRequest(BaseModel):
+    text: str
+
+class LanguageDetectionResponse(BaseModel):
+    language: str
+    language_name: str
+    confidence: Optional[float] = None

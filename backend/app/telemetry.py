@@ -103,7 +103,7 @@ def send_creator_heartbeat(status: str = "active"):
     
     Notification format:
       Title: 🟢 SMARAN.AI — New Installation!  (or ♻️ Heartbeat)
-      Body:  ID: smaran-inst-abc123 | Windows 11 | v2.2.0 | 2026-08-08T15:30:00Z
+      Body:  ID: smaran-inst-abc123 | Windows 11 | v1.0.0 | 2026-08-08T15:30:00Z
     """
     def _ping():
         try:
@@ -135,7 +135,7 @@ def send_creator_heartbeat(status: str = "active"):
             body = (
                 f"📌 ID: {inst_id}\n"
                 f"💻 OS: {os_name} {os_ver} ({machine})\n"
-                f"📦 Version: 2.2.0\n"
+                f"📦 Version: 1.0.0\n"
                 f"🕐 Time: {ts}"
             )
 

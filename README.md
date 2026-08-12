@@ -1,261 +1,203 @@
-# 🧠 SMARAN AI — Enterprise Knowledge & High-Performance RAG Intelligence Console
+<div align="center">
 
-[![Version](https://img.shields.io/badge/version-2.5.0-indigo.svg?style=for-the-badge)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI)
-[![Docker Image](https://img.shields.io/badge/docker-shashwatmishra062%2Fsmaran--ai-blue.svg?style=for-the-badge&logo=docker)](https://hub.docker.com/r/shashwatmishra062/smaran-ai)
-[![License](https://img.shields.io/badge/license-MIT-emerald.svg?style=for-the-badge)](LICENSE)
-[![Engine](https://img.shields.io/badge/Inference-vLLM%20%7C%20Qwen3--4B--AWQ-orange.svg?style=for-the-badge)](https://vllm.ai)
-[![Developer](https://img.shields.io/badge/Developer-Shashwat%20Mishra-purple.svg?style=for-the-badge)](https://shashwatmishra-portfolio.netlify.app/)
+# SMARAN.AI
 
-**SMARAN AI** is a state-of-the-art, air-gapped, on-premise Enterprise Document & RAG Intelligence Console developed for high-security robotics, engineering, and manufacturing organizations. It runs quantization-accelerated LLMs locally on GPU infrastructure to index, extract, search, and reason over proprietary enterprise knowledge without ever sending data to external cloud services.
+### Local Intelligence. Cloud Freedom. One Private Workspace.
 
----
+[![Version](https://img.shields.io/badge/version-1.0.0-6d4aff?style=for-the-badge)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](#system-requirements)
+[![Docker](https://img.shields.io/badge/Docker-private%20image-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/shashwatmishra062/smaran-ai)
+[![Backend](https://img.shields.io/badge/FastAPI-production-009688?style=for-the-badge&logo=fastapi&logoColor=white)](#architecture)
+[![Frontend](https://img.shields.io/badge/React-Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white)](#architecture)
 
-## 🌟 Core Features & Highlights
+**SMARAN.AI** is a Windows-first AI workspace for private document intelligence, local model execution, optional cloud API models, live web research, YouTube analysis, persistent memory, and real system telemetry.
 
-- **⚡ High-Speed Local LLM Engine**: Powered by **vLLM** and **Qwen3-4B-AWQ (4-bit AWQ Quantized)** running on local CUDA GPUs with an expanded **8192-token context window**.
-- **🔍 Multimodal RAG & Document Intelligence**: Deep text, table, and optical vision extraction for PDFs, DOCX, XLSX/Excel, PPTX, CSV, Invoices, Engineering Bills of Materials (BOMs), and raw source code.
-- **🧠 AI Memory Vault**: Automatic real-time extraction and persistent storage of user preferences, roles, project contexts, and key facts across all chat sessions.
-- **🛡️ Strict Grounding & Anti-Hallucination Guardrails**: Enforces exact factual document citations. If source documents do not contain the answer, the engine refrains from inventing facts.
-- **📊 Developer Telemetry & Analytics Dashboard**: Restricted real-time tracking of visitor log metrics, active sessions, prompt throughput, and system resource utilization (RAM, GPU VRAM, DB size).
-- **🖥️ Standalone Windows Portable Launcher**: Includes `SMARAN.AI.exe` for one-click startup without requiring manual environment setup.
-- **🔒 Role-Based Access Control (RBAC)**: Secure user registration, password hashing (bcrypt), JWT authentication, master password recovery, and administrator account approval.
+[Features](#highlights) | [Quick Start](#quick-start) | [Architecture](#architecture) | [Privacy](#privacy-and-security) | [Developer](#developer)
+
+</div>
 
 ---
 
-## 🏗️ System Architecture
+## Highlights
+
+| Capability | What it provides |
+|---|---|
+| Local AI | Run supported local models on compatible NVIDIA hardware |
+| Cloud API models | Bring your own provider key and select an available provider model |
+| Clear routing | The AI Engine header reports whether Local or Cloud API execution is active |
+| Free-only protection | OpenRouter routes are filtered to verified zero-cost options where supported |
+| Document RAG | Upload and query PDF, DOCX, XLSX, CSV, PPTX, text, code, and supported image files |
+| Multi-source analysis | Use multiple uploaded documents, websites, or YouTube links in one request |
+| YouTube intelligence | Embedded previews plus transcript and metadata-based analysis |
+| Live web mode | Research URLs and current web content when explicitly enabled |
+| AI memory | Store and manage approved persistent user context |
+| Real telemetry | Display device CPU, memory, storage, network, GPU, temperature, and VRAM when available |
+| Multilingual responses | English and major Indian-language response options |
+| Appearance | Light, dark, or system theme with configurable left/right navigation |
+| Windows launcher | A single executable starts the required Docker application and opens localhost |
+
+## Model routing you can verify
+
+SMARAN.AI does not silently rename one backend model as another.
+
+- The header shows **Local** or **Cloud API**, provider, and selected model.
+- Each completed response records the model identifier returned by the execution path.
+- Cloud API execution does not present local GPU utilization as provider-side utilization.
+- Provider model lists are fetched using the user's configured API key.
+- Automatic free-route fallback is optional and limited to configured eligible routes.
+- Direct OpenAI, Anthropic, and Gemini BYOK routes are user-selected and are not assumed to be free.
+
+> Provider availability, free quotas, rate limits, and model access are controlled by each provider and may change.
+
+## Quick Start
+
+### Recommended: Windows release
+
+1. Obtain `SMARAN_AI_Setup_v1.0.0.zip` from the developer.
+2. Extract the archive to a folder you control.
+3. Run `SMARAN.AI.exe`.
+4. Allow the launcher to verify Docker Desktop and start the application.
+5. Open `http://localhost:3003`.
+
+The public release ZIP contains the executable only. Source files, developer databases, API keys, uploaded documents, and developer runtime history are not included.
+
+### Developer deployment
+
+```powershell
+git clone https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI.git
+cd SMARAN.AI
+docker compose up -d --build
+```
+
+Open:
+
+```text
+http://localhost:3003
+```
+
+Check health:
+
+```powershell
+docker compose ps
+```
+
+Expected application mapping:
+
+```text
+localhost:3003 -> smaran-ai:3003
+```
+
+## Architecture
 
 ```mermaid
-graph TD
-    subgraph Client Layer
-        A[User Browser / Client PC] -->|HTTP / WebSocket :3003| B[Vite + React Frontend]
-        P[SMARAN.AI.exe Executable] -->|Launches Monolith| B
-    end
-
-    subgraph Application Server Layer [FastAPI Monolith Container]
-        B --> C[FastAPI Gateway]
-        C --> D[Auth & JWT Security]
-        C --> E[Document Ingestion & Chunker]
-        C --> F[RAG Pipeline Controller]
-        C --> G[Memory Vault Manager]
-        C --> H[Telemetry & Visitor Logger]
-    end
-
-    subgraph Data & Storage Layer
-        E --> I[(Chroma Vector DB)]
-        G --> J[(SQLite Database)]
-        H --> J
-    end
-
-    subgraph AI Inference Engine Layer [vLLM GPU Container]
-        F -->|OpenAI API Protocol :8000| K[vLLM Inference Server]
-        K -->|CUDA GPU Acceleration| L[Qwen3-4B-AWQ Model]
-    end
+flowchart LR
+    U[Windows User] --> L[SMARAN.AI Launcher]
+    L --> D[Docker Desktop]
+    D --> A[SMARAN.AI Container :3003]
+    A --> F[React Interface]
+    A --> B[FastAPI Services]
+    B --> R[Document RAG]
+    B --> M[Local Model Router]
+    B --> C[Optional Cloud API Router]
+    R --> V[(Vector Index)]
+    B --> S[(Fresh User Data)]
 ```
 
----
+### Technology
 
-## 🔄 RAG Execution & Search Flowchart
+- React and Vite user interface
+- FastAPI application services
+- Docker Compose deployment
+- vLLM-compatible local inference
+- SQLite application storage
+- Chroma-based vector retrieval
+- Hybrid semantic and keyword document search
 
-```mermaid
-flowchart TD
-    Start([User Incurs Chat Query]) --> CheckCmd{Is Command / Command Slash?}
-    CheckCmd -- Yes: /image or /video --> LocalBridge[Call Image/Video Generator Bridge] --> RenderOutput[Render Media Stream]
-    CheckCmd -- No: RAG / General Prompt --> MemoryFetch[Fetch Stored Facts from User Memory Vault]
-    
-    MemoryFetch --> RAGCheck{Is RAG Enabled & Collection Selected?}
-    RAGCheck -- Yes --> SearchDocs[Semantic Hybrid Search in Chroma Vector DB]
-    SearchDocs --> ContextInject[Inject Top-K Relevant Chunks into Context]
-    RAGCheck -- No --> SystemPrompt[Construct System Prompt with Verified Anti-Hallucination Guardrails]
-    
-    ContextInject --> SystemPrompt
-    SystemPrompt --> DevFactCheck{Does Prompt Mention Developer / Shashwat Mishra?}
-    DevFactCheck -- Yes --> InjectDevFacts[Inject Verified Authoritative Developer Profile & Links]
-    DevFactCheck -- No --> StreamRequest[Post Payload to vLLM Engine :8000]
-    InjectDevFacts --> StreamRequest
+## Supported workflows
 
-    StreamRequest --> vLLMStream[vLLM Streams SSE Tokens Real-Time]
-    vLLMStream --> UpdateDB[Save Interaction & Log Visitor Telemetry in SQLite]
-    UpdateDB --> End([Render Response & Citations in UI])
-```
+### Direct AI
 
----
+Use the selected local or cloud model without document retrieval.
 
-## 🔐 User Lifecycle & Access Control Flowchart
+### Document RAG
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as New User
-    participant App as Frontend (React)
-    participant Auth as Auth Service (FastAPI)
-    participant DB as SQLite DB
-    actor Admin as System Administrator
+Upload supported files, choose the relevant collection, and ask grounded questions. Uploaded items remain visible in the collection manager.
 
-    User->>App: Submits Registration Form
-    App->>Auth: POST /api/auth/register (Username, Password, Name)
-    Auth->>DB: Check User Count
-    alt First Registered User
-        DB-->>Auth: Count == 0
-        Auth->>DB: Save User with Role = 'admin', Approved = True
-        Auth-->>App: Registration Success (Auto-Approved Admin)
-    else Subsequent Users
-        DB-->>Auth: Count > 0
-        Auth->>DB: Save User with Role = 'user', Approved = False
-        Auth-->>App: Account Pending Admin Approval
-        Admin->>App: Opens Admin Control Board
-        Admin->>Auth: Approve User Request
-        Auth->>DB: Set User Approved = True
-    end
+### Live web
 
-    User->>App: Submits Login Form
-    App->>Auth: POST /api/auth/login
-    Auth->>DB: Validate bcrypt Password Hash
-    Auth-->>App: Returns Signed JWT Token
-    App->>App: Store Token & Mount Dashboard
-```
+Enable Web mode for current web pages, supported URLs, and multi-link requests.
 
----
+### Provider API keys
 
-## 💻 Hardware Requirements
+The Model Hub supports provider-specific key entry and live model discovery. The exact visible model list depends on the provider account, region, quota, and current provider API response.
 
-| Component | Minimum Specifications | Recommended Specifications |
-|-----------|------------------------|----------------------------|
-| **OS** | Windows 10/11, Ubuntu 22.04 LTS, macOS (Docker) | Windows 11 / Linux (CUDA Supported) |
-| **CPU** | Intel Core i5 (10th Gen) / AMD Ryzen 5 | Intel Core i7 / AMD Ryzen 7 or higher |
-| **RAM** | 16 GB DDR4 | 32 GB DDR4/DDR5 |
-| **GPU** | NVIDIA GTX 1660 / RTX 2060 (6 GB VRAM) | NVIDIA RTX 3060 / 4070+ (8 GB+ VRAM) |
-| **CUDA** | CUDA 11.8+ / Driver v530+ | CUDA 12.0+ / Driver v550+ |
-| **Storage** | 20 GB SSD Space | 50 GB High-Speed NVMe SSD |
+## System requirements
 
----
+| Component | Minimum | Recommended |
+|---|---|---|
+| Operating system | Windows 10 64-bit | Windows 11 64-bit |
+| Memory | 8 GB for cloud-oriented use | 16 GB or more |
+| Storage | Space for Docker and selected models | SSD with 30 GB or more free |
+| Docker | Docker Desktop | Current Docker Desktop release |
+| Local GPU | Optional for cloud-only mode | NVIDIA GPU with suitable VRAM |
+| Internet | Provider APIs and image download | Stable broadband |
 
-## 🚀 Quick Start Guide
+Local model compatibility depends on model size, quantization, available RAM/VRAM, GPU support, and free disk capacity.
 
-### Option 1: One-Click Standalone Executable (Windows)
+## Privacy and security
 
-1. Download `SMARAN_AI_Universal_Release.zip` or clone the repository.
-2. Extract the ZIP package to your desired directory.
-3. Double-click **`SMARAN.AI.exe`**.
-4. The launcher automatically starts the backend server, launches the web interface, and opens your default browser at `http://localhost:3003`.
+- `.env` is excluded from Git.
+- Runtime databases, uploads, vector indexes, caches, logs, ZIP archives, and large binaries are excluded from source control.
+- API keys are not documented or committed in this repository.
+- Each fresh user deployment initializes its own runtime data.
+- Cloud requests are sent only when the user selects and configures a cloud provider.
+- The Docker Hub application image is maintained as a private repository.
 
----
+Never commit real credentials. Use `.env.example` only as a configuration template.
 
-### Option 2: Production Docker Compose (Recommended for Teams)
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI.git
-   cd SMARAN.AI
-   ```
-
-2. Start all services using Docker Compose:
-   ```bash
-   docker compose up -d
-   ```
-
-3. Open your browser and navigate to:
-   ```text
-   http://localhost:3003
-   ```
-
-4. Check container statuses:
-   ```bash
-   docker compose ps
-   ```
-
----
-
-### Option 3: Manual Developer Setup (Source Code)
-
-#### Backend Setup (FastAPI):
-```bash
-cd backend
-python -m venv venv
-# Windows:
-.\venv\Scripts\activate
-# Linux/macOS:
-source venv/bin/activate
-
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 3003 --reload
-```
-
-#### Frontend Setup (React + Vite):
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
----
-
-## 🌐 LAN Network Deployment (Multi-Device Office Use)
-
-To share **SMARAN AI** across your office network so team members can access it from their own PCs/laptops:
-
-1. Obtain the host computer's IPv4 address:
-   ```powershell
-   ipconfig
-   # Example Output: 192.168.1.100
-   ```
-
-2. Open port `3003` in Windows Firewall (run PowerShell as Administrator):
-   ```powershell
-   New-NetFirewallRule -DisplayName "SMARAN AI LAN Access" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3003 -Profile Private
-   ```
-
-3. Share the LAN link with your team:
-   ```text
-   http://192.168.1.100:3003
-   ```
-
----
-
-## 📁 Repository Structure
+## Project structure
 
 ```text
 SMARAN.AI/
-├── backend/
-│   ├── app/
-│   │   ├── auth.py             # JWT & Password Security Handlers
-│   │   ├── config.py           # Application Settings & Defaults
-│   │   ├── database.py         # SQLAlchemy SQLite Connection
-│   │   ├── main.py             # FastAPI Core Routing & Chat Stream Engine
-│   │   ├── models.py           # Database Schemas (User, Memory, VisitorLog)
-│   │   ├── models_catalog.py   # AI Models Catalog & Quantization Configs
-│   │   ├── schemas.py          # Pydantic Request/Response Models
-│   │   ├── telemetry.py        # Host & GPU Resource Monitors
-│   │   ├── utils.py            # Helpers & Zep Memory Bridges
-│   │   ├── vision.py           # Multimodal Vision OCR Engine
-│   │   └── rag/                # Document Chunking, Embedding & Search Pipelines
-│   ├── Dockerfile              # Backend Container Build Spec
-│   └── requirements.txt        # Python Dependencies
-├── frontend/
-│   ├── src/
-│   │   ├── components/         # React Components (Chat, Admin, Settings, Memory)
-│   │   ├── App.jsx             # Main Application Router & State
-│   │   └── index.css           # Global Dark Theme Styling & Glassmorphism
-│   ├── package.json            # Node Dependencies
-│   └── vite.config.js          # Vite Build Configuration
-├── docker-compose.yml          # Production Docker Compose Services
-├── launcher.py                 # Standalone Windows GUI Executable Entrypoint
-├── SMARAN.AI.exe               # Pre-compiled Standalone Executable
-├── SMARAN_AI_Universal_Release.zip # Universal Distribution Release Package
-└── README.md                   # System Documentation
+|-- backend/                 FastAPI, RAG, routing, telemetry
+|-- frontend/                React interface
+|-- Dockerfile               Production application image
+|-- docker-compose.yml       Single application stack on port 3003
+|-- launcher.py              Windows launcher source
+|-- installer.iss            Windows installer definition
+|-- push_image.bat           Developer image publishing helper
+|-- .env.example             Safe configuration template
+|-- .gitignore               Secret and runtime-data exclusions
+`-- README.md
 ```
 
+## Release information
+
+- Application version: **1.0.0**
+- Windows archive: `SMARAN_AI_Setup_v1.0.0.zip`
+- Docker tags: `app-v1.0.0` and `latest`
+- Application URL: `http://localhost:3003`
+
+## Developer
+
+<div align="center">
+
+### Shashwat Mishra
+
+**AI and Robotics Engineer | Creator and Architect of SMARAN.AI**
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-sm980-0A66C2?style=for-the-badge&logo=linkedin)](https://www.linkedin.com/in/sm980/)
+[![Portfolio](https://img.shields.io/badge/Portfolio-Visit-7C3AED?style=for-the-badge&logo=vercel&logoColor=white)](https://shashwatmishra-portfolio.netlify.app/)
+[![GitHub](https://img.shields.io/badge/GitHub-SHASHWAT--MISHRA--997-181717?style=for-the-badge&logo=github)](https://github.com/SHASHWAT-MISHRA-997)
+
+</div>
+
 ---
 
-## 👨‍💻 Developer & Author Credits
+<div align="center">
 
-| Lead Developer & Architect | Official Links |
-|----------------------------|----------------|
-| **SHASHWAT MISHRA** <br> *AI & Robotics Engineer \| MTech Graduate* | 🔗 [LinkedIn Profile](https://www.linkedin.com/in/sm980/) <br> 🌐 [Portfolio Website](https://shashwatmishra-portfolio.netlify.app/) |
+**SMARAN.AI v1.0.0**  
+Built for transparent, controllable, and private AI workflows on Windows.
 
-> **Creator & Architect of**: SMARAN AI — Enterprise Knowledge & RAG Intelligence Console.
+</div>
 
----
-
-## 📄 License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

@@ -4,11 +4,80 @@ import json
 import logging
 import subprocess
 import psutil
+import ipaddress
+import socket
+from urllib.parse import urljoin, urlparse
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+_whisper_model = None
+
+
+def _validate_public_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Only public http/https URLs are supported.")
+    if parsed.port not in {None, 80, 443}:
+        raise ValueError("Only standard web ports 80 and 443 are supported.")
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)}
+    except socket.gaierror as exc:
+        raise ValueError("The website hostname could not be resolved.") from exc
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise ValueError("Private, local, reserved, and metadata-network URLs are blocked.")
+
+
+def _safe_public_get(url: str, headers: dict, timeout: int = 15):
+    import requests as _r
+    current = url
+    for _ in range(6):
+        _validate_public_url(current)
+        response = _r.get(current, headers=headers, timeout=timeout, allow_redirects=False)
+        if response.is_redirect or response.is_permanent_redirect:
+            location = response.headers.get("location")
+            if not location:
+                break
+            current = urljoin(current, location)
+            continue
+        return response
+    raise ValueError("The website redirected too many times.")
+
+
+def _transcribe_local_media(file_path: str) -> str:
+    global _whisper_model
+    try:
+        import requests
+        service_url = os.getenv("LOCAL_IMAGE_SERVICE_URL", "http://media-generator:8002")
+        response = requests.post(
+            f"{service_url}/transcribe",
+            json={"filename": os.path.basename(file_path)},
+            timeout=600,
+        )
+        if response.ok:
+            return response.json().get("transcript", "")
+    except Exception:
+        logger.exception("CUDA media transcription service failed; using local fallback")
+    from faster_whisper import WhisperModel
+    if _whisper_model is None:
+        device = os.getenv("UPLOAD_WHISPER_DEVICE", "cuda")
+        compute_type = "float16" if device == "cuda" else "int8"
+        try:
+            _whisper_model = WhisperModel(os.getenv("UPLOAD_WHISPER_MODEL", "tiny"), device=device, compute_type=compute_type)
+        except Exception:
+            logger.exception("GPU Whisper initialization failed; falling back to CPU INT8")
+            _whisper_model = WhisperModel(os.getenv("UPLOAD_WHISPER_MODEL", "tiny"), device="cpu", compute_type="int8")
+    try:
+        segments, _ = _whisper_model.transcribe(file_path, beam_size=2, vad_filter=True)
+        return " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+    except Exception:
+        logger.exception("GPU media transcription failed; retrying on CPU INT8")
+        _whisper_model = WhisperModel(os.getenv("UPLOAD_WHISPER_MODEL", "tiny"), device="cpu", compute_type="int8")
+        segments, _ = _whisper_model.transcribe(file_path, beam_size=2, vad_filter=True)
+        return " ".join(segment.text.strip() for segment in segments if segment.text.strip())
 
 # --- Ingestion File Parsers ---
 def parse_file_content(file_path: str, file_type: str) -> str:
@@ -19,10 +88,10 @@ def parse_file_content(file_path: str, file_type: str) -> str:
         try:
             reader = PdfReader(file_path)
             text_parts = []
-            for page in reader.pages:
+            for page_number, page in enumerate(reader.pages, start=1):
                 text = page.extract_text()
                 if text:
-                    text_parts.append(text)
+                    text_parts.append(f"[Page {page_number}]\n{text}")
             return "\n\n".join(text_parts)
         except Exception as e:
             logger.error(f"Error parsing PDF file {file_path}: {e}")
@@ -32,11 +101,17 @@ def parse_file_content(file_path: str, file_type: str) -> str:
         try:
             formatted_rows = []
             with open(file_path, mode="r", encoding="utf-8-sig") as f:
-                reader = csv.DictReader(f)
-                headers = reader.fieldnames or []
-                for idx, row in enumerate(reader):
-                    row_parts = [f"{col}: {val}" for col, val in row.items() if val]
-                    formatted_rows.append(f"Row {idx + 1}: " + ", ".join(row_parts))
+                reader = csv.reader(f)
+                for row_index, row in enumerate(reader, start=1):
+                    cells = []
+                    for column_index, value in enumerate(row, start=1):
+                        column_name = ""
+                        number = column_index
+                        while number:
+                            number, remainder = divmod(number - 1, 26)
+                            column_name = chr(65 + remainder) + column_name
+                        cells.append(f"{column_name}{row_index}={value}")
+                    formatted_rows.append(f"Row {row_index}: " + " | ".join(cells))
             return "\n".join(formatted_rows)
         except Exception as e:
             logger.error(f"Error parsing CSV file {file_path}: {e}")
@@ -45,24 +120,20 @@ def parse_file_content(file_path: str, file_type: str) -> str:
     elif file_type == "xlsx":
         try:
             from openpyxl import load_workbook
-            wb = load_workbook(file_path, read_only=True, data_only=True)
+            wb = load_workbook(file_path, read_only=False, data_only=False)
             all_text_parts = []
             for sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
-                rows = list(ws.iter_rows(values_only=True))
-                if not rows:
+                if ws.max_row < 1 or ws.max_column < 1:
                     continue
-                # First row as headers
-                headers = [str(h) if h is not None else "" for h in rows[0]]
-                all_text_parts.append(f"Sheet: {sheet_name}")
-                all_text_parts.append(f"Columns: {', '.join(headers)}")
-                for idx, row in enumerate(rows[1:], start=1):
-                    row_parts = []
-                    for col_name, val in zip(headers, row):
-                        if val is not None:
-                            row_parts.append(f"{col_name}: {val}")
-                    if row_parts:
-                        all_text_parts.append(f"Row {idx}: " + ", ".join(row_parts))
+                all_text_parts.append(f"Sheet: {sheet_name} | Used range: A1:{ws.cell(ws.max_row, ws.max_column).coordinate}")
+                for row_index in range(1, ws.max_row + 1):
+                    cells = []
+                    for column_index in range(1, ws.max_column + 1):
+                        cell = ws.cell(row_index, column_index)
+                        value = "" if cell.value is None else str(cell.value)
+                        cells.append(f"{cell.coordinate}={value}")
+                    all_text_parts.append(f"Row {row_index}: " + " | ".join(cells))
             wb.close()
             return "\n".join(all_text_parts)
         except Exception as e:
@@ -106,12 +177,8 @@ def parse_file_content(file_path: str, file_type: str) -> str:
     elif file_type in ["mp3", "wav", "m4a", "ogg", "flac"]:
         try:
             try:
-                from faster_whisper import WhisperModel
-                # Run model on CPU with INT8 quantization for fast offloaded inference
-                model = WhisperModel("small", device="cpu", compute_type="int8")
-                segments, info = model.transcribe(file_path, beam_size=5)
-                transcripts = [segment.text for segment in segments]
-                return f"[Audio Transcription for {os.path.basename(file_path)}]\n" + " ".join(transcripts)
+                transcript = _transcribe_local_media(file_path)
+                return f"[Actual audio transcription for {os.path.basename(file_path)}]\n{transcript}"
             except ImportError:
                 filename = os.path.basename(file_path)
                 return f"[Audio File: {filename}] Audio content uploaded. Local faster-whisper package not installed. Size: {os.path.getsize(file_path)} bytes."
@@ -120,59 +187,58 @@ def parse_file_content(file_path: str, file_type: str) -> str:
             raise ValueError(f"Could not parse audio content: {str(e)}")
 
     elif file_type in ["mp4", "avi", "mkv", "webm", "mov", "flv"]:
-        # Extract audio from video, then transcribe with Whisper
         try:
-            import tempfile
-            audio_extracted = False
-            tmp_audio_path = None
             try:
-                from moviepy import VideoFileClip
-                tmp_audio_path = tempfile.mktemp(suffix=".wav")
-                clip = VideoFileClip(file_path)
-                clip.audio.write_audiofile(tmp_audio_path, logger=None)
-                clip.close()
-                audio_extracted = True
-            except ImportError:
-                pass
-            except Exception as ve:
-                logger.warning(f"moviepy failed to extract audio from {file_path}: {ve}")
-
-            if audio_extracted and tmp_audio_path and os.path.exists(tmp_audio_path):
-                try:
-                    from faster_whisper import WhisperModel
-                    model = WhisperModel("small", device="cpu", compute_type="int8")
-                    segments, info = model.transcribe(tmp_audio_path, beam_size=5)
-                    transcripts = [segment.text for segment in segments]
-                    os.remove(tmp_audio_path)
-                    return f"[Video Transcription for {os.path.basename(file_path)}]\n" + " ".join(transcripts)
-                except ImportError:
-                    os.remove(tmp_audio_path)
-                    return f"[Video File: {os.path.basename(file_path)}] Audio extracted but faster-whisper not installed for transcription."
-                except Exception as we:
-                    logger.error(f"Whisper transcription failed for video {file_path}: {we}")
-                    return f"[Video File: {os.path.basename(file_path)}] Audio extraction succeeded but transcription failed: {str(we)}"
-            else:
-                return f"[Video File: {os.path.basename(file_path)}] Could not extract audio (moviepy not installed or no audio track). File size: {os.path.getsize(file_path)} bytes."
+                transcript = _transcribe_local_media(file_path)
+            except Exception as exc:
+                logger.warning("Video speech transcription failed: %s", exc)
+                transcript = ""
+            try:
+                from app.youtube_analysis import _frames, _caption_frames
+                frames = _frames(file_path, count=8)
+                visual = _caption_frames(frames) if frames else ""
+            except Exception as exc:
+                logger.warning("Video frame analysis failed: %s", exc)
+                visual = ""
+            evidence = [f"[Actual uploaded-video analysis for {os.path.basename(file_path)}]"]
+            if transcript:
+                evidence.append("Speech/transcript:\n" + transcript)
+            if visual:
+                evidence.append("Chronological sampled-frame descriptions:\n" + visual)
+            if not transcript and not visual:
+                evidence.append("No speech or visual evidence could be extracted; do not guess the contents.")
+            return "\n\n".join(evidence)
         except Exception as e:
             logger.error(f"Error parsing video file {file_path}: {e}")
             raise ValueError(f"Could not parse video content: {str(e)}")
 
     elif file_type in ["png", "jpg", "jpeg", "webp", "bmp", "tiff"]:
         try:
-            from app.vision import call_vision_model, encode_image_base64
+            import base64
+            import requests
             with open(file_path, "rb") as f:
                 img_bytes = f.read()
-            img_b64 = encode_image_base64(img_bytes)
-            # Call vision model synchronously
-            description = call_vision_model(
-                images_b64=[img_b64],
-                prompt="Analyze this document image, drawing, diagram or figure. Extract all text, numbers, labels, columns, and structured information in detail. Describe any charts or graphical plots precisely for indexing in a text search database.",
-                stream=False
+            service_url = os.getenv("LOCAL_IMAGE_SERVICE_URL", "http://media-generator:8002")
+            response = requests.post(
+                f"{service_url}/caption",
+                json={"frames": [base64.b64encode(img_bytes).decode("ascii")], "ocr": True},
+                timeout=600,
             )
-            return f"[Visual Figure Description for {os.path.basename(file_path)}]\n{description}"
+            response.raise_for_status()
+            result = response.json()
+            captions = result.get("captions", [])
+            ocr_results = result.get("ocr", [])
+            evidence = [f"[Actual local image analysis for {os.path.basename(file_path)}]"]
+            if captions:
+                evidence.append("Visual description:\n" + "\n".join(captions))
+            if ocr_results:
+                evidence.append("Extracted text (OCR):\n" + "\n".join(ocr_results))
+            if not captions and not ocr_results:
+                raise ValueError("The local image analyzer returned no visual or OCR evidence.")
+            return "\n\n".join(evidence)
         except Exception as e:
-            logger.error(f"Error calling vision model for image parse: {e}")
-            return f"[Image File: {os.path.basename(file_path)}] Failed to automatically extract vision description: {str(e)}"
+            logger.error(f"Error calling local image analyzer: {e}")
+            return f"[Image File: {os.path.basename(file_path)}] Local image analysis failed; do not guess the contents. Error: {str(e)}"
 
     elif file_type in ["txt", "md", "xml", "py", "cpp", "h", "json", "yaml", "yml", "log", "html", "htm"]:
         try:
@@ -212,31 +278,80 @@ def fetch_url_content(url: str) -> str:
         import re as _re
         # YouTube URL handling
         yt_patterns = [
-            r'(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]+)',
+            r'(?:youtube\.com/(?:watch\?[^\s]*?v=|shorts/|live/)|youtu\.be/)([\w-]{6,})',
         ]
         for pattern in yt_patterns:
             match = _re.search(pattern, url)
             if match:
                 video_id = match.group(1)
-                # Try to get video info via YouTube oembed (no API key required)
                 try:
-                    import requests as _r
-                    resp = _r.get(f"https://www.youtube.com/oembed?url={url}&format=json", timeout=10)
-                    if resp.ok:
-                        data = resp.json()
-                        title = data.get("title", "Unknown")
-                        author = data.get("author_name", "Unknown")
-                        return f"[YouTube Video]\nTitle: {title}\nChannel: {author}\nURL: {url}\n\nNote: Full transcript not available without YouTube API. The AI has the video title and channel info."
-                except Exception:
-                    pass
-                return f"[YouTube Video: {video_id}]\nURL: {url}\nNote: Could not fetch video metadata."
+                    from app.youtube_analysis import analyze_youtube_video
+                    result = analyze_youtube_video(url, video_id)
+                    return f"[YouTube Video]\nURL: {result['url']}\n\n{result['snippet']}"
+                except Exception as exc:
+                    return f"[YouTube Video: {video_id}]\nURL: {url}\nContent extraction failed; do not guess. Error: {exc}"
 
         # General web page extraction
         import requests as _r
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
         }
-        resp = _r.get(url, headers=headers, timeout=15)
+        renderer_url = os.getenv("BROWSER_RENDER_SERVICE_URL", "http://browser-renderer:8003")
+
+        # Fast path for ordinary server-rendered pages.
+        try:
+            fast_resp = _safe_public_get(url, headers=headers, timeout=10)
+            fast_resp.raise_for_status()
+            fast_content_type = fast_resp.headers.get("content-type", "")
+            if "text/html" in fast_content_type or not fast_content_type:
+                from bs4 import BeautifulSoup
+                fast_soup = BeautifulSoup(fast_resp.text, "html.parser")
+                
+                title = fast_soup.title.string.strip() if (fast_soup.title and fast_soup.title.string) else ""
+                meta_desc = ""
+                for m in fast_soup.find_all("meta"):
+                    name = (m.get("name") or "").lower()
+                    prop = (m.get("property") or "").lower()
+                    content = (m.get("content") or "").strip()
+                    if not title and prop == "og:title":
+                        title = content
+                    if name == "description" or prop in ("og:description", "twitter:description"):
+                        if not meta_desc or len(content) > len(meta_desc):
+                            meta_desc = content
+
+                for tag in fast_soup(["script", "style", "nav", "footer", "header", "aside", "form", "iframe", "svg", "noscript"]):
+                    tag.decompose()
+                
+                fast_main = fast_soup.find("article") or fast_soup.find("main") or fast_soup.find("body")
+                fast_text = fast_main.get_text(separator="\n", strip=True) if fast_main else fast_soup.get_text(separator="\n", strip=True)
+                lines = [line.strip() for line in fast_text.splitlines() if line.strip()]
+                clean_body = "\n".join(lines)
+                
+                parts = [f"[Web Page: {title or urllib.parse.urlparse(url).netloc}]", f"URL: {fast_resp.url}"]
+                if meta_desc:
+                    parts.append(f"Meta Description: {meta_desc}")
+                if clean_body:
+                    parts.append(f"Content:\n{clean_body[:50000]}")
+                
+                final_excerpt = "\n\n".join(parts)
+                if len(clean_body) >= 200 or meta_desc:
+                    return final_excerpt
+        except Exception:
+            pass
+
+        try:
+            _validate_public_url(url)
+            rendered = _r.post(f"{renderer_url}/render", json={"url": url}, timeout=40)
+            if rendered.ok:
+                rendered_data = rendered.json()
+                rendered_text = rendered_data.get("text", "").strip()
+                if rendered_text:
+                    if len(rendered_text) > 50000:
+                        rendered_text = rendered_text[:50000] + "\n\n[Content truncated...]"
+                    return f"[Web Page: {rendered_data.get('title', '')}]\nURL: {rendered_data.get('url', url)}\n\n{rendered_text}"
+        except Exception as browser_error:
+            logger.warning("Local browser rendering failed, using HTML fallback: %s", browser_error)
+        resp = _safe_public_get(url, headers=headers, timeout=15)
         resp.raise_for_status()
         content_type = resp.headers.get("content-type", "")
         
@@ -244,23 +359,31 @@ def fetch_url_content(url: str) -> str:
             try:
                 from bs4 import BeautifulSoup
                 soup = BeautifulSoup(resp.text, "html.parser")
-                # Remove script, style, nav, footer noise
-                for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form", "iframe"]):
+                title = soup.title.string.strip() if (soup.title and soup.title.string) else ""
+                meta_desc = ""
+                for m in soup.find_all("meta"):
+                    name = (m.get("name") or "").lower()
+                    prop = (m.get("property") or "").lower()
+                    content = (m.get("content") or "").strip()
+                    if not title and prop == "og:title":
+                        title = content
+                    if name == "description" or prop in ("og:description", "twitter:description"):
+                        if not meta_desc or len(content) > len(meta_desc):
+                            meta_desc = content
+                for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form", "iframe", "svg", "noscript"]):
                     tag.decompose()
-                # Get title
-                title = soup.title.string.strip() if soup.title else ""
-                # Extract main content: try article/main first, then body
                 main = soup.find("article") or soup.find("main") or soup.find("body")
                 text = main.get_text(separator="\n", strip=True) if main else soup.get_text(separator="\n", strip=True)
-                # Clean up excessive blank lines
                 lines = [l.strip() for l in text.splitlines() if l.strip()]
                 clean_text = "\n".join(lines)
-                # Limit to ~50000 chars
-                if len(clean_text) > 50000:
-                    clean_text = clean_text[:50000] + "\n\n[Content truncated...]"
-                return f"[Web Page: {title}]\nURL: {url}\n\n{clean_text}"
+                
+                parts = [f"[Web Page: {title or urllib.parse.urlparse(url).netloc}]", f"URL: {url}"]
+                if meta_desc:
+                    parts.append(f"Meta Description: {meta_desc}")
+                if clean_text:
+                    parts.append(f"Content:\n{clean_text[:50000]}")
+                return "\n\n".join(parts)
             except ImportError:
-                # BeautifulSoup not available, return raw text
                 text = resp.text[:50000]
                 return f"[Web Page]\nURL: {url}\n\n{text}"
         elif "application/json" in content_type:
@@ -564,5 +687,3 @@ async def zep_get_history(session_id: str) -> list[dict]:
     except Exception as e:
         logger.warning(f"Failed to fetch history from Zep AI for session {session_id}: {e}")
     return []
-
-

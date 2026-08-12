@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Shield, Users, Activity, Eye, Search, Check, Ban, Trash2, Cpu, HardDrive, Clock, UsersRound, X, KeyRound } from 'lucide-react';
+import { Shield, Users, Activity, Eye, Search, Check, Ban, Trash2, Cpu, HardDrive, Clock, UsersRound, X, KeyRound, Network } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 
 const AdminDashboard = ({ token, currentUserId }) => {
@@ -8,7 +8,7 @@ const AdminDashboard = ({ token, currentUserId }) => {
   const [auditLogs, setAuditLogs] = useState([]);
   const [auditSearch, setAuditSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
-  const [activeTab, setActiveTab] = useState('users'); // 'users', 'telemetry', 'audit', 'sessions', 'reports'
+  const [activeTab, setActiveTab] = useState('users'); // 'users', 'telemetry', 'audit', 'sessions', 'reports', 'analytics'
   const [selectedAudit, setSelectedAudit] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [showClearLogsConfirm, setShowClearLogsConfirm] = useState(false);
@@ -58,6 +58,8 @@ const AdminDashboard = ({ token, currentUserId }) => {
       console.error(err);
     }
   };
+
+
 
   const fetchUsers = async () => {
     try {
@@ -330,7 +332,7 @@ const AdminDashboard = ({ token, currentUserId }) => {
           Usage Reports
         </button>
         <button
-          onClick={() => setActiveTab('analytics')}
+          onClick={() => { setActiveTab('analytics'); fetchDeveloperAnalytics(); }}
           className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
             activeTab === 'analytics'
               ? 'border-indigo-650 text-indigo-650 dark:border-indigo-500 dark:text-indigo-400 font-black'
@@ -903,6 +905,8 @@ const AdminDashboard = ({ token, currentUserId }) => {
             </div>
           </div>
         )}
+        
+
       </div>
 
       {/* Inspect Modal */}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ExternalLink, Code2, Cpu, ShieldCheck, Sparkles, Globe, UserCheck } from 'lucide-react';
+import { X, ExternalLink, Code2, Cpu, ShieldCheck, Sparkles, Globe, UserCheck, Boxes } from 'lucide-react';
 
 const LinkedInIcon = ({ className = "w-4 h-4" }) => (
   <svg className={className} fill="currentColor" viewBox="0 0 24 24">
@@ -26,11 +26,11 @@ const DeveloperModal = ({ isOpen, onClose }) => {
               <h2 className="text-xl font-black text-white tracking-wide flex items-center gap-2">
                 About the Developer
                 <span className="text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  Creator & Architect
+                  Creator
                 </span>
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                The mind behind Smaran AI System Architecture
+                The mind behind SMARAN.AI
               </p>
             </div>
           </div>
@@ -54,9 +54,6 @@ const DeveloperModal = ({ isOpen, onClose }) => {
                   SM
                 </div>
               </div>
-              <div className="absolute -bottom-2 -right-2 bg-emerald-500 text-zinc-950 font-extrabold text-[10px] px-2 py-0.5 rounded-md border border-zinc-950 shadow-md">
-                VERIFIED
-              </div>
             </div>
 
             <div className="space-y-2 text-center md:text-left flex-1">
@@ -65,11 +62,11 @@ const DeveloperModal = ({ isOpen, onClose }) => {
                   SHASHWAT MISHRA
                 </h3>
                 <p className="text-xs font-bold text-indigo-400 tracking-wide uppercase mt-0.5">
-                  AI System Architect & Full-Stack Engineer
+                  AI Engineer & Robotics Engineer
                 </p>
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">
-                Architected and engineered the entire <strong className="text-white">Smaran AI</strong> enterprise platform — integrating zero-latency vLLM local inference, hybrid vector RAG retrieval, and real-time GPU engine optimization.
+                Built the entire <strong className="text-white">SMARAN.AI</strong> enterprise platform — integrating zero-latency vLLM local inference, hybrid vector RAG retrieval, and real-time GPU engine optimization, and the Model Catalog & Matrix.
               </p>
 
               {/* Social Action Links */}
@@ -98,52 +95,60 @@ const DeveloperModal = ({ isOpen, onClose }) => {
               </div>
             </div>
           </div>
-
-          {/* Key System Innovations Created */}
           <div className="space-y-3">
             <h4 className="text-xs font-black text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              Smaran AI Architectural Highlights
+              Genuine Platform Highlights
             </h4>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
-                <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
-                  <Cpu className="w-4 h-4 text-indigo-400" />
-                  <span>vLLM Engine Integration</span>
+                <div className="flex items-center gap-2 text-xs font-bold text-rose-400">
+                  <Globe className="w-4 h-4 text-rose-400" />
+                  <span>Multi-URL YouTube Intelligence</span>
                 </div>
                 <p className="text-[11px] text-zinc-400">
-                  Built-in AWQ quantized vision & text model serving for zero-latency local GPU execution.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
-                <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>100% Offline Privacy</span>
-                </div>
-                <p className="text-[11px] text-zinc-400">
-                  Zero cloud dependencies, zero external data leaks — enterprise local security.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
-                <div className="flex items-center gap-2 text-xs font-bold text-purple-400">
-                  <Code2 className="w-4 h-4 text-purple-400" />
-                  <span>Smart Model Router</span>
-                </div>
-                <p className="text-[11px] text-zinc-400">
-                  Auto-detects GPU VRAM & route queries to optimal local LLM/Vision parameters.
+                  Paste multiple YouTube links at once — each video gets its own transcript extraction, preview card, and grounded answer.
                 </p>
               </div>
 
               <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
                 <div className="flex items-center gap-2 text-xs font-bold text-cyan-400">
                   <Globe className="w-4 h-4 text-cyan-400" />
-                  <span>Real-Time Web Grounding</span>
+                  <span>8-Language Regional Support</span>
                 </div>
                 <p className="text-[11px] text-zinc-400">
-                  Gemini-style live web search synthesis integrated directly into local chat pipeline.
+                  Auto-translate input and responses in Hindi, Gujarati, Punjabi, Marathi, Tamil, Telugu, Malayalam, and Kannada.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
+                  <Boxes className="w-4 h-4 text-indigo-400" />
+                  <span>Expanded Enterprise Model Catalog</span>
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Verified local and cloud model catalog with hardware-fit indicators, provider selection, capability filters, and transparent execution-source labels.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                  <Cpu className="w-4 h-4 text-amber-400" />
+                  <span>Auto-Vision Model Routing</span>
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Automatically selects a vision-capable model for image/PDF analysis, preventing text-only model errors.
+                </p>
+              </div>
+
+              <div className="p-3.5 md:col-span-2 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Local Hardware Telemetry</span>
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Shows real local GPU/CPU/RAM telemetry. Cloud provider infrastructure metrics are not represented as local measurements.
                 </p>
               </div>
             </div>
@@ -154,7 +159,7 @@ const DeveloperModal = ({ isOpen, onClose }) => {
         {/* Footer */}
         <div className="px-6 py-4 bg-zinc-900/60 border-t border-zinc-800/80 flex items-center justify-between">
           <span className="text-xs text-zinc-500 font-medium">
-            Designed & Engineered by <strong className="text-zinc-300">Shashwat Mishra</strong>
+            Designed by <strong className="text-zinc-300">Shashwat Mishra</strong>
           </span>
           <button
             onClick={onClose}

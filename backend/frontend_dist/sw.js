@@ -1,5 +1,5 @@
 /**
- * GMR AI — Service Worker SELF-DESTRUCT
+ * SMARAN.AI — Service Worker SELF-DESTRUCT
  * This SW exists only to unregister itself and wipe all old caches.
  * After it runs, no service worker will ever be registered again.
  * Nginx cache-control headers handle everything going forward.

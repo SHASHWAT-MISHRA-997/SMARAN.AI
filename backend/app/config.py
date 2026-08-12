@@ -19,7 +19,7 @@ _detected_api_url = _hw_config.get("api_url", "http://127.0.0.1:11434")
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "GMR AI Robotics Knowledge Management"
+    PROJECT_NAME: str = "SMARAN.AI Knowledge Management"
 
     # Storage Directories
     DATA_DIR: str = os.getenv("DATA_DIR", "./data")
@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     VISION_MODEL: str = os.getenv("VISION_MODEL", "nemotron-nano-12b-v2")
 
     # Model context window
-    MAX_MODEL_LEN: int = int(_hw_config.get("max_model_len", 8192))
+    MAX_MODEL_LEN: int = int(os.getenv("MAX_MODEL_LEN", _hw_config.get("max_model_len", 2048)))
 
     class Config:
         case_sensitive = True

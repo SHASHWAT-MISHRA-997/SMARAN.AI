@@ -1,6 +1,7 @@
 import logging
 import time
 import hashlib
+import os
 import numpy as np
 import requests
 from fastapi import HTTPException
@@ -23,8 +24,25 @@ class OllamaEmbeddings:
     def __init__(self):
         self.base_url = settings.OLLAMA_URL
         self.model = getattr(settings, 'DEFAULT_EMBEDDING_MODEL', 'nomic-embed-text')
+        self._resolved_url = None
+        self._retry_after = 0
+        self.enabled = os.getenv("OLLAMA_EMBEDDINGS_ENABLED", "1" if settings.INFERENCE_ENGINE == "ollama" else "0") == "1"
+
+    def semantic_search_available(self) -> bool:
+        """Return True only when a real embedding service is reachable.
+
+        Hash-based fallback vectors are useful for satisfying a storage schema, but
+        they carry no semantic meaning and must never be used for retrieval.
+        """
+        return bool(self._resolve_url())
 
     def _resolve_url(self) -> str:
+        if not self.enabled:
+            return ""
+        if self._resolved_url:
+            return self._resolved_url
+        if time.time() < self._retry_after:
+            return ""
         candidates = []
         if self.base_url:
             candidates.append(self.base_url.rstrip('/'))
@@ -37,14 +55,18 @@ class OllamaEmbeddings:
             try:
                 resp = requests.get(f"{c}/api/tags", timeout=2)
                 if resp.status_code == 200:
+                    self._resolved_url = c
                     return c
             except Exception:
                 continue
-        return candidates[0] if candidates else 'http://127.0.0.1:11434'
+        self._retry_after = time.time() + 300
+        return ""
 
     def embed_query(self, text: str) -> list[float]:
         try:
             url_base = self._resolve_url()
+            if not url_base:
+                return _generate_fallback_embedding(text)
             url = f"{url_base}/api/embed"
             payload = {"model": self.model, "input": text}
             response = requests.post(url, json=payload, timeout=10)
@@ -62,6 +84,8 @@ class OllamaEmbeddings:
             return []
         try:
             url_base = self._resolve_url()
+            if not url_base:
+                return [_generate_fallback_embedding(t) for t in texts]
             url = f"{url_base}/api/embed"
             payload = {"model": self.model, "input": texts}
             response = requests.post(url, json=payload, timeout=30)

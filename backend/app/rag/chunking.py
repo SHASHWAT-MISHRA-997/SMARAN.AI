@@ -1,5 +1,5 @@
 """
-Advanced multi-strategy chunking module for Grey Matter AI RAG system.
+Advanced multi-strategy chunking module for SMARAN.AI RAG system.
 Implements:
 1. Character Text Splitting
 2. Recursive Character Text Splitting
