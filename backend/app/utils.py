@@ -3,6 +3,7 @@ import csv
 import json
 import logging
 import subprocess
+import platform
 import psutil
 import ipaddress
 import socket
@@ -238,7 +239,12 @@ def parse_file_content(file_path: str, file_type: str) -> str:
             return "\n\n".join(evidence)
         except Exception as e:
             logger.error(f"Error calling local image analyzer: {e}")
-            return f"[Image File: {os.path.basename(file_path)}] Local image analysis failed; do not guess the contents. Error: {str(e)}"
+            raise ValueError(
+                f"[Image File: {os.path.basename(file_path)}] "
+                "Image analysis is currently unavailable for this file type. "
+                "The model cannot read this image directly. "
+                "Please use a vision-capable model for image analysis."
+            )
 
     elif file_type in ["txt", "md", "xml", "py", "cpp", "h", "json", "yaml", "yml", "log", "html", "htm"]:
         try:
@@ -396,6 +402,60 @@ def fetch_url_content(url: str) -> str:
         raise ValueError(f"Could not fetch URL content from '{url}': {str(e)}")
 
 
+def _detect_cpu_name_windows() -> str:
+    """Best-effort CPU name detection on Windows using WMIC or PowerShell."""
+    name = ""
+    try:
+        res = subprocess.run(
+            ["wmic", "cpu", "get", "name"],
+            capture_output=True, text=True, timeout=5
+        )
+        if res.returncode == 0:
+            lines = [ln.strip() for ln in res.stdout.strip().splitlines() if ln.strip()]
+            if len(lines) >= 2:
+                name = lines[1]
+    except Exception:
+        pass
+    if not name:
+        try:
+            res = subprocess.run(
+                ["powershell", "-Command", "Get-WmiObject Win32_Processor | Select-Object -ExpandProperty Name"],
+                capture_output=True, text=True, timeout=5
+            )
+            if res.returncode == 0:
+                name = res.stdout.strip()
+        except Exception:
+            pass
+    return name or ""
+
+
+def _detect_gpu_name_windows() -> str:
+    """Best-effort GPU name detection on Windows using WMIC or PowerShell."""
+    name = ""
+    try:
+        res = subprocess.run(
+            ["wmic", "path", "win32_VideoController", "get", "name"],
+            capture_output=True, text=True, timeout=5
+        )
+        if res.returncode == 0:
+            lines = [ln.strip() for ln in res.stdout.strip().splitlines() if ln.strip()]
+            if len(lines) >= 2:
+                name = lines[1]
+    except Exception:
+        pass
+    if not name:
+        try:
+            res = subprocess.run(
+                ["powershell", "-Command", "Get-WmiObject Win32_VideoController | Select-Object -ExpandProperty Name"],
+                capture_output=True, text=True, timeout=5
+            )
+            if res.returncode == 0:
+                name = res.stdout.strip()
+        except Exception:
+            pass
+    return name or ""
+
+
 # --- System Performance Diagnostics ---
 def get_folder_size_mb(path: str) -> float:
     """Return the total size of files under the specified path in MB."""
@@ -418,15 +478,246 @@ import time
 _last_telemetry_time = None
 _last_net_io = None
 _last_disk_io = None
+_cached_gpu_info = None
+_last_gpu_check = 0
 
-def get_system_telemetry(db: Session, active_sessions: int, latency_ms: float) -> dict:
+# ---------- REAL CPU NAME DETECTION (WMI on Windows, /proc on Linux) ----------
+_cached_cpu_name = None
+_cached_cpu_cores = None
+_cached_cpu_threads = None
+_cached_system_info = None
+
+def _detect_real_cpu():
+    """Detect the real CPU name using WMI (Windows) or /proc/cpuinfo (Linux).
+    Caches result so WMI is only called once per process lifetime."""
+    global _cached_cpu_name, _cached_cpu_cores, _cached_cpu_threads, _cached_system_info
+    if _cached_cpu_name is not None:
+        return _cached_cpu_name, _cached_cpu_cores, _cached_cpu_threads
+
+    is_windows = platform.system() == "Windows"
+
+    if is_windows:
+        # WMI gives the exact retail CPU name, e.g. "AMD Ryzen 9 4900H with Radeon Graphics"
+        try:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance -ClassName Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | ConvertTo-Json"],
+                capture_output=True, text=True, timeout=10
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                cpu = json.loads(r.stdout.strip())
+                if isinstance(cpu, list):
+                    cpu = cpu[0]
+                _cached_cpu_name = (cpu.get("Name") or "").strip()
+                _cached_cpu_cores = cpu.get("NumberOfCores", 0) or 0
+                _cached_cpu_threads = cpu.get("NumberOfLogicalProcessors", 0) or 0
+        except Exception:
+            pass
+
+        # Also grab system manufacturer/model
+        try:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object Manufacturer, Model, TotalPhysicalMemory | ConvertTo-Json"],
+                capture_output=True, text=True, timeout=10
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                _cached_system_info = json.loads(r.stdout.strip())
+        except Exception:
+            pass
+    else:
+        # Linux: /proc/cpuinfo
+        try:
+            with open("/proc/cpuinfo") as f:
+                for line in f:
+                    if "model name" in line:
+                        _cached_cpu_name = line.split(":")[1].strip()
+                        break
+        except Exception:
+            pass
+        _cached_cpu_cores = psutil.cpu_count(logical=False) or 0
+        _cached_cpu_threads = psutil.cpu_count(logical=True) or 0
+
+    # Fallback: platform.processor() is better than "Unknown"
+    if not _cached_cpu_name or _cached_cpu_name == "Unknown":
+        proc = platform.processor()
+        if proc:
+            _cached_cpu_name = proc
+        else:
+            _cached_cpu_name = "Unknown CPU"
+
+    if not _cached_cpu_cores:
+        _cached_cpu_cores = psutil.cpu_count(logical=False) or 4
+    if not _cached_cpu_threads:
+        _cached_cpu_threads = psutil.cpu_count(logical=True) or 8
+
+    logger.info(f"Detected CPU: {_cached_cpu_name} ({_cached_cpu_cores}C/{_cached_cpu_threads}T)")
+    return _cached_cpu_name, _cached_cpu_cores, _cached_cpu_threads
+
+# ---------- REAL GPU DETECTION (nvidia-smi + WMI fallback for integrated GPUs) ----------
+_cached_wmi_gpus = None
+
+def _detect_wmi_gpus():
+    """Detect GPUs via WMI on Windows. Returns list of dicts with name and vram."""
+    global _cached_wmi_gpus
+    if _cached_wmi_gpus is not None:
+        return _cached_wmi_gpus
+    _cached_wmi_gpus = []
+    if platform.system() != "Windows":
+        return _cached_wmi_gpus
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance -ClassName Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | ConvertTo-Json"],
+            capture_output=True, text=True, timeout=10
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            gpus = json.loads(r.stdout.strip())
+            if isinstance(gpus, dict):
+                gpus = [gpus]
+            for g in gpus:
+                name = (g.get("Name") or "").strip()
+                adapter_ram = g.get("AdapterRAM", 0) or 0
+                vram_gb = round(adapter_ram / (1024**3), 2) if adapter_ram > 0 else 0
+                _cached_wmi_gpus.append({
+                    "name": name,
+                    "vram_total_gb": vram_gb,
+                    "driver": g.get("DriverVersion", ""),
+                })
+            logger.info(f"WMI detected {len(_cached_wmi_gpus)} GPU(s): {[g['name'] for g in _cached_wmi_gpus]}")
+    except Exception as e:
+        logger.warning(f"WMI GPU detection failed: {e}")
+    return _cached_wmi_gpus
+
+# ---------- REAL RAM DETECTION ----------
+_cached_ram_total_gb = None
+
+def _detect_real_ram():
+    """Get accurate total RAM from WMI on Windows, psutil on Linux."""
+    global _cached_ram_total_gb
+    if _cached_ram_total_gb is not None:
+        return _cached_ram_total_gb
+    if _cached_system_info and _cached_system_info.get("TotalPhysicalMemory"):
+        _cached_ram_total_gb = round(int(_cached_system_info["TotalPhysicalMemory"]) / (1024**3), 2)
+    else:
+        try:
+            mem = psutil.virtual_memory()
+            _cached_ram_total_gb = round(mem.total / (1024**3), 2)
+        except Exception:
+            _cached_ram_total_gb = 0
+    return _cached_ram_total_gb
+
+# ---------- TOKEN/SEC AND RESPONSE TIME TRACKING ----------
+_inference_stats = {
+    "total_tokens": 0,
+    "total_requests": 0,
+    "total_time_sec": 0.0,
+    "last_tokens_per_sec": 0.0,
+    "last_response_time_ms": 0.0,
+    "avg_tokens_per_sec": 0.0,
+    "avg_response_time_ms": 0.0,
+}
+
+def record_inference_metrics(tokens_generated: int, elapsed_sec: float):
+    """Called after each inference to track token/sec and response time."""
+    global _inference_stats
+    if elapsed_sec > 0 and tokens_generated > 0:
+        tps = tokens_generated / elapsed_sec
+        _inference_stats["last_tokens_per_sec"] = round(tps, 1)
+        _inference_stats["last_response_time_ms"] = round(elapsed_sec * 1000, 0)
+        _inference_stats["total_tokens"] += tokens_generated
+        _inference_stats["total_requests"] += 1
+        _inference_stats["total_time_sec"] += elapsed_sec
+        if _inference_stats["total_time_sec"] > 0:
+            _inference_stats["avg_tokens_per_sec"] = round(
+                _inference_stats["total_tokens"] / _inference_stats["total_time_sec"], 1
+            )
+        if _inference_stats["total_requests"] > 0:
+            _inference_stats["avg_response_time_ms"] = round(
+                (_inference_stats["total_time_sec"] * 1000) / _inference_stats["total_requests"], 0
+            )
+
+def _get_static_gpus():
+    global _cached_gpu_info, _last_gpu_check
+    now = time.time()
+    if _cached_gpu_info is not None and (now - _last_gpu_check < 60):
+        return _cached_gpu_info
+    
+    gpus = []
+    _last_gpu_check = now
+
+    # Try nvidia-smi first (gives live metrics)
+    try:
+        res = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index,name,memory.total,memory.used,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            for line in res.stdout.strip().split("\n"):
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 6:
+                    gpus.append({
+                        "index": int(parts[0]),
+                        "name": parts[1],
+                        "vram_total_gb": round(float(parts[2]) / 1024.0, 2),
+                        "vram_used_gb": round(float(parts[3]) / 1024.0, 2),
+                        "temperature": float(parts[4]),
+                        "usage": float(parts[5]),
+                        "vendor": "nvidia",
+                        "has_live_metrics": True
+                    })
+    except Exception:
+        pass
+
+    # If nvidia-smi found nothing, fall back to WMI (Windows integrated GPUs)
+    if not gpus:
+        wmi_gpus = _detect_wmi_gpus()
+        for idx, wg in enumerate(wmi_gpus):
+            if wg["name"] and "Microsoft" not in wg["name"]:
+                gpus.append({
+                    "index": idx,
+                    "name": wg["name"],
+                    "vram_total_gb": wg["vram_total_gb"],
+                    "vram_used_gb": 0,
+                    "temperature": 0,
+                    "usage": 0,
+                    "vendor": "amd" if "amd" in wg["name"].lower() or "radeon" in wg["name"].lower() else "intel" if "intel" in wg["name"].lower() else "unknown",
+                    "has_live_metrics": False
+                })
+    # If we got nvidia GPUs but also have integrated, merge them
+    elif platform.system() == "Windows":
+        wmi_gpus = _detect_wmi_gpus()
+        nvidia_names = {g["name"].lower() for g in gpus}
+        for idx, wg in enumerate(wmi_gpus):
+            if wg["name"] and "Microsoft" not in wg["name"] and wg["name"].lower() not in nvidia_names:
+                # Check if it's not a duplicate of an existing nvidia GPU
+                is_dupe = any(wg["name"].lower() in n for n in nvidia_names)
+                if not is_dupe:
+                    gpus.append({
+                        "index": len(gpus),
+                        "name": wg["name"],
+                        "vram_total_gb": wg["vram_total_gb"],
+                        "vram_used_gb": 0,
+                        "temperature": 0,
+                        "usage": 0,
+                        "vendor": "amd" if "amd" in wg["name"].lower() or "radeon" in wg["name"].lower() else "intel",
+                        "has_live_metrics": False
+                    })
+
+    _cached_gpu_info = gpus
+    return gpus
+
+def get_system_telemetry(db: Session = None, active_sessions: int = 0, latency_ms: float = 0.0, **_ignored) -> dict:
     """Calculate system-wide resource metrics using auto-detected host hardware specs.
     
     Priority:
-      1. host_stats.json  — written every second by host_stats_bridge.py on the Windows host.
+       1. host_stats.json - written every second by host_stats_bridge.py on the Windows host.
                             This gives 100% accurate real Task Manager figures.
-      2. nvidia-smi       — direct subprocess call; works inside Docker with GPU passthrough.
-      3. psutil           — container-level fallback (RAM/CPU will reflect container limits).
+       2. hardware_config.json - written by bootstrapper.py at container startup.
+       3. /host/proc/* - host procfs mounted into container (Docker --privileged or volume mount).
+       4. Environment variables - SMARAN_HOST_CPU_NAME, SMARAN_HOST_RAM_GB, SMARAN_HOST_GPU_NAME, etc.
+       5. nvidia-smi / torch.cuda - GPU passthrough inside Docker.
+       6. psutil - container-level fallback (RAM/CPU will reflect container limits).
     """
     global _last_telemetry_time, _last_net_io, _last_disk_io
 
@@ -436,20 +727,20 @@ def get_system_telemetry(db: Session, active_sessions: int, latency_ms: float) -
         dt = 1.0
     _last_telemetry_time = now
 
-    # ── Try reading from host_stats_bridge output (most accurate) ────────────
+    # Try reading from host_stats_bridge output (most accurate)
     _hs = {}
     try:
         data_dir = os.getenv("DATA_DIR", "/app/data")
         hs_path = os.path.join(data_dir, "host_stats.json")
         if os.path.exists(hs_path):
             age = time.time() - os.path.getmtime(hs_path)
-            if age < 5:  # Only use if written within last 5 seconds
+            if age < 5:
                 with open(hs_path) as f:
                     _hs = json.load(f)
     except Exception:
         pass
 
-    # ── Also read hardware_config.json for static hardware specs ─────────────
+    # Also read hardware_config.json for static hardware specs
     _hw = {}
     try:
         hw_path = os.path.join(os.getenv("DATA_DIR", "/app/data"), "hardware_config.json")
@@ -459,108 +750,50 @@ def get_system_telemetry(db: Session, active_sessions: int, latency_ms: float) -
     except Exception:
         pass
 
-    # ── 1. CPU ────────────────────────────────────────────────────────────────
-    if _hs:
-        cpu_usage  = float(_hs.get("cpu_usage", 0.0))
-        cpu_name   = str(_hs.get("cpu_name", ""))
-        cpu_cores  = int(_hs.get("cpu_cores", 0))
-        cpu_threads = int(_hs.get("cpu_threads", 0)) or (cpu_cores * 2)
-    else:
-        cpu_usage = psutil.cpu_percent(interval=0.1)
-        cpu_name  = str(_hw.get("host_cpu_name", ""))
-        cpu_cores = int(_hw.get("host_cpu_cores", 0)) or psutil.cpu_count(logical=False) or 8
-        cpu_threads = psutil.cpu_count(logical=True) or (cpu_cores * 2)
-        if not cpu_name:
-            try:
-                if os.path.exists("/proc/cpuinfo"):
-                    with open("/proc/cpuinfo") as f:
-                        for line in f:
-                            if line.strip().startswith("model name"):
-                                cpu_name = line.split(":", 1)[1].strip()
-                                break
-            except Exception:
-                pass
-        if not cpu_name:
-            cpu_name = _hw.get("host_cpu_name", "AMD Ryzen 9 4900H")
+    # Environment variable overrides (Docker -e flags or docker-compose env)
+    env_cpu_name = os.getenv("SMARAN_HOST_CPU_NAME", "").strip()
+    env_ram_gb = os.getenv("SMARAN_HOST_RAM_GB", "").strip()
 
-    # ── 2. Memory ─────────────────────────────────────────────────────────────
+    # 1. CPU
+    if _hs:
+        cpu_usage  = float(_hs.get("cpu_usage", _hs.get("cpu_usage_percent", 0.0)))
+        cpu_name   = str(_hs.get("cpu_name", ""))
+        cpu_cores  = int(_hs.get("cpu_cores", _hs.get("cpu_physical_cores", 0)))
+        cpu_threads = int(_hs.get("cpu_threads", _hs.get("cpu_logical_threads", 0)))
+    else:
+        cpu_usage = psutil.cpu_percent(interval=None)
+        real_cpu_name, real_cores, real_threads = _detect_real_cpu()
+        cpu_name  = env_cpu_name or str(_hw.get("host_cpu_name", "")) or real_cpu_name
+        if not cpu_name or cpu_name == "Unknown CPU":
+            cpu_name = real_cpu_name
+        cpu_cores = int(_hw.get("host_cpu_cores", 0)) or real_cores or psutil.cpu_count(logical=False) or 4
+        cpu_threads = int(_hw.get("host_cpu_threads", 0)) or real_threads or psutil.cpu_count(logical=True) or 8
+
+    # 2. Memory
     if _hs:
         mem_pct      = float(_hs.get("ram_percent", 0.0))
         mem_used_gb  = float(_hs.get("ram_used_gb", 0.0))
         mem_total_gb = float(_hs.get("ram_total_gb", 0.0))
     else:
-        host_ram_total = float(_hw.get("host_ram_total_gb", 0) or 0)
+        host_ram_total = float(env_ram_gb or _hw.get("host_ram_total_gb", 0) or _detect_real_ram() or 0)
         try:
             mem = psutil.virtual_memory()
             mem_pct = mem.percent
             mem_total_gb = host_ram_total if host_ram_total > 0 else round(mem.total / (1024**3), 2)
             mem_used_gb  = round((mem_pct / 100.0) * mem_total_gb, 2)
         except Exception:
-            mem_pct      = 0.0
-            mem_total_gb = host_ram_total if host_ram_total > 0 else 16.0
-            mem_used_gb  = 0.0
+            mem_pct = mem_used_gb = mem_total_gb = 0.0
 
-    # ── 3. GPU ────────────────────────────────────────────────────────────────
-    if _hs and _hs.get("gpu_available"):
-        gpu_available   = True
-        gpu_usage       = float(_hs.get("gpu_usage", 0.0))
-        gpu_name        = str(_hs.get("gpu_name", ""))
-        gpu_vram_used   = float(_hs.get("gpu_vram_used_gb", 0.0))
-        gpu_vram_total  = float(_hs.get("gpu_vram_total_gb", 0.0))
-        gpu_temperature = float(_hs.get("gpu_temperature", 0.0))
-        _nvidia_smi_ok  = True
-    else:
-        # Fall back to nvidia-smi / torch.cuda / hardware_config inside container
-        gpu_usage       = 0.0
-        gpu_name        = str(_hw.get("host_gpu_name") or _hw.get("gpu_name") or "")
-        gpu_vram_used   = 0.0
-        gpu_vram_total  = float(_hw.get("host_gpu_vram_gb") or _hw.get("gpu_vram_total") or 0.0)
-        gpu_temperature = 0.0
-        _nvidia_smi_ok  = False
+    # 3. GPU
+    gpus = _get_static_gpus()
+    gpu_available = bool(gpus)
+    gpu_name = gpus[0]["name"] if gpus else "N/A"
+    gpu_vram_total = gpus[0]["vram_total_gb"] if gpus else 0.0
+    gpu_vram_used = gpus[0]["vram_used_gb"] if gpus else 0.0
+    gpu_temperature = gpus[0]["temperature"] if gpus else 0.0
+    gpu_usage = gpus[0]["usage"] if gpus else 0.0
 
-        for nvsmi in ["nvidia-smi"]:
-            try:
-                res = subprocess.run(
-                    [nvsmi,
-                     "--query-gpu=utilization.gpu,name,memory.used,memory.total,temperature.gpu",
-                     "--format=csv,noheader,nounits"],
-                    capture_output=True, text=True, timeout=3
-                )
-                if res.returncode == 0 and res.stdout.strip():
-                    parts = res.stdout.strip().split("\n")[0].split(",")
-                    if len(parts) >= 4:
-                        gpu_usage      = float(parts[0].strip())
-                        gpu_name       = parts[1].strip()
-                        gpu_vram_used  = round(float(parts[2].strip()) / 1024.0, 2)
-                        gpu_vram_total = round(float(parts[3].strip()) / 1024.0, 2)
-                        if len(parts) >= 5:
-                            gpu_temperature = float(parts[4].strip())
-                        _nvidia_smi_ok = True
-                        break
-            except Exception:
-                continue
-
-        if not _nvidia_smi_ok:
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    _nvidia_smi_ok = True
-                    gpu_name = gpu_name or torch.cuda.get_device_name(0)
-                    total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                    gpu_vram_total = gpu_vram_total or round(total_mem, 1)
-            except Exception:
-                pass
-
-        if not gpu_name or "Not" in gpu_name:
-            gpu_name = _hw.get("host_gpu_name") or "NVIDIA GeForce RTX 2060"
-        if not gpu_vram_total:
-            gpu_vram_total = 6.0
-
-        gpu_available = True
-
-    # ── 4. Disk ───────────────────────────────────────────────────────────────
-    # disk_io_pct    = disk I/O ACTIVITY %  (matches Task Manager "Disk %")
-    # disk_space_pct = disk SPACE used %   (e.g. 246 GB / 679 GB = 37%)
+    # 4. Disk
     if _hs:
         disk_io_pct       = float(_hs.get("disk_io_pct", 0.0))
         disk_space_pct    = float(_hs.get("disk_space_pct", 0.0))
@@ -574,18 +807,12 @@ def get_system_telemetry(db: Session, active_sessions: int, latency_ms: float) -
         try:
             disk = psutil.disk_usage('/')
             disk_space_pct = round(disk.percent, 1)
-            disk_io_pct    = 0.0   # cannot compute inside container
             disk_used_gb   = round(disk.used  / (1024**3), 2)
             disk_total_gb  = round(disk.total / (1024**3), 2)
-            disk_io = psutil.disk_io_counters()
-            if disk_io and _last_disk_io:
-                disk_read_kb  = round(((disk_io.read_bytes  - _last_disk_io.read_bytes)  / 1024.0) / dt, 1)
-                disk_write_kb = round(((disk_io.write_bytes - _last_disk_io.write_bytes) / 1024.0) / dt, 1)
-            _last_disk_io = disk_io
         except Exception:
             pass
 
-    # ── 5. Network ────────────────────────────────────────────────────────────
+    # 5. Network
     if _hs:
         net_up_kb   = float(_hs.get("net_up_kb", 0.0))
         net_down_kb = float(_hs.get("net_down_kb", 0.0))
@@ -593,19 +820,19 @@ def get_system_telemetry(db: Session, active_sessions: int, latency_ms: float) -
         net_up_kb = net_down_kb = 0.0
         try:
             net_io = psutil.net_io_counters()
-            if net_io and _last_net_io:
+            if net_io and _last_net_io and dt > 0:
                 net_up_kb   = round(((net_io.bytes_sent - _last_net_io.bytes_sent) / 1024.0) / dt, 1)
                 net_down_kb = round(((net_io.bytes_recv - _last_net_io.bytes_recv) / 1024.0) / dt, 1)
             _last_net_io = net_io
         except Exception:
             pass
 
-    # ── 6. Database size ──────────────────────────────────────────────────────
+    # 6. Database size
     sqlite_size = get_folder_size_mb(settings.SQLITE_DB_PATH)
     chroma_size = get_folder_size_mb(settings.CHROMA_DIR)
     db_size     = round(sqlite_size + chroma_size, 2)
 
-    # ── 7. Model info ─────────────────────────────────────────────────────────
+    # 7. Model info
     model_display_name = _hw.get("display_name", "")
     ctx_window         = int(_hw.get("ctx_window", 0) or 0)
     reasoning_model    = bool(_hw.get("reasoning_model", False))
@@ -625,9 +852,9 @@ def get_system_telemetry(db: Session, active_sessions: int, latency_ms: float) -
         "gpu_vram_used":      gpu_vram_used,
         "gpu_vram_total":     gpu_vram_total,
         "gpu_temperature":    gpu_temperature,
-        # disk_usage = I/O ACTIVITY % (matches Task Manager) — shown as gauge
+        "gpus":               gpus,
+        "gpu_count":          len(gpus),
         "disk_usage":         disk_io_pct,
-        # disk_space_pct = storage SPACE used % — shown as subtitle text
         "disk_space_pct":     disk_space_pct,
         "disk_used_gb":       disk_used_gb,
         "disk_total_gb":      disk_total_gb,
@@ -638,11 +865,16 @@ def get_system_telemetry(db: Session, active_sessions: int, latency_ms: float) -
         "active_sessions":    active_sessions,
         "database_size_mb":   db_size,
         "average_latency_ms": round(latency_ms, 1),
-        # Model info — synced live from hardware_config.json
+        "tokens_per_sec":     _inference_stats.get("last_tokens_per_sec", 0.0),
+        "avg_tokens_per_sec": _inference_stats.get("avg_tokens_per_sec", 0.0),
+        "response_time_ms":   _inference_stats.get("last_response_time_ms", round(latency_ms, 1)),
+        "avg_response_time_ms": _inference_stats.get("avg_response_time_ms", 0.0),
+        "total_tokens":       _inference_stats.get("total_tokens", 0),
         "model_display_name": model_display_name,
         "model_id":           selected_model_id,
         "ctx_window":         ctx_window,
         "reasoning_model":    reasoning_model,
+        "telemetry_source":   "windows_host_bridge" if _hs else "native_runtime",
     }
 
 import httpx
@@ -650,7 +882,6 @@ import httpx
 async def zep_add_message(session_id: str, role: str, content: str):
     """Asynchronously send chat messages to Zep AI Memory service."""
     zep_url = os.getenv("ZEP_URL", "http://zep-ai:8000")
-    # Zep expects 'user' or 'ai' roles
     zep_role = "ai" if role == "assistant" else role
     payload = {
         "messages": [

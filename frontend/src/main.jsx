@@ -2,8 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import { AuthProvider } from './context/AuthContext.jsx';
 import { ThemeProvider } from './context/ThemeContext.jsx';
+import { ensureDeviceUser, getCurrentUser } from './context/AuthContext.jsx';
 import './index.css';
 
 // Unregister ALL service workers — nginx cache-control headers handle caching.
@@ -17,14 +17,26 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <ThemeProvider>
-      <AuthProvider>
+async function initApp() {
+  // Initialize device user (legacy fallback)
+  await ensureDeviceUser();
+  
+  // Check for existing session
+  try {
+    await getCurrentUser();
+  } catch (e) {
+    console.log('No active session, user needs to login');
+  }
+  
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <ThemeProvider>
         <ErrorBoundary>
           <App />
         </ErrorBoundary>
-      </AuthProvider>
-    </ThemeProvider>
-  </React.StrictMode>
-);
+      </ThemeProvider>
+    </React.StrictMode>
+  );
+}
+
+initApp().catch((e) => console.error('App init failed:', e));

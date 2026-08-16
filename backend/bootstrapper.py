@@ -167,7 +167,7 @@ EXPLICIT_DELETE = [
 
 # Build OLLAMA_DEPRECATED list: everything in EXPLICIT_DELETE that is NOT
 # a preferred model tag and NOT in KEEP_MODELS.
-PREFERRED_TAGS = {m["ollama_tag"] for m in PREFERRED_MODELS}
+PREFERRED_TAGS = {m["model_id"] for m in PREFERRED_MODELS}
 OLLAMA_DEPRECATED = [
     m for m in EXPLICIT_DELETE
     if m not in PREFERRED_TAGS and m not in KEEP_MODELS
@@ -241,56 +241,100 @@ def detect_ram():
 
 
 def detect_gpu():
-    name    = "No GPU / CPU-only"
-    vram_gb = 0.0
-    count   = 0
-    driver  = "N/A"
+    gpus = []
+    driver = "N/A"
 
-    # NVML — fastest, most accurate
+    # NVML — fastest, most accurate for NVIDIA
     try:
         import pynvml
         pynvml.nvmlInit()
         count = pynvml.nvmlDeviceGetCount()
-        if count > 0:
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            raw    = pynvml.nvmlDeviceGetName(handle)
-            name   = raw.decode() if isinstance(raw, bytes) else str(raw)
-            mem    = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        for i in range(count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            raw = pynvml.nvmlDeviceGetName(handle)
+            name = raw.decode() if isinstance(raw, bytes) else str(raw)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
             vram_gb = round(mem.total / (1024 ** 3), 2)
-            try:
-                driver = pynvml.nvmlSystemGetDriverVersion()
-                if isinstance(driver, bytes): driver = driver.decode()
-            except Exception: pass
+            gpus.append({"name": name, "vram_gb": vram_gb, "index": i, "vendor": "nvidia"})
+        try:
+            d = pynvml.nvmlSystemGetDriverVersion()
+            driver = d.decode() if isinstance(d, bytes) else str(d)
+        except Exception:
+            pass
         pynvml.nvmlShutdown()
-        logger.info(f"GPU (NVML): {name} | VRAM: {vram_gb} GB | Driver: {driver}")
-        return {"gpu_name": name, "gpu_vram_gb": vram_gb,
-                "gpu_count": count, "driver_version": driver}
+        logger.info(f"GPU (NVML): detected {len(gpus)} NVIDIA GPU(s)")
+        return gpus, driver
     except Exception as e:
         logger.warning(f"NVML failed: {e}. Trying nvidia-smi...")
 
-    # nvidia-smi fallback
+    # nvidia-smi fallback for NVIDIA
     for smi in ["nvidia-smi", "/usr/bin/nvidia-smi", r"C:\Windows\System32\nvidia-smi.exe"]:
         try:
             res = subprocess.run(
-                [smi, "--query-gpu=name,memory.total,driver_version,count",
+                [smi, "--query-gpu=index,name,memory.total,driver_version",
                  "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=5)
             if res.returncode == 0 and res.stdout.strip():
-                parts = [p.strip() for p in res.stdout.strip().split("\n")[0].split(",")]
-                if len(parts) >= 2:
-                    name    = parts[0]
-                    vram_gb = round(float(parts[1]) / 1024.0, 2)
-                    driver  = parts[2] if len(parts) > 2 else "N/A"
-                    count   = int(parts[3]) if len(parts) > 3 else 1
-                logger.info(f"GPU (nvidia-smi): {name} | VRAM: {vram_gb} GB")
-                return {"gpu_name": name, "gpu_vram_gb": vram_gb,
-                        "gpu_count": count, "driver_version": driver}
+                lines = res.stdout.strip().split("\n")
+                for line in lines:
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 3:
+                        gpus.append({
+                            "index": int(parts[0]) if len(parts) > 3 else len(gpus),
+                            "name": parts[0] if len(parts) <= 3 else parts[1],
+                            "vram_gb": round(float(parts[1] if len(parts) <= 3 else parts[2]) / 1024.0, 2),
+                            "vendor": "nvidia"
+                        })
+                        if len(parts) > 3 and driver == "N/A":
+                            driver = parts[3]
+                if gpus:
+                    logger.info(f"GPU (nvidia-smi): detected {len(gpus)} NVIDIA GPU(s)")
+                    return gpus, driver
         except Exception:
             continue
 
+    # WMI / CIM fallback for AMD and other GPUs
+    try:
+        import platform
+        if platform.system() == "Windows":
+            try:
+                ps_script = """
+                Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | ConvertTo-Json -Compress
+                """
+                res = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", ps_script],
+                    capture_output=True, text=True, timeout=10
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    import json
+                    controllers = json.loads(res.stdout.strip())
+                    if isinstance(controllers, dict):
+                        controllers = [controllers]
+                    for idx, ctrl in enumerate(controllers):
+                        name = ctrl.get("Name", "Unknown GPU")
+                        adapter_ram_bytes = int(ctrl.get("AdapterRAM", 0) or 0)
+                        vram_gb = round(adapter_ram_bytes / (1024 ** 3), 2)
+                        if vram_gb < 0.1:
+                            vram_gb = 0.5  # fallback for iGPUs with shared memory
+                        vendor = "amd" if "amd" in name.lower() or "radeon" in name.lower() else "other"
+                        gpus.append({
+                            "index": idx,
+                            "name": name,
+                            "vram_gb": vram_gb,
+                            "vendor": vendor
+                        })
+                        if driver == "N/A":
+                            driver = ctrl.get("DriverVersion", "N/A")
+                    if gpus:
+                        logger.info(f"GPU (WMI): detected {len(gpus)} GPU(s): {[g['name'] for g in gpus]}")
+                        return gpus, driver
+            except Exception as e:
+                logger.warning(f"WMI GPU detection failed: {e}")
+    except Exception:
+        pass
+
     logger.warning("No GPU detected — CPU-only mode.")
-    return {"gpu_name": name, "gpu_vram_gb": vram_gb,
-            "gpu_count": count, "driver_version": driver}
+    return gpus, driver
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -631,7 +675,7 @@ def main():
 
         logger.info("Phase 2 — Pulling preferred models...")
         for pm in PREFERRED_MODELS:
-            pull_ollama_model(pm["ollama_tag"])
+            pull_ollama_model(pm["model_id"])
 
         logger.info("Phase 3 — Ensuring embedding model is present...")
         pull_ollama_model("nomic-embed-text")
@@ -647,11 +691,12 @@ def main():
     # 1. Full hardware detection
     cpu = detect_cpu()
     ram = detect_ram()
-    gpu = detect_gpu()
+    gpus, driver = detect_gpu()
+    best_gpu = max(gpus, key=lambda g: g.get("vram_gb", 0)) if gpus else {"name": "No GPU", "vram_gb": 0.0, "index": 0, "vendor": "none"}
 
     # 2. Select best possible model from the 8 preferred models
     profile = select_best_model(
-        vram_gb   = gpu["gpu_vram_gb"],
+        vram_gb   = best_gpu.get("vram_gb", 0.0),
         ram_gb    = ram["ram_total_gb"],
         cpu_cores = cpu["cpu_cores_logical"]
     )
@@ -662,15 +707,19 @@ def main():
         # Hardware facts
         "cpu":               cpu,
         "ram":               ram,
-        "gpu":               gpu,
+        "gpus":              gpus,
+        "gpu":               best_gpu,
+        "driver_version":    driver,
         # Selected inference profile
         "inference":         profile,
         # Flat shortcuts for telemetry (utils.py Task Manager)
         "host_cpu_cores":    cpu["cpu_cores_logical"],
         "host_cpu_name":     cpu["cpu_name"],
         "host_ram_total_gb": ram["ram_total_gb"],
-        "host_gpu_name":     gpu["gpu_name"],
-        "host_gpu_vram_gb":  gpu["gpu_vram_gb"],
+        "host_gpu_name":     best_gpu.get("name", ""),
+        "host_gpu_vram_gb":  best_gpu.get("vram_gb", 0.0),
+        "host_gpu_count":    len(gpus),
+        "host_gpus":         gpus,
         # Engine routing (backend/config.py + main.py reads these)
         "engine":            profile["engine"],
         "model_id":          profile["model_id"],
@@ -688,8 +737,8 @@ def main():
     logger.info("┌─ HARDWARE DETECTED ─────────────────────────────────────────┐")
     logger.info(f"│  CPU   : {cpu['cpu_name']} ({cpu['cpu_cores_logical']} cores)")
     logger.info(f"│  RAM   : {ram['ram_total_gb']} GB system memory")
-    logger.info(f"│  GPU   : {gpu['gpu_name']}")
-    logger.info(f"│  VRAM  : {gpu['gpu_vram_gb']} GB")
+    for g in gpus:
+        logger.info(f"│  GPU {g.get('index', 0)} : {g.get('name', 'Unknown')} | VRAM: {g.get('vram_gb', 0)} GB | Vendor: {g.get('vendor', 'unknown')}")
     logger.info("├─ SELECTED MODEL ────────────────────────────────────────────┤")
     logger.info(f"│  Engine: {profile['engine'].upper()}")
     logger.info(f"│  Model : {profile['model_id']}")

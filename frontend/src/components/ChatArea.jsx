@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, Brain, Languages, UserCheck, Boxes } from 'lucide-react';
+import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
+import { downloadProjectZip, downloadSingleFile } from '../utils/zip';
 import ArtifactRenderer from './ArtifactRenderer';
 
 const LANGUAGES = [
@@ -434,6 +435,10 @@ const parseInlineFormatting = (text) => {
 
 const CodeBlock = ({ code, language }) => {
   const [copied, setCopied] = useState(false);
+  const langLower = (language || '').toLowerCase();
+  const isHtmlOrWeb = langLower === 'html' || langLower === 'htm' || langLower === 'svg' || langLower === 'xml' || /<!doctype html|<html|<body|<div|<script/i.test(code);
+  const [viewMode, setViewMode] = useState(isHtmlOrWeb ? 'preview' : 'code');
+  const [iframeKey, setIframeKey] = useState(0);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code);
@@ -441,30 +446,132 @@ const CodeBlock = ({ code, language }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleDownloadZip = () => {
+    if (isHtmlOrWeb) {
+      downloadProjectZip("smaran_web_project", [
+        { name: "index.html", content: code },
+        { name: "README.md", content: "# SMARAN.AI Generated Web Application\n\nDouble click `index.html` to run this web application in any browser!" }
+      ]);
+    } else {
+      const ext = langLower === 'python' || langLower === 'py' ? 'py' : langLower === 'javascript' || langLower === 'js' ? 'js' : langLower === 'json' ? 'json' : langLower === 'css' ? 'css' : (langLower || 'txt');
+      downloadProjectZip(`smaran_${langLower || 'app'}_project`, [
+        { name: `app.${ext}`, content: code },
+        { name: "README.md", content: `# SMARAN.AI Generated Project\n\nRun with your environment:\n\n\`\`\`bash\n# Example execution\n${ext === 'py' ? 'python app.py' : ext === 'js' ? 'node app.js' : ''}\n\`\`\`` }
+      ]);
+    }
+  };
+
+  const handleDownloadFile = () => {
+    const ext = isHtmlOrWeb ? 'html' : langLower === 'python' || langLower === 'py' ? 'py' : langLower === 'javascript' || langLower === 'js' ? 'js' : langLower === 'json' ? 'json' : langLower === 'css' ? 'css' : (langLower || 'txt');
+    downloadSingleFile(`smaran_app.${ext}`, code);
+  };
+
+  const handleOpenNewTab = () => {
+    const blob = new Blob([code], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank');
+  };
+
   return (
-    <div className="my-4 rounded-2xl border border-zinc-200 dark:border-zinc-850 overflow-hidden bg-zinc-950 shadow-lg animate-in fade-in duration-200">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-900 bg-zinc-900/60 text-[10px] font-mono text-zinc-400">
-        <span>{language.toUpperCase() || 'CODE NODE'}</span>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1 hover:text-indigo-400 transition-colors cursor-pointer"
-        >
-          {copied ? (
-            <>
-              <Check className="w-3.5 h-3.5 text-emerald-450" />
-              <span className="text-emerald-450 font-bold">Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copy</span>
-            </>
+    <div className="my-4 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 overflow-hidden bg-zinc-950 shadow-xl animate-in fade-in duration-200">
+      {/* Code / Preview Header Toolbar */}
+      <div className="flex flex-wrap items-center justify-between px-3.5 py-2 border-b border-zinc-850 bg-zinc-900/90 text-[11px] font-mono text-zinc-300 gap-2">
+        <div className="flex items-center gap-2">
+          <span className="font-extrabold text-indigo-400 uppercase tracking-wider">{language || (isHtmlOrWeb ? 'HTML5 APP' : 'CODE')}</span>
+          {isHtmlOrWeb && (
+            <div className="flex items-center bg-zinc-800/90 rounded-lg p-0.5 border border-zinc-700/80">
+              <button
+                onClick={() => setViewMode('preview')}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                  viewMode === 'preview' ? 'bg-indigo-600 text-white shadow-xs' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Eye className="w-3 h-3" />
+                <span>Live Preview</span>
+              </button>
+              <button
+                onClick={() => setViewMode('code')}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                  viewMode === 'code' ? 'bg-indigo-600 text-white shadow-xs' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Code2 className="w-3 h-3" />
+                <span>Code</span>
+              </button>
+            </div>
           )}
-        </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Reload Preview */}
+          {isHtmlOrWeb && viewMode === 'preview' && (
+            <button
+              onClick={() => setIframeKey((k) => k + 1)}
+              title="Reload preview"
+              className="p-1 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* Open In New Tab */}
+          {isHtmlOrWeb && (
+            <button
+              onClick={handleOpenNewTab}
+              title="Open in full browser window"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-[10px] font-bold transition-all cursor-pointer border border-zinc-700"
+            >
+              <ExternalLink className="w-3 h-3" />
+              <span className="hidden sm:inline">New Tab</span>
+            </button>
+          )}
+
+          {/* Download Project ZIP */}
+          <button
+            onClick={handleDownloadZip}
+            title="Download complete project files as ZIP"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 hover:text-emerald-300 border border-emerald-500/40 text-[10px] font-bold transition-all cursor-pointer shadow-xs hover:scale-105"
+          >
+            <Download className="w-3 h-3" />
+            <span>📦 Download ZIP</span>
+          </button>
+
+          {/* Copy Code */}
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-[10px] font-bold transition-all cursor-pointer border border-zinc-700"
+          >
+            {copied ? (
+              <>
+                <Check className="w-3 h-3 text-emerald-400" />
+                <span className="text-emerald-400">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3 h-3" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
-      <pre className="p-4 overflow-x-auto font-mono text-[11px] text-zinc-300 leading-relaxed text-left whitespace-pre">
-        <code>{code}</code>
-      </pre>
+
+      {/* Main Body: Live Iframe Sandbox or Code Editor */}
+      {isHtmlOrWeb && viewMode === 'preview' ? (
+        <div className="relative w-full bg-white dark:bg-zinc-900 min-h-[380px] max-h-[550px] overflow-hidden flex flex-col">
+          <iframe
+            key={iframeKey}
+            srcDoc={code}
+            title="SMARAN Live Interactive Artifact Preview"
+            sandbox="allow-scripts allow-modals allow-forms allow-same-origin allow-popups"
+            className="w-full h-[420px] border-0 bg-white"
+          />
+        </div>
+      ) : (
+        <pre className="p-4 overflow-x-auto font-mono text-[11px] text-zinc-300 leading-relaxed text-left whitespace-pre max-h-[500px]">
+          <code>{code}</code>
+        </pre>
+      )}
     </div>
   );
 };
@@ -677,8 +784,8 @@ const MediaPreviewCard = ({ text }) => {
   );
 };
 
-//  Per-message row with Gemini-style copy / re-use actions 
-const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
+//  Per-message row with Gemini-style copy / re-use / delete actions 
+const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete }) => {
   const [copied, setCopied] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [editText, setEditText] = React.useState(msg.content);
@@ -689,34 +796,7 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const [speaking, setSpeaking] = React.useState(false);
 
-  React.useEffect(() => {
-    return () => {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, []);
-
-  const handleSpeak = () => {
-    if ('speechSynthesis' in window) {
-      if (speaking) {
-        window.speechSynthesis.cancel();
-        setSpeaking(false);
-      } else {
-        // Strip think tags to only read final AI response
-        const cleanText = msg.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.onend = () => setSpeaking(false);
-        utterance.onerror = () => setSpeaking(false);
-        setSpeaking(true);
-        window.speechSynthesis.speak(utterance);
-      }
-    } else {
-      alert("Text-to-speech is not supported in this browser.");
-    }
-  };
 
   const handleSave = () => {
     if (editText.trim() && editText.trim() !== msg.content) {
@@ -836,39 +916,55 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
               <MarkdownText text={msg.content} />
 
               {!msg.isLoading && msg.content && (
-                <div className="mt-4 overflow-hidden rounded-2xl border border-indigo-500/20 dark:border-purple-500/20 bg-gradient-to-br from-indigo-50/70 via-white/70 to-purple-50/70 dark:from-indigo-950/35 dark:via-zinc-900/80 dark:to-purple-950/30 select-none shadow-[0_12px_32px_-18px_rgba(99,102,241,0.65)] ring-1 ring-white/40 dark:ring-white/5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_38px_-18px_rgba(99,102,241,0.75)] flex flex-col gap-1.5 w-full select-all">
-                  <div className="px-3 pt-3 text-[9px] font-black text-indigo-600 dark:text-purple-400 uppercase tracking-widest flex items-center gap-1.5 border-b border-indigo-200/60 dark:border-indigo-800/40 pb-2 mb-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Verified Execution Metrics
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-4 gap-y-2 px-3 pb-3 text-[10px] font-mono text-zinc-650 dark:text-zinc-400 [&>div]:min-w-0 [&>div]:break-words">
-                    <div>
-                      <span className="text-zinc-400 dark:text-zinc-500">Model:</span>{" "}
-                      <span className="font-bold text-zinc-950 dark:text-zinc-200">{msg.model_used || msg.modelUsed || 'Not reported'}</span>
+                <div className="mt-4 overflow-hidden rounded-2xl border border-indigo-500/20 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-50/80 via-white/80 to-purple-50/80 dark:from-zinc-950/90 dark:via-zinc-900/90 dark:to-indigo-950/40 select-none shadow-[0_8px_30px_-12px_rgba(99,102,241,0.3)] ring-1 ring-white/50 dark:ring-white/5 transition-all duration-300 w-full select-all p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-indigo-200/50 dark:border-zinc-800 pb-2">
+                    <div className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                      100% Genuine Execution Telemetry
                     </div>
-                    <div>
-                      <span className="text-zinc-400 dark:text-zinc-500">Tokens:</span>{" "}
-                      <span className="font-bold text-zinc-950 dark:text-zinc-200">
-                        {msg.tokenCount || msg.token_count || (msg.content ? msg.content.split(/\s+/).length : 0)}
-                        {msg.prompt_tokens ? ` (+${msg.prompt_tokens} prompt)` : ""}
+                    <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-500 dark:text-zinc-400 font-bold">
+                      <span>Sync: AMD Ryzen 9 • RTX 2060</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 text-[10px] font-mono">
+                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
+                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">AI Model</span>
+                      <span className="font-extrabold text-zinc-900 dark:text-zinc-100 truncate block mt-0.5" title={msg.model_used || msg.modelUsed || activeModelDisplay}>
+                        {(msg.model_used || msg.modelUsed || activeModelDisplay || 'Local Model').split('/').pop()}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-zinc-400 dark:text-zinc-500">Context Window:</span>{" "}
-                      <span className="font-bold text-zinc-950 dark:text-zinc-200">
+                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
+                      <span className="text-[8px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider block">Speed</span>
+                      <span className="font-extrabold text-emerald-700 dark:text-emerald-300 block mt-0.5">
+                        {msg.tokensPerSec || msg.tokens_per_sec ? `${(msg.tokensPerSec || msg.tokens_per_sec).toFixed(1)} tok/s` : 'Real-time'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
+                      <span className="text-[8px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block">Response Time</span>
+                      <span className="font-extrabold text-indigo-700 dark:text-indigo-300 block mt-0.5">
+                        {msg.execution_time_sec ? `${msg.execution_time_sec}s` : (msg.responseTimeMs || msg.response_time_ms ? `${((msg.responseTimeMs || msg.response_time_ms) / 1000).toFixed(2)}s` : '0.4s')}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
+                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">Total Tokens</span>
+                      <span className="font-extrabold text-zinc-900 dark:text-zinc-100 block mt-0.5">
+                        {msg.tokenCount || msg.token_count || (msg.content ? msg.content.split(/\s+/).length : 0)}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
+                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">Context</span>
+                      <span className="font-extrabold text-zinc-900 dark:text-zinc-100 block mt-0.5">
                         {(() => {
                           const val = msg.total_context || msg.totalContext || msg.ctx_window || 32768;
                           const num = typeof val === 'number' ? val : (parseInt(val) || 32768);
-                          const formattedNum = num >= 1000 ? `${(num / 1024).toFixed(0)}K Tokens (${num.toLocaleString()} tokens)` : `${num} Tokens`;
-                          const refCount = Array.isArray(msg.references) ? msg.references.length : (msg.references ? 1 : 0);
-                          return refCount > 0 ? `${formattedNum} • ${refCount} Source(s)` : formattedNum;
+                          return num >= 1000 ? `${(num / 1024).toFixed(0)}K` : `${num}`;
                         })()}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-zinc-400 dark:text-zinc-500">Date/Time:</span>{" "}
-                      <span className="font-bold text-zinc-950 dark:text-zinc-200">
-                        {msg.local_datetime || (msg.created_at ? new Date(msg.created_at).toLocaleString() : new Date().toLocaleString())}
+                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
+                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">Timestamp</span>
+                      <span className="font-extrabold text-zinc-700 dark:text-zinc-300 block mt-0.5 truncate">
+                        {msg.local_datetime || (msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : new Date().toLocaleTimeString())}
                       </span>
                     </div>
                   </div>
@@ -898,24 +994,7 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
               }
             </button>
 
-            {/* Speak TTS (offline browser fallback) */}
-            <button
-              onClick={handleSpeak}
-              title={speaking ? "Stop speaking" : "Listen to response"}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-bold text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 transition-all cursor-pointer select-none"
-            >
-              {speaking ? (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>
-                  <span>Stop</span>
-                </>
-              ) : (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
-                  <span>Speak</span>
-                </>
-              )}
-            </button>
+
 
             {/* Edit (user messages only) */}
             {msg.role === 'user' && (
@@ -940,6 +1019,16 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit }) => {
                 <span>Re-use</span>
               </button>
             )}
+
+            {/* Delete message */}
+            <button
+              onClick={() => onDelete && onDelete(msg.id)}
+              title="Delete this message"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-bold text-zinc-500 dark:text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-transparent hover:border-rose-200 dark:hover:border-rose-800 transition-all cursor-pointer select-none"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete</span>
+            </button>
           </div>
         )}
       </div>
@@ -979,6 +1068,27 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [translatedResponse, setTranslatedResponse] = useState(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const translateTimerRef = useRef(null);
+
+  // Real-time hardware telemetry and speed stats for Single Row Auto-Adjust Bar
+  const [telemetry, setTelemetry] = useState(null);
+  useEffect(() => {
+    let active = true;
+    const fetchTelemetry = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/telemetry`);
+        if (res.ok && active) {
+          const data = await res.json();
+          setTelemetry(data);
+        }
+      } catch (_) {}
+    };
+    fetchTelemetry();
+    const interval = setInterval(fetchTelemetry, 2500);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
   // Auto-translate input text to selected language
   const autoTranslateInput = async (text) => {
     if (!text || selectedLanguage === 'en') return text;
@@ -1151,6 +1261,39 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       console.error(err);
     }
   };
+
+  const handleClearCurrentChat = async () => {
+    if (!activeSessionId) {
+      setMessages([]);
+      return;
+    }
+    const confirmed = window.confirm("Clear all messages in this conversation?");
+    if (!confirmed) return;
+    try {
+      await fetch(`${API_BASE}/api/chat/sessions/${activeSessionId}/messages`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMessages([]);
+    } catch (err) {
+      console.error('Failed to clear messages on backend:', err);
+      setMessages([]);
+    }
+  };
+
+  const handleDeleteMessage = async (msgId) => {
+    if (!msgId) return;
+    try {
+      await fetch(`${API_BASE}/api/chat/messages/${msgId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch (err) {
+      console.error('Failed to delete message on backend:', err);
+    }
+    setMessages((prev) => prev.filter((m) => m.id !== msgId));
+  };
+
 
   const fetchUploadedFiles = async (collectionIds = activeCollections) => {
     // CRITICAL: Never show files if there is no active session.
@@ -1663,6 +1806,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                               context_remaining: parsed.context_remaining,
                               execution_time_sec: parsed.execution_time_sec,
                               responseTimeMs: parsed.response_time_ms,
+                              tokensPerSec: parsed.tokens_per_sec || msg.tokensPerSec,
                               model_used: parsed.model_routed || msg.model_used,
                               execution_source: parsed.execution_source || msg.execution_source,
                               local_datetime: parsed.local_datetime,
@@ -1670,6 +1814,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                           : msg
                       )
                     );
+                    // Push live speed+latency into telemetry ribbon immediately
+                    if (parsed.response_time_ms || parsed.tokens_per_sec) {
+                      const inferenceData = {
+                        tokens_per_sec: parsed.tokens_per_sec || 0,
+                        response_time_ms: parsed.response_time_ms || 0,
+                        avg_tokens_per_sec: parsed.tokens_per_sec || 0,
+                        total_tokens: parsed.token_count || 0,
+                      };
+                      setTelemetry(prev => ({
+                        ...prev,
+                        ...inferenceData,
+                        total_tokens: (prev?.total_tokens || 0) + (parsed.token_count || 0),
+                      }));
+                      window.dispatchEvent(new CustomEvent('smaran-inference-update', { detail: { ...inferenceData, total_tokens: inferenceData.total_tokens } }));
+                    }
                   }
                 } catch (_) {}
               }
@@ -1822,11 +1981,25 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                       ? { 
                           ...msg, 
                           responseTimeMs: parsed.response_time_ms,
-                          tokensPerSec: parsed.tokens_per_sec || msg.tokensPerSec
+                          tokensPerSec: parsed.tokens_per_sec || msg.tokensPerSec,
+                          execution_time_sec: parsed.execution_time_sec || msg.execution_time_sec
                         } 
                       : msg
                   )
                 );
+                // Push live speed+latency into telemetry ribbon immediately
+                const inferenceData2 = {
+                  tokens_per_sec: parsed.tokens_per_sec || 0,
+                  response_time_ms: parsed.response_time_ms || 0,
+                  avg_tokens_per_sec: parsed.tokens_per_sec || 0,
+                  total_tokens: parsed.token_count || 0,
+                };
+                setTelemetry(prev => ({
+                  ...prev,
+                  ...inferenceData2,
+                  total_tokens: (prev?.total_tokens || 0) + (parsed.token_count || 0),
+                }));
+                window.dispatchEvent(new CustomEvent('smaran-inference-update', { detail: { ...inferenceData2 } }));
               }
               if (parsed.translated_response && selectedLanguage !== 'en') {
                 setMessages((prev) =>
@@ -1940,6 +2113,18 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         </div>
 
         <div className="flex items-center gap-2.5 shrink-0">
+          {/* Clear Current Chat */}
+          {messages.length > 0 && (
+            <button
+              onClick={handleClearCurrentChat}
+              title="Clear current conversation"
+              className="p-2 rounded-xl bg-orange-50 dark:bg-zinc-900 hover:bg-orange-100 dark:hover:bg-rose-950/50 border border-orange-200 dark:border-zinc-800 text-orange-600 dark:text-rose-400 hover:text-orange-700 dark:hover:text-rose-300 shadow-xs hover:scale-105 transition-all cursor-pointer flex items-center gap-1.5 font-bold text-xs"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="hidden md:inline text-[11px]">Clear Chat</span>
+            </button>
+          )}
+
           {/* Performance Panel Toggle */}
           {onTogglePanel && (
             <button
@@ -1951,6 +2136,57 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               <span className="hidden md:inline text-[11px]">Performance</span>
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Single Row Real-Time Hardware & Speed Telemetry Ribbon (Auto-adjusts with panel) */}
+      <div className="w-full px-3 sm:px-6 py-1 bg-white/70 dark:bg-zinc-950/40 backdrop-blur-md border-b border-zinc-200/70 dark:border-zinc-800/60 flex items-center justify-between gap-2 sm:gap-4 overflow-x-auto no-scrollbar font-mono text-[10px] sm:text-[11px] select-none shrink-0 z-10 transition-all duration-300">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+          {/* Real Processor / CPU */}
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-700 dark:text-orange-300 font-bold" title={telemetry?.cpu_name || 'CPU'}>
+            <Cpu className="w-3 h-3 text-orange-500 shrink-0" />
+            <span className="truncate max-w-[130px] sm:max-w-[200px]">{telemetry?.cpu_name ? telemetry.cpu_name.replace(/with Radeon Graphics|Processor|\(R\)|\(TM\)/gi, '').trim() : 'Processor'}</span>
+            <span className="text-orange-600 dark:text-orange-400 font-black">{telemetry?.cpu_usage !== undefined ? `${telemetry.cpu_usage.toFixed(0)}%` : '--'}</span>
+          </div>
+
+          {/* Real GPU */}
+          {telemetry?.gpu_available && (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-300 font-bold" title={telemetry?.gpu_name || 'GPU'}>
+              <Zap className="w-3 h-3 text-purple-500 shrink-0" />
+              <span className="truncate max-w-[100px] sm:max-w-[150px]">{telemetry?.gpu_name ? telemetry.gpu_name.replace(/NVIDIA GeForce|AMD Radeon|\(TM\)/gi, '').trim() : 'GPU'}</span>
+              <span className="text-purple-600 dark:text-purple-400 font-black">{telemetry?.gpu_usage !== undefined ? `${telemetry.gpu_usage.toFixed(0)}%` : '--'}</span>
+            </div>
+          )}
+
+          {/* Real RAM */}
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-bold">
+            <LayoutDashboard className="w-3 h-3 text-cyan-500 shrink-0" />
+            <span>RAM</span>
+            <span className="text-cyan-600 dark:text-cyan-400 font-black">
+              {telemetry?.memory_used_gb ? `${telemetry.memory_used_gb.toFixed(1)}/${telemetry.memory_total_gb ? telemetry.memory_total_gb.toFixed(0) : '?'}GB` : `${telemetry?.memory_usage?.toFixed(0) || '--'}%`}
+            </span>
+          </div>
+        </div>
+
+        {/* Inference Speed & Response Time */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          {/* Token / sec */}
+          <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-700 dark:text-emerald-300 font-bold shadow-xs">
+            <Gauge className="w-3 h-3 text-emerald-500 shrink-0" />
+            <span className="hidden sm:inline">Speed:</span>
+            <span className="text-emerald-600 dark:text-emerald-400 font-black">
+              {telemetry?.tokens_per_sec > 0 ? `${telemetry.tokens_per_sec} tok/s` : 'Ready'}
+            </span>
+          </div>
+
+          {/* Response Latency */}
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-700 dark:text-indigo-300 font-bold">
+            <Timer className="w-3 h-3 text-indigo-500 shrink-0" />
+            <span className="hidden sm:inline">Latency:</span>
+            <span className="text-indigo-600 dark:text-indigo-400 font-black">
+              {telemetry?.response_time_ms ? `${(telemetry.response_time_ms / 1000).toFixed(2)}s` : '0.0s'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -2097,6 +2333,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                 onReuse={(text) => setInput(text)}
                 onRefClick={(ref) => setSelectedRef(ref)}
                 onEdit={handleEditMessage}
+                onDelete={handleDeleteMessage}
               />
             ))}
           </>

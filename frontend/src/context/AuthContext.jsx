@@ -1,139 +1,159 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { parseJsonResponse } from '../utils/api';
-
-const AuthContext = createContext();
-
-// Use a relative API base so local dev is proxied by Vite and production uses the same origin.
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [networkError, setNetworkError] = useState(false);
+const DEVICE_ID_KEY = 'smaran_ai_device_id';
+const DEVICE_FP_KEY = 'smaran_ai_device_fingerprint';
 
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        // Quick connection check to see if the server is offline/down
-        const pingRes = await fetch(`${API_BASE}/api/test/ping`);
-        if (!pingRes.ok) {
-          throw new Error('Ping failed');
-        }
-      } catch (err) {
-        console.error('Server is unreachable', err);
-        setNetworkError(true);
-        setLoading(false);
-        return;
-      }
-
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const response = await fetch(`${API_BASE}/api/auth/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (response.ok) {
-          const userData = await parseJsonResponse(response);
-          setUser(userData);
-        } else if (response.status === 401 || response.status === 403) {
-          // Token expired or invalid
-          logout();
-        } else {
-          console.warn(`Server returned status ${response.status}. Keeping session.`);
-        }
-      } catch (err) {
-        console.error('Failed to verify token', err);
-        // Don't log out if it's a network disconnect error, just keep state
-      } finally {
-        setLoading(false);
-      }
-    };
-    initAuth();
-  }, [token]);
-
-  const login = async (username, password) => {
-    setError(null);
-    try {
-      const response = await fetch(`${API_BASE}/api/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await parseJsonResponse(response);
-      if (!response.ok) {
-        throw new Error(data?.detail || 'Login failed');
-      }
-      localStorage.setItem('token', data.access_token);
-      localStorage.setItem('username', data.username);
-      localStorage.setItem('role', data.role);
-      setToken(data.access_token);
-      
-      // Fetch details
-      const userRes = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: {
-          Authorization: `Bearer ${data.access_token}`,
-        },
-      });
-      if (userRes.ok) {
-        const userData = await parseJsonResponse(userRes);
-        setUser(userData);
-        return userData;
-      }
-      throw new Error('Could not retrieve user details');
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    }
-  };
-
-  const register = async (username, password) => {
-    setError(null);
-    try {
-      const response = await fetch(`${API_BASE}/api/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await parseJsonResponse(response);
-      if (!response.ok) {
-        throw new Error(data?.detail || 'Registration failed');
-      }
-      return data;
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    }
-  };
-
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    localStorage.removeItem('role');
-    setToken(null);
-    setUser(null);
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, token, loading, error, login, register, logout, setUser, networkError }}>
-      {children}
-    </AuthContext.Provider>
-  );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+export function getDeviceFingerprint() {
+  if (typeof window === 'undefined') return 'server';
+  let fp = localStorage.getItem(DEVICE_FP_KEY);
+  if (!fp) {
+    const components = [
+      navigator.userAgent,
+      navigator.language,
+      screen.width + 'x' + screen.height,
+      new Date().getTimezoneOffset(),
+      navigator.hardwareConcurrency || 4,
+      navigator.deviceMemory || 'unknown',
+    ];
+    fp = btoa(components.join('|')).slice(0, 64);
+    localStorage.setItem(DEVICE_FP_KEY, fp);
   }
-  return context;
-};
+  return fp;
+}
+
+export function getDeviceId() {
+  if (typeof window === 'undefined') return 'server';
+  let id = localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id = 'device_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+    localStorage.setItem(DEVICE_ID_KEY, id);
+  }
+  return id;
+}
+
+export function clearDeviceSession() {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(DEVICE_ID_KEY);
+    localStorage.removeItem(DEVICE_FP_KEY);
+  }
+}
+
+export async function ensureDeviceUser() {
+  const deviceId = getDeviceId();
+  const deviceFingerprint = getDeviceFingerprint();
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/device-login`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json', 
+        'X-Device-ID': deviceId, 
+        'X-Device-Fingerprint': deviceFingerprint 
+      },
+      credentials: 'include',
+      body: JSON.stringify({ device_id: deviceId, device_fingerprint: deviceFingerprint }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data;
+    }
+  } catch (e) {
+    console.error('Device login failed:', e);
+  }
+  return { device_id: deviceId };
+}
+
+function formatAuthError(data, defaultMsg) {
+  if (!data) return defaultMsg;
+  const detail = data.detail || data.message;
+  if (!detail) return defaultMsg;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(d => d.msg || d.message || JSON.stringify(d)).join(', ');
+  }
+  if (typeof detail === 'object') {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+  return String(detail);
+}
+
+// Cookie-based & API auth helpers
+export async function registerUser(email, password, username) {
+  const res = await fetch(`${API_BASE}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ email, password, username }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(formatAuthError(data, 'Registration failed'));
+  }
+  localStorage.removeItem('sm_auth_logged_out');
+  return data;
+}
+
+export async function loginUser(email, password, rememberMe) {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ email, password, remember_me: rememberMe }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(formatAuthError(data, 'Invalid email or password'));
+  }
+  localStorage.removeItem('sm_auth_logged_out');
+  return data;
+}
+
+export async function logoutUser() {
+  localStorage.setItem('sm_auth_logged_out', 'true');
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'X-Device-ID': getDeviceId(),
+        'X-Device-Fingerprint': getDeviceFingerprint(),
+      }
+    });
+    return await res.json();
+  } catch (e) {
+    console.error('Logout error:', e);
+    return { message: 'Logged out locally' };
+  }
+}
+
+export async function getCurrentUser() {
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/me`, {
+      credentials: 'include',
+      headers: {
+        'X-Device-ID': getDeviceId(),
+        'X-Device-Fingerprint': getDeviceFingerprint(),
+      }
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('getCurrentUser failed:', e);
+  }
+  return null;
+}
+
+export async function fetchWithAuth(url, options = {}) {
+  const deviceId = getDeviceId();
+  const deviceFingerprint = getDeviceFingerprint();
+  const headers = {
+    'X-Device-ID': deviceId,
+    'X-Device-Fingerprint': deviceFingerprint,
+    ...(options.headers || {}),
+  };
+  return fetch(url, {
+    ...options,
+    headers,
+    credentials: 'include',
+  });
+}

@@ -2,28 +2,50 @@ import React, { useEffect, useState } from "react";
 import {
   X,
   Cpu,
-  User,
-  Shield,
-  Info,
-  Zap,
   Monitor,
-  HardDrive,
-  Gauge,
   Sparkles,
-  Globe,
-  ExternalLink,
-  RefreshCw,
+  Smartphone,
+  Lock,
 } from "lucide-react";
 import { API_BASE } from "../context/AuthContext";
+
+const finite = (value) => typeof value === "number" && Number.isFinite(value);
+const positive = (value) => finite(value) && value > 0;
+const cleanText = (value) => {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  return text && !/^(n\/?a|unknown|not detected|none|null)$/i.test(text) ? text : "";
+};
+const settingsTelemetryUrl = () => {
+  const base = new URL(API_BASE || window.location.origin, window.location.origin);
+  return `${base.protocol === "https:" ? "wss:" : "ws:"}//${base.host}/ws/telemetry`;
+};
+const settingsBrowserCapabilities = async () => {
+  let storage = null;
+  try {
+    storage = (await navigator.storage?.estimate?.()) || null;
+  } catch {
+    storage = null;
+  }
+  return {
+    source: "browser",
+    logical_processors: positive(navigator.hardwareConcurrency)
+      ? navigator.hardwareConcurrency
+      : null,
+    memory_class_gb: positive(navigator.deviceMemory)
+      ? navigator.deviceMemory
+      : null,
+    storage_quota_gb: positive(storage?.quota)
+      ? storage.quota / 1024 ** 3
+      : null,
+  };
+};
 
 const SettingsModal = ({
   isOpen,
   onClose,
-  user,
   onModelChange,
   selectedModel,
-  turboMode,
-  onTurboModeChange,
   sidebarPosition = "left",
   onSidebarPositionChange,
   performancePosition = "right",
@@ -36,14 +58,12 @@ const SettingsModal = ({
     display_name: "",
   });
   const [deviceSpecs, setDeviceSpecs] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [telemetryState, setTelemetryState] = useState("connecting");
   // Real-time download status from /api/model/status (separate from /api/system/models)
   const [downloadStatus, setDownloadStatus] = useState(null);
   const [appearance, setAppearance] = useState(
     () => localStorage.getItem("sm_appearance") || "system",
   );
-  const [updateStatus, setUpdateStatus] = useState(null);
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [autoCloudFallback, setAutoCloudFallback] = useState(
     () => localStorage.getItem("sm_cloud_auto_fallback") !== "false",
   );
@@ -58,28 +78,13 @@ const SettingsModal = ({
     document.documentElement.classList.toggle("dark", Boolean(dark));
   };
 
-  const checkForUpdates = async () => {
-    setCheckingUpdate(true);
-    setUpdateStatus(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/app/update`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-      });
-      setUpdateStatus(await res.json());
-    } catch (_) {
-      setUpdateStatus({ error: "Could not contact the update service." });
-    } finally {
-      setCheckingUpdate(false);
-    }
-  };
-
   useEffect(() => {
     if (!isOpen) return;
 
     const fetchModels = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/system/models`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+          headers: {  },
         });
         if (res.ok) {
           const data = await res.json();
@@ -92,51 +97,103 @@ const SettingsModal = ({
       }
     };
 
-    const fetchSpecs = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/system/device-specs`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-        });
-        if (res.ok) {
-          const specs = await res.json();
-          setDeviceSpecs(specs);
-        }
-      } catch (e) {
-        console.error("Failed to fetch specs", e);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     // Also fetch real-time download status for accuracy
     const fetchDownloadStatus = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/model/status`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+          headers: {  },
         });
         if (res.ok) {
           const data = await res.json();
           setDownloadStatus(data);
         }
-      } catch (e) {}
+      } catch {}
     };
 
     fetchModels();
-    fetchSpecs();
     fetchDownloadStatus();
 
-    // Live sync device specs (load metrics) every 4 seconds while modal is open
     const interval = setInterval(() => {
-      fetchSpecs();
       fetchDownloadStatus();
       fetchModels();
     }, 4000);
     return () => clearInterval(interval);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    let disposed = false;
+    let socket = null;
+    let retryTimer = null;
+    let fallbackTimer = null;
+    let receivedTelemetry = false;
+
+    const fetchInitialTelemetry = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/telemetry`);
+        if (res.ok) {
+          const payload = await res.json();
+          if (!disposed && payload && typeof payload === "object") {
+            receivedTelemetry = true;
+            setDeviceSpecs({ ...payload, source: "telemetry" });
+            setTelemetryState("telemetry");
+          }
+        }
+      } catch {
+        // ignore and wait for WebSocket or browser fallback
+      }
+    };
+    const showBrowserFallback = async () => {
+      const capabilities = await settingsBrowserCapabilities();
+      if (disposed || receivedTelemetry) return;
+      setDeviceSpecs(capabilities);
+      setTelemetryState("browser");
+    };
+    const connect = () => {
+      if (disposed) return;
+      setTelemetryState((current) =>
+        current === "telemetry" ? "reconnecting" : "connecting",
+      );
+      try {
+        socket = new WebSocket(settingsTelemetryUrl());
+      } catch {
+        showBrowserFallback();
+        return;
+      }
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (!payload || typeof payload !== "object") return;
+          receivedTelemetry = true;
+          setDeviceSpecs({ ...payload, source: "telemetry" });
+          setTelemetryState("telemetry");
+        } catch {
+          // Ignore malformed telemetry rather than displaying guessed values.
+        }
+      };
+      socket.onclose = () => {
+        if (disposed) return;
+        setTelemetryState(receivedTelemetry ? "reconnecting" : "browser");
+        if (!receivedTelemetry) showBrowserFallback();
+        retryTimer = window.setTimeout(connect, 3000);
+      };
+      socket.onerror = () => socket?.close();
+    };
+
+    fetchInitialTelemetry();
+    fallbackTimer = window.setTimeout(showBrowserFallback, 2500);
+    connect();
+    return () => {
+      disposed = true;
+      window.clearTimeout(fallbackTimer);
+      window.clearTimeout(retryTimer);
+      socket?.close();
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
-  const defaultModelList = ["auto", "Qwen/Qwen3-4B-AWQ"];
+  const defaultModelList = ["auto"];
   const rawSelectable = Array.from(
     new Set([
       ...defaultModelList,
@@ -145,13 +202,13 @@ const SettingsModal = ({
     ]),
   ).filter((m) => !m.startsWith("nomic-embed-text"));
 
-  // Include auto, Qwen3-4B-AWQ, plus any model that is installed, downloaded, or currently downloading
+  // Only expose models that the local service actually reports.
   let savedCloudSelection = null;
   try {
     savedCloudSelection = JSON.parse(
       localStorage.getItem("sm_cloud_selected_models") || "null",
     );
-  } catch (_) {}
+  } catch {}
   const cloudModelValue =
     savedCloudSelection?.provider && savedCloudSelection?.model
       ? `cloud:${savedCloudSelection.provider}:${savedCloudSelection.model}`
@@ -162,7 +219,7 @@ const SettingsModal = ({
     cachedCloudModels = JSON.parse(
       localStorage.getItem("sm_cloud_provider_models") || "{}",
     );
-  } catch (_) {}
+  } catch {}
   const cloudOptions = Object.entries(cachedCloudModels).flatMap(
     ([provider, modelList]) =>
       (Array.isArray(modelList) ? modelList : [])
@@ -190,7 +247,7 @@ const SettingsModal = ({
       isServedReady ||
       (models.installed_models || []).includes(m) ||
       (models.downloaded_models || []).includes(m);
-    return isReady || isActiveDownload || m === "Qwen/Qwen3-4B-AWQ";
+    return isReady || isActiveDownload;
   });
 
   return (
@@ -212,28 +269,6 @@ const SettingsModal = ({
 
         {/* Content */}
         <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
-          {/* User Profile card */}
-          <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-900 rounded-xl p-4 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 font-black uppercase text-sm">
-                {user?.username?.charAt(0) || "U"}
-              </div>
-              <div>
-                <div className="font-black text-zinc-950 dark:text-white text-sm">
-                  {user?.username}
-                </div>
-                <div className="text-xs text-zinc-600 dark:text-zinc-500 font-semibold flex items-center gap-1.5 mt-0.5">
-                  <User className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>ID: {user?.id}</span>
-                </div>
-              </div>
-            </div>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-              <Shield className="w-3 h-3" />
-              {user?.role === "admin" ? "Admin" : "Staff"}
-            </span>
-          </div>
-
           {/* Model Selection */}
           <div className="space-y-3">
             <label className="block text-xs font-black text-zinc-950 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
@@ -244,12 +279,12 @@ const SettingsModal = ({
               <select
                 value={selectedModel}
                 onChange={(e) => onModelChange?.(e.target.value)}
-                className="w-full rounded-xl border-2 border-indigo-500/50 bg-zinc-950 px-3 py-3 text-sm font-black text-white outline-none"
+                className="w-full rounded-xl border-2 border-indigo-500/50 bg-white dark:bg-zinc-950 px-3 py-3 text-sm font-black text-zinc-900 dark:text-white outline-none"
               >
                 <optgroup label="Local models">
                   {selectableModels.map((m) => (
                     <option key={m} value={m}>
-                      {m === "auto" ? "Local · Auto Router" : m}
+                      {m === "auto" ? "Local - Auto Router" : m}
                     </option>
                   ))}
                 </optgroup>
@@ -268,7 +303,7 @@ const SettingsModal = ({
                   ) && (
                     <optgroup label="Cloud API model">
                       <option value={cloudModelValue}>
-                        Cloud API · {savedCloudSelection.provider} ·{" "}
+                        Cloud API - {savedCloudSelection.provider} -{" "}
                         {savedCloudSelection.model}
                       </option>
                     </optgroup>
@@ -366,100 +401,7 @@ const SettingsModal = ({
               </label>
             </div>
           </div>
-          <div className="space-y-3">
-            <label className="block text-xs font-black text-zinc-950 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
-              <RefreshCw className="w-3.5 h-3.5 text-indigo-500" /> App Updates
-            </label>
-            <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-4 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-black text-zinc-900 dark:text-white">
-                    Installed: 1.0.0
-                  </p>
-                  <p className="text-[10px] text-zinc-500">
-                    Checks only the developer-configured release source.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={checkForUpdates}
-                  disabled={checkingUpdate}
-                  className="rounded-xl bg-indigo-600 px-3 py-2 text-[11px] font-black text-white hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  {checkingUpdate ? "Checking…" : "Check for updates"}
-                </button>
-              </div>
-              {updateStatus && (
-                <p
-                  className={`text-[10px] font-semibold ${updateStatus.error ? "text-rose-400" : "text-zinc-400"}`}
-                >
-                  {updateStatus.error ||
-                    updateStatus.message ||
-                    (updateStatus.update_available
-                      ? `Version ${updateStatus.latest_version} is available.`
-                      : `No newer verified version found. Current: ${updateStatus.current_version}`)}
-                </p>
-              )}
-            </div>
-          </div>
-          {/* Device Specifications */}
-          {deviceSpecs && (
-            <div className="space-y-3">
-              <label className="block text-xs font-black text-zinc-950 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
-                <Monitor className="w-3.5 h-3.5 text-indigo-500" />
-                Device Specifications
-              </label>
-              <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-900 rounded-xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
-                    GPU
-                  </span>
-                  <span className="text-xs font-black text-zinc-950 dark:text-white">
-                    {deviceSpecs.gpu_name || "N/A"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
-                    VRAM
-                  </span>
-                  <span className="text-xs font-black text-zinc-950 dark:text-white">
-                    {deviceSpecs.gpu_vram_total
-                      ? deviceSpecs.gpu_vram_total + " GB"
-                      : "N/A"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
-                    RAM
-                  </span>
-                  <span className="text-xs font-black text-zinc-950 dark:text-white">
-                    {deviceSpecs.memory_total_gb
-                      ? deviceSpecs.memory_total_gb + " GB"
-                      : "N/A"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
-                    CPU
-                  </span>
-                  <span className="text-xs font-black text-zinc-950 dark:text-white">
-                    {deviceSpecs.cpu_name || "N/A"} (
-                    {deviceSpecs.cpu_cores || "N/A"} cores)
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
-                    Current GPU Usage
-                  </span>
-                  <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">
-                    {deviceSpecs.gpu_usage
-                      ? deviceSpecs.gpu_usage.toFixed(0) + "%"
-                      : "N/A"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
+          <DeviceSummary specs={deviceSpecs} state={telemetryState} />
         </div>
 
         {/* Footer */}
@@ -471,6 +413,86 @@ const SettingsModal = ({
             Close Settings
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+const SpecRow = ({ label, value }) => (
+  <div className="flex items-start justify-between gap-4">
+    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+      {label}
+    </span>
+    <span className="text-right text-xs font-black text-zinc-950 dark:text-white break-words">
+      {value}
+    </span>
+  </div>
+);
+
+const DeviceSummary = ({ specs, state }) => {
+  const isTelemetry = specs?.source === "telemetry";
+  const status = state === "telemetry"
+    ? "Live local telemetry"
+    : state === "reconnecting"
+      ? "Reconnecting to local telemetry"
+      : state === "browser"
+        ? "Browser capabilities only"
+        : "Connecting to local telemetry";
+
+  if (!specs) return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-200">
+        <Monitor className="w-3.5 h-3.5 text-indigo-500" /> Device information
+      </div>
+      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-500 dark:border-zinc-900 dark:bg-zinc-950">
+        {status}
+      </div>
+    </div>
+  );
+
+  if (!isTelemetry) return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-200">
+        <Monitor className="w-3.5 h-3.5 text-indigo-500" /> Browser capabilities
+      </div>
+      <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-[10px] leading-relaxed text-amber-800 dark:text-amber-200">
+        Live hardware telemetry is unavailable. These browser hints are not Task Manager measurements.
+      </div>
+      <div className="space-y-2 rounded-xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-900 dark:bg-zinc-950">
+        <SpecRow label="Logical processors" value={positive(specs.logical_processors) ? specs.logical_processors + " reported by browser" : "Unavailable"} />
+        <SpecRow label="Memory class" value={positive(specs.memory_class_gb) ? "Approximately " + specs.memory_class_gb + " GB (not installed RAM)" : "Unavailable"} />
+        <SpecRow label="Browser storage quota" value={positive(specs.storage_quota_gb) ? specs.storage_quota_gb.toFixed(1) + " GB" : "Unavailable"} />
+        <SpecRow label="GPU / VRAM / live usage" value="Unavailable to the browser" />
+      </div>
+    </div>
+  );
+
+  const gpuName = specs.gpu_available ? cleanText(specs.gpu_name) : "";
+  const cpuName = cleanText(specs.cpu_name);
+  const cpuDetails = [
+    cpuName || "Processor name unavailable",
+    positive(specs.cpu_cores) ? specs.cpu_cores + " physical cores" : "physical cores unavailable",
+    positive(specs.cpu_threads) ? specs.cpu_threads + " logical threads" : "logical threads unavailable",
+  ].join(" / ");
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-200">
+          <Monitor className="w-3.5 h-3.5 text-indigo-500" /> Local runtime telemetry
+        </div>
+        <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">{status}</span>
+      </div>
+      <p className="text-[10px] leading-relaxed text-zinc-500">
+        Values are reported by the local SMARAN service. Host-level readings appear when the host telemetry bridge or GPU runtime is available.
+      </p>
+      <div className="space-y-2 rounded-xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-900 dark:bg-zinc-950">
+        <SpecRow label="GPU" value={gpuName || "Unavailable"} />
+        <SpecRow label="VRAM" value={gpuName && positive(specs.gpu_vram_total) ? specs.gpu_vram_total.toFixed(1) + " GB" : "Unavailable"} />
+        <SpecRow label="GPU utilization" value={gpuName && finite(specs.gpu_usage) ? specs.gpu_usage.toFixed(0) + "%" : "Unavailable"} />
+        <SpecRow label="RAM" value={positive(specs.memory_total_gb) ? specs.memory_total_gb.toFixed(1) + " GB" : "Unavailable"} />
+        <SpecRow label="Memory utilization" value={finite(specs.memory_usage) ? specs.memory_usage.toFixed(0) + "%" : "Unavailable"} />
+        <SpecRow label="CPU" value={cpuDetails} />
+        <SpecRow label="CPU utilization" value={finite(specs.cpu_usage) ? specs.cpu_usage.toFixed(0) + "%" : "Unavailable"} />
       </div>
     </div>
   );

@@ -31,11 +31,6 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = f"sqlite:///{os.path.join(os.getenv('DATA_DIR', './data'), 'sqlite.db')}"
 
-    # JWT Security
-    JWT_SECRET: str = os.getenv("JWT_SECRET", "super-secret-key-change-in-production-12345")
-    JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
-
     # ── Inference Engine (auto-detected by bootstrapper.py) ──────────────────
     # "vllm"  → Uses vLLM OpenAI-compatible API (preferred, faster)
     # "ollama" → Uses Ollama API (fallback for CPU / low VRAM)

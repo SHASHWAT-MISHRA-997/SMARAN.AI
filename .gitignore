@@ -1,36 +1,61 @@
-# Security & Environment
+# Security & Secrets Protection
 .env
 .env.local
 *.env
+litellm_config.yaml
+*.pem
+*.key
+*.secret
 
-# Dependencies
+# Runtime Data, Uploads, DBs & Embeddings
+backend/data/
+data/
+*.db
+*.sqlite
+*.sqlite3
+chroma/
+uploads/
+
+# Dependencies & Build Artefacts
 frontend/node_modules/
 frontend/dist/
 backend/venv/
 .venv/
 node_modules/
-
-# Release Zip Archives & Large Binaries
-*.zip
-
-# Runtime data & build caches
-backend/data/
-data/
-build/
 dist/
+build/
+*.egg-info/
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 
-# OS files
+# Packaged Binaries, Installers & Large Archives
+*.zip
+*.tar
+*.gz
+*.7z
+*.rar
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.onnx
+*.exe
+SMARAN_AI.spec
+
+# OS & Workspace Files
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
-
-# IDE
 .vscode/
 .idea/
 
-# Logs
+# Logs & System Test Traces
 *.log
+.tempmediaStorage/
+.user_uploaded/
+.system_generated/
+test-results/
+playwright-report/

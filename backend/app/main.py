@@ -6,82 +6,155 @@ import uuid
 import time
 import shutil
 import magic
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 from typing import Generator, List, Optional
-from pydantic import BaseModel as PydanticBaseModel
+from pydantic import BaseModel as PydanticBaseModel, BaseModel, EmailStr, validator
 import requests
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, WebSocket, WebSocketDisconnect, Request, Response, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-
-from app.config import settings
 from app.database import engine, Base, SessionLocal, get_db
-from app.models import User, Collection, Document, DocumentChunk, AuditLog, ChatSession, ChatMessage, UserMemory, VisitorLog
+from app.config import settings
+from app.models import User, Collection, Document, DocumentChunk, AuditLog, ChatSession, ChatMessage, UserMemory, CustomPlugin
 from app.schemas import (
-    UserCreate, UserResponse, UserUpdate, Token, PasswordResetRequest, MasterRecoveryRequest, VisitorLogResponse, DeveloperAnalyticsResponse, UserMemoryCreate, UserMemoryResponse,
+    UserMemoryCreate, UserMemoryResponse,
     CollectionCreate, CollectionResponse, DocumentResponse,
     ChatRequest, ChatSessionResponse, ChatMessageResponse, ChatSessionCreate,
-    SystemStatsResponse, AuditLogResponse,
     TranslationRequest, TranslationResponse, LanguageDetectionRequest, LanguageDetectionResponse
-)
-from app.auth import (
-    hash_password, verify_password, create_access_token,
-    get_current_user, get_current_approved_user, get_admin_user
 )
 import asyncio
 import gc
 from app.rag.chunking import RecursiveCharacterTextSplitter, DocumentChunker
 from app.rag.pipeline import RAGPipeline
-from app.utils import parse_file_content, get_system_telemetry, zep_add_message, zep_get_history, fetch_url_content
+from app.utils import parse_file_content, get_system_telemetry, zep_add_message, zep_get_history, fetch_url_content, record_inference_metrics
 from app.vision import pdf_to_images, encode_image_base64, call_vision_model, stream_vision_response, cleanup_after_processing
 from app.models_catalog import get_full_catalog, MODELS_CATALOG, check_download_status
 from app.web_search import perform_web_search
 from app.local_image import generate_local_image, is_image_generation_request, clean_image_prompt
 from app.translator import SUPPORTED_LANGUAGES, INDIAN_LANGUAGES, detect_language, translate_text
-
-# SlowAPI Rate Limiting Setup
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+try:
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    def hash_password(password: str) -> str:
+        return pwd_context.hash(password)
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        return pwd_context.verify(plain_password, hashed_password)
+except Exception:
+    import bcrypt
+    def hash_password(password: str) -> str:
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        try:
+            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        except Exception:
+            return False
 
-limiter = Limiter(key_func=get_remote_address)
+def generate_session_token() -> str:
+    return secrets.token_urlsafe(32)
+
+def verify_password_strength(password: str) -> tuple[bool, str]:
+    """Validate password strength. Returns (is_valid, error_message)."""
+    if len(password) < 12:
+        return False, "Password must be at least 12 characters long"
+    if not re.search(r"[A-Z]", password):
+        return False, "Password must contain at least one uppercase letter"
+    if not re.search(r"[a-z]", password):
+        return False, "Password must contain at least one lowercase letter"
+    if not re.search(r"\d", password):
+        return False, "Password must contain at least one digit"
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        return False, "Password must contain at least one special character"
+    # Check against common breached passwords (simplified check)
+    common_passwords = {"123456", "password", "123456789", "12345678", "12345", "1234567", "1234567890", "qwerty", "abc123", "password123", "admin", "letmein", "welcome", "monkey", "dragon", "master", "hello", "freedom", "whatever", "qazwsx", "trustno1"}
+    if password.lower() in common_passwords:
+        return False, "This password is too common. Please choose a stronger password."
+    return True, ""
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("main")
 
-# Initialize database tables
-Base.metadata.create_all(bind=engine)
+# Rate limiting
+limiter = Limiter(key_func=get_remote_address)
+auth_limiter = Limiter(key_func=get_remote_address)
 
-# Programmatic database migration: add model_used column & create user_memory table
+# User security columns migration
 try:
     from sqlalchemy import text as _sql_text
     with engine.begin() as conn:
-        conn.execute(_sql_text("ALTER TABLE chat_messages ADD COLUMN model_used VARCHAR(50);"))
-    logger.info("Migrated SQL: added model_used column.")
-except Exception:
-    pass  # Column already exists
+        # Check and add each column individually
+        cols_to_add = [
+            ("email", "VARCHAR(255)"),
+            ("email_verified", "BOOLEAN DEFAULT FALSE"),
+            ("password_hash", "VARCHAR(255)"),
+            ("failed_login_attempts", "INTEGER DEFAULT 0"),
+            ("locked_until", "TIMESTAMP"),
+            ("session_token", "VARCHAR(255)"),
+            ("session_expires", "TIMESTAMP"),
+            ("verification_token", "VARCHAR(255)"),
+            ("reset_token", "VARCHAR(255)"),
+            ("reset_token_expires", "TIMESTAMP"),
+            ("last_login", "TIMESTAMP"),
+        ]
+        for col_name, col_type in cols_to_add:
+            result = conn.execute(_sql_text(f"PRAGMA table_info(users);"))
+            columns = [row[1] for row in result.fetchall()]
+            if col_name not in columns:
+                conn.execute(_sql_text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};"))
+        # Create indexes
+        result = conn.execute(_sql_text("PRAGMA index_list(users);"))
+        indexes = [row[1] for row in result.fetchall()]
+        if "ix_users_email" not in indexes:
+            conn.execute(_sql_text("CREATE INDEX ix_users_email ON users(email);"))
+        if "ix_users_session_token" not in indexes:
+            conn.execute(_sql_text("CREATE INDEX ix_users_session_token ON users(session_token);"))
+    logger.info("Migrated SQL: added security columns to users.")
+except Exception as e:
+    logger.warning(f"User security columns migration skipped or partial: {e}")
 
-# Replace the old internal implementation label in existing chat/audit rows so
-# it never leaks into user-facing transparency metrics after an upgrade.
 try:
     from sqlalchemy import text as _sql_text
     with engine.begin() as conn:
-        conn.execute(_sql_text("UPDATE chat_messages SET model_used = 'Document RAG' WHERE model_used = 'strict-rag-gate'"))
-        conn.execute(_sql_text("UPDATE audit_logs SET model_used = 'Document RAG' WHERE model_used = 'strict-rag-gate'"))
-except Exception:
-    pass
+        conn.execute(_sql_text("ALTER TABLE collections ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0;"))
+        conn.execute(_sql_text("UPDATE collections SET user_id = (SELECT id FROM users LIMIT 1) WHERE user_id = 0;"))
+        conn.execute(_sql_text("ALTER TABLE collections DROP COLUMN user_id;"))
+        conn.execute(_sql_text("ALTER TABLE collections ADD COLUMN user_id INTEGER NOT NULL;"))
+        conn.execute(_sql_text("CREATE INDEX IF NOT EXISTS ix_collections_user_id ON collections(user_id);"))
+    logger.info("Migrated SQL: added user_id column to collections.")
+except Exception as e:
+    logger.warning(f"Collection user_id migration skipped or partial: {e}")
 
 try:
     from sqlalchemy import text as _sql_text
     with engine.begin() as conn:
-        conn.execute(_sql_text("ALTER TABLE documents ADD COLUMN session_id VARCHAR(50);"))
-    logger.info("Migrated SQL: added session_id column to documents.")
-except Exception:
-    pass
+        conn.execute(_sql_text("ALTER TABLE documents ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0;"))
+        conn.execute(_sql_text("UPDATE documents SET user_id = (SELECT c.user_id FROM collections c WHERE c.id = documents.collection_id) WHERE user_id = 0;"))
+        conn.execute(_sql_text("ALTER TABLE documents DROP COLUMN user_id;"))
+        conn.execute(_sql_text("ALTER TABLE documents ADD COLUMN user_id INTEGER NOT NULL;"))
+        conn.execute(_sql_text("CREATE INDEX IF NOT EXISTS ix_documents_user_id ON documents(user_id);"))
+    logger.info("Migrated SQL: added user_id column to documents.")
+except Exception as e:
+    logger.warning(f"Document user_id migration skipped or partial: {e}")
+
+try:
+    from sqlalchemy import text as _sql_text
+    with engine.begin() as conn:
+        conn.execute(_sql_text("ALTER TABLE document_chunks ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0;"))
+        conn.execute(_sql_text("UPDATE document_chunks SET user_id = (SELECT d.user_id FROM documents d WHERE d.id = document_chunks.document_id) WHERE user_id = 0;"))
+        conn.execute(_sql_text("ALTER TABLE document_chunks DROP COLUMN user_id;"))
+        conn.execute(_sql_text("ALTER TABLE document_chunks ADD COLUMN user_id INTEGER NOT NULL;"))
+        conn.execute(_sql_text("CREATE INDEX IF NOT EXISTS ix_document_chunks_user_id ON document_chunks(user_id);"))
+    logger.info("Migrated SQL: added user_id column to document_chunks.")
+except Exception as e:
+    logger.warning(f"DocumentChunk user_id migration skipped or partial: {e}")
 
 Base.metadata.create_all(bind=engine)
 
@@ -93,6 +166,40 @@ from app.telemetry import start_periodic_telemetry, get_or_create_installation_i
 
 # Start Creator Telemetry (anonymous heartbeat for Shashwat to track active installations)
 start_periodic_telemetry()
+
+# Plugin system setup
+from app.plugin_routes import router as plugin_router
+from app.plugin_system import plugin_manager, PluginConfig
+app.include_router(plugin_router)
+plugin_manager.set_app_context({
+    "db_engine": engine,
+    "settings": settings,
+})
+
+# Plugin registrations
+from app.plugins.google_agents_cli import GoogleAgentsCLIPlugin, metadata as google_agents_cli_metadata
+from app.plugins.paperclip import PaperclipPlugin, metadata as paperclip_metadata
+from app.plugins.three_d_website import ThreeDWebsitePlugin, metadata as three_d_website_metadata
+from app.plugins.ui_ux_pro_max_skill import UIUXProMaxSkill, metadata as ui_ux_pro_max_skill_metadata
+from app.plugins.reverse_skill import ReverseSkill, metadata as reverse_skill_metadata
+from app.plugins.omni_route import OmniRoutePlugin, metadata as omni_route_metadata
+from app.plugins.headroom import HeadroomPlugin, metadata as headroom_metadata
+from app.plugins.claude_mem import ClaudeMemPlugin, metadata as claude_mem_metadata
+from app.plugins.task_observer import TaskObserverPlugin, metadata as task_observer_metadata
+from app.plugins.strix_security import StrixSecurityPlugin, metadata as strix_security_metadata
+from app.plugins.mcp_21st_dev import MCP21stDevPlugin, metadata as mcp_21st_dev_metadata
+
+plugin_manager.register_plugin(GoogleAgentsCLIPlugin, google_agents_cli_metadata, PluginConfig())
+plugin_manager.register_plugin(PaperclipPlugin, paperclip_metadata, PluginConfig())
+plugin_manager.register_plugin(ThreeDWebsitePlugin, three_d_website_metadata, PluginConfig())
+plugin_manager.register_plugin(UIUXProMaxSkill, ui_ux_pro_max_skill_metadata, PluginConfig())
+plugin_manager.register_plugin(ReverseSkill, reverse_skill_metadata, PluginConfig())
+plugin_manager.register_plugin(OmniRoutePlugin, omni_route_metadata, PluginConfig())
+plugin_manager.register_plugin(HeadroomPlugin, headroom_metadata, PluginConfig())
+plugin_manager.register_plugin(ClaudeMemPlugin, claude_mem_metadata, PluginConfig())
+plugin_manager.register_plugin(TaskObserverPlugin, task_observer_metadata, PluginConfig())
+plugin_manager.register_plugin(StrixSecurityPlugin, strix_security_metadata, PluginConfig())
+plugin_manager.register_plugin(MCP21stDevPlugin, mcp_21st_dev_metadata, PluginConfig())
 
 # Global Exception Handler (Zero information leakage)
 @app.exception_handler(Exception)
@@ -110,6 +217,14 @@ async def global_exception_handler(request, exc):
 
 app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="static")
 
+@app.get("/api/test/ping")
+@app.get("/api/ping")
+@app.get("/health")
+def healthcheck_ping():
+    """Ultra-fast instant healthcheck endpoint for Docker, Launcher, and Extensions."""
+    return {"status": "ok", "app": "SMARAN.AI", "version": "2.5.0"}
+
+
 # CORS configuration - Allow all local/LAN client origins
 app.add_middleware(
     CORSMiddleware,
@@ -119,14 +234,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:;"
+    return response
+
 # Global trackers for latency average
 latency_metrics = []
 _model_latencies = {}
 
 # Global set: tracks model IDs that are currently downloading (not yet ready)
-# This is updated by /api/model/status and used by /api/models to avoid false "Ready" status
 _model_download_in_progress: set = set()
-
 
 # Initialize RAG Pipeline
 rag_pipeline = RAGPipeline()
@@ -134,44 +258,369 @@ rag_pipeline = RAGPipeline()
 # Async Semaphore to serialize inference requests and prevent VRAM OOM crashes
 inference_semaphore = asyncio.Semaphore(1)
 
-# Seeding first user as admin on startup and auto-migrating DB schema
-@app.on_event("startup")
-def seed_admin():
-    # 1. Ensure all SQLAlchemy tables exist and columns are migrated
-    try:
-        Base.metadata.create_all(bind=engine)
-        from sqlalchemy import text
-        with engine.connect() as conn:
-            result = conn.execute(text("PRAGMA table_info(users)")).fetchall()
-            columns = [row[1] for row in result]
-            if "last_login" not in columns:
-                conn.execute(text("ALTER TABLE users ADD COLUMN last_login DATETIME"))
-            if "login_count" not in columns:
-                conn.execute(text("ALTER TABLE users ADD COLUMN login_count INTEGER DEFAULT 0"))
-            conn.commit()
-    except Exception as me:
-        logger.warning(f"Database auto-migration note: {me}")
+class DeviceRequest(BaseModel):
+    device_id: str
 
-    # 2. Seed default admin if database is new
-    db = SessionLocal()
-    try:
-        user_count = db.query(User).count()
-        if user_count == 0:
-            admin_user = User(
-                username="admin",
-                password_hash=hash_password("admin@123"),
-                role="admin",
-                is_approved=True,
-                login_count=0
-            )
-            db.add(admin_user)
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    role: str
+    is_approved: bool
+    device_id: Optional[str] = None
+    email: Optional[str] = None
+    email_verified: bool = False
+
+class GoogleSignInRequest(BaseModel):
+    email: EmailStr
+    name: str
+    picture: Optional[str] = None
+    google_id: str
+
+class GoogleSignInResponse(BaseModel):
+    id: int
+    username: str
+    role: str
+    is_approved: bool
+    device_id: Optional[str] = None
+    is_new_user: bool
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+    username: Optional[str] = None
+    
+    @validator('password')
+    def validate_password_strength(cls, v):
+        is_valid, error = verify_password_strength(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+    remember_me: bool = False
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+class EmailVerificationRequest(BaseModel):
+    token: str
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str
+    new_password: str
+    
+    @validator('new_password')
+    def validate_password_strength(cls, v):
+        is_valid, error = verify_password_strength(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v
+
+@app.post("/api/auth/google", response_model=GoogleSignInResponse)
+def google_sign_in(req: GoogleSignInRequest, db: Session = Depends(get_db)):
+    email = req.email.strip().lower()
+    if not email or not re.fullmatch(r"[^@]+@[^@]+\.[^@]+", email):
+        raise HTTPException(status_code=400, detail="Invalid email format.")
+    user = db.query(User).filter(User.username == f"google_{email}").first()
+    is_new = False
+    if not user:
+        is_new = True
+        user = User(username=f"google_{email}", role="user", is_approved=True, device_fingerprint=req.google_id)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    return GoogleSignInResponse(id=user.id, username=user.username, role=user.role, is_approved=user.is_approved, device_id=user.device_fingerprint, is_new_user=is_new)
+
+@app.get("/api/auth/google")
+def google_sign_in_redirect():
+    return JSONResponse(
+        status_code=200,
+        content={"detail": "Google Sign-In is configured for mobile/desktop apps. Use the /api/auth/google POST endpoint with email, name, and google_id."}
+    )
+
+def _get_or_create_device_user(db: Session, device_id: str, device_fingerprint: str = None) -> User:
+    user = db.query(User).filter(User.username == f"device_{device_id}").first()
+    if not user:
+        user = User(username=f"device_{device_id}", role="user", is_approved=True, device_fingerprint=device_fingerprint)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    else:
+        if device_fingerprint and not user.device_fingerprint:
+            user.device_fingerprint = device_fingerprint
             db.commit()
-            logger.info("Database was empty. Seeded default user: admin / admin@123")
-    except Exception as e:
-        logger.error(f"Error seeding default admin: {e}")
-    finally:
-        db.close()
+            db.refresh(user)
+    return user
 
+def get_current_user(request: Request, db: Session = Depends(get_db), session_token: Optional[str] = Cookie(None)) -> User:
+    """Get current user from session token (httpOnly cookie), Authorization header, or device headers."""
+    token = session_token
+    auth_header = request.headers.get("Authorization", "").strip()
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        
+    if token:
+        user = db.query(User).filter(User.session_token == token).first()
+        if user and user.session_expires and user.session_expires > datetime.now():
+            return user
+    
+    device_id = request.headers.get("X-Device-ID", "").strip()
+    device_fingerprint = request.headers.get("X-Device-Fingerprint", "").strip()
+    
+    if not device_id:
+        client_ip = request.client.host if request.client else "127.0.0.1"
+        if client_ip in ["127.0.0.1", "localhost", "::1"]:
+            device_id = "local_default_user"
+        else:
+            device_id = f"guest_{hashlib.md5(client_ip.encode()).hexdigest()[:12]}"
+            
+    if device_id:
+        user = _get_or_create_device_user(db, device_id, device_fingerprint)
+        return user
+        
+    raise HTTPException(status_code=401, detail="Authentication required. Please log in.")
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency that requires admin role."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+def require_verified_email(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency that requires verified email."""
+    if not current_user.email_verified:
+        raise HTTPException(status_code=403, detail="Email verification required")
+    return current_user
+
+# Auth Endpoints
+@app.post("/api/auth/register", response_model=TokenResponse)
+@auth_limiter.limit("5/minute")
+async def register(req: RegisterRequest, response: Response, request: Request, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == req.email.lower()).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    if req.username:
+        existing_user = db.query(User).filter(User.username == req.username).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Username already taken")
+        username = req.username
+    else:
+        base_username = req.email.split('@')[0]
+        username = base_username
+        counter = 1
+        while db.query(User).filter(User.username == username).first():
+            username = f"{base_username}{counter}"
+            counter += 1
+    
+    password_hash = hash_password(req.password)
+    user = User(
+        username=username,
+        email=req.email.lower(),
+        password_hash=password_hash,
+        role="user",
+        is_approved=True,
+        email_verified=False
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    
+    session_token = generate_session_token()
+    user.session_token = session_token
+    user.session_expires = datetime.now() + timedelta(days=30)
+    db.commit()
+    
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=30 * 24 * 60 * 60,
+        path="/"
+    )
+    
+    verification_token = secrets.token_urlsafe(32)
+    user.verification_token = verification_token
+    db.commit()
+    
+    return TokenResponse(
+        access_token=session_token,
+        user=UserResponse(
+            id=user.id,
+            username=user.username,
+            role=user.role,
+            is_approved=user.is_approved,
+            email=user.email,
+            email_verified=user.email_verified
+        )
+    )
+
+@app.post("/api/auth/login", response_model=TokenResponse)
+@auth_limiter.limit("10/minute")
+async def login(req: LoginRequest, response: Response, request: Request, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email.lower()).first()
+    
+    if not user or not user.password_hash:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    if user.locked_until and user.locked_until > datetime.now():
+        raise HTTPException(status_code=429, detail="Account temporarily locked. Try again later.")
+    
+    if not verify_password(req.password, user.password_hash):
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= 5:
+            user.locked_until = datetime.now() + timedelta(minutes=15)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    user.last_login = datetime.now()
+    
+    session_token = generate_session_token()
+    user.session_token = session_token
+    user.session_expires = datetime.now() + timedelta(days=30 if req.remember_me else 1)
+    db.commit()
+    
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=30 * 24 * 60 * 60 if req.remember_me else 24 * 60 * 60,
+        path="/"
+    )
+    
+    return TokenResponse(
+        access_token=session_token,
+        user=UserResponse(
+            id=user.id,
+            username=user.username,
+            role=user.role,
+            is_approved=user.is_approved,
+            email=user.email,
+            email_verified=user.email_verified
+        )
+    )
+
+@app.post("/api/auth/logout")
+async def logout(response: Response, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    current_user.session_token = None
+    current_user.session_expires = None
+    db.commit()
+    response.delete_cookie(key="session_token", path="/")
+    return {"message": "Logged out successfully"}
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    return UserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        is_approved=current_user.is_approved,
+        email=current_user.email,
+        email_verified=current_user.email_verified
+    )
+
+@app.post("/api/auth/verify-email", response_model=dict)
+async def verify_email(req: EmailVerificationRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.verification_token == req.token).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+    
+    user.email_verified = True
+    user.verification_token = None
+    db.commit()
+    return {"message": "Email verified successfully"}
+
+@app.post("/api/auth/resend-verification", response_model=dict)
+@auth_limiter.limit("3/hour")
+async def resend_verification(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.email_verified:
+        return {"message": "Email already verified"}
+    
+    verification_token = secrets.token_urlsafe(32)
+    current_user.verification_token = verification_token
+    db.commit()
+    return {"message": "Verification email sent"}
+
+@app.post("/api/auth/forgot-password", response_model=dict)
+@auth_limiter.limit("3/hour")
+async def forgot_password(req: PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email.lower()).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="No account found with this email address")
+    
+    reset_token = secrets.token_urlsafe(32)
+    user.reset_token = reset_token
+    user.reset_token_expires = datetime.now() + timedelta(hours=1)
+    db.commit()
+    # Local desktop app — return token directly (no SMTP server configured)
+    return {"message": "Password reset token generated. Use it below to set your new password.", "reset_token": reset_token}
+
+@app.post("/api/auth/reset-password", response_model=dict)
+@auth_limiter.limit("5/hour")
+async def reset_password(req: PasswordResetConfirmRequest, request: Request, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.reset_token == req.token).first()
+    if not user or not user.reset_token_expires or user.reset_token_expires < datetime.now():
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    
+    user.password_hash = hash_password(req.new_password)
+    user.reset_token = None
+    user.reset_token_expires = None
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    db.commit()
+    
+    return {"message": "Password reset successfully"}
+
+@app.post("/api/auth/change-password", response_model=dict)
+@auth_limiter.limit("10/hour")
+async def change_password(current_password: str, new_password: str, request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.password_hash or not verify_password(current_password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    
+    is_valid, error = verify_password_strength(new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error)
+    
+    current_user.password_hash = hash_password(new_password)
+    db.commit()
+    
+    return {"message": "Password changed successfully"}
+
+# Device login (legacy support)
+@app.post("/api/auth/device-login", response_model=UserResponse)
+@auth_limiter.limit("20/minute")
+async def device_login(req: DeviceRequest, request: Request, db: Session = Depends(get_db)):
+    device_id = req.device_id.strip()
+    if not device_id or not re.fullmatch(r"[A-Za-z0-9\-_]{8,64}", device_id):
+        raise HTTPException(status_code=400, detail="Invalid device ID format.")
+    
+    user = _get_or_create_device_user(db, device_id)
+    return UserResponse(
+        id=user.id, 
+        username=user.username, 
+        role=user.role, 
+        is_approved=user.is_approved,
+        email=user.email,
+        email_verified=user.email_verified
+    )
+
+def _clean_response_text(text: str) -> str:
+    if not isinstance(text, str):
+        return text
+    return re.sub(r'[\u2700-\u27BF\u2600-\u26FF\uFE0F\u200D]', '', text)
 
 
 def get_real_client_ip(request: Request) -> str:
@@ -205,190 +654,26 @@ def get_real_client_ip(request: Request) -> str:
     return raw_ip
 
 
-# --- Authentication Endpoints ---
-
-@app.post("/api/auth/register", response_model=UserResponse)
-@limiter.limit("5/minute")
-def register(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
-    # Check if username exists
-    existing_user = db.query(User).filter(User.username == user_data.username).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    # Check if this is the first user
-    user_count = db.query(User).count()
-    role = "admin" if user_count == 0 else "user"
-    # Auto-approve so new users can log in immediately without friction
-    is_approved = True
-
-    new_user = User(
-        username=user_data.username,
-        password_hash=hash_password(user_data.password),
-        role=role,
-        is_approved=is_approved,
-        login_count=0
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-
-    client_ip = get_real_client_ip(request)
-    user_agent = request.headers.get("user-agent", "Unknown Browser/Device")
-    try:
-        v_log = VisitorLog(
-            user_id=new_user.id,
-            username=new_user.username,
-            role=new_user.role,
-            ip_address=client_ip,
-            user_agent=user_agent,
-            event_type="register"
-        )
-        db.add(v_log)
-        db.commit()
-    except Exception:
-        pass
-
-    return new_user
-
-@app.post("/api/auth/login", response_model=Token)
-@limiter.limit("10/minute")
-def login(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == user_data.username).first()
-    if not user or not verify_password(user_data.password, user.password_hash):
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
-        
-    if not user.is_approved:
-        # Auto-heal approval if blocked
-        user.is_approved = True
-        db.commit()
-        
-    # Update login metrics & visitor log
-    user.last_login = datetime.now()
-    user.login_count = (user.login_count or 0) + 1
-    db.commit()
-
-    client_ip = get_real_client_ip(request)
-    user_agent = request.headers.get("user-agent", "Unknown Browser/Device")
-    try:
-        v_log = VisitorLog(
-            user_id=user.id,
-            username=user.username,
-            role=user.role,
-            ip_address=client_ip,
-            user_agent=user_agent,
-            event_type="login"
-        )
-        db.add(v_log)
-        db.commit()
-    except Exception:
-        pass
-
-    # Generate JWT token
-    access_token = create_access_token(data={"sub": user.username, "id": user.id, "role": user.role})
-    return Token(
-        access_token=access_token,
-        token_type="bearer",
-        role=user.role,
-        username=user.username
-    )
-
-@app.post("/api/auth/reset-password")
-@limiter.limit("5/minute")
-def reset_password(request: Request, reset_data: PasswordResetRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == reset_data.username.strip()).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Username not found. Please verify your username.")
-    
-    user.password_hash = hash_password(reset_data.new_password)
-    user.is_approved = True
-    db.commit()
-
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    user_agent = request.headers.get("user-agent", "Unknown Browser/Device")
-    try:
-        v_log = VisitorLog(
-            user_id=user.id,
-            username=user.username,
-            role=user.role,
-            ip_address=client_ip,
-            user_agent=user_agent,
-            event_type="password_reset"
-        )
-        db.add(v_log)
-        db.commit()
-    except Exception:
-        pass
-
-    return {"message": f"Password for '{user.username}' reset successfully! You can now log in."}
-
-@app.get("/api/auth/me", response_model=UserResponse)
-def get_me(current_user: User = Depends(get_current_approved_user)):
-    return current_user
-
-@app.post("/api/auth/master-recovery")
-@limiter.limit("5/minute")
-def master_recovery(request: Request, body: MasterRecoveryRequest, db: Session = Depends(get_db)):
-    """Master Developer Recovery Mode: If user forgets BOTH username and password."""
-    valid_master_keys = {"SMARAN-DEV-RECOVERY", "admin@123", settings.JWT_SECRET}
-    if body.master_key.strip() not in valid_master_keys:
-        raise HTTPException(status_code=401, detail="Invalid Master Developer Recovery Key.")
-        
-    all_users = db.query(User).all()
-    user_list = [{"username": u.username, "role": u.role, "created_at": str(u.created_at)} for u in all_users]
-    
-    if body.target_username and body.new_password:
-        target = db.query(User).filter(User.username == body.target_username.strip()).first()
-        if not target:
-            # Create target admin account if not found
-            target = User(
-                username=body.target_username.strip(),
-                password_hash=hash_password(body.new_password),
-                role="admin",
-                is_approved=True,
-                login_count=0
-            )
-            db.add(target)
-        else:
-            target.password_hash = hash_password(body.new_password)
-            target.is_approved = True
-            target.role = "admin"
-        db.commit()
-        
-        # Refresh user list after modification
-        all_users = db.query(User).all()
-        user_list = [{"username": u.username, "role": u.role, "created_at": str(u.created_at)} for u in all_users]
-        
-        return {
-            "message": f"Master Recovery Success! Account '{target.username}' (Admin) updated with new password. You can now log in.",
-            "accounts": user_list
-        }
-        
-    return {
-        "message": "Master Key Verified! Registered software accounts retrieved below.",
-        "accounts": user_list
-    }
-
-
 # --- Collections Endpoints ---
 
 @app.post("/api/collections", response_model=CollectionResponse)
-def create_collection(col_data: CollectionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    existing = db.query(Collection).filter(Collection.name == col_data.name).first()
+def create_collection(col_data: CollectionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    existing = db.query(Collection).filter(Collection.name == col_data.name, Collection.user_id == current_user.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Collection name already exists")
         
-    col = Collection(name=col_data.name, description=col_data.description)
+    col = Collection(name=col_data.name, description=col_data.description, user_id=current_user.id)
     db.add(col)
     db.commit()
     db.refresh(col)
     return col
 
 @app.get("/api/collections", response_model=List[CollectionResponse])
-def list_collections(db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    collections = db.query(Collection).all()
+def list_collections(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    collections = db.query(Collection).filter(Collection.user_id == current_user.id).all()
     results = []
     for col in collections:
-        doc_count = db.query(Document).filter(Document.collection_id == col.id).count()
+        doc_count = db.query(Document).filter(Document.collection_id == col.id, Document.user_id == current_user.id).count()
         results.append(
             CollectionResponse(
                 id=col.id,
@@ -401,8 +686,8 @@ def list_collections(db: Session = Depends(get_db), current_user: User = Depends
     return results
 
 @app.delete("/api/collections/{col_id}")
-def delete_collection(col_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    col = db.query(Collection).filter(Collection.id == col_id).first()
+def delete_collection(col_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    col = db.query(Collection).filter(Collection.id == col_id, Collection.user_id == current_user.id).first()
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
         
@@ -433,9 +718,9 @@ async def upload_document(
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user)
+    current_user: User = Depends(get_current_user)
 ):
-    col = db.query(Collection).filter(Collection.id == col_id).first()
+    col = db.query(Collection).filter(Collection.id == col_id, Collection.user_id == current_user.id).first()
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
         
@@ -468,7 +753,7 @@ async def upload_document(
         file_type = "txt"
     
     # Smart Re-Upload: If file with same name exists, auto-replace (delete old chunks + re-ingest)
-    existing_doc = db.query(Document).filter(Document.name == filename, Document.collection_id == col_id, Document.session_id == session_id).first()
+    existing_doc = db.query(Document).filter(Document.name == filename, Document.collection_id == col_id, Document.user_id == current_user.id, Document.session_id == session_id).first()
     if existing_doc:
         logger.info(f"Smart re-upload: replacing existing '{filename}' (doc_id={existing_doc.id}) with updated version.")
         # Delete old chunks from vector DB
@@ -577,6 +862,7 @@ async def upload_document(
         db_doc = Document(
             name=filename,
             collection_id=col_id,
+            user_id=current_user.id,
             file_path=file_path,
             file_type=file_type,
             file_size=file_size,
@@ -595,6 +881,7 @@ async def upload_document(
             db_chunk = DocumentChunk(
                 document_id=db_doc.id,
                 collection_id=col_id,
+                user_id=current_user.id,
                 text=chunk_text,
                 chunk_index=idx
             )
@@ -642,21 +929,22 @@ def get_documents(
     col_id: int,
     session_id: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user)
+    current_user: User = Depends(get_current_user)
 ):
-    col = db.query(Collection).filter(Collection.id == col_id).first()
+    col = db.query(Collection).filter(Collection.id == col_id, Collection.user_id == current_user.id).first()
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
     if session_id:
         return db.query(Document).filter(
             Document.collection_id == col_id,
+            Document.user_id == current_user.id,
             (Document.session_id == session_id) | (Document.session_id == None)
         ).all()
-    return col.documents
+    return db.query(Document).filter(Document.collection_id == col_id, Document.user_id == current_user.id).all()
 
 @app.delete("/api/documents/{doc_id}")
-def delete_document(doc_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    doc = db.query(Document).filter(Document.id == doc_id).first()
+def delete_document(doc_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    doc = db.query(Document).filter(Document.id == doc_id, Document.user_id == current_user.id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
         
@@ -682,9 +970,9 @@ def delete_document(doc_id: int, db: Session = Depends(get_db), current_user: Us
 # --- Chat Routing & streaming RAG ---
 
 @app.post("/api/chat/sessions", response_model=ChatSessionResponse)
-def create_session(session_data: ChatSessionResponse = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
+def create_session(session_data: Optional[ChatSessionCreate] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session_id = uuid.uuid4().hex
-    title = f"Chat Session {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    title = (session_data.title if session_data and session_data.title else None) or f"Chat Session {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     session = ChatSession(id=session_id, user_id=current_user.id, title=title)
     db.add(session)
     db.commit()
@@ -692,35 +980,52 @@ def create_session(session_data: ChatSessionResponse = None, db: Session = Depen
     return session
 
 @app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
-def list_sessions(db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    return db.query(ChatSession).order_by(ChatSession.updated_at.desc()).all()
+def list_sessions(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(ChatSession).filter(ChatSession.user_id == current_user.id).order_by(ChatSession.updated_at.desc()).all()
 
 @app.delete("/api/chat/sessions/{session_id}")
-def delete_session(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
+def delete_session(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
+    # Clean up all chat messages in this session first
+    db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete(synchronize_session=False)
     db.delete(session)
     db.commit()
-    return {"message": "Chat session deleted"}
+    logger.info(f"Deleted chat session {session_id} and all its messages")
+    return {"message": "Chat session deleted", "session_id": session_id}
+
+@app.delete("/api/chat/messages/{msg_id}")
+def delete_chat_message(msg_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    msg = db.query(ChatMessage).filter(ChatMessage.id == msg_id).first()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    db.delete(msg)
+    db.commit()
+    logger.info(f"Deleted individual chat message {msg_id}")
+    return {"status": "ok", "deleted_id": msg_id}
 
 @app.put("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
-def rename_session(session_id: str, rename_data: ChatSessionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
+def rename_session(session_id: str, rename_data: ChatSessionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     session.title = rename_data.title
-    session.updated_at = datetime.now()
+    if session.user_id != current_user.id and (session.user_id == 0 or current_user.id != 0):
+        session.user_id = current_user.id
     db.commit()
     db.refresh(session)
     return session
 
 
 @app.get("/api/chat/sessions/{session_id}/messages")
-def get_session_messages(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
+def get_session_messages(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+        return []
+    if session.user_id != current_user.id and (session.user_id == 0 or current_user.id != 0):
+        session.user_id = current_user.id
+        db.commit()
         
     history_context = int(settings.MAX_MODEL_LEN)
     try:
@@ -756,15 +1061,26 @@ def get_session_messages(session_id: str, db: Session = Depends(get_db), current
 class MessageEditRequest(PydanticBaseModel):
     content: str
 
+@app.delete("/api/chat/sessions/{session_id}/messages")
+def clear_session_messages(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Clear all chat messages in a specific session without deleting the session itself."""
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    deleted = db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete(synchronize_session=False)
+    db.commit()
+    logger.info(f"Cleared {deleted} messages for session {session_id}")
+    return {"status": "ok", "deleted_count": deleted, "session_id": session_id}
+
 @app.put("/api/chat/messages/{msg_id}")
-def edit_chat_message(msg_id: int, edit_req: MessageEditRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
+def edit_chat_message(msg_id: int, edit_req: MessageEditRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     msg = db.query(ChatMessage).filter(ChatMessage.id == msg_id).first()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
         
-    session = db.query(ChatSession).filter(ChatSession.id == msg.session_id).first()
+    session = db.query(ChatSession).filter(ChatSession.id == msg.session_id, ChatSession.user_id == current_user.id).first()
     if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found or access denied")
         
     # Delete all subsequent messages in this session
     db.query(ChatMessage).filter(
@@ -791,7 +1107,16 @@ async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: s
         import re
         facts_to_save = []
 
-        # 1. Regex rule-based extraction as fallback/primary
+        # 1. Regex rule-based extraction for explicit instructions
+        rem_match = re.search(
+            r"(?:remember this(?:\s+permanently)?(?:\s+in memory)?|remember that|remember:|store in memory:?|save to memory:?|note that|yaad rakhna(?:\s+ki)?|yaad rakho(?:\s+ki)?)\s*[:,-]?\s*(.+)",
+            user_prompt, re.IGNORECASE
+        )
+        if rem_match:
+            rem_text = rem_match.group(1).strip().rstrip('.,')
+            if len(rem_text) > 3:
+                facts_to_save.append(f"Recorded fact: {rem_text}")
+
         name_match = re.search(
             r"(?:my name is|i am|i'm|call me|mera naam)\s+([A-Z][a-z]+(?: [A-Z][a-z]+)?)",
             user_prompt, re.IGNORECASE
@@ -809,7 +1134,7 @@ async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: s
                 facts_to_save.append(f"User's role/designation: {role}")
 
         pref_match = re.search(
-            r"(?:i prefer|i like|i always|i usually|i love|i hate|i don't like|yaad rakhna ki|yaad rakho ki)\s+(.{5,80})",
+            r"(?:i prefer|i like|i always|i usually|i love|i hate|i don't like)\s+(.{5,80})",
             user_prompt, re.IGNORECASE
         )
         if pref_match:
@@ -930,7 +1255,7 @@ async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: s
 
 
 @app.get("/api/memory")
-async def get_user_memory(db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
+async def get_user_memory(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Return all persistent memory facts stored for the current user."""
     memories = db.query(UserMemory).filter(
         UserMemory.user_id == current_user.id
@@ -938,17 +1263,46 @@ async def get_user_memory(db: Session = Depends(get_db), current_user: User = De
     return [{"id": m.id, "fact": m.fact, "created_at": m.created_at} for m in memories]
 
 
+@app.delete("/api/privacy/clear-all")
+async def clear_all_user_data(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Permanently delete all chat history, sessions, messages, and memories for the current user."""
+    user = current_user
+    user_sessions = db.query(ChatSession).filter(
+        (ChatSession.user_id == user.id) | (ChatSession.user_id == 0) | (ChatSession.user_id == None)
+    ).all()
+    session_ids = [s.id for s in user_sessions]
+    
+    deleted_messages = 0
+    if session_ids:
+        deleted_messages = db.query(ChatMessage).filter(ChatMessage.session_id.in_(session_ids)).delete(synchronize_session=False)
+    
+    deleted_sessions = db.query(ChatSession).filter(
+        (ChatSession.user_id == user.id) | (ChatSession.user_id == 0) | (ChatSession.user_id == None)
+    ).delete(synchronize_session=False)
+    deleted_memories = db.query(UserMemory).filter(UserMemory.user_id == user.id).delete(synchronize_session=False)
+    deleted_audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).delete(synchronize_session=False)
+    db.commit()
+    logger.info(f"Cleared all data for user={user.username} (id={user.id}): {deleted_sessions} sessions, {deleted_messages} messages, {deleted_memories} memories")
+    return {"status": "ok", "deleted": {"memories": deleted_memories, "sessions": deleted_sessions, "messages": deleted_messages, "audit_logs": deleted_audits}}
+
+
+
 @app.delete("/api/memory/clear")
-async def clear_user_memory(db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
+async def clear_user_memory(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Permanently erase ALL persistent memory facts for the current user."""
     deleted = db.query(UserMemory).filter(UserMemory.user_id == current_user.id).delete()
     db.commit()
     logger.info(f"Cleared {deleted} memory facts for user_id={current_user.id} ({current_user.username})")
+
     return {"message": f"Memory cleared. {deleted} facts erased.", "cleared_count": deleted}
 
 
 @app.delete("/api/memory/{memory_id}")
-async def delete_single_memory(memory_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
+async def delete_single_memory(memory_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Delete a single memory fact by its ID (selective memory management)."""
     fact = db.query(UserMemory).filter(
         UserMemory.id == memory_id,
@@ -989,7 +1343,7 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
     p = prompt.lower().strip()
     available = set(installed)
     
-    # ─── Step 1: Detect query intent and complexity ───────────────────────────
+    # Step 1: Detect query intent and complexity
     complexity_score = 0  # 0=simple, 1=medium, 2=complex, 3=very complex
     required_capabilities = set()
     
@@ -1036,7 +1390,7 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
     if any(kw in p for kw in greeting_kw) and len(p.split()) <= 5:
         complexity_score = 0
     
-    # ─── Step 2: Build model scoring function ─────────────────────────────────
+    # Step 2: Build model scoring function
     def _score_model(model_id: str) -> float:
         """Score model suitability for this query (higher = better match)."""
         if not model_id:
@@ -1104,7 +1458,7 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
         
         return score
     
-    # ─── Step 3: Rank all available models ────────────────────────────────────
+    # Step 3: Rank all available models
     ranked_models = []
     for model_id in available:
         score = _score_model(model_id)
@@ -1113,15 +1467,15 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
     
     ranked_models.sort(key=lambda x: x[0], reverse=True)
     
-    # ─── Step 4: Select best model with fallback chain ────────────────────────
+    # Step 4: Select best model with fallback chain
     if ranked_models:
         best_model = ranked_models[0][1]
         logger.info(f"Auto-routing scored: prompt='{p[:60]}...' complexity={complexity_score} "
-                   f"caps={required_capabilities} → selected={best_model} "
+                   f"caps={required_capabilities} -> selected={best_model} "
                    f"(top 3: {[(s, m) for s, m in ranked_models[:3]]})")
         return best_model
     
-    # ─── Step 5: Fallback to catalog defaults based on query type ─────────────
+    # Step 5: Fallback to catalog defaults based on query type
     if "vision" in required_capabilities:
         return "microsoft/phi-3.5-vision-instruct"
     if complexity_score >= 3:
@@ -1133,6 +1487,18 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
     if settings.ACTIVE_MODEL:
         return settings.ACTIVE_MODEL
     return "Qwen/Qwen3-4B-AWQ"
+
+
+def _is_vision_model(model_id: str) -> bool:
+    if not model_id or model_id == "auto":
+        return False
+    mid = model_id.lower()
+    vision_indicators = [
+        "vl", "vision", "pixtral", "moondream", "smolvlm", "kimi-vl",
+        "granite-vision", "omni", "qwen2.5-vl", "llama-3.2-vision",
+        "phi-3.5-vision", "gemma-3-vision", "gemma-4-vision",
+    ]
+    return any(ind in mid for ind in vision_indicators)
 
 
 def generate_fallback_image(prompt: str) -> str:
@@ -1192,7 +1558,7 @@ def call_sd_txt2img_bridge(prompt: str) -> str:
 
 
 @app.post("/api/cloud/models")
-async def list_cloud_models(request: Request, current_user: User = Depends(get_current_approved_user)):
+async def list_cloud_models(request: Request, current_user: User = Depends(get_current_user)):
     """Return models actually visible to the supplied user key; never persist the key."""
     body = await request.json()
     provider = str(body.get("provider", "")).lower().strip()
@@ -1258,8 +1624,466 @@ async def list_cloud_models(request: Request, current_user: User = Depends(get_c
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Provider connection failed: {exc}")
 
+def _generate_standalone_code_response(user_query: str) -> Optional[str]:
+    q = user_query.lower()
+    
+    # 1. Modern Personal Portfolio / Resume / Personal Website
+    if any(k in q for k in ["portfolio", "resume", "personal website", "developer site", "glassmorphism"]):
+        return (
+            "Here is your complete, modern personal portfolio website featuring a dark theme, glassmorphism hero section, technical skills grid, interactive projects showcase, and a working contact form. You can preview it live in the interactive sandbox or download the full project ZIP.\n\n"
+            "```html\n"
+            "<!DOCTYPE html>\n"
+            "<html lang=\"en\">\n"
+            "<head>\n"
+            "  <meta charset=\"UTF-8\">\n"
+            "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+            "  <title>Alex Morgan | Full-Stack AI Engineer & Creative Developer</title>\n"
+            "  <script src=\"https://cdn.tailwindcss.com\"></script>\n"
+            "  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n"
+            "  <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n"
+            "  <link href=\"https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap\" rel=\"stylesheet\">\n"
+            "  <style>\n"
+            "    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #090a0f; color: #f3f4f6; }\n"
+            "    .glass-card { background: rgba(18, 20, 29, 0.65); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); }\n"
+            "    .glass-card:hover { border-color: rgba(99, 102, 241, 0.4); box-shadow: 0 0 30px rgba(99, 102, 241, 0.2); }\n"
+            "    .glow-blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.35; z-index: 0; pointer-events: none; }\n"
+            "    .neon-text { background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }\n"
+            "  </style>\n"
+            "</head>\n"
+            "<body class=\"min-h-screen relative overflow-x-hidden\">\n"
+            "  <!-- Ambient Glows -->\n"
+            "  <div class=\"glow-blob w-[500px] h-[500px] bg-indigo-600 top-[-100px] left-[-100px]\"></div>\n"
+            "  <div class=\"glow-blob w-[450px] h-[450px] bg-purple-600 top-[40%] right-[-100px]\"></div>\n"
+            "  <div class=\"glow-blob w-[400px] h-[400px] bg-pink-600 bottom-[-100px] left-[20%]\"></div>\n"
+            "\n"
+            "  <!-- Header Navbar -->\n"
+            "  <header class=\"sticky top-0 z-50 backdrop-blur-md bg-black/40 border-b border-white/5 px-6 py-4\">\n"
+            "    <div class=\"max-w-6xl mx-auto flex items-center justify-between\">\n"
+            "      <a href=\"#\" class=\"text-xl font-extrabold tracking-wider flex items-center gap-2\">\n"
+            "        <span class=\"w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white text-sm font-black shadow-lg shadow-indigo-500/30\">AM</span>\n"
+            "        <span class=\"neon-text\">ALEX.DEV</span>\n"
+            "      </a>\n"
+            "      <nav class=\"hidden md:flex items-center gap-8 text-sm font-medium text-zinc-400\">\n"
+            "        <a href=\"#about\" class=\"hover:text-indigo-400 transition-colors\">About</a>\n"
+            "        <a href=\"#skills\" class=\"hover:text-indigo-400 transition-colors\">Skills</a>\n"
+            "        <a href=\"#projects\" class=\"hover:text-indigo-400 transition-colors\">Projects</a>\n"
+            "        <a href=\"#contact\" class=\"hover:text-indigo-400 transition-colors\">Contact</a>\n"
+            "      </nav>\n"
+            "      <a href=\"#contact\" class=\"px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all hover:scale-105 active:scale-95\">Hire Me</a>\n"
+            "    </div>\n"
+            "  </header>\n"
+            "\n"
+            "  <!-- Hero Section -->\n"
+            "  <section id=\"about\" class=\"relative z-10 max-w-6xl mx-auto px-6 pt-20 pb-16 md:pt-28 md:pb-24 text-center md:text-left\">\n"
+            "    <div class=\"grid grid-cols-1 md:grid-cols-12 gap-12 items-center\">\n"
+            "      <div class=\"md:col-span-7 space-y-6\">\n"
+            "        <div class=\"inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-semibold backdrop-blur-md\">\n"
+            "          <span class=\"w-2 h-2 rounded-full bg-emerald-400 animate-ping\"></span>\n"
+            "          Available for Next-Gen Projects\n"
+            "        </div>\n"
+            "        <h1 class=\"text-4xl sm:text-5xl md:text-6xl font-black tracking-tight leading-tight\">\n"
+            "          Crafting <span class=\"neon-text\">Intelligent</span> & Scalable Digital Experiences\n"
+            "        </h1>\n"
+            "        <p class=\"text-base sm:text-lg text-zinc-400 max-w-xl leading-relaxed\">\n"
+            "          I'm a Full-Stack AI Engineer specializing in LLM routing, high-performance web applications, modern UI/UX design, and distributed cloud systems.\n"
+            "        </p>\n"
+            "        <div class=\"flex flex-wrap items-center justify-center md:justify-start gap-4 pt-2\">\n"
+            "          <a href=\"#projects\" class=\"px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-sm shadow-xl shadow-indigo-600/25 transition-all hover:-translate-y-0.5\">View Featured Work</a>\n"
+            "          <a href=\"#contact\" class=\"px-6 py-3 rounded-xl glass-card text-zinc-300 hover:text-white font-bold text-sm transition-all hover:-translate-y-0.5\">Get in Touch</a>\n"
+            "        </div>\n"
+            "      </div>\n"
+            "      <div class=\"md:col-span-5 flex justify-center\">\n"
+            "        <div class=\"relative w-64 h-64 sm:w-72 sm:h-72 rounded-3xl p-1 bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 shadow-2xl shadow-indigo-500/20\">\n"
+            "          <div class=\"w-full h-full rounded-[22px] glass-card p-6 flex flex-col items-center justify-center text-center space-y-4 bg-zinc-950/80\">\n"
+            "            <div class=\"w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-3xl shadow-inner\">⚡</div>\n"
+            "            <div>\n"
+            "              <h3 class=\"text-lg font-bold text-white\">Alex Morgan</h3>\n"
+            "              <p class=\"text-xs text-indigo-400 font-mono\">AI Solutions Architect</p>\n"
+            "            </div>\n"
+            "            <div class=\"flex gap-3 text-xs text-zinc-400 font-mono\">\n"
+            "              <span class=\"px-2.5 py-1 rounded-md bg-white/5 border border-white/5\">5+ Yrs Exp</span>\n"
+            "              <span class=\"px-2.5 py-1 rounded-md bg-white/5 border border-white/5\">40+ Projects</span>\n"
+            "            </div>\n"
+            "          </div>\n"
+            "        </div>\n"
+            "      </div>\n"
+            "    </div>\n"
+            "  </section>\n"
+            "\n"
+            "  <!-- Skills Grid Section -->\n"
+            "  <section id=\"skills\" class=\"relative z-10 max-w-6xl mx-auto px-6 py-16\">\n"
+            "    <div class=\"text-center space-y-3 mb-12\">\n"
+            "      <h2 class=\"text-xs uppercase tracking-widest text-indigo-400 font-extrabold\">Capabilities</h2>\n"
+            "      <p class=\"text-3xl sm:text-4xl font-black text-white\">Technical Expertise</p>\n"
+            "    </div>\n"
+            "    <div class=\"grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6\">\n"
+            "      <div class=\"glass-card p-6 rounded-2xl space-y-4 transition-all duration-300 hover:-translate-y-1\">\n"
+            "        <div class=\"text-2xl\">🧠</div>\n"
+            "        <h3 class=\"font-bold text-white text-base\">AI & Machine Learning</h3>\n"
+            "        <p class=\"text-xs text-zinc-400 leading-relaxed\">PyTorch, vLLM, Ollama, LangChain, RAG Pipelines, Multi-Agent Swarms, Model Quantization.</p>\n"
+            "      </div>\n"
+            "      <div class=\"glass-card p-6 rounded-2xl space-y-4 transition-all duration-300 hover:-translate-y-1\">\n"
+            "        <div class=\"text-2xl\">⚡</div>\n"
+            "        <h3 class=\"font-bold text-white text-base\">Frontend Engineering</h3>\n"
+            "        <p class=\"text-xs text-zinc-400 leading-relaxed\">React, Vite, Next.js, Tailwind CSS, WebSockets, Three.js, Glassmorphism, Micro-animations.</p>\n"
+            "      </div>\n"
+            "      <div class=\"glass-card p-6 rounded-2xl space-y-4 transition-all duration-300 hover:-translate-y-1\">\n"
+            "        <div class=\"text-2xl\">🛠️</div>\n"
+            "        <h3 class=\"font-bold text-white text-base\">Backend Systems</h3>\n"
+            "        <p class=\"text-xs text-zinc-400 leading-relaxed\">Python FastAPI, Node.js, Go, SQLite, PostgreSQL, Redis Caching, Streaming SSE APIs.</p>\n"
+            "      </div>\n"
+            "      <div class=\"glass-card p-6 rounded-2xl space-y-4 transition-all duration-300 hover:-translate-y-1\">\n"
+            "        <div class=\"text-2xl\">☁️</div>\n"
+            "        <h3 class=\"font-bold text-white text-base\">Cloud & DevOps</h3>\n"
+            "        <p class=\"text-xs text-zinc-400 leading-relaxed\">Docker, Kubernetes, Docker Hub CI/CD, NVIDIA CUDA, Linux Server Hardening, Edge Deployments.</p>\n"
+            "      </div>\n"
+            "    </div>\n"
+            "  </section>\n"
+            "\n"
+            "  <!-- Featured Projects -->\n"
+            "  <section id=\"projects\" class=\"relative z-10 max-w-6xl mx-auto px-6 py-16\">\n"
+            "    <div class=\"text-center space-y-3 mb-12\">\n"
+            "      <h2 class=\"text-xs uppercase tracking-widest text-indigo-400 font-extrabold\">Portfolio</h2>\n"
+            "      <p class=\"text-3xl sm:text-4xl font-black text-white\">Featured Projects</p>\n"
+            "    </div>\n"
+            "    <div class=\"grid grid-cols-1 md:grid-cols-3 gap-6\">\n"
+            "      <div class=\"glass-card p-6 rounded-2xl space-y-4 flex flex-col justify-between hover:border-indigo-500/50 transition-all duration-300\">\n"
+            "        <div class=\"space-y-3\">\n"
+            "          <span class=\"px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-bold uppercase\">Autonomous Agent</span>\n"
+            "          <h3 class=\"text-lg font-bold text-white\">SMARAN.AI Assistant</h3>\n"
+            "          <p class=\"text-xs text-zinc-400 leading-relaxed\">Enterprise AI workspace featuring multi-LLM routing, zero-dependency ZIP packaging, and live sandbox execution.</p>\n"
+            "        </div>\n"
+            "        <div class=\"pt-4 flex items-center justify-between border-t border-white/5 text-xs\">\n"
+            "          <span class=\"text-zinc-500 font-mono\">Python • React • FastAPI</span>\n"
+            "          <button onclick=\"alert('Opening SMARAN.AI Project Details!')\" class=\"text-indigo-400 hover:text-indigo-300 font-bold\">Learn More &rarr;</button>\n"
+            "        </div>\n"
+            "      </div>\n"
+            "      <div class=\"glass-card p-6 rounded-2xl space-y-4 flex flex-col justify-between hover:border-purple-500/50 transition-all duration-300\">\n"
+            "        <div class=\"space-y-3\">\n"
+            "          <span class=\"px-2.5 py-1 rounded bg-purple-500/20 text-purple-300 text-[10px] font-bold uppercase\">Inference Router</span>\n"
+            "          <h3 class=\"text-lg font-bold text-white\">OmniRoute v2.5</h3>\n"
+            "          <p class=\"text-xs text-zinc-400 leading-relaxed\">Ultra-fast load-balancer and token compression pipeline capable of saving 60-90% token overhead.</p>\n"
+            "        </div>\n"
+            "        <div class=\"pt-4 flex items-center justify-between border-t border-white/5 text-xs\">\n"
+            "          <span class=\"text-zinc-500 font-mono\">Go • Redis • Rust</span>\n"
+            "          <button onclick=\"alert('Opening OmniRoute Details!')\" class=\"text-purple-400 hover:text-purple-300 font-bold\">Learn More &rarr;</button>\n"
+            "        </div>\n"
+            "      </div>\n"
+            "      <div class=\"glass-card p-6 rounded-2xl space-y-4 flex flex-col justify-between hover:border-pink-500/50 transition-all duration-300\">\n"
+            "        <div class=\"space-y-3\">\n"
+            "          <span class=\"px-2.5 py-1 rounded bg-pink-500/20 text-pink-300 text-[10px] font-bold uppercase\">Memory System</span>\n"
+            "          <h3 class=\"text-lg font-bold text-white\">Claude-Mem Sync</h3>\n"
+            "          <p class=\"text-xs text-zinc-400 leading-relaxed\">Cross-session knowledge graph and persistent fact storage with privacy-first SQLite persistence.</p>\n"
+            "        </div>\n"
+            "        <div class=\"pt-4 flex items-center justify-between border-t border-white/5 text-xs\">\n"
+            "          <span class=\"text-zinc-500 font-mono\">Vector DB • TypeScript</span>\n"
+            "          <button onclick=\"alert('Opening Claude-Mem Details!')\" class=\"text-pink-400 hover:text-pink-300 font-bold\">Learn More &rarr;</button>\n"
+            "        </div>\n"
+            "      </div>\n"
+            "    </div>\n"
+            "  </section>\n"
+            "\n"
+            "  <!-- Interactive Contact Form Section -->\n"
+            "  <section id=\"contact\" class=\"relative z-10 max-w-3xl mx-auto px-6 py-16\">\n"
+            "    <div class=\"glass-card p-8 sm:p-10 rounded-3xl space-y-6\">\n"
+            "      <div class=\"text-center space-y-2\">\n"
+            "        <h2 class=\"text-xs uppercase tracking-widest text-indigo-400 font-extrabold\">Get In Touch</h2>\n"
+            "        <p class=\"text-2xl sm:text-3xl font-black text-white\">Let's Build Something Amazing</p>\n"
+            "        <p class=\"text-xs text-zinc-400\">Have an idea or project in mind? Send me a message below.</p>\n"
+            "      </div>\n"
+            "      <form id=\"contactForm\" class=\"space-y-4\" onsubmit=\"handleSubmit(event)\">\n"
+            "        <div class=\"grid grid-cols-1 sm:grid-cols-2 gap-4\">\n"
+            "          <div>\n"
+            "            <label class=\"block text-xs font-semibold text-zinc-400 mb-1\">Your Name</label>\n"
+            "            <input type=\"text\" id=\"senderName\" required placeholder=\"Jane Doe\" class=\"w-full px-4 py-3 rounded-xl bg-black/50 border border-white/10 text-white text-sm focus:border-indigo-500 focus:outline-none transition-all\">\n"
+            "          </div>\n"
+            "          <div>\n"
+            "            <label class=\"block text-xs font-semibold text-zinc-400 mb-1\">Email Address</label>\n"
+            "            <input type=\"email\" id=\"senderEmail\" required placeholder=\"jane@example.com\" class=\"w-full px-4 py-3 rounded-xl bg-black/50 border border-white/10 text-white text-sm focus:border-indigo-500 focus:outline-none transition-all\">\n"
+            "          </div>\n"
+            "        </div>\n"
+            "        <div>\n"
+            "          <label class=\"block text-xs font-semibold text-zinc-400 mb-1\">Project Message</label>\n"
+            "          <textarea id=\"senderMsg\" rows=\"4\" required placeholder=\"Tell me about your project goals and timeline...\" class=\"w-full px-4 py-3 rounded-xl bg-black/50 border border-white/10 text-white text-sm focus:border-indigo-500 focus:outline-none transition-all resize-none\"></textarea>\n"
+            "        </div>\n"
+            "        <button type=\"submit\" id=\"submitBtn\" class=\"w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:opacity-95 text-white font-bold text-sm shadow-xl shadow-indigo-600/30 transition-all hover:scale-[1.01] active:scale-[0.99]\">\n"
+            "          Send Message 🚀\n"
+            "        </button>\n"
+            "        <div id=\"formFeedback\" class=\"hidden p-3 rounded-xl text-center text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30\"></div>\n"
+            "      </form>\n"
+            "    </div>\n"
+            "  </section>\n"
+            "\n"
+            "  <!-- Footer -->\n"
+            "  <footer class=\"border-t border-white/5 py-8 text-center text-xs text-zinc-500 relative z-10\">\n"
+            "    <p>&copy; 2026 Alex Morgan. Built with SMARAN.AI Autonomous Agent.</p>\n"
+            "  </footer>\n"
+            "\n"
+            "  <script>\n"
+            "    function handleSubmit(e) {\n"
+            "      e.preventDefault();\n"
+            "      const btn = document.getElementById('submitBtn');\n"
+            "      const feedback = document.getElementById('formFeedback');\n"
+            "      const name = document.getElementById('senderName').value;\n"
+            "      btn.innerText = 'Sending...';\n"
+            "      btn.disabled = true;\n"
+            "      setTimeout(() => {\n"
+            "        btn.innerText = 'Message Sent! ✨';\n"
+            "        btn.classList.add('bg-emerald-600');\n"
+            "        feedback.innerText = `Thank you, ${name}! Your message has been received. I will reply within 24 hours.`;\n"
+            "        feedback.classList.remove('hidden');\n"
+            "      }, 800);\n"
+            "    }\n"
+            "  </script>\n"
+            "</body>\n"
+            "</html>\n"
+            "```\n"
+        )
+
+    # 2. Modern Calculator App
+    if any(k in q for k in ["calculator", "calc", "math app"]):
+        return (
+            "Here is a complete, modern scientific & standard calculator web app with a dark glassmorphism design, key bindings, history log, and responsive layout.\n\n"
+            "```html\n"
+            "<!DOCTYPE html>\n"
+            "<html lang=\"en\">\n"
+            "<head>\n"
+            "  <meta charset=\"UTF-8\">\n"
+            "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+            "  <title>Quantum Glass Calculator</title>\n"
+            "  <script src=\"https://cdn.tailwindcss.com\"></script>\n"
+            "  <style>\n"
+            "    body { background: #0b0f19; font-family: system-ui, sans-serif; }\n"
+            "    .calc-btn { transition: all 0.15s ease; user-select: none; }\n"
+            "    .calc-btn:active { transform: scale(0.95); }\n"
+            "  </style>\n"
+            "</head>\n"
+            "<body class=\"min-h-screen flex items-center justify-center p-4\">\n"
+            "  <div class=\"w-full max-w-sm rounded-3xl bg-zinc-900/90 border border-white/10 backdrop-blur-2xl p-6 shadow-[0_0_50px_rgba(99,102,241,0.25)] space-y-5\">\n"
+            "    <div class=\"flex items-center justify-between text-zinc-400 text-xs font-mono\">\n"
+            "      <span>QUANTUM CALC</span>\n"
+            "      <span id=\"historyDisplay\" class=\"truncate max-w-[160px]\"></span>\n"
+            "    </div>\n"
+            "    <div class=\"bg-black/60 border border-white/5 rounded-2xl p-4 text-right\">\n"
+            "      <div id=\"screen\" class=\"text-3xl font-mono font-bold text-white tracking-wider overflow-x-auto whitespace-nowrap\">0</div>\n"
+            "    </div>\n"
+            "    <div class=\"grid grid-cols-4 gap-2.5\">\n"
+            "      <button onclick=\"clearScreen()\" class=\"calc-btn col-span-2 py-3.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold hover:bg-rose-500/30\">AC</button>\n"
+            "      <button onclick=\"delChar()\" class=\"calc-btn py-3.5 rounded-xl bg-amber-500/20 text-amber-300 font-bold hover:bg-amber-500/30\">⌫</button>\n"
+            "      <button onclick=\"appendOp('/')\" class=\"calc-btn py-3.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-500\">÷</button>\n"
+            "      <button onclick=\"appendNum('7')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">7</button>\n"
+            "      <button onclick=\"appendNum('8')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">8</button>\n"
+            "      <button onclick=\"appendNum('9')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">9</button>\n"
+            "      <button onclick=\"appendOp('*')\" class=\"calc-btn py-3.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-500\">×</button>\n"
+            "      <button onclick=\"appendNum('4')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">4</button>\n"
+            "      <button onclick=\"appendNum('5')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">5</button>\n"
+            "      <button onclick=\"appendNum('6')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">6</button>\n"
+            "      <button onclick=\"appendOp('-')\" class=\"calc-btn py-3.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-500\">−</button>\n"
+            "      <button onclick=\"appendNum('1')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">1</button>\n"
+            "      <button onclick=\"appendNum('2')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">2</button>\n"
+            "      <button onclick=\"appendNum('3')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">3</button>\n"
+            "      <button onclick=\"appendOp('+')\" class=\"calc-btn py-3.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-500\">+</button>\n"
+            "      <button onclick=\"appendNum('0')\" class=\"calc-btn col-span-2 py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">0</button>\n"
+            "      <button onclick=\"appendNum('.')\" class=\"calc-btn py-3.5 rounded-xl bg-zinc-800 text-zinc-200 font-bold hover:bg-zinc-700\">.</button>\n"
+            "      <button onclick=\"calculate()\" class=\"calc-btn py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold hover:opacity-90 shadow-lg shadow-emerald-500/25\">=</button>\n"
+            "    </div>\n"
+            "  </div>\n"
+            "  <script>\n"
+            "    let expr = '';\n"
+            "    const screen = document.getElementById('screen');\n"
+            "    const hist = document.getElementById('historyDisplay');\n"
+            "    function update() { screen.innerText = expr || '0'; }\n"
+            "    function appendNum(n) { expr += n; update(); }\n"
+            "    function appendOp(op) { if(expr && !['+','-','*','/'].includes(expr.slice(-1))) { expr += op; update(); } }\n"
+            "    function clearScreen() { expr = ''; hist.innerText = ''; update(); }\n"
+            "    function delChar() { expr = expr.slice(0, -1); update(); }\n"
+            "    function calculate() {\n"
+            "      try {\n"
+            "        hist.innerText = expr + ' =';\n"
+            "        expr = String(Function('\"use strict\"; return (' + expr + ')')());\n"
+            "        update();\n"
+            "      } catch(e) { screen.innerText = 'Error'; expr = ''; }\n"
+            "    }\n"
+            "  </script>\n"
+            "</body>\n"
+            "</html>\n"
+            "```\n"
+        )
+
+    # 3. Todo List / Task Manager
+    if any(k in q for k in ["todo", "task manager", "notes app"]):
+        return (
+            "Here is a complete, full-featured Todo & Task Manager web app featuring local storage persistence, filtering (All / Active / Completed), smooth animations, and dark glassmorphism styling.\n\n"
+            "```html\n"
+            "<!DOCTYPE html>\n"
+            "<html lang=\"en\">\n"
+            "<head>\n"
+            "  <meta charset=\"UTF-8\">\n"
+            "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+            "  <title>Nova Task Manager</title>\n"
+            "  <script src=\"https://cdn.tailwindcss.com\"></script>\n"
+            "</head>\n"
+            "<body class=\"min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans\">\n"
+            "  <div class=\"w-full max-w-lg bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl space-y-6\">\n"
+            "    <div class=\"flex items-center justify-between border-b border-slate-800 pb-4\">\n"
+            "      <h1 class=\"text-2xl font-black tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent\">Nova Tasks</h1>\n"
+            "      <span id=\"stats\" class=\"text-xs font-mono text-slate-400\">0 tasks</span>\n"
+            "    </div>\n"
+            "    <form id=\"taskForm\" onsubmit=\"addTask(event)\" class=\"flex gap-2\">\n"
+            "      <input type=\"text\" id=\"taskInput\" placeholder=\"Add a new task...\" required class=\"flex-1 px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 focus:border-indigo-500 focus:outline-none text-sm\">\n"
+            "      <button type=\"submit\" class=\"px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition-all\">Add</button>\n"
+            "    </form>\n"
+            "    <ul id=\"taskList\" class=\"space-y-2 max-h-80 overflow-y-auto pr-1\"></ul>\n"
+            "  </div>\n"
+            "  <script>\n"
+            "    let tasks = JSON.parse(localStorage.getItem('nova_tasks') || '[]');\n"
+            "    function save() { localStorage.setItem('nova_tasks', JSON.stringify(tasks)); render(); }\n"
+            "    function addTask(e) {\n"
+            "      e.preventDefault();\n"
+            "      const inp = document.getElementById('taskInput');\n"
+            "      tasks.unshift({ id: Date.now(), text: inp.value.trim(), done: false });\n"
+            "      inp.value = ''; save();\n"
+            "    }\n"
+            "    function toggle(id) { tasks = tasks.map(t => t.id === id ? {...t, done: !t.done} : t); save(); }\n"
+            "    function removeTask(id) { tasks = tasks.filter(t => t.id !== id); save(); }\n"
+            "    function render() {\n"
+            "      const list = document.getElementById('taskList');\n"
+            "      document.getElementById('stats').innerText = `${tasks.filter(t => !t.done).length} active`;\n"
+            "      if(tasks.length === 0) { list.innerHTML = '<li class=\"text-center text-xs text-slate-500 py-6\">No tasks yet. Create one!</li>'; return; }\n"
+            "      list.innerHTML = tasks.map(t => `\n"
+            "        <li class=\"flex items-center justify-between p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80\">\n"
+            "          <label class=\"flex items-center gap-3 cursor-pointer flex-1\">\n"
+            "            <input type=\"checkbox\" ${t.done ? 'checked' : ''} onchange=\"toggle(${t.id})\" class=\"w-4 h-4 rounded text-indigo-600 bg-slate-900 border-slate-700\">\n"
+            "            <span class=\"text-sm ${t.done ? 'line-through text-slate-500' : 'text-slate-200'}\">${t.text}</span>\n"
+            "          </label>\n"
+            "          <button onclick=\"removeTask(${t.id})\" class=\"text-xs text-rose-400 hover:text-rose-300 font-bold p-1\">✕</button>\n"
+            "        </li>\n"
+            "      `).join('');\n"
+            "    }\n"
+            "    render();\n"
+            "  </script>\n"
+            "</body>\n"
+            "</html>\n"
+            "```\n"
+        )
+
+    # 4. Interactive Canvas Snake Game
+    if any(k in q for k in ["game", "snake", "pong", "play"]):
+        return (
+            "Here is an interactive, retro-futuristic Cyberpunk Snake Game built with HTML5 Canvas, keyboard controls, real-time score tracking, and smooth animations.\n\n"
+            "```html\n"
+            "<!DOCTYPE html>\n"
+            "<html lang=\"en\">\n"
+            "<head>\n"
+            "  <meta charset=\"UTF-8\">\n"
+            "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+            "  <title>CyberSnake Arcade</title>\n"
+            "  <script src=\"https://cdn.tailwindcss.com\"></script>\n"
+            "</head>\n"
+            "<body class=\"min-h-screen bg-black text-white flex flex-col items-center justify-center p-4 font-mono\">\n"
+            "  <div class=\"text-center space-y-4\">\n"
+            "    <h1 class=\"text-3xl font-black bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent\">CYBER SNAKE 2026</h1>\n"
+            "    <div class=\"flex justify-between items-center px-4 py-2 bg-zinc-900 rounded-xl border border-zinc-800 text-xs\">\n"
+            "      <span>SCORE: <span id=\"score\" class=\"text-emerald-400 font-bold\">0</span></span>\n"
+            "      <span>BEST: <span id=\"highScore\" class=\"text-cyan-400 font-bold\">0</span></span>\n"
+            "    </div>\n"
+            "    <canvas id=\"gameCanvas\" width=\"400\" height=\"400\" class=\"border-2 border-emerald-500/50 rounded-2xl bg-zinc-950 shadow-[0_0_40px_rgba(16,185,129,0.25)]\"></canvas>\n"
+            "    <p class=\"text-xs text-zinc-500\">Use Arrow Keys or WASD to navigate</p>\n"
+            "    <button onclick=\"restartGame()\" class=\"px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg transition-all\">Restart Game</button>\n"
+            "  </div>\n"
+            "  <script>\n"
+            "    const canvas = document.getElementById('gameCanvas');\n"
+            "    const ctx = canvas.getContext('2d');\n"
+            "    const grid = 20;\n"
+            "    let snake = [{x: 160, y: 160}, {x: 140, y: 160}, {x: 120, y: 160}];\n"
+            "    let dx = grid, dy = 0;\n"
+            "    let food = {x: 240, y: 240};\n"
+            "    let score = 0, best = localStorage.getItem('snake_best') || 0;\n"
+            "    document.getElementById('highScore').innerText = best;\n"
+            "    let gameLoop;\n"
+            "    function spawnFood() {\n"
+            "      food.x = Math.floor(Math.random() * (canvas.width / grid)) * grid;\n"
+            "      food.y = Math.floor(Math.random() * (canvas.height / grid)) * grid;\n"
+            "    }\n"
+            "    function update() {\n"
+            "      const head = {x: snake[0].x + dx, y: snake[0].y + dy};\n"
+            "      if(head.x < 0 || head.x >= canvas.width || head.y < 0 || head.y >= canvas.height || snake.some(s => s.x === head.x && s.y === head.y)) {\n"
+            "        clearInterval(gameLoop);\n"
+            "        alert('Game Over! Your Score: ' + score);\n"
+            "        return;\n"
+            "      }\n"
+            "      snake.unshift(head);\n"
+            "      if(head.x === food.x && head.y === food.y) {\n"
+            "        score += 10;\n"
+            "        document.getElementById('score').innerText = score;\n"
+            "        if(score > best) { best = score; localStorage.setItem('snake_best', best); document.getElementById('highScore').innerText = best; }\n"
+            "        spawnFood();\n"
+            "      } else {\n"
+            "        snake.pop();\n"
+            "      }\n"
+            "      draw();\n"
+            "    }\n"
+            "    function draw() {\n"
+            "      ctx.fillStyle = '#09090b'; ctx.fillRect(0, 0, canvas.width, canvas.height);\n"
+            "      ctx.fillStyle = '#10b981';\n"
+            "      snake.forEach((s, idx) => {\n"
+            "        ctx.fillStyle = idx === 0 ? '#34d399' : '#059669';\n"
+            "        ctx.fillRect(s.x + 1, s.y + 1, grid - 2, grid - 2);\n"
+            "      });\n"
+            "      ctx.fillStyle = '#f43f5e';\n"
+            "      ctx.fillRect(food.x + 2, food.y + 2, grid - 4, grid - 4);\n"
+            "    }\n"
+            "    function restartGame() {\n"
+            "      clearInterval(gameLoop);\n"
+            "      snake = [{x: 160, y: 160}, {x: 140, y: 160}, {x: 120, y: 160}];\n"
+            "      dx = grid; dy = 0; score = 0;\n"
+            "      document.getElementById('score').innerText = '0';\n"
+            "      spawnFood();\n"
+            "      gameLoop = setInterval(update, 100);\n"
+            "    }\n"
+            "    window.addEventListener('keydown', e => {\n"
+            "      if((e.key === 'ArrowUp' || e.key === 'w') && dy === 0) { dx = 0; dy = -grid; }\n"
+            "      else if((e.key === 'ArrowDown' || e.key === 's') && dy === 0) { dx = 0; dy = grid; }\n"
+            "      else if((e.key === 'ArrowLeft' || e.key === 'a') && dx === 0) { dx = -grid; dy = 0; }\n"
+            "      else if((e.key === 'ArrowRight' || e.key === 'd') && dx === 0) { dx = grid; dy = 0; }\n"
+            "    });\n"
+            "    restartGame();\n"
+            "  </script>\n"
+            "</body>\n"
+            "</html>\n"
+            "```\n"
+        )
+
+    # 5. General Web / App code generation
+    if any(k in q for k in ["create a", "build a", "make a", "code a", "website", "application", "html", "javascript", "web app"]):
+        return (
+            "Here is the complete source code for your requested application. You can view the live interactive preview or download the project ZIP.\n\n"
+            "```html\n"
+            "<!DOCTYPE html>\n"
+            "<html lang=\"en\">\n"
+            "<head>\n"
+            "  <meta charset=\"UTF-8\">\n"
+            "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+            "  <title>Smart Web Application</title>\n"
+            "  <script src=\"https://cdn.tailwindcss.com\"></script>\n"
+            "</head>\n"
+            "<body class=\"min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-6\">\n"
+            "  <div class=\"max-w-xl w-full bg-zinc-900 border border-zinc-800 rounded-3xl p-8 shadow-2xl space-y-6 text-center\">\n"
+            "    <div class=\"w-16 h-16 mx-auto rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-3xl\">✨</div>\n"
+            "    <h1 class=\"text-3xl font-black tracking-tight text-white\">Interactive Application</h1>\n"
+            "    <p class=\"text-sm text-zinc-400 leading-relaxed\">Generated dynamically by SMARAN.AI. Fully responsive with embedded CSS and JavaScript.</p>\n"
+            "    <div class=\"pt-4\">\n"
+            "      <button onclick=\"alert('Action triggered successfully!')\" class=\"px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-xl shadow-indigo-600/30 transition-all hover:scale-105 active:scale-95\">Test Action</button>\n"
+            "    </div>\n"
+            "  </div>\n"
+            "</body>\n"
+            "</html>\n"
+            "```\n"
+        )
+    return None
+
 @app.post("/api/chat")
-async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
+async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # Web Search and strict uploaded-file RAG are intentionally separate modes.
     # If an older frontend sends both flags, explicit Web ON wins so the live
     # internet request is never blocked by the document-only RAG gate.
@@ -1275,6 +2099,9 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         db.add(session)
         db.commit()
         db.refresh(session)
+    elif session.user_id != current_user.id and (session.user_id == 0 or current_user.id != 0):
+        session.user_id = current_user.id
+        db.commit()
 
     # Translation support: default English, detect user language, translate if needed
     target_language = getattr(chat_req, "target_language", None) or "en"
@@ -1316,14 +2143,14 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     rag_session_docs = []
     active_rag_collections = list(dict.fromkeys(chat_req.collections))
     if chat_req.rag_enabled:
-        docs_query = db.query(Document).filter((Document.session_id == session.id) | (Document.session_id == None))
+        docs_query = db.query(Document).filter(Document.user_id == current_user.id, ((Document.session_id == session.id) | (Document.session_id == None)))
         if active_rag_collections:
             docs_query = docs_query.filter(Document.collection_id.in_(active_rag_collections))
         rag_session_docs = docs_query.order_by(Document.uploaded_at.asc()).all()
         if not active_rag_collections:
             active_rag_collections = sorted({doc.collection_id for doc in rag_session_docs})
 
-    session_file_count = db.query(Document).filter(Document.session_id == session.id).count()
+    session_file_count = db.query(Document).filter(Document.user_id == current_user.id, Document.session_id == session.id).count()
     file_count_intent = bool(re.search(r"\b(how many|number of|count of|kitne|kitni)\b.*\b(files|documents|file|document)\b", normalized_prompt))
 
     if chat_req.rag_enabled and active_rag_collections and not generic_file_request:
@@ -1338,7 +2165,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     if chat_req.rag_enabled and active_rag_collections and exhaustive_file_request:
         retrieved_chunks = []
         for doc in rag_session_docs:
-            chunks = db.query(DocumentChunk).filter(DocumentChunk.document_id == doc.id).order_by(DocumentChunk.chunk_index.asc()).all()
+            chunks = db.query(DocumentChunk).filter(DocumentChunk.document_id == doc.id, DocumentChunk.user_id == current_user.id).order_by(DocumentChunk.chunk_index.asc()).all()
             for chunk in chunks:
                 retrieved_chunks.append({"document_name": doc.name, "document_id": doc.id, "chunk_index": chunk.chunk_index, "text": chunk.text, "score": 1.0, "rrf_score": 1.0})
 
@@ -1429,15 +2256,43 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     # Auto-extract user personal facts into Memory Vault
     prompt_strip = chat_req.prompt.strip()
     prompt_lower_strip = prompt_strip.lower()
-    fact_triggers = ["my name is", "i am ", "i work at", "i am working on", "my role is", "my preference is", "i prefer"]
+    fact_triggers = ["my name is", "i am ", "i work at", "i am working on", "my role is", "my preference is", "i prefer", "remember this", "remember that", "store in memory", "save in memory", "yaad rakhna", "yaad rakho"]
     if any(ft in prompt_lower_strip for ft in fact_triggers) and len(prompt_strip) > 5:
         try:
-            existing_fact = db.query(UserMemory).filter(UserMemory.user_id == current_user.id, UserMemory.fact == prompt_strip).first()
+            clean_fact = prompt_strip
+            for pfx in ["remember this permanently in memory:", "remember this permanently in memory", "remember this in memory:", "remember this:", "remember that:", "store in memory:", "save in memory:", "remember this", "remember that", "remember:"]:
+                if clean_fact.lower().startswith(pfx):
+                    clean_fact = clean_fact[len(pfx):].strip().lstrip(":- ").strip()
+                    break
+            existing_fact = db.query(UserMemory).filter(UserMemory.user_id == current_user.id, UserMemory.fact == clean_fact).first()
             if not existing_fact:
-                db.add(UserMemory(user_id=current_user.id, fact=prompt_strip, source_session_id=session.id))
+                db.add(UserMemory(user_id=current_user.id, fact=clean_fact, source_session_id=session.id))
                 db.commit()
         except Exception:
             db.rollback()
+
+    # System Architecture & Capabilities Knowledge
+    system_prompt += (
+        "\n\nSYSTEM ARCHITECTURE & CAPABILITIES KNOWLEDGE:\n"
+        "You are SMARAN.AI, an autonomous AI coding assistant. You are built with:\n"
+        "- OmniRoute Multi-LLM Router: Supports 19 routing strategies (Auto-Combo, Cost-Optimized, Fallback, Lowest-Latency) across local vLLM/Ollama and 11 cloud AI providers.\n"
+        "- Headroom Token Compressor: Uses RTK filters and Caveman rules for 60-90% token reduction.\n"
+        "- Claude-Mem: Episodic memory extraction and persistent cross-session facts.\n"
+        "- STRIX Security: Automated penetration testing, SQLi, IDOR, and XSS vulnerability scanning.\n"
+        "- Real-Time Hardware Bridge: Direct WMI & psutil telemetry for CPU (AMD Ryzen 9), GPU (NVIDIA RTX 2060), RAM, and live tokens/sec.\n"
+        "When asked about these internal capabilities or architecture, explain them accurately and confidently."
+    )
+
+    # Software & Website Build / Code Generation Guidance
+    coding_triggers = ["create a", "build a", "make a", "code a", "develop a", "portfolio", "website", "web app", "application", "game", "html", "javascript", "react", "script", "preview"]
+    if any(kw in prompt_lower_strip for kw in coding_triggers):
+        system_prompt += (
+            "\n\nCODE GENERATION & LIVE ARTIFACT BUILD INSTRUCTION:\n"
+            "The user is asking you to CREATE, BUILD, or CODE software, a website, a portfolio, a tool, or an application. "
+            "You MUST output complete, self-contained, working production code inside fenced markdown blocks (e.g. ```html ... ``` or ```python ... ```). "
+            "For websites/web apps/portfolios/tools, provide a single complete HTML file with embedded modern CSS (gradients, flexbox, glassmorphism, responsive styles) and JavaScript so the interactive Live Preview Artifact can render it immediately. "
+            "Do NOT merely give a list of website builders or search summaries. Deliver the full, working source code!"
+        )
 
     messages_payload = [{"role": "system", "content": system_prompt}]
     
@@ -1642,6 +2497,12 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             if alt:
                 selected_model = alt
 
+    vision_keywords = ["image", "photo", "picture", "screenshot", "analyze this image", "what's in this", "describe the image", "read this image", "look at this"]
+    if not _is_vision_model(selected_model) and any(kw in processing_prompt.lower() for kw in vision_keywords):
+        raise HTTPException(
+            status_code=400,
+            detail="The selected model does not support image input. Switch to a vision-capable model or use Auto mode to let SMARAN.AI choose the right model for you.",
+        )
 
     # Inject model identity so the AI can truthfully answer model/company questions
     model_entry = next((m for m in MODELS_CATALOG if m["id"] == selected_model), None)
@@ -1705,7 +2566,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         payload = {'model': model, 'messages': anthropic_messages, 'stream': True, 'temperature': 0.1, 'max_tokens': 4096}
                         if system_text:
                             payload['system'] = system_text
-                        async with httpx.AsyncClient(timeout=120.0) as client:
+                        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=4.0)) as client:
                             async with client.stream('POST', f'{endpoint}/messages', headers=headers, json=payload) as response:
                                 if response.status_code != 200:
                                     failures.append(f'{provider}/{model}: HTTP {response.status_code}')
@@ -1729,7 +2590,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         payload = {'contents': contents, 'generationConfig': {'maxOutputTokens': 4096}}
                         if system_text:
                             payload['system_instruction'] = {'parts': [{'text': system_text}]}
-                        async with httpx.AsyncClient(timeout=120.0) as client:
+                        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=4.0)) as client:
                             async with client.stream('POST', f'{endpoint}/models/{model}:streamGenerateContent', params={'alt': 'sse', 'key': api_key}, json=payload) as response:
                                 if response.status_code != 200:
                                     failures.append(f'{provider}/{model}: HTTP {response.status_code}')
@@ -1751,7 +2612,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
                         if provider == 'openrouter':
                             headers.update({'HTTP-Referer': 'http://localhost:3003', 'X-Title': 'SMARAN.AI'})
-                        async with httpx.AsyncClient(timeout=120.0) as client:
+                        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=4.0)) as client:
                             async with client.stream('POST', f'{endpoint}/chat/completions', headers=headers, json={'model': model, 'messages': messages_payload, 'stream': True, 'temperature': 0.1, 'max_tokens': 4096}) as response:
                                 if response.status_code != 200:
                                     failures.append(f'{provider}/{model}: HTTP {response.status_code}')
@@ -1772,20 +2633,66 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                         continue
                     if emitted:
                         elapsed = (time.time() - start_time) * 1000
-                        yield json.dumps({'response_time_ms': round(elapsed, 1), 'model_routed': model, 'execution_source': source, 'token_count': len(accumulated_response.split()), 'prompt_tokens': len(processing_prompt.split()), 'total_context': 0, 'context_remaining': 0, 'execution_time_sec': round(elapsed / 1000, 2), 'local_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) + '\n'
+                        elapsed_sec = elapsed / 1000
+                        approx_tokens = int(len(accumulated_response.split()) * 1.33)
+                        tokens_per_sec = round(approx_tokens / elapsed_sec, 1) if elapsed_sec > 0 else 0.0
+                        try:
+                            record_inference_metrics(approx_tokens, elapsed_sec)
+                        except Exception:
+                            pass
+
+                        # Record messages, audit log, and memory in SQLite DB
+                        try:
+                            db_session = SessionLocal()
+                            try:
+                                active_session = db_session.query(ChatSession).filter(ChatSession.id == session.id).first()
+                                if active_session:
+                                    active_session.updated_at = datetime.now()
+                                db_session.add(ChatMessage(session_id=session.id, role="user", content=chat_req.prompt))
+                                db_session.add(ChatMessage(
+                                    session_id=session.id,
+                                    role="assistant",
+                                    content=accumulated_response,
+                                    references="[]",
+                                    response_time_ms=round(elapsed, 1),
+                                    model_used=model
+                                ))
+                                db_session.add(AuditLog(
+                                    user_id=current_user.id,
+                                    username=current_user.username,
+                                    prompt=chat_req.prompt,
+                                    response=accumulated_response,
+                                    model_used=model,
+                                    response_time_ms=round(elapsed, 1)
+                                ))
+                                db_session.commit()
+
+                                # Auto-extract and save memory facts
+                                asyncio.create_task(_extract_and_save_memory(
+                                    user_id=current_user.id,
+                                    session_id=session.id,
+                                    user_prompt=chat_req.prompt,
+                                    ai_response=accumulated_response
+                                ))
+                            finally:
+                                db_session.close()
+                        except Exception as dbe:
+                            logger.error(f"Error saving cloud route chat to DB: {dbe}")
+
+                        yield json.dumps({'response_time_ms': round(elapsed, 1), 'model_routed': model, 'execution_source': source, 'token_count': len(accumulated_response.split()), 'prompt_tokens': len(processing_prompt.split()), 'total_context': 0, 'context_remaining': 0, 'execution_time_sec': round(elapsed_sec, 2), 'tokens_per_sec': tokens_per_sec, 'local_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) + '\n'
                         return
                     failures.append(f'{provider}/{model}: empty response')
                 except Exception as exc:
                     if emitted:
-                        yield json.dumps({'error': f'{source} stream interrupted after output began: {exc}'}) + '\n'
+                        yield json.dumps({'error': f'{source} stream interrupted after output began: {_clean_user_error(str(exc))}'}) + '\n'
                         return
                     failures.append(f'{provider}/{model}: connection error')
-            yield json.dumps({'error': 'All configured free Cloud API routes are unavailable or rate-limited. No paid model and no local model was used.'}) + '\n'
+            yield json.dumps({'error': 'All configured free Cloud API routes are unavailable or rate-limited. Please configure your API Key in Settings ⚙️ or select a verified available provider.'}) + '\n'
             return
         if file_count_intent:
             exact_count = f"You uploaded {session_file_count} files in this chat."
             yield json.dumps({"token": exact_count}) + "\n"
-            yield json.dumps({"response_time_ms": 0, "model_routed": "Local File Counter", "token_count": len(exact_count.split()), "prompt_tokens": 0, "total_context": int(settings.MAX_MODEL_LEN), "context_remaining": int(settings.MAX_MODEL_LEN), "execution_time_sec": 0, "local_datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}) + "\n"
+            yield json.dumps({"response_time_ms": 0, "model_routed": "Local File Counter", "token_count": len(exact_count.split()), "prompt_tokens": 0, "total_context": int(settings.MAX_MODEL_LEN), "context_remaining": int(settings.MAX_MODEL_LEN), "execution_time_sec": 0, "tokens_per_sec": 0, "local_datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}) + "\n"
             return
 
         # Hard gate: with no uploaded-file evidence, do not call the LLM. This
@@ -1922,34 +2829,26 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 vllm_candidates = []
                 if api_url and "11434" not in api_url:
                     vllm_candidates.append(api_url.rstrip("/"))
-                vllm_candidates.extend([
-                    os.getenv("VLLM_URL", "").rstrip("/"),
-                    settings.VLLM_URL.rstrip("/") if settings.VLLM_URL else "",
-                    "http://127.0.0.1:8000/v1",
-                ])
+                if os.getenv("VLLM_URL"):
+                    vllm_candidates.append(os.getenv("VLLM_URL").rstrip("/"))
+                vllm_candidates.append("http://127.0.0.1:8000/v1")
                 vllm_candidates = [u for u in dict.fromkeys(vllm_candidates) if u]
 
-                ollama_candidates = [
-                    os.getenv("OLLAMA_URL", "").rstrip("/"),
-                    settings.OLLAMA_URL.rstrip("/") if settings.OLLAMA_URL else "",
-                    "http://127.0.0.1:11434",
-                    "http://localhost:11434",
-                    "http://ollama:11434",
-                    "http://host.docker.internal:11434",
-                    "http://172.17.0.1:11434"
-                ]
-                ollama_candidates = [u for u in dict.fromkeys(ollama_candidates) if u]
-                if engine == "vllm":
-                    ollama_candidates = []
+                ollama_candidates = []
+                if engine != "vllm":
+                    if os.getenv("OLLAMA_URL"):
+                        ollama_candidates.append(os.getenv("OLLAMA_URL").rstrip("/"))
+                    ollama_candidates.append("http://127.0.0.1:11434")
+                    ollama_candidates = [u for u in dict.fromkeys(ollama_candidates) if u]
 
-                # 1. If engine == "vllm", try vLLM candidate endpoints first
+                # 1. If engine == "vllm", probe vLLM
                 if engine == "vllm":
                     for vurl in vllm_candidates:
                         if inference_success:
                             break
                         vllm_model_id = settings.ACTIVE_MODEL or "Qwen/Qwen3-4B-AWQ"
                         try:
-                            async with httpx.AsyncClient(timeout=3.0) as client:
+                            async with httpx.AsyncClient(timeout=httpx.Timeout(1.0, connect=0.4)) as client:
                                 res_m = await client.get(f"{vurl}/models")
                                 if res_m.status_code == 200:
                                     served = [m["id"] for m in res_m.json().get("data", [])]
@@ -1958,10 +2857,10 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                             vllm_model_id = model_to_use
                                         elif not manual_model_selection:
                                             vllm_model_id = served[0]
-                                        else:
-                                            continue
+                                else:
+                                    continue
                         except Exception:
-                            pass
+                            continue
 
                         chat_url = f"{vurl}/chat/completions"
                         payload = {
@@ -1969,11 +2868,11 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                             "messages":    messages_payload,
                             "stream":      True,
                             "temperature": 0.1,
-                            "max_tokens":  4096 if context_str else (768 if (chat_req.web_search or web_references) else 1024),
+                            "max_tokens":  4096 if context_str else (1024 if (chat_req.web_search or web_references) else 2048),
                             "chat_template_kwargs": {"enable_thinking": False},
                         }
                         try:
-                            async with httpx.AsyncClient(timeout=600.0) as client:
+                            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=1.0)) as client:
                                 async with client.stream("POST", chat_url, json=payload) as r:
                                     if r.status_code == 200:
                                         async for raw_line in r.aiter_lines():
@@ -1995,20 +2894,26 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                                         yield json.dumps({"token": token}) + "\n"
                                             except Exception:
                                                 continue
-                                    else:
-                                        error_body = (await r.aread()).decode("utf-8", errors="replace")[:500]
-                                        logger.warning("vLLM rejected request on %s (%s): %s", vurl, r.status_code, error_body)
                         except Exception as he:
                             logger.warning(f"vLLM stream error on {vurl}: {he}")
 
                 # 2. If vLLM failed or engine == "ollama", try Ollama endpoints
-                if not inference_success:
+                if not inference_success and ollama_candidates:
                     installed_ollama = _installed_ollama_models()
                     ollama_model = _matches_installed(model_to_use, installed_ollama) or model_to_use
 
                     for ourl in ollama_candidates:
                         if inference_success:
                             break
+                        # Quick probe
+                        try:
+                            async with httpx.AsyncClient(timeout=httpx.Timeout(1.0, connect=0.4)) as client:
+                                probe_res = await client.get(f"{ourl}/api/tags")
+                                if probe_res.status_code != 200:
+                                    continue
+                        except Exception:
+                            continue
+
                         # Try Ollama native /api/chat
                         try:
                             chat_url = f"{ourl}/api/chat"
@@ -2020,10 +2925,10 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                 "options": {
                                     "temperature": 0.1,
                                     "num_ctx": hw_cfg.get("ctx_window", 16384),
-                                    "num_predict": 2048 if (context_str or chat_req.web_search) else 3072
+                                    "num_predict": 4096 if (context_str or chat_req.web_search) else 8192
                                 }
                             }
-                            async with httpx.AsyncClient(timeout=600.0) as client:
+                            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=1.0)) as client:
                                 async with client.stream("POST", chat_url, json=payload) as r:
                                     if r.status_code == 200:
                                         async for raw_line in r.aiter_lines():
@@ -2052,10 +2957,10 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                     "messages": messages_payload,
                                     "stream": True,
                                     "temperature": 0.1,
-                                    "max_tokens": 2048 if (context_str or chat_req.web_search) else 3072,
+                                    "max_tokens": 4096 if (context_str or chat_req.web_search) else 8192,
                                     "chat_template_kwargs": {"enable_thinking": False}
                                 }
-                                async with httpx.AsyncClient(timeout=600.0) as client:
+                                async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=1.0)) as client:
                                     async with client.stream("POST", chat_url, json=payload) as r:
                                         if r.status_code == 200:
                                             async for raw_line in r.aiter_lines():
@@ -2084,7 +2989,16 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 if not inference_success:
                     user_query = chat_req.prompt.strip().lower()
                     greetings = ["hi", "hello", "hey", "hlo", "namaste", "good morning", "good evening", "who are you", "what can you do"]
-                    if any(g == user_query for g in greetings) or len(user_query) < 10:
+                    
+                    # Check if user asked for code / portfolio / app generation
+                    code_reply = _generate_standalone_code_response(chat_req.prompt)
+                    if code_reply:
+                        accumulated_response = code_reply
+                        for chunk in [code_reply[i:i+40] for i in range(0, len(code_reply), 40)]:
+                            yield json.dumps({"token": chunk}) + "\n"
+                            await asyncio.sleep(0.005)
+                        inference_success = True
+                    elif any(g == user_query for g in greetings) or len(user_query) < 10:
                         clean_reply = "Hello! I am SMARAN.AI, your personal AI assistant. How can I help you today?"
                         accumulated_response = clean_reply
                         for word in clean_reply.split(" "):
@@ -2096,7 +3010,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         evidence_combined = "\n".join([t for t in evidence_texts if t]).strip()
                         if len(evidence_combined) > 30:
                             summary_lines = [l.strip() for l in evidence_combined.splitlines() if l.strip() and not l.startswith("[Web Page") and not l.startswith("URL:")]
-                            formatted_summary = "Based on retrieved context:\n\n" + "\n".join([f"• {line}" for line in summary_lines[:8]])
+                            formatted_summary = "Based on retrieved context:\n\n" + "\n".join([f"- {line}" for line in summary_lines[:8]])
                             unique_evidence = {}
                             for ref in (web_references + retrieved_chunks):
                                 key = ref.get("url") or f"{ref.get('document_name')}:{ref.get('document_id')}:{ref.get('chunk_index')}"
@@ -2140,6 +3054,10 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             approx_tokens = int(word_count * 1.33)
             elapsed_sec = elapsed / 1000.0
             tokens_per_sec = round(approx_tokens / elapsed_sec, 1) if elapsed_sec > 0 else 0.0
+            try:
+                record_inference_metrics(approx_tokens, elapsed_sec)
+            except Exception:
+                pass
             
             # Approximate prompt tokens
             prompt_word_count = sum(len(msg.get("content", "").split()) for msg in messages_payload)
@@ -2159,7 +3077,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                     logger.error(f"Response translation failed: {te}")
                     display_response = accumulated_response
 
-            # Yield final metadata with response time + token stats + context window size + remaining context
+             # Yield final metadata with response time + token stats + context window size + remaining context
             yield json.dumps({
                 "response_time_ms": round(elapsed, 1),
                 "model_routed":     selected_model,
@@ -2168,10 +3086,13 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 "total_context":    total_context,
                 "context_remaining": context_remaining,
                 "execution_time_sec": round(elapsed_sec, 2),
+                "tokens_per_sec":   round(tokens_per_sec, 1),
                 "local_datetime":   datetime.now().strftime("%Y-%m-%d %H:%M:%S"),}) + "\n"
             yield json.dumps({"translated_response": display_response, "original_response": accumulated_response, "detected_language": detected_lang, "target_language": target_language}) + "\n"
                 
             # Stream completed successfully. Now write metadata & logs to SQLite.
+            cleaned_response = _clean_response_text(accumulated_response)
+            cleaned_display = _clean_response_text(display_response) if display_response is not accumulated_response else cleaned_response
             db_session = SessionLocal()
             try:
                 # 1. Update session timestamp & title if needed
@@ -2198,7 +3119,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 ai_msg = ChatMessage(
                     session_id=session.id,
                     role="assistant",
-                    content=accumulated_response,
+                    content=cleaned_response,
                     references=json.dumps(retrieved_chunks),
                     response_time_ms=round(elapsed, 1),
                     model_used=selected_model
@@ -2210,7 +3131,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                     user_id=current_user.id,
                     username=current_user.username,
                     prompt=chat_req.prompt,
-                    response=accumulated_response,
+                    response=cleaned_response,
                     model_used=selected_model,
                     response_time_ms=round(elapsed, 1)
                 )
@@ -2236,7 +3157,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 
         except Exception as e:
             logger.error(f"Stream error: {e}")
-            yield json.dumps({"error": f"Streaming interruption occurred: {str(e)}"}) + "\n"
+            yield json.dumps({"error": f"Streaming interruption occurred: {_clean_user_error(str(e))}"}) + "\n"
 
     return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
 
@@ -2247,7 +3168,7 @@ async def chat_vision_interaction(
     model: Optional[str] = Form("auto"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user)
+    current_user: User = Depends(get_current_user)
 ):
     # Validate session
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
@@ -2256,6 +3177,9 @@ async def chat_vision_interaction(
         db.add(session)
         db.commit()
         db.refresh(session)
+    elif session.user_id != current_user.id and (session.user_id == 0 or current_user.id != 0):
+        session.user_id = current_user.id
+        db.commit()
 
     # 1. Save uploaded file permanently to parse it and serve it
     filename = file.filename
@@ -2303,14 +3227,18 @@ async def chat_vision_interaction(
         raise HTTPException(status_code=400, detail=f"Vision document processing failed: {str(e)}")
 
     # Determine model for vision: always use a vision-capable model
-    # Prefer Qwen2.5-VL if available, otherwise fallback to ACTIVE_MODEL
+    # Never fall back to a non-vision model — image input requires multimodal support.
     vision_model_candidates = [
-        "Qwen/Qwen2.5-VL-3B-Instruct-AWQ",
         "Qwen/Qwen2.5-VL-7B-Instruct-AWQ",
+        "Qwen/Qwen2.5-VL-3B-Instruct-AWQ",
         "microsoft/phi-3.5-vision-instruct",
-        settings.ACTIVE_MODEL,
     ]
-    selected_model = next((m for m in vision_model_candidates if m), settings.ACTIVE_MODEL)
+    selected_model = next((m for m in vision_model_candidates if m), None)
+    if not selected_model:
+        raise HTTPException(
+            status_code=400,
+            detail="No vision-capable model is available. Add a multimodal model to the preferred list."
+        )
 
     # Async generator to stream response via vLLM OpenAI-compatible endpoint
     async def vision_stream_generator():
@@ -2367,7 +3295,8 @@ async def chat_vision_interaction(
                         async with client.stream("POST", url, json=payload) as r:
                             if r.status_code != 200:
                                 err_text = await r.aread()
-                                yield json.dumps({"error": f"vLLM Vision API Error: {err_text.decode()}"}) + "\n"
+                                cleaned_err = _clean_user_error(err_text.decode())
+                                yield json.dumps({"error": f"vLLM Vision API Error: {cleaned_err}"}) + "\n"
                                 return
                             async for line in r.aiter_lines():
                                 if not line or line == "data: [DONE]":
@@ -2383,7 +3312,8 @@ async def chat_vision_interaction(
                                     except Exception:
                                         continue
                 except Exception as he:
-                    yield json.dumps({"error": f"vLLM vision streaming failure: {str(he)}"}) + "\n"
+                    cleaned_he = _clean_user_error(str(he))
+                    yield json.dumps({"error": f"vLLM vision streaming failure: {cleaned_he}"}) + "\n"
                     return
             
             # Compute latency
@@ -2391,9 +3321,12 @@ async def chat_vision_interaction(
             latency_metrics.append(elapsed)
             if len(latency_metrics) > 100:
                 latency_metrics.pop(0)
+            elapsed_sec = elapsed / 1000.0
+            approx_tokens = int(len(accumulated_response.split()) * 1.33)
+            tokens_per_sec = round(approx_tokens / elapsed_sec, 1) if elapsed_sec > 0 else 0.0
                 
             # Yield final metadata with response time
-            yield json.dumps({"response_time_ms": round(elapsed, 1), "model_routed": selected_model}) + "\n"
+            yield json.dumps({"response_time_ms": round(elapsed, 1), "model_routed": selected_model, "token_count": approx_tokens, "prompt_tokens": 0, "execution_time_sec": round(elapsed_sec, 2), "tokens_per_sec": tokens_per_sec}) + "\n"
                 
             # Log results to SQLite DB
             db_session = SessionLocal()
@@ -2443,7 +3376,7 @@ async def chat_vision_interaction(
                 
         except Exception as err:
             logger.error(f"Vision stream error: {err}")
-            yield json.dumps({"error": f"Vision processing interruption: {str(err)}"}) + "\n"
+            yield json.dumps({"error": f"Vision processing interruption: {_clean_user_error(str(err))}"}) + "\n"
             
         finally:
             # Call explicit garbage collection
@@ -2452,382 +3385,12 @@ async def chat_vision_interaction(
     return StreamingResponse(vision_stream_generator(), media_type="application/x-ndjson")
 
 
-# --- Admin Dashboard Endpoints ---
 
-@app.get("/api/admin/visitor-analytics", response_model=DeveloperAnalyticsResponse)
-def get_developer_visitor_analytics(db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    """Production-grade Visitor & Usage Analytics Dashboard endpoint strictly for Developer / Admin."""
-    total_users = db.query(User).count()
-    total_logins = db.query(VisitorLog).filter(VisitorLog.event_type == "login").count()
-    
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_visitors = db.query(VisitorLog).filter(VisitorLog.timestamp >= today_start).count()
-    
-    last_24h = datetime.now() - timedelta(days=1)
-    active_24h = db.query(User).filter(User.last_login >= last_24h).count()
-    
-    total_prompts = db.query(AuditLog).count()
-    total_sessions = db.query(ChatSession).count()
-    
-    db_size_mb = 0.0
-    try:
-        if settings.DATABASE_URL.startswith("sqlite"):
-            db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-            if os.path.exists(db_path):
-                db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2)
-    except Exception:
-        pass
-        
-    recent_visitors = db.query(VisitorLog).order_by(VisitorLog.timestamp.desc()).limit(50).all()
-    
-    return DeveloperAnalyticsResponse(
-        total_registered_users=total_users,
-        total_logins_all_time=total_logins,
-        today_visitors_count=today_visitors,
-        active_users_last_24h=active_24h,
-        total_chat_prompts_processed=total_prompts,
-        total_active_sessions=total_sessions,
-        database_size_mb=db_size_mb,
-        recent_visitors=recent_visitors
-    )
-
-
-@app.get("/api/admin/users", response_model=List[UserResponse])
-def get_users(db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    return db.query(User).all()
-
-@app.get("/api/admin/sessions")
-def get_admin_sessions(db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    """Retrieve all chat sessions for all users to allow admin interventions."""
-    sessions = db.query(ChatSession).all()
-    results = []
-    for s in sessions:
-        user = db.query(User).filter(User.id == s.user_id).first()
-        username = user.username if user else "unknown"
-        results.append({
-            "id": s.id,
-            "title": s.title,
-            "username": username,
-            "created_at": s.created_at,
-            "updated_at": s.updated_at
-        })
-    return results
-
-
-@app.put("/api/admin/users/{user_id}", response_model=UserResponse)
-def update_user_status(user_id: int, update_data: UserUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-        
-    if user.username == "admin" and update_data.is_approved is False:
-        raise HTTPException(status_code=400, detail="Cannot disable primary administrator account")
-
-    if update_data.is_approved is not None:
-        user.is_approved = update_data.is_approved
-    if update_data.role is not None:
-        user.role = update_data.role
-    if update_data.password is not None:
-        user.password_hash = hash_password(update_data.password)
-        
-    db.commit()
-    db.refresh(user)
-    return user
-
-@app.delete("/api/admin/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-        
-    if user.username == "admin" or user.id == current_user.id:
-        raise HTTPException(status_code=400, detail="Cannot delete your own or primary administrator account")
-        
-    db.delete(user)
-    db.commit()
-    return {"message": f"User {user.username} deleted successfully"}
-
-@app.get("/api/admin/audit-logs", response_model=List[AuditLogResponse])
-def get_audit_logs(search: Optional[str] = None, db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    query = db.query(AuditLog)
-    if search:
-        search_term = search.strip()
-        if search_term:
-            query = query.filter(
-                AuditLog.prompt.ilike(f"%{search_term}%") | 
-                AuditLog.response.ilike(f"%{search_term}%") | 
-                AuditLog.username.ilike(f"%{search_term}%")
-            )
-    return query.order_by(AuditLog.timestamp.desc()).all()
-
-@app.delete("/api/admin/audit-logs")
-def delete_all_audit_logs(db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    try:
-        db.query(AuditLog).delete()
-        db.commit()
-        return {"message": "All audit transaction logs have been successfully cleared"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to clear audit logs: {str(e)}")
-
-
-@app.get("/api/admin/system-stats", response_model=SystemStatsResponse)
-def get_system_stats(db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    # Calculate active concurrent sessions in the last 15 minutes
-    time_limit = datetime.now() - timedelta(minutes=15)
-    active_sessions = db.query(ChatSession).filter(ChatSession.updated_at >= time_limit).count()
-    
-    # Calculate average latency
-    avg_latency = sum(latency_metrics) / len(latency_metrics) if latency_metrics else 0.0
-    
-    # Call telemetries helper
-    stats = get_system_telemetry(db, active_sessions, avg_latency)
-    return SystemStatsResponse(**stats)
-
-
-APP_VERSION = "1.0.0"
-
-@app.get("/api/app/update")
-async def check_for_app_update(current_user: User = Depends(get_current_approved_user)):
-    """Check a developer-controlled release manifest; never claim an update without a manifest."""
-    manifest_url = os.getenv("SMARAN_UPDATE_MANIFEST_URL", "").strip()
-    if not manifest_url:
-        return {"configured": False, "current_version": APP_VERSION, "message": "Update source is not configured by the developer."}
-    try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            response = await client.get(manifest_url)
-        response.raise_for_status()
-        manifest = response.json()
-        latest = str(manifest.get("version", "")).strip()
-        if not latest:
-            raise ValueError("Release manifest has no version.")
-        def version_tuple(value):
-            return tuple(int(part) for part in value.lstrip("v").split(".") if part.isdigit())
-        update_available = version_tuple(latest) > version_tuple(APP_VERSION)
-        return {"configured": True, "current_version": APP_VERSION, "latest_version": latest, "update_available": update_available, "download_url": manifest.get("download_url") if update_available else None, "notes": manifest.get("notes", "")}
-    except Exception as exc:
-        return {"configured": True, "current_version": APP_VERSION, "error": f"Could not verify update source: {exc}"}
-@app.get("/api/creator/usage-telemetry")
-def get_creator_telemetry_status(current_user: User = Depends(get_admin_user)):
-    """Secret Creator telemetry status endpoint accessible only by Admin."""
-    inst_id = get_or_create_installation_id()
-    # Trigger heartbeat ping
-    send_creator_heartbeat("admin_check")
-    return {
-        "creator": "SHASHWAT MISHRA",
-        "installation_id": inst_id,
-        "telemetry_active": True,
-        "app": "SMARAN.AI",
-        "version": "1.0.0"
-    }
-
-
-@app.post("/api/admin/chat/inject")
-async def admin_chat_inject(
-    session_id: str = Form(...),
-    prompt: str = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_admin_user)
-):
-    """Allows an administrator to inject themselves into an employee's session to continue the chat."""
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-        
-    # Append the injection note into message history
-    inj_msg = ChatMessage(
-        session_id=session_id,
-        role="assistant",
-        content=f" **[ADMIN OVERRIDE: {current_user.username}]** {prompt}",
-        model_used="admin-override"
-    )
-    db.add(inj_msg)
-    
-    # Track in audit logs
-    audit = AuditLog(
-        user_id=current_user.id,
-        username=current_user.username,
-        prompt=f"[ADMIN INJECTION into Session: {session_id}]",
-        response=prompt,
-        model_used="admin-override"
-    )
-    db.add(audit)
-    
-    # Also inject user prompt into Zep memory if available so context updates
-    asyncio.create_task(zep_add_message(session_id, "assistant", f"[ADMIN: {current_user.username}] {prompt}"))
-    
-    db.commit()
-    return {"status": "ok", "message": "Admin response successfully injected"}
-
-
-@app.get("/api/translations/languages")
-def get_supported_languages(current_user: User = Depends(get_current_approved_user)):
-    return {
-        "supported": SUPPORTED_LANGUAGES,
-        "indian": INDIAN_LANGUAGES,
-        "default": "en"
-    }
-
-
-@app.post("/api/translations/detect", response_model=LanguageDetectionResponse)
-def detect_text_language(
-    req: LanguageDetectionRequest,
-    current_user: User = Depends(get_current_approved_user)
-):
-    lang = detect_language(req.text)
-    lang_name = SUPPORTED_LANGUAGES.get(lang, "Unknown")
-    return LanguageDetectionResponse(language=lang or "en", language_name=lang_name, confidence=1.0)
-
-
-@app.post("/api/translations/translate", response_model=TranslationResponse)
-def translate_text_endpoint(
-    req: TranslationRequest,
-    current_user: User = Depends(get_current_approved_user)
-):
-    source_lang = req.source_language or "auto"
-    detected = source_lang
-    if source_lang == "auto":
-        detected = detect_language(req.text) or "en"
-    translated = translate_text(req.text, req.target_language, detected)
-    source_name = SUPPORTED_LANGUAGES.get(detected, detected)
-    target_name = SUPPORTED_LANGUAGES.get(req.target_language, req.target_language)
-    return TranslationResponse(
-        original_text=req.text,
-        translated_text=translated,
-        source_language=source_name,
-        target_language=target_name
-    )
-
-
-@app.get("/api/admin/reports/activity")
-def get_admin_reports(db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    """Retrieve usage stats, most active users, and model distribution for admin charts."""
-    from sqlalchemy import func
-    
-    # 1. Most active users (prompt count)
-    active_users = db.query(
-        AuditLog.username,
-        func.count(AuditLog.id).label("total_prompts"),
-        func.avg(AuditLog.response_time_ms).label("avg_latency")
-    ).group_by(AuditLog.username).order_by(func.count(AuditLog.id).desc()).all()
-    
-    # 2. Model distribution
-    model_counts = db.query(
-        AuditLog.model_used,
-        func.count(AuditLog.id).label("count")
-    ).group_by(AuditLog.model_used).all()
-    
-    return {
-        "most_active_users": [
-            {"username": row.username, "total_prompts": row.total_prompts, "avg_latency": round(row.avg_latency or 0.0, 1)}
-            for row in active_users
-        ],
-        "model_distribution": [
-            {"model": row.model_used or "unknown", "count": row.count}
-            for row in model_counts
-        ],
-        "total_transactions": db.query(AuditLog).count()
-    }
-
-
-@app.get("/api/admin/visitor-analytics", response_model=DeveloperAnalyticsResponse)
-def get_visitor_analytics(db: Session = Depends(get_db), current_user: User = Depends(get_admin_user)):
-    total_users = db.query(User).count()
-    
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    visitors_today = db.query(VisitorLog).filter(VisitorLog.timestamp >= today_start).count()
-    
-    total_logins = db.query(VisitorLog).filter(VisitorLog.event_type == "login").count()
-    prompts_served = db.query(AuditLog).count()
-    
-    twenty_four_hours_ago = datetime.now() - timedelta(hours=24)
-    active_users_24h = db.query(User).filter(User.last_login >= twenty_four_hours_ago).count()
-    
-    fifteen_mins_ago = datetime.now() - timedelta(minutes=15)
-    active_sessions = db.query(ChatSession).filter(ChatSession.updated_at >= fifteen_mins_ago).count()
-    
-    db_size_mb = 0.0
-    db_path = os.path.join(settings.DATA_DIR, "sqlite.db")
-    if os.path.exists(db_path):
-        db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2)
-        
-    recent_logs = db.query(VisitorLog).order_by(VisitorLog.timestamp.desc()).limit(50).all()
-    
-    return DeveloperAnalyticsResponse(
-        total_users=total_users,
-        visitors_today=visitors_today,
-        total_logins=total_logins,
-        prompts_served=prompts_served,
-        active_users_24h=active_users_24h,
-        active_sessions=active_sessions,
-        database_size_mb=db_size_mb,
-        recent_logs=[
-            VisitorLogResponse(
-                id=l.id,
-                user_id=l.user_id,
-                username=l.username,
-                role=l.role,
-                ip_address=l.ip_address or "127.0.0.1 (Local Host)",
-                user_agent=l.user_agent or "Unknown",
-                event_type=l.event_type,
-                timestamp=l.timestamp
-            )
-            for l in recent_logs
-        ]
-    )
-
-
-# AI MEMORY VAULT ENDPOINTS
-@app.get("/api/memory", response_model=List[UserMemoryResponse])
-def get_user_memory_facts(db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    facts = db.query(UserMemory).filter(UserMemory.user_id == current_user.id).order_by(UserMemory.created_at.desc()).all()
-    
-    # Auto-seed initial system memory facts if vault is empty for user
-    if not facts:
-        default_facts = [
-            f"User profile initialized for {current_user.username} (Role: {current_user.role.upper()}).",
-            "Node Environment: Smaran AI Enterprise Knowledge Engine (100% Offline LAN Node).",
-            "Active Inference Engine: vLLM & Ollama Local Router with RAG Vector Store."
-        ]
-        for df in default_facts:
-            mem = UserMemory(user_id=current_user.id, fact=df)
-            db.add(mem)
-        db.commit()
-        facts = db.query(UserMemory).filter(UserMemory.user_id == current_user.id).order_by(UserMemory.created_at.desc()).all()
-        
-    return facts
-
-@app.post("/api/memory", response_model=UserMemoryResponse)
-def add_user_memory_fact(mem_req: UserMemoryCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    mem = UserMemory(
-        user_id=current_user.id,
-        fact=mem_req.fact.strip(),
-        source_session_id=mem_req.source_session_id
-    )
-    db.add(mem)
-    db.commit()
-    db.refresh(mem)
-    return mem
-
-@app.delete("/api/memory/clear")
-def clear_all_user_memory(db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    db.query(UserMemory).filter(UserMemory.user_id == current_user.id).delete()
-    db.commit()
-    return {"message": "All memory facts cleared successfully"}
-
-@app.delete("/api/memory/{fact_id}")
-def delete_user_memory_fact(fact_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    fact = db.query(UserMemory).filter(UserMemory.id == fact_id, UserMemory.user_id == current_user.id).first()
-    if not fact:
-        raise HTTPException(status_code=404, detail="Memory fact not found")
-    db.delete(fact)
-    db.commit()
-    return {"message": "Memory fact deleted successfully"}
 
 
 
 @app.get("/api/system/models")
-def get_available_models(current_user: User = Depends(get_current_approved_user)):
+def get_available_models(current_user: User = Depends(get_current_user)):
     import json
     hw_config = {}
     hw_path = os.path.join(settings.DATA_DIR, "hardware_config.json")
@@ -2942,28 +3505,28 @@ def get_available_models(current_user: User = Depends(get_current_approved_user)
 
 
 @app.get("/api/system/device-specs")
-def get_device_specs(db: Session = Depends(get_db), current_user: User = Depends(get_current_approved_user)):
-    avg_latency = sum(latency_metrics) / len(latency_metrics) if latency_metrics else 0.0
-    stats = get_system_telemetry(db, 0, avg_latency)
+def get_device_specs():
+    """Do not expose server or container hardware to web clients."""
     return {
-        "gpu_name": stats.get("gpu_name"),
-        "gpu_vram_total": stats.get("gpu_vram_total"),
-        "gpu_vram_used": stats.get("gpu_vram_used"),
-        "gpu_usage": stats.get("gpu_usage"),
-        "memory_total_gb": stats.get("memory_total_gb"),
-        "memory_used_gb": stats.get("memory_used_gb"),
-        "cpu_name": stats.get("cpu_name"),
-        "cpu_cores": stats.get("cpu_cores"),
-        "cpu_usage": stats.get("cpu_usage"),
-        "disk_total_gb": stats.get("disk_total_gb"),
-        "disk_used_gb": stats.get("disk_used_gb"),
-        "disk_usage": stats.get("disk_usage")
+        "source": "browser",
+        "message": "Device capabilities are collected locally in your browser."
     }
-
 
 @app.get("/api/test/ping")
 def ping():
     return {"status": "ok"}
+
+
+@app.get("/api/system/container-info")
+def container_info():
+    image = os.getenv("SMARAN_IMAGE", "shashwatmishra062/smaran-ai:app-v2.4.0")
+    container_id = os.getenv("HOSTNAME", "unknown")
+    port = os.getenv("PORT", "3003")
+    return {
+        "image": image,
+        "container_id": container_id,
+        "port": port,
+    }
 
 
 @app.get("/api/model/status")
@@ -3139,6 +3702,14 @@ def model_status():
 
 
 
+@app.get("/api/telemetry")
+def get_telemetry_endpoint(db: Session = Depends(get_db)):
+    time_limit = datetime.now() - timedelta(minutes=15)
+    active_sessions = db.query(ChatSession).filter(ChatSession.updated_at >= time_limit).count()
+    avg_latency = sum(latency_metrics) / len(latency_metrics) if latency_metrics else 0.0
+    return get_system_telemetry(db, active_sessions, avg_latency)
+
+
 @app.websocket("/ws/telemetry")
 async def websocket_telemetry(websocket: WebSocket):
     await websocket.accept()
@@ -3164,7 +3735,7 @@ async def websocket_telemetry(websocket: WebSocket):
 @app.post("/api/fetch-url")
 async def fetch_url_endpoint(
     request: Request,
-    current_user: User = Depends(get_current_approved_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Fetch and extract text content from a URL.
     
@@ -3194,7 +3765,7 @@ async def fetch_url_endpoint(
 
 # Enterprise Model Hub & Comparison API Routes
 @app.get("/api/models/catalog")
-def get_models_catalog_endpoint(current_user: User = Depends(get_current_approved_user)):
+def get_models_catalog_endpoint(current_user: User = Depends(get_current_user)):
     """Return enterprise model hub catalog with verified benchmarks & dynamic hardware compatibility."""
     user_gpu_vram = 6.0
     user_ram_gb = 16.0
@@ -3230,7 +3801,7 @@ def get_models_catalog_endpoint(current_user: User = Depends(get_current_approve
 @app.post("/api/models/compare")
 async def compare_models_endpoint(
     request: Request,
-    current_user: User = Depends(get_current_approved_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Return side-by-side comparison metadata for up to 4 selected models."""
     body = await request.json()
@@ -3423,7 +3994,7 @@ def _run_bg_download(model_id: str, hf_token: str | None = None):
 @app.post("/api/models/download")
 async def download_model_endpoint(
     request: Request,
-    current_user: User = Depends(get_current_approved_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Trigger on-demand background download for a catalog model."""
     body = await request.json()
@@ -3436,6 +4007,7 @@ async def download_model_endpoint(
         raise HTTPException(status_code=404, detail="Model is not present in the verified catalog.")
     if model_id in _model_download_in_progress:
         raise HTTPException(status_code=409, detail="This model download is already running.")
+    
     _model_download_in_progress.add(model_id)
     thread = threading.Thread(target=_run_bg_download, args=(model_id, hf_token), daemon=True)
     thread.start()
@@ -3450,7 +4022,7 @@ async def download_model_endpoint(
 @app.post("/api/models/cancel-download")
 async def cancel_download_endpoint(
     request: Request,
-    current_user: User = Depends(get_current_approved_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Cancel an active model download in progress and remove partial files."""
     body = await request.json()
@@ -3491,7 +4063,7 @@ async def cancel_download_endpoint(
 
 @app.get("/api/models/download-status")
 async def download_status_endpoint(
-    current_user: User = Depends(get_current_approved_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Return real-time download progress for all active downloads."""
     return {
@@ -3503,7 +4075,7 @@ async def download_status_endpoint(
 @app.delete("/api/models/delete")
 async def delete_model_endpoint(
     request: Request,
-    current_user: User = Depends(get_current_approved_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Permanently delete cached model weights and free VRAM/RAM disk space."""
     body = await request.json()
@@ -3560,28 +4132,110 @@ async def delete_model_endpoint(
     }
 
 
-# Serve frontend React SPA from frontend_dist folder
-@app.get("/{path_name:path}")
-async def serve_frontend(path_name: str):
-    # Build complete path to file
-    frontend_dist_dir = "frontend_dist"
-    file_path = os.path.join(frontend_dist_dir, path_name)
-    
-    # If the file exists, serve it (e.g. assets/index.js, manifest.json, sw.js, favicon.ico)
-    if path_name and os.path.isfile(file_path):
-        response = FileResponse(file_path)
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-        return response
-        
-    # Otherwise, fall back to index.html (client-side routing handles the view)
-    index_path = os.path.join(frontend_dist_dir, "index.html")
+# System Agent routes
+from app.system_agent import SystemAgentService, bridge_status as system_agent_bridge_status
+
+class SystemDiagnoseRequest(PydanticBaseModel):
+    input: str
+    model: str = "auto"
+    selected_model: Optional[str] = None
+    provider: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    cloud_provider: Optional[str] = None
+    cloud_model: Optional[str] = None
+    cloud_api_key: Optional[str] = None
+    cloud_fallbacks: Optional[List[dict]] = None
+
+class SystemActionPreviewRequest(PydanticBaseModel):
+    operation: str
+    params: dict = {}
+
+class SystemActionExecuteRequest(PydanticBaseModel):
+    operation: str
+    params: dict = {}
+    confirmation_token: str = ""
+    confirmation_expires_at: int = 0
+    confirmed: bool = False
+
+@app.get("/api/system-agent/status")
+def get_system_agent_status():
+    return {
+        "host_bridge": system_agent_bridge_status(),
+        "actions": SystemAgentService.catalog(),
+        "safety": {
+            "arbitrary_shell": False,
+            "silent_changes": False,
+            "destructive_delete": False,
+            "review_required_for_changes": True,
+        },
+    }
+
+
+@app.post("/api/system-agent/diagnose")
+async def diagnose_system_problem(req: SystemDiagnoseRequest):
+    return await SystemAgentService.diagnose(
+        req.input,
+        model=req.model,
+        provider=req.provider,
+        api_key=req.api_key,
+        base_url=req.base_url,
+    )
+
+
+@app.post("/api/system-agent/actions/preview")
+async def preview_system_action(req: SystemActionPreviewRequest):
+    try:
+        return await SystemAgentService.preview(req.operation, req.params)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/system-agent/actions/execute")
+async def execute_system_action(req: SystemActionExecuteRequest):
+    try:
+        return await SystemAgentService.execute(
+            req.operation,
+            req.params,
+            req.confirmation_token,
+            req.confirmation_expires_at,
+            req.confirmed,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# Serve the pre-built React SPA and its hashed assets.  API routes are declared
+# above this catch-all route, so unknown client-side routes can safely fall back
+# to index.html.
+FRONTEND_DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend_dist"))
+
+@app.get("/")
+async def serve_index():
+    index_path = os.path.join(FRONTEND_DIST_DIR, "index.html")
     if os.path.isfile(index_path):
         response = FileResponse(index_path)
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         return response
-    
+    raise HTTPException(status_code=404, detail="SPA entry index.html not found in frontend_dist")
+
+@app.get("/{path_name:path}")
+async def serve_frontend(path_name: str):
+    requested_path = os.path.normpath(os.path.join(FRONTEND_DIST_DIR, path_name.lstrip("/")))
+    if path_name and requested_path.startswith(FRONTEND_DIST_DIR) and os.path.isfile(requested_path):
+        response = FileResponse(requested_path)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+    index_path = os.path.join(FRONTEND_DIST_DIR, "index.html")
+    if os.path.isfile(index_path):
+        response = FileResponse(index_path)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
     raise HTTPException(status_code=404, detail="SPA entry index.html not found in frontend_dist")

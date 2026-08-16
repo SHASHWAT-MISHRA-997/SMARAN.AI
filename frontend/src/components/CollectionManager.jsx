@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { FolderPlus, Trash2, Upload, FileText, ChevronRight, HardDrive, Database } from 'lucide-react';
-import { API_BASE } from '../context/AuthContext';
+import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
 const CollectionManager = ({ token }) => {
   const [collections, setCollections] = useState([]);
@@ -17,9 +17,7 @@ const CollectionManager = ({ token }) => {
   const fetchCollections = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/collections`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`${API_BASE}/api/collections`);
       if (res.ok) {
         const data = await res.json();
         setCollections(data);
@@ -46,9 +44,7 @@ const CollectionManager = ({ token }) => {
 
   const fetchDocuments = async (colId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/collections/${colId}/documents`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuth(`${API_BASE}/api/collections/${colId}/documents`);
       if (res.ok) {
         const data = await res.json();
         setDocuments(data);
@@ -63,11 +59,10 @@ const CollectionManager = ({ token }) => {
     if (!newColName.trim()) return;
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/collections`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/collections`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ name: newColName, description: newColDesc }),
       });
@@ -87,9 +82,8 @@ const CollectionManager = ({ token }) => {
   const handleDeleteCollection = async (id, e) => {
     if (e) e.stopPropagation();
     try {
-      const res = await fetch(`${API_BASE}/api/collections/${id}`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/collections/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         if (activeCol?.id === id) setActiveCol(null);
@@ -182,7 +176,7 @@ const CollectionManager = ({ token }) => {
     const IGNORED_DIR_PATTERNS = [
       '/node_modules/', '/.git/', '/.venv/', '/venv/', '/__pycache__/', 
       '/dist/', '/build/', '/.next/', '/.idea/', '/.vscode/', '/.pytest_cache/',
-      '/data/', '/SMARAN.AI_Release/', '/brain/', '/.antigravity/', '/out/', '/coverage/'
+      '/data/', '/SMARAN.AI_Release/', '/brain/', '/out/', '/coverage/'
     ];
     const FORBIDDEN_EXTS = [
       '.exe', '.dll', '.so', '.dylib', '.bin', '.iso', '.dmg', '.pkg', '.deb', '.rpm', '.class', '.pyc', '.pyo', '.o', '.a', '.lib', '.obj', '.zip', '.tar', '.gz', '.7z', '.rar', '.gguf'
@@ -217,9 +211,8 @@ const CollectionManager = ({ token }) => {
       formData.append('file', file, relativePath);
 
       try {
-        const res = await fetch(`${API_BASE}/api/collections/${activeCol.id}/upload`, {
+        const res = await fetchWithAuth(`${API_BASE}/api/collections/${activeCol.id}/upload`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
           body: formData,
         });
         if (res.ok) {
@@ -255,9 +248,8 @@ const CollectionManager = ({ token }) => {
 
   const handleDeleteDoc = async (docId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/documents/${docId}`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/documents/${docId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         setConfirmDeleteDocId(null);

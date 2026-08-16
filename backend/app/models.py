@@ -8,17 +8,29 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
-    password_hash = Column(String, nullable=False)
-    role = Column(String, default="user", nullable=False)  # "admin" or "user"
+    email = Column(String, unique=True, index=True, nullable=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    password_hash = Column(String, nullable=True)
+    role = Column(String, default="user", nullable=False)
     is_approved = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
+    device_fingerprint = Column(String, nullable=True)
     last_login = Column(DateTime, nullable=True)
-    login_count = Column(Integer, default=0, nullable=False)
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+    session_token = Column(String, unique=True, index=True, nullable=True)
+    session_expires = Column(DateTime, nullable=True)
+    verification_token = Column(String, nullable=True)
+    reset_token = Column(String, nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
 
     # Relationships
     sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="user")
     memories = relationship("UserMemory", back_populates="user", cascade="all, delete-orphan")
+    collections = relationship("Collection", back_populates="user", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
+    chunks = relationship("DocumentChunk", back_populates="user", cascade="all, delete-orphan")
 
 
 class Collection(Base):
@@ -27,9 +39,11 @@ class Collection(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
     description = Column(String, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
 
     # Relationships
+    user = relationship("User", back_populates="collections")
     documents = relationship("Document", back_populates="collection", cascade="all, delete-orphan")
     chunks = relationship("DocumentChunk", back_populates="collection", cascade="all, delete-orphan")
 
@@ -39,6 +53,7 @@ class Document(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     collection_id = Column(Integer, ForeignKey("collections.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     file_path = Column(String, nullable=False)
     file_type = Column(String, nullable=False)
     file_size = Column(Integer, nullable=False)
@@ -46,6 +61,7 @@ class Document(Base):
     uploaded_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
 
     # Relationships
+    user = relationship("User", back_populates="documents")
     collection = relationship("Collection", back_populates="documents")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
 
@@ -55,10 +71,12 @@ class DocumentChunk(Base):
     id = Column(Integer, primary_key=True, index=True)
     document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
     collection_id = Column(Integer, ForeignKey("collections.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     text = Column(Text, nullable=False)
     chunk_index = Column(Integer, nullable=False)
 
     # Relationships
+    user = relationship("User", back_populates="chunks")
     document = relationship("Document", back_populates="chunks")
     collection = relationship("Collection", back_populates="chunks")
 
@@ -116,22 +134,27 @@ class UserMemory(Base):
     source_session_id = Column(String, nullable=True)  # Which session it came from
     created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
-
     # Relationships
     user = relationship("User", back_populates="memories")
 
+class CustomPlugin(Base):
+    """User-defined custom plugins, skills, and MCP connectors."""
+    __tablename__ = "custom_plugins"
 
-class VisitorLog(Base):
-    """Production-grade Visitor Analytics log for tracking developer metrics, logins, IP addresses, and user activity."""
-    __tablename__ = "visitor_logs"
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String, nullable=False)
+    type = Column(String, nullable=False)  # "plugin", "skill", "connector", "mcp"
+    url = Column(String, nullable=False)   # Git URL or MCP server endpoint
+    description = Column(Text, nullable=True)
+    config = Column(Text, nullable=True)   # JSON-serialized custom configuration/headers
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    username = Column(String, nullable=False)
-    role = Column(String, default="user", nullable=False)
-    ip_address = Column(String, nullable=True)
-    user_agent = Column(String, nullable=True)
-    event_type = Column(String, default="login", nullable=False) # "login", "register", "password_reset"
-    timestamp = Column(DateTime, default=datetime.datetime.now, nullable=False)
+    # Relationships
+    user = relationship("User")
+
+
 
 

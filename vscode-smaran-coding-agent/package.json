@@ -1,0 +1,175 @@
+{
+  "name": "smaran-ai-pair-programmer",
+  "displayName": "SMARAN AI - Autonomous Coding Assistant & Pair Programmer",
+  "description": "Autonomous AI Pair Programmer & Developer Assistant powered by Multi-LLM Dynamic Routing and Headroom Compression.",
+  "version": "1.0.6",
+  "publisher": "ShashwatMishra",
+  "icon": "media/agent.png",
+  "galleryBanner": {
+    "color": "#090a0f",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Snippets",
+    "Machine Learning",
+    "Testing",
+    "Linters"
+  ],
+  "keywords": [
+    "ai",
+    "ai-assistant",
+    "copilot",
+    "cursor",
+    "claude",
+    "claude-code",
+    "codex",
+    "deepseek",
+    "deepseek-r1",
+    "deepseek-v3",
+    "deepseek-coder",
+    "openai",
+    "gemini",
+    "chatgpt",
+    "pair-programmer",
+    "code-generator",
+    "code-refactor",
+    "unit-tests",
+    "linter",
+    "autonomous-agent",
+    "omniroute",
+    "headroom",
+    "smaran",
+    "smaran-ai"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:smaran-ai.chatView"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "smaran-ai-sidebar",
+          "title": "SMARAN.AI",
+          "icon": "media/agent.svg"
+        }
+      ]
+    },
+    "views": {
+      "smaran-ai-sidebar": [
+        {
+          "type": "webview",
+          "id": "smaran-ai.chatView",
+          "name": "SMARAN.AI Console",
+          "icon": "media/agent.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "smaran.startAgent",
+        "title": "SMARAN.AI: Open Console",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "smaran.generateCode",
+        "title": "SMARAN.AI: Generate Code from Instruction",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "smaran.explainCode",
+        "title": "SMARAN.AI: Explain Selected Code",
+        "icon": "$(book)"
+      },
+      {
+        "command": "smaran.refactorCode",
+        "title": "SMARAN.AI: Autonomous Refactor Selection",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "smaran.generateTests",
+        "title": "SMARAN.AI: Generate Unit Test Suite",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "smaran.fixDiagnostics",
+        "title": "SMARAN.AI: Auto-Fix Error / Diagnostic",
+        "icon": "$(check-all)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "smaran.editorSubmenu",
+          "group": "1_modification"
+        }
+      ],
+      "smaran.editorSubmenu": [
+        {
+          "command": "smaran.explainCode",
+          "group": "1_explain"
+        },
+        {
+          "command": "smaran.refactorCode",
+          "group": "2_refactor"
+        },
+        {
+          "command": "smaran.generateTests",
+          "group": "3_tests"
+        },
+        {
+          "command": "smaran.fixDiagnostics",
+          "group": "4_fix"
+        }
+      ]
+    },
+    "submenus": [
+      {
+        "id": "smaran.editorSubmenu",
+        "label": "SMARAN.AI",
+        "icon": "$(hubot)"
+      }
+    ],
+    "configuration": {
+      "title": "SMARAN.AI Settings",
+      "properties": {
+        "smaran.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:3003",
+          "description": "SMARAN.AI Server Endpoint URL (Default: http://localhost:3003)"
+        },
+        "smaran.defaultModel": {
+          "type": "string",
+          "default": "auto",
+          "description": "Default inference model (auto, deepseek-coder, claude-3-5-sonnet, qwen-2.5-coder)"
+        },
+        "smaran.enableHeadroomCompression": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Headroom 60-90% token compression for faster code synthesis"
+        },
+        "smaran.autoApplyDiffs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically apply file edits without showing diff confirmation preview"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.3.3"
+  }
+}

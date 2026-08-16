@@ -1,27 +1,104 @@
-# SMARAN.AI - Windows NVIDIA GPU single-container deployment
+# SMARAN.AI - Auto-generated Compose Profile
 name: smaran-ai
+
 services:
-  app:
-    image: shashwatmishra062/smaran-ai:app-v1.0.0
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: smaran-ai
-    ports:
-      - 3003:3003
+  browser-renderer:
+    image: shashwatmishra062/smaran-ai:browser-v2.5.0
+    profiles: [optional-services]
+    read_only: true
+    tmpfs:
+      - /tmp:size=536870912
+    shm_size: 536870912
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  media-generator:
+    image: shashwatmishra062/smaran-ai:media-v2.5.0
+    profiles: [optional-services]
     environment:
-      JWT_SECRET: gmr-robotics-local-security-secret-key-98765
-      ACTIVE_MODEL: Qwen/Qwen3-4B-AWQ
-      INFERENCE_ENGINE: vllm
-      MAX_MODEL_LEN: 2048
-      VLLM_URL: http://127.0.0.1:8000/v1
-      DATA_DIR: /app/data
-      HF_HOME: /root/.cache/huggingface
-      VLLM_GPU_MEMORY_UTILIZATION: 0.75
+      - LOCAL_IMAGE_DEVICE=cuda
+      - LOCAL_IMAGE_MODEL=segmind/tiny-sd
+      - LOCAL_IMAGE_OFFLOAD=none
+      - LOCAL_IMAGE_SIZE=384
+      - LOCAL_IMAGE_STEPS=12
+      - LOCAL_IMAGE_GUIDANCE=7.5
+      - LOCAL_IMAGE_USE_SAFETENSORS=0
+      - LOCAL_IMAGE_RELEASE_GPU=1
+      - VIDEO_CAPTION_DEVICE=cuda
+      - MEDIA_WHISPER_DEVICE=cuda
+      - MEDIA_WHISPER_MODEL=tiny
     volumes:
       - smaran_models:/root/.cache/huggingface
-      - smaran_data:/app/data
+      - smaran_data:/data
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # vLLM OpenAI-Compatible Inference Server
+  inference-server:
+    image: vllm/vllm-openai:latest
+    expose:
+      - "8000"
+    volumes:
+      - ./data/models:/root/.cache/huggingface
+    environment:
+      - VLLM_USE_V1=0
+    command: --model Qwen/Qwen3-4B-AWQ --port 8000 --host 0.0.0.0 --max-model-len 3968 --gpu-memory-utilization 0.75 --enforce-eager --dtype float16 --trust-remote-code
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Monolithic App Container (FastAPI Backend + Vite Frontend)
+  # Hardware auto-detected by bootstrapper.py at startup
+  # Multi-GPU telemetry via nvidia-smi / host_stats.json / WMI (AMD + NVIDIA)
+  app:
+    build: .
+    image: shashwatmishra062/smaran-ai:app-v2.5.0
+    ports:
+      - "3003:3003"
+    environment:
+      - ACTIVE_MODEL=Qwen/Qwen3-4B-AWQ
+      - INFERENCE_ENGINE=vllm
+      - MAX_MODEL_LEN=3968
+      - VLLM_URL=http://inference-server:8000/v1
+      - DATA_DIR=/app/data
+      - LOCAL_IMAGE_SERVICE_URL=http://media-generator:8002
+      - UPLOAD_WHISPER_DEVICE=cuda
+      - UPLOAD_WHISPER_MODEL=tiny
+      - HF_HOME=/app/data/models
+      - BROWSER_RENDER_SERVICE_URL=http://browser-renderer:8003
+      - SMARAN_IMAGE=shashwatmishra062/smaran-ai:app-v2.5.0
+      - SMARAN_CODING_AGENT_ENABLED=true
+      # Optional: override host hardware detection (Docker host passthrough)
+      - SMARAN_HOST_CPU_NAME=${SMARAN_HOST_CPU_NAME:-}
+      - SMARAN_HOST_RAM_GB=${SMARAN_HOST_RAM_GB:-}
+      - SMARAN_HOST_GPU_NAME=${SMARAN_HOST_GPU_NAME:-}
+      - SMARAN_HOST_GPU_VRAM_GB=${SMARAN_HOST_GPU_VRAM_GB:-}
+      - SMARAN_HOST_GPU_COUNT=${SMARAN_HOST_GPU_COUNT:-}
+      - SMARAN_HOST_GPU_1_NAME=${SMARAN_HOST_GPU_1_NAME:-}
+      - SMARAN_HOST_GPU_1_VRAM_GB=${SMARAN_HOST_GPU_1_VRAM_GB:-}
+      - SMARAN_HOST_GPU_2_NAME=${SMARAN_HOST_GPU_2_NAME:-}
+      - SMARAN_HOST_GPU_2_VRAM_GB=${SMARAN_HOST_GPU_2_VRAM_GB:-}
+      # AMD GPU support
+      - SMARAN_AMD_GPU_DETECT=${SMARAN_AMD_GPU_DETECT:-true}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    depends_on:
+      - inference-server
     deploy:
       resources:
         reservations:
@@ -33,7 +110,7 @@ services:
 volumes:
   smaran_models:
     external: true
-    name: smaran-ai_smaran_models
+    name: smaran-ai_models_a1abdb1927e2
   smaran_data:
     external: true
-    name: smaran-ai_smaran_data
+    name: smaran-ai_data_a1abdb1927e2

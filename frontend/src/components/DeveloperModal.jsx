@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ExternalLink, Code2, Cpu, ShieldCheck, Sparkles, Globe, UserCheck, Boxes } from 'lucide-react';
+import { X, ExternalLink, Code2, Cpu, ShieldCheck, Sparkles, Globe, UserCheck, Boxes, Brain, Languages, Video, Zap, Smartphone, FileText, Database, BarChart2 } from 'lucide-react';
 
 const LinkedInIcon = ({ className = "w-4 h-4" }) => (
   <svg className={className} fill="currentColor" viewBox="0 0 24 24">
@@ -7,15 +7,67 @@ const LinkedInIcon = ({ className = "w-4 h-4" }) => (
   </svg>
 );
 
+const highlightCards = [
+  {
+    icon: <BarChart2 className="w-4 h-4 text-cyan-400" />,
+    title: '100% Real Hardware Telemetry',
+    description: 'Direct Windows WMI & native host bridge syncing real CPU (AMD Ryzen 9 4900H), GPU (RTX 2060), and RAM with live Tokens/sec & latency metrics.',
+    color: '#06b6d4',
+  },
+  {
+    icon: <Code2 className="w-4 h-4 text-indigo-400" />,
+    title: 'Autonomous Code & Web Studio',
+    description: 'Full-stack software and website generator with live interactive preview iframe, syntax-highlighted code inspector, and instant ZIP export.',
+    color: '#6366f1',
+  },
+  {
+    icon: <Zap className="w-4 h-4 text-amber-400" />,
+    title: 'OmniRoute Multi-LLM Router',
+    description: '19 routing strategies (Auto-Combo, Cost-Optimized, Fallback, Lowest-Latency) across 327+ AI provider integrations with circuit-breaker resilience.',
+    color: '#f59e0b',
+  },
+  {
+    icon: <Cpu className="w-4 h-4 text-emerald-400" />,
+    title: 'Headroom Token Compressor',
+    description: '60–90% prompt token reduction using stacked RTK filters, Caveman rules, and AST context relay for ultra-fast response generation.',
+    color: '#10b981',
+  },
+  {
+    icon: <Brain className="w-4 h-4 text-purple-400" />,
+    title: 'Claude-Mem Infinite Memory',
+    description: 'Autonomous cross-session cognitive memory with episodic observation extraction, domain concept tagging, and persistent recall.',
+    color: '#a855f7',
+  },
+  {
+    icon: <Globe className="w-4 h-4 text-violet-400" />,
+    title: '21st.dev MCP Protocol Ecosystem',
+    description: 'Extensible Model Context Protocol (MCP) server integration supporting custom GitHub skill repositories and stdio/SSE endpoints.',
+    color: '#8b5cf6',
+  },
+  {
+    icon: <ShieldCheck className="w-4 h-4 text-rose-400" />,
+    title: 'STRIX Security & Sandbox',
+    description: 'Automated penetration testing engine, IDOR verification, HttpOnly cookie authentication, and zero-telemetry hardware sync.',
+    color: '#f43f5e',
+  },
+  {
+    icon: <FileText className="w-4 h-4 text-pink-400" />,
+    title: 'Deep RAG & Visual Intelligence',
+    description: 'Hybrid vector document ingestion for PDFs, Excel BoMs, YouTube transcripts, and live URLs with Stable Diffusion local image generation.',
+    color: '#ec4899',
+  },
+];
+
 const DeveloperModal = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl bg-zinc-950 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 text-left">
+      <div className="w-full max-w-2xl bg-zinc-950/95 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 text-left cyber-rainbow-card">
         
         {/* Header */}
         <div className="relative px-6 py-6 border-b border-zinc-800/80 bg-gradient-to-r from-indigo-950/40 via-zinc-900 to-purple-950/30 backdrop-blur-sm flex items-center justify-between">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.12),transparent_60%)] pointer-events-none" />
           <div className="flex items-center gap-3.5">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-cyan-400 p-0.5 shadow-lg shadow-indigo-500/20">
               <div className="w-full h-full bg-zinc-950 rounded-[14px] flex items-center justify-center">
@@ -30,7 +82,7 @@ const DeveloperModal = ({ isOpen, onClose }) => {
                 </span>
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                The mind behind SMARAN.AI
+                The mind behind Smaran AI System Architecture
               </p>
             </div>
           </div>
@@ -66,7 +118,7 @@ const DeveloperModal = ({ isOpen, onClose }) => {
                 </p>
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">
-                Built the entire <strong className="text-white">SMARAN.AI</strong> enterprise platform — integrating zero-latency vLLM local inference, hybrid vector RAG retrieval, and real-time GPU engine optimization, and the Model Catalog & Matrix.
+                Built the entire <strong className="text-white">Smaran AI</strong> enterprise platform — integrating zero-latency vLLM local inference, hybrid vector RAG retrieval, and real-time GPU engine optimization.
               </p>
 
               {/* Social Action Links */}
@@ -95,62 +147,41 @@ const DeveloperModal = ({ isOpen, onClose }) => {
               </div>
             </div>
           </div>
+
+          {/* Key System Innovations Created */}
           <div className="space-y-3">
             <h4 className="text-xs font-black text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              Genuine Platform Highlights
+              Smaran AI Platform Highlights
             </h4>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
-                <div className="flex items-center gap-2 text-xs font-bold text-rose-400">
-                  <Globe className="w-4 h-4 text-rose-400" />
-                  <span>Multi-URL YouTube Intelligence</span>
+              {highlightCards.map((card, idx) => (
+                <div
+                  key={idx}
+                  className="group p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1 transition-all duration-300 hover:scale-[1.02] cursor-default highlight-card-enter"
+                  onMouseEnter={(e) => {
+                    const target = e.currentTarget;
+                    target.style.borderColor = card.color;
+                    target.style.boxShadow = `0 0 20px ${card.color}33`;
+                  }}
+                  onMouseLeave={(e) => {
+                    const target = e.currentTarget;
+                    target.style.borderColor = '';
+                    target.style.boxShadow = '';
+                  }}
+                >
+                  <div className="flex items-center gap-2 text-xs font-bold text-zinc-300 group-hover:text-white transition-colors">
+                    <span className="transition-transform duration-300 group-hover:scale-110 group-hover:rotate-12">
+                      {card.icon}
+                    </span>
+                    <span>{card.title}</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    {card.description}
+                  </p>
                 </div>
-                <p className="text-[11px] text-zinc-400">
-                  Paste multiple YouTube links at once — each video gets its own transcript extraction, preview card, and grounded answer.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
-                <div className="flex items-center gap-2 text-xs font-bold text-cyan-400">
-                  <Globe className="w-4 h-4 text-cyan-400" />
-                  <span>8-Language Regional Support</span>
-                </div>
-                <p className="text-[11px] text-zinc-400">
-                  Auto-translate input and responses in Hindi, Gujarati, Punjabi, Marathi, Tamil, Telugu, Malayalam, and Kannada.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
-                <div className="flex items-center gap-2 text-xs font-bold text-indigo-400">
-                  <Boxes className="w-4 h-4 text-indigo-400" />
-                  <span>Expanded Enterprise Model Catalog</span>
-                </div>
-                <p className="text-[11px] text-zinc-400">
-                  Verified local and cloud model catalog with hardware-fit indicators, provider selection, capability filters, and transparent execution-source labels.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
-                <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
-                  <Cpu className="w-4 h-4 text-amber-400" />
-                  <span>Auto-Vision Model Routing</span>
-                </div>
-                <p className="text-[11px] text-zinc-400">
-                  Automatically selects a vision-capable model for image/PDF analysis, preventing text-only model errors.
-                </p>
-              </div>
-
-              <div className="p-3.5 md:col-span-2 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
-                <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>Local Hardware Telemetry</span>
-                </div>
-                <p className="text-[11px] text-zinc-400">
-                  Shows real local GPU/CPU/RAM telemetry. Cloud provider infrastructure metrics are not represented as local measurements.
-                </p>
-              </div>
+              ))}
             </div>
           </div>
 

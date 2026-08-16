@@ -1,17 +1,20 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  MessageSquare, Plus, Trash2, X, LogOut,
-  ShieldAlert, Settings, Pencil, Check, Brain,
-  ChevronLeft, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck
+  MessageSquare, Plus, Trash2, X,
+  Settings, Pencil, Check, Brain, Sparkles,
+  ChevronLeft, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, LogOut, User,
+  Activity, LayoutDashboard,
 } from 'lucide-react';
 import ModelHubModal from './ModelHubModal';
 import DeveloperModal from './DeveloperModal';
-import { API_BASE } from '../context/AuthContext';
+import PluginHubModal from './PluginHubModal';
+import { SmaranLogo } from './SmaranLogo';
+import { API_BASE, logoutUser, getCurrentUser, fetchWithAuth } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
 
 
-/* â”€â”€â”€ Tooltip â€” uses React Portal so it's NEVER clipped by parent overflow â”€â”€ */
+/* Tooltip uses a React Portal so parent overflow never clips it. */
 const Tip = ({ label, children }) => {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -22,7 +25,7 @@ const Tip = ({ label, children }) => {
       const rect = ref.current.getBoundingClientRect();
       setPos({
         top: rect.top + rect.height / 2,
-        left: rect.right + 10,   // 10px gap to the right of the button
+        left: rect.right + 10,
       });
     }
     setShow(true);
@@ -46,7 +49,6 @@ const Tip = ({ label, children }) => {
             border border-zinc-700/80
             animate-in fade-in zoom-in-95 duration-100"
         >
-          {/* Arrow pointing left */}
           <span
             style={{
               position: 'absolute',
@@ -67,14 +69,18 @@ const Tip = ({ label, children }) => {
 };
 
 
-/* â”€â”€â”€ Collapsed Icon Button (icon + tiny label below) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Collapsed icon button */
 const RailBtn = ({ icon, label, onClick, active = false, danger = false, violet = false }) => (
   <Tip label={label}>
     <button
+      type="button"
       onClick={onClick}
+      aria-label={label}
+      title={label}
       className={`
         flex flex-col items-center justify-center gap-1 w-12 h-12 rounded-xl
         transition-all duration-200 cursor-pointer group relative
+        btn-lightning-hover sidebar-item-highlight
         ${active
           ? 'bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-400/40'
           : danger
@@ -91,17 +97,15 @@ const RailBtn = ({ icon, label, onClick, active = false, danger = false, violet 
 );
 
 
-/* â”€â”€â”€ Main Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const Sidebar = ({
   token, user, sessions, activeSessionId, setActiveSessionId,
-  onCreateSession, onDeleteSession, onRenameSession,
+  onCreateSession, onDeleteSession, onRenameSession, onClearHistory, onLogout,
   activeCollections, setActiveCollections,
-  onNavigate, activeView, logout, onExpandChange,
+  onNavigate, activeView, onExpandChange,
   isModelHubOpen: externalModelHubOpen,
   setIsModelHubOpen: externalSetIsModelHubOpen,
-  isDeveloperOpen: externalDeveloperOpen,
-  setIsDeveloperOpen: externalSetIsDeveloperOpen,
   onModelChange, position = 'left',
+  onTogglePerformance, showPerformance,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -122,17 +126,15 @@ const Sidebar = ({
   const isModelHubOpen = externalModelHubOpen !== undefined ? externalModelHubOpen : internalModelHubOpen;
   const setIsModelHubOpen = externalSetIsModelHubOpen || setInternalModelHubOpen;
 
-  // Developer Modal (Controlled externally or fallback to internal)
-  const [internalDeveloperOpen, setInternalDeveloperOpen] = useState(false);
-  const isDeveloperOpen = externalDeveloperOpen !== undefined ? externalDeveloperOpen : internalDeveloperOpen;
-  const setIsDeveloperOpen = externalSetIsDeveloperOpen || setInternalDeveloperOpen;
+  // Plugin & Skills Hub Modal
+  const [isPluginHubOpen, setIsPluginHubOpen] = useState(false);
+
+  // Developer Modal (Internal only)
+  const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
 
   const fetchMemoryFacts = async () => {
-    setMemoryLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/memory`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetchWithAuth(`${API_BASE}/api/memory`);
       if (res.ok) {
         const data = await parseJsonResponse(res);
         setMemoryFacts(data);
@@ -152,9 +154,8 @@ const Sidebar = ({
 
   const handleDeleteFact = async (id) => {
     try {
-      const res = await fetch(`${API_BASE}/api/memory/${id}`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/memory/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
         setMemoryFacts((prev) => prev.filter((fact) => fact.id !== id));
@@ -174,9 +175,8 @@ const Sidebar = ({
     if (!window.confirm("Are you sure you want to clear ALL memory facts? This cannot be undone.")) return;
     setMemoryLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/memory/clear`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/memory/clear`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
         setMemoryFacts([]);
@@ -203,7 +203,7 @@ const Sidebar = ({
   useEffect(() => { fetchCollections(); }, []);
   const fetchCollections = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/collections`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetchWithAuth(`${API_BASE}/api/collections`);
       if (res.ok) {
         await parseJsonResponse(res);
       }
@@ -212,9 +212,7 @@ const Sidebar = ({
 
   const handleSessionClick = (id) => { setActiveSessionId(id); onNavigate('chat'); setMobileOpen(false); };
 
-  /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-     MEMORY VAULT MODAL â€” Full screen overlay
-  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* Memory vault modal */
   const memoryModal = isMemoryOpen && (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
       <div className="bg-[#1e1f20] border border-zinc-800 rounded-3xl w-full max-w-xl flex flex-col max-h-[80vh] shadow-[0_0_50px_rgba(99,102,241,0.15)] overflow-hidden">
@@ -302,29 +300,28 @@ const Sidebar = ({
   /* 3D Motion Animated Logo Component */
   const Logo3DMotion = ({ size = "md" }) => {
     const isSm = size === "sm";
-    const containerClass = isSm ? "w-8 h-8" : "w-10 h-10";
-    const iconClass = isSm ? "w-4 h-4" : "w-5 h-5";
+    const containerClass = isSm ? "w-9 h-9" : "w-10 h-10";
 
     return (
       <div className={`relative ${containerClass} flex items-center justify-center shrink-0 select-none group cursor-pointer`}>
-        <div className="absolute inset-0 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-500 to-indigo-500 opacity-90 blur-[3px] animate-pulse group-hover:scale-110 transition-transform duration-500" />
-        <div className="relative w-full h-full rounded-xl bg-gradient-to-br from-zinc-950 via-zinc-900 to-black p-0.5 border border-amber-500/40 flex items-center justify-center shadow-[0_0_18px_rgba(249,115,22,0.4)] overflow-hidden">
-          <span className="absolute w-2 h-2 rounded-full bg-amber-400 animate-ping opacity-75" />
-          <span className="relative text-amber-400 flex items-center justify-center">
-            <Brain className={`${iconClass} filter drop-shadow-[0_2px_8px_rgba(249,115,22,0.7)] animate-pulse`} />
-          </span>
+        <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-indigo-500 opacity-90 blur-[4px] animate-pulse group-hover:scale-110 transition-transform duration-500" />
+        <div className="relative w-full h-full rounded-xl bg-zinc-950 p-0.5 border border-amber-500/40 flex items-center justify-center shadow-[0_0_18px_rgba(249,115,22,0.4)] overflow-hidden">
+          <SmaranLogo
+            alt="SMARAN.AI"
+            className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition-transform duration-300"
+          />
         </div>
       </div>
     );
   };
 
-  /* DESKTOP — Collapsed (icon rail) ↔ Expanded (full panel) */
+  /* Desktop sidebar: collapsed icon rail or expanded panel */
   const sidebarDesktop = (
     <aside className={`
       hidden md:flex flex-col shrink-0 z-40
-      bg-[#f3f4f6] dark:bg-[#1a1b1e] text-zinc-900 dark:text-zinc-100
+      bg-[#f3f4f6] dark:bg-[#1a1b1e] text-zinc-900 dark:text-zinc-100 sidebar-cyber-border
       ${position === 'right' ? 'md:order-3 h-screen sticky top-0 border-l border-zinc-300/70 dark:border-zinc-800' : 'md:order-1 h-screen sticky top-0 border-r border-zinc-300/70 dark:border-zinc-800'}
-      transition-all duration-300 ease-in-out
+      transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]
       ${expanded ? 'w-[268px]' : 'w-[64px]'}
     `}>
 
@@ -335,33 +332,33 @@ const Sidebar = ({
       `}>
         {expanded ? (
           <>
-            {/* 3D Motion Animated Logo */}
             <Logo3DMotion size="sm" />
-
-            {/* Brand text */}
             <div className="ml-2.5 flex-1 min-w-0 animate-in fade-in duration-200 select-none flex items-center">
               <div className="text-sm sm:text-base font-black tracking-wider uppercase leading-none flex items-center">
                 <span className="bg-gradient-to-r from-amber-400 via-orange-500 to-indigo-400 bg-clip-text text-transparent font-extrabold filter drop-shadow-[0_0_10px_rgba(249,115,22,0.5)]">SMARAN</span>
                 <span className="text-white font-extrabold ml-1 px-1.5 py-0.5 rounded-md bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500 text-[10px] shadow-[0_0_10px_rgba(99,102,241,0.5)]">.AI</span>
               </div>
             </div>
-
-            {/* Collapse toggle button */}
             <Tip label="Collapse sidebar">
               <button
+                type="button"
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
                 onClick={() => setExpanded(false)}
-                className="ml-2 p-2 rounded-xl text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-white bg-zinc-200/80 dark:bg-zinc-900/80 hover:bg-indigo-600/20 border border-zinc-300/70 dark:border-zinc-800 hover:border-indigo-500/50 shadow-xs hover:scale-105 transition-all cursor-pointer"
+                className="ml-2 p-2 rounded-xl text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-white bg-zinc-200/80 dark:bg-zinc-900/80 hover:bg-indigo-600/20 border border-zinc-300/70 dark:border-zinc-800 hover:border-indigo-500/50 shadow-xs hover:scale-105 transition-all cursor-pointer btn-lightning-hover"
               >
                 <PanelLeftClose className="w-4.5 h-4.5" />
               </button>
             </Tip>
           </>
         ) : (
-          /* Collapsed State: Clean centered expand button */
           <Tip label="Expand sidebar">
             <button
+              type="button"
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
               onClick={() => setExpanded(true)}
-              className="p-2.5 rounded-xl text-indigo-600 dark:text-indigo-400 hover:text-white bg-zinc-200/80 dark:bg-zinc-900/80 hover:bg-indigo-600 border border-zinc-300 dark:border-zinc-800 hover:border-indigo-500 shadow-xs hover:scale-105 transition-all cursor-pointer flex items-center justify-center"
+              className="p-2.5 rounded-xl text-indigo-600 dark:text-indigo-400 hover:text-white bg-zinc-200/80 dark:bg-zinc-900/80 hover:bg-indigo-600 border border-zinc-300 dark:border-zinc-800 hover:border-indigo-500 shadow-xs hover:scale-105 transition-all cursor-pointer flex items-center justify-center btn-lightning-hover"
             >
               <PanelLeftOpen className="w-5 h-5" />
             </button>
@@ -369,7 +366,7 @@ const Sidebar = ({
         )}
       </div>
 
-      {/* — NEW CONVERSATION button — */}
+      {/* New conversation button */}
       <div className={`shrink-0 ${expanded ? 'p-3' : 'flex justify-center py-3 px-2'}`}>
         {expanded ? (
           <button
@@ -389,7 +386,7 @@ const Sidebar = ({
         )}
       </div>
 
-      {/* — CHAT HISTORY — */}
+      {/* Chat history */}
       <div className={`flex-1 overflow-y-auto ${expanded ? 'px-3 py-1' : 'px-2 py-1 flex flex-col items-center gap-1'}`}>
         {expanded && (
           <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest px-2 mb-2">
@@ -431,135 +428,85 @@ const Sidebar = ({
               className={`
                 group w-full flex items-center justify-between rounded-full px-3 py-2 text-xs font-bold
                 cursor-pointer transition-all duration-200 border mb-1
+                sidebar-item-highlight btn-lightning-hover
                 ${isActive
-                  ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/20'
-                  : 'text-zinc-400 hover:bg-zinc-800/60 border-transparent hover:text-zinc-200'}
+                  ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/20 active shadow-[0_0_12px_rgba(99,102,241,0.2)]'
+                  : 'text-zinc-600 dark:text-zinc-400 border-transparent hover:bg-zinc-200/60 dark:hover:bg-zinc-800/40 hover:shadow-[0_0_10px_rgba(99,102,241,0.08)]'}
               `}
             >
-              {isEditing ? (
-                <div className="flex items-center gap-1.5 w-full" onClick={e => e.stopPropagation()}>
-                  <input
-                    type="text" value={editTitle}
-                    onChange={e => setEditTitle(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') handleSave(s.id); if (e.key === 'Escape') handleCancel(); }}
-                    autoFocus
-                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 text-white"
-                  />
-                  <button onClick={() => handleSave(s.id)} className="p-0.5 text-emerald-400 hover:bg-emerald-500/10 rounded cursor-pointer"><Check className="w-3.5 h-3.5" /></button>
-                  <button onClick={handleCancel} className="p-0.5 text-rose-400 hover:bg-rose-500/10 rounded cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <MessageSquare className="w-3.5 h-3.5 shrink-0 text-zinc-500 group-hover:text-indigo-400 transition-colors" />
-                    <span className="truncate">{s.title}</span>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{s.title}</span>
+              </div>
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {isEditing ? (
+                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                    <input
+                      value={editTitle}
+                      onChange={e => setEditTitle(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleSave(s.id); if (e.key === 'Escape') handleCancel(); }}
+                      className="w-24 px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs text-zinc-900 dark:text-white outline-none"
+                      autoFocus
+                    />
+                    <button onClick={() => handleSave(s.id)} className="p-1 text-emerald-500 hover:text-emerald-400"><Check className="w-3.5 h-3.5" /></button>
                   </div>
-                  {isConfirmDel ? (
-                    <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                      <span className="text-[10px] font-black text-rose-400 uppercase">Delete?</span>
-                      <button onClick={() => { onDeleteSession(s.id); setConfirmDeleteId(null); }} className="p-0.5 text-rose-400 hover:bg-rose-500/10 rounded cursor-pointer"><Check className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => setConfirmDeleteId(null)} className="p-0.5 text-zinc-500 hover:bg-zinc-800 rounded cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      <button onClick={e => handleStartEdit(e, s)} className="p-0.5 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
-                      <button onClick={e => { e.stopPropagation(); setConfirmDeleteId(s.id); }} className="p-0.5 text-zinc-500 hover:text-rose-400 hover:bg-zinc-800 rounded cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-                    </div>
-                  )}
-                </>
-              )}
+                ) : (
+                  <>
+                    <button onClick={e => handleStartEdit(e, s)} className="p-1 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded cursor-pointer" title="Rename session"><Pencil className="w-3.5 h-3.5" /></button>
+                    {confirmDeleteId === s.id ? (
+                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => { onDeleteSession(s.id); setConfirmDeleteId(null); }} className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold rounded-lg cursor-pointer">Delete</button>
+                        <button onClick={() => setConfirmDeleteId(null)} className="px-2 py-0.5 bg-zinc-300 dark:bg-zinc-700 hover:bg-zinc-400 text-zinc-700 dark:text-zinc-300 text-[10px] font-bold rounded-lg cursor-pointer">Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={e => { e.stopPropagation(); setConfirmDeleteId(s.id); }} className="p-1 text-zinc-500 hover:text-rose-400 hover:bg-zinc-800 rounded cursor-pointer" title="Delete session"><Trash2 className="w-3.5 h-3.5" /></button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
 
-      {/* — FOOTER — */}
-      <div className={`
-        border-t border-zinc-200 dark:border-zinc-800 shrink-0
-        ${expanded ? 'p-3 space-y-1.5' : 'flex flex-col items-center gap-1 py-3 px-2'}
-      `}>
-
-        {/* Memory toast */}
-        {memoryToast && expanded && (
-          <div className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold animate-in fade-in duration-300">
-            <Brain className="w-3.5 h-3.5 shrink-0" /> {memoryToast}
-          </div>
-        )}
-
-        {/* Manage Memory */}
+      {/* BOTTOM: Actions */}
+      <div className={`shrink-0 border-t border-zinc-300/60 dark:border-zinc-800/80 p-2 space-y-1 ${expanded ? '' : 'flex flex-col items-center'}`}>
         {expanded ? (
-          <button onClick={() => setIsMemoryOpen(true)}
-            className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-violet-600 dark:text-violet-400 hover:bg-violet-500/10 hover:border-violet-500/20 transition-all">
-            <Brain className="w-4 h-4 shrink-0" />
-            Manage AI Memory
-          </button>
-        ) : (
-          <RailBtn
-            icon={<Brain className="w-5 h-5" />}
-            label="AI Memory Vault"
-            onClick={() => setIsMemoryOpen(true)}
-            violet
-          />
-        )}
-
-        {/* Admin */}
-        {user?.role === 'admin' && (
-          expanded ? (
-            <button
-              onClick={() => { onNavigate('admin'); setMobileOpen(false); }}
-              className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border cursor-pointer transition-all ${activeView === 'admin' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' : 'text-rose-600 dark:text-rose-400 border-transparent hover:bg-rose-500/10 hover:border-rose-500/20'}`}
-            >
-              <ShieldAlert className="w-4 h-4 shrink-0" /> Admin Control Board
+          <>
+            <button onClick={() => setIsPluginHubOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-amber-400 hover:bg-amber-500/10 btn-lightning-hover sidebar-item-highlight sidebar-item-glow transition-all duration-300">
+              <Sparkles className="w-4 h-4 shrink-0 text-amber-400 animate-pulse" /> Skills, Plugins & MCP Hub
             </button>
-          ) : (
-            <RailBtn icon={<ShieldAlert className="w-5 h-5" />} label="Admin Control Board"
-              onClick={() => onNavigate('admin')} active={activeView === 'admin'} danger />
-          )
-        )}
-
-        {/* Model Hub Catalog Button */}
-        {expanded ? (
-          <button onClick={() => setIsModelHubOpen(true)} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 mb-1">
-            <Boxes className="w-4 h-4 shrink-0 text-indigo-500 dark:text-indigo-400" /> Model Catalog & Cloud APIs
-          </button>
-        ) : (
-          <RailBtn icon={<Boxes className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />} label="Model Catalog & Cloud APIs" onClick={() => setIsModelHubOpen(true)} />
-        )}
-
-        {/* About Developer Modal Button */}
-        {expanded ? (
-          <button onClick={() => setIsDeveloperOpen(true)} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 mb-1">
-            <UserCheck className="w-4 h-4 shrink-0 text-cyan-500 dark:text-cyan-400" /> About Developer
-          </button>
-        ) : (
-          <RailBtn icon={<UserCheck className="w-5 h-5 text-cyan-400" />} label="About Developer" onClick={() => setIsDeveloperOpen(true)} />
-        )}
-
-        {/* Settings / Theme / Logout */}
-        {expanded ? (
-          <div className="flex items-center gap-2">
-            <button onClick={() => onNavigate('settings')}
-              className="p-2.5 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-xl transition-all cursor-pointer" title="Settings">
-              <Settings className="w-4 h-4" />
+            <button onClick={() => setIsModelHubOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow transition-all duration-300">
+              <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
             </button>
-            <button onClick={logout}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 border border-zinc-200 dark:border-zinc-800 hover:bg-rose-500/10 hover:border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-black rounded-xl cursor-pointer transition-all">
-              <LogOut className="w-3.5 h-3.5" /> Sign Out
+            <button onClick={() => setIsMemoryOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow transition-all duration-300">
+              <Brain className="w-4 h-4 shrink-0" /> Manage AI Memory
             </button>
-          </div>
+            <button onClick={() => setIsDeveloperOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow transition-all duration-300">
+              <UserCheck className="w-4 h-4 shrink-0 text-cyan-400" /> About Developer
+            </button>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => onNavigate('settings')} className="flex items-center gap-2 px-3 py-2.5 border border-zinc-400 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:text-indigo-700 dark:hover:text-white hover:border-indigo-500 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow transition-all duration-300 shadow-sm"><Settings className="w-4 h-4" /><span>Settings</span></button>
+              {onClearHistory && <button onClick={onClearHistory} className="flex items-center gap-2 px-3 py-2.5 border border-orange-400 dark:border-rose-700 text-orange-700 dark:text-rose-300 hover:text-white hover:bg-orange-600 dark:hover:bg-rose-600 hover:border-orange-600 dark:hover:border-rose-500 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow transition-all duration-300 shadow-sm hover:shadow-[0_0_14px_rgba(244,63,94,0.25)]"><Trash2 className="w-4 h-4" /><span>Clear History</span></button>}
+              <button onClick={onLogout} className="flex items-center gap-2 px-3 py-2.5 border border-red-400 dark:border-rose-700 text-red-700 dark:text-rose-300 hover:text-white hover:bg-red-600 dark:hover:bg-rose-600 hover:border-red-600 dark:hover:border-rose-500 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow transition-all duration-300 shadow-sm hover:shadow-[0_0_14px_rgba(244,63,94,0.25)]"><LogOut className="w-4 h-4" /><span>Logout</span></button>
+            </div>
+          </>
         ) : (
           <>
+            <RailBtn icon={<Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />} label="Skills, Plugins & MCP Hub" onClick={() => setIsPluginHubOpen(true)} active={isPluginHubOpen} />
+            <RailBtn icon={<Boxes className="w-5 h-5" />} label="Model Catalog & Matrix" onClick={() => setIsModelHubOpen(true)} violet />
+            <RailBtn icon={<Brain className="w-5 h-5" />} label="Manage AI Memory" onClick={() => setIsMemoryOpen(true)} />
+            <RailBtn icon={<UserCheck className="w-5 h-5" />} label="About Developer" onClick={() => setIsDeveloperOpen(true)} />
             <RailBtn icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => onNavigate('settings')} />
-            <RailBtn icon={<LogOut className="w-5 h-5" />} label="Sign Out" onClick={logout} danger />
+            <RailBtn icon={<LogOut className="w-5 h-5" />} label="Logout" onClick={onLogout} danger />
           </>
         )}
       </div>
     </aside>
   );
 
-  /* ——————————————————————————————————————————————————————————————————————————————————————————————————————
-     MOBILE
-  —————————————————————————————————————————————————————————————————————————————————————————————————————— */
+  /* Mobile sidebar */
   const mobileSidebar = (
     <>
       <div className="md:hidden flex items-center justify-between px-4 py-3 bg-[#1a1b1e] border-b border-zinc-800 shrink-0 z-30">
@@ -604,7 +551,7 @@ const Sidebar = ({
             <p className="text-xs text-zinc-600 italic px-2 py-1 font-bold">No conversations yet.</p>
           ) : sessions.map(s => (
             <div key={s.id} onClick={() => handleSessionClick(s.id)}
-              className={`group w-full flex items-center justify-between rounded-full px-3 py-2 text-xs font-bold cursor-pointer transition-all border ${activeSessionId === s.id && activeView === 'chat' ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/20' : 'text-zinc-400 hover:bg-zinc-800/60 border-transparent'}`}>
+              className={`group w-full flex items-center justify-between rounded-full px-3 py-2 text-xs font-bold cursor-pointer transition-all border btn-lightning-hover ${activeSessionId === s.id && activeView === 'chat' ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/20 shadow-[0_0_10px_rgba(99,102,241,0.2)]' : 'text-zinc-400 hover:bg-zinc-800/60 border-transparent hover:shadow-[0_0_8px_rgba(99,102,241,0.08)]'}`}>
               <div className="flex items-center gap-2 min-w-0 flex-1">
                 <MessageSquare className="w-3.5 h-3.5 shrink-0 text-zinc-500" />
                 <span className="truncate">{s.title}</span>
@@ -618,6 +565,9 @@ const Sidebar = ({
         </div>
 
         <div className="p-3 border-t border-zinc-800 space-y-1.5 shrink-0">
+          <button onClick={() => { setIsPluginHubOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-amber-400 hover:bg-amber-500/10">
+            <Sparkles className="w-4 h-4 shrink-0 text-amber-400 animate-pulse" /> Skills, Plugins & MCP Hub
+          </button>
           <button onClick={() => { setIsModelHubOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/8">
             <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
           </button>
@@ -627,16 +577,16 @@ const Sidebar = ({
           <button onClick={() => { setIsDeveloperOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8">
             <UserCheck className="w-4 h-4 shrink-0 text-cyan-400" /> About Developer
           </button>
-          {user?.role === 'admin' && (
-            <button onClick={() => { onNavigate('admin'); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-rose-400 hover:bg-rose-500/8">
-              <ShieldAlert className="w-4 h-4 shrink-0" /> Admin Control Board
+          {onTogglePerformance && (
+            <button onClick={() => { onTogglePerformance(); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-emerald-400 hover:bg-emerald-500/10">
+              <Activity className="w-4 h-4 shrink-0 text-emerald-400 animate-pulse" /> Live Hardware Performance
             </button>
           )}
+
           <div className="flex items-center gap-2">
-            <button onClick={() => onNavigate('settings')} className="p-2.5 border border-zinc-800 text-zinc-400 hover:text-white rounded-xl cursor-pointer"><Settings className="w-4 h-4" /></button>
-            <button onClick={logout} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 border border-zinc-800 hover:bg-rose-500/10 text-rose-400 text-xs font-black rounded-xl cursor-pointer">
-              <LogOut className="w-3.5 h-3.5" /> Sign Out
-            </button>
+            <button onClick={() => onNavigate('settings')} className="flex items-center gap-2 px-3 py-2.5 border border-zinc-800 text-zinc-300 hover:text-white rounded-xl cursor-pointer text-xs font-bold"><Settings className="w-4 h-4" /><span>Settings</span></button>
+            {onClearHistory && <button onClick={onClearHistory} className="flex items-center gap-2 px-3 py-2.5 border border-rose-800 text-rose-300 hover:text-white hover:border-rose-600 rounded-xl cursor-pointer text-xs font-bold"><Trash2 className="w-4 h-4" /><span>Clear History</span></button>}
+            <button onClick={onLogout} className="flex items-center gap-2 px-3 py-2.5 border border-rose-800 text-rose-300 hover:text-white hover:border-rose-600 rounded-xl cursor-pointer text-xs font-bold"><LogOut className="w-4 h-4" /><span>Logout</span></button>
           </div>
 
           <div 
@@ -649,11 +599,11 @@ const Sidebar = ({
             </div>
             <div className="flex items-center justify-center gap-2 mt-1 text-[10px]">
               <a href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-cyan-400 hover:underline font-bold">
-                LinkedIn 🔗
+                LinkedIn
               </a>
-              <span className="text-zinc-600">•</span>
+              <span className="text-zinc-600" aria-hidden="true">|</span>
               <a href="https://shashwatmishra-portfolio.netlify.app/" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-purple-400 hover:underline font-bold">
-                Portfolio 🌐
+                Portfolio
               </a>
             </div>
           </div>
@@ -667,6 +617,10 @@ const Sidebar = ({
       {sidebarDesktop}
       {mobileSidebar}
       {memoryModal}
+      <PluginHubModal
+        isOpen={isPluginHubOpen}
+        onClose={() => setIsPluginHubOpen(false)}
+      />
       <ModelHubModal
         isOpen={isModelHubOpen}
         onClose={() => setIsModelHubOpen(false)}

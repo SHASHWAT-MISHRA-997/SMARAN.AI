@@ -27,8 +27,8 @@ const COMPANY_LABELS = {
   mistral: 'Mistral AI',
   nvidia: 'NVIDIA',
   ibm: 'IBM',
-  glm: 'Zhipu AI (GLM-4)',
-  kimi: 'Moonshot AI (Kimi)',
+  glm: 'Zhipu AI',
+  kimi: 'Moonshot AI',
 };
 
 const FREE_CLOUD_PROVIDERS = [
@@ -57,7 +57,7 @@ const FREE_CLOUD_PROVIDERS = [
     badge: 'Universal Gateway',
     tag: '🌐 100+ Free Models',
     color: 'from-purple-500/20 via-indigo-500/10 to-purple-950/40 border-purple-500/40 text-purple-400',
-    models: ['DeepSeek R1 (Free)', 'Llama 3.3 70B (Free)', 'Qwen 2.5 72B (Free)', 'Mistral Small (Free)'],
+    models: ['DeepSeek R1 (Free)', 'Llama 3.3 70B (Free)', 'Qwen 2.5 72B (Free)', 'Mistral Small (Free)', 'Nemotron 3 Ultra 49B (Free)', 'Gemma 4 27B (Free)'],
     specs: 'Single unified API key accessing 100+ AI models with dedicated zero-cost free-tier routes.',
     description: 'The ultimate fallback gateway. Connect to top proprietary and open models with zero upfront setup.',
     getKeyUrl: 'https://openrouter.ai/keys',
@@ -210,12 +210,23 @@ const FREE_CLOUD_PROVIDERS = [
     defaultChatModel: 'meta/llama-3.3-70b-instruct',
     category: 'free-trial',
     name: 'NVIDIA Build (NIM)',
-    badge: 'Enterprise Acceleration',
-    tag: '💚 1,000 Free Credits',
+    badge: 'Free NIM Models',
+    tag: '💚 1,000 Free Credits + Free Models',
     color: 'from-green-500/20 via-emerald-500/10 to-green-950/40 border-green-500/40 text-green-400',
-    models: ['Nemotron-4 340B', 'Llama 3.1 405B', 'Phi-3 Vision'],
-    specs: 'Accelerated NVIDIA TensorRT-LLM cloud microservices with 1000 free trial credits.',
-    description: 'Experience enterprise-grade NVIDIA NIM microservices hosted on high-end H100 clusters.',
+    models: [
+      'Nemotron-3-Ultra-49B-Instruct',
+      'Nemotron-3-8B-Instruct',
+      'Nemotron-3-Nano-Omni-30B-A3B',
+      'Llama 3.1 405B Instruct',
+      'Llama 3.3 70B Instruct',
+      'Phi-3.5 Vision Instruct',
+      'Mistral 7B Instruct',
+      'Mixtral 8x7B Instruct',
+      'Gemma 2 27B',
+      'Qwen 2.5 72B Instruct'
+    ],
+    specs: 'Free NVIDIA NIM microservices + 1000 trial credits. TensorRT-LLM accelerated inference on H100 clusters.',
+    description: 'Access NVIDIA\'s latest Nemotron 3 Ultra/Nano, Llama 3.1/3.3, Gemma 2, Qwen 2.5, and more. Free tier available for many models.',
     getKeyUrl: 'https://build.nvidia.com/',
     envKey: 'NVIDIA_API_KEY',
     placeholder: 'nvapi-...',
@@ -291,7 +302,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
     setProviderLoading((prev) => ({ ...prev, [providerId]: true }));
     setProviderErrors((prev) => ({ ...prev, [providerId]: null }));
     try {
-      const res = await fetch(`${API_BASE}/api/cloud/models`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ provider: providerId, api_key: key }) });
+      const res = await fetch(`${API_BASE}/api/cloud/models`, { method: 'POST', headers: { 'Content-Type': 'application/json',  }, body: JSON.stringify({ provider: providerId, api_key: key }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || 'Could not load provider models.');
       const models = [...new Set((data.models || []).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -320,7 +331,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/api/models/catalog`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {  },
       });
       if (res.ok) {
         const data = await res.json();
@@ -365,7 +376,6 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ model_id: modelId, hf_token: apiKeys.huggingface || '' }),
       });
@@ -373,7 +383,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
         const pollInterval = setInterval(async () => {
           try {
             const statusRes = await fetch(`${API_BASE}/api/models/download-status`, {
-              headers: { Authorization: `Bearer ${token}` },
+              headers: {  },
             });
             if (statusRes.ok) {
               const statusData = await statusRes.json();
@@ -410,7 +420,6 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ model_id: modelId }),
       });
@@ -431,7 +440,6 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ model_id: modelId }),
       });
@@ -668,7 +676,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                         >
                           <div>
                             <div className="flex items-center justify-between gap-2 mb-3">
-                              <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg border bg-gradient-to-r ${badgeColor}`}>
+                              <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg border bg-gradient-to-r truncate whitespace-nowrap ${badgeColor}`}>
                                 {m.company}
                               </span>
                               
@@ -685,9 +693,9 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                               </button>
                             </div>
 
-                            <h3 className="text-base font-black text-white leading-snug tracking-tight flex items-center justify-between">
-                              <span>{m.name}</span>
-                              <span className="text-xs font-extrabold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-md">
+                            <h3 className="text-base font-black text-white leading-snug tracking-tight flex items-center justify-between gap-2">
+                              <span className="min-w-0 truncate">{m.name}</span>
+                              <span className="text-xs font-extrabold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-md shrink-0">
                                 {m.parameters}
                               </span>
                             </h3>

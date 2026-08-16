@@ -1,715 +1,379 @@
-import React, { useEffect, useState, useRef } from "react";
-import {
-  Cpu,
-  HardDrive,
-  Wifi,
-  Shield,
-  LayoutDashboard,
-  Terminal,
-  CheckCircle,
-  X,
-  Thermometer,
-  Activity,
-  Zap,
-} from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Activity, CheckCircle, Cpu, HardDrive, LayoutDashboard, Shield, Thermometer, Wifi, X, Zap, Gauge, Timer, Rocket } from "lucide-react";
 import { API_BASE } from "../context/AuthContext";
 
-const RightPanel = ({
-  token,
-  selectedModel,
-  showPanel,
-  onClose,
-  position = "right",
-}) => {
-  const isCloudExecution = Boolean(selectedModel?.startsWith("cloud:"));
-  const [stats, setStats] = useState(null);
-  const [connected, setConnected] = useState(false);
-  const [selectedMetric, setSelectedMetric] = useState("CPU"); // default to CPU, will switch to GPU if available
-  const [history, setHistory] = useState({
-    CPU: Array(60).fill(0),
-    Memory: Array(60).fill(0),
-    Disk: Array(60).fill(0),
-    WiFiUp: Array(60).fill(0),
-    WiFiDown: Array(60).fill(0),
-    GPU: Array(60).fill(0),
-  });
+const UNAVAILABLE = "Unavailable";
+const finite = (value) => typeof value === "number" && Number.isFinite(value);
+const positive = (value) => finite(value) && value > 0;
+const cleanText = (value) => {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  if (!text) return "";
+  if (/^(n\/?a|unknown(\s*cpu)?|not detected|none|null|undefined)$/i.test(text)) return "";
+  return text;
+};
+const percent = (value, digits = 0) => finite(value) ? `${value.toFixed(digits)}%` : UNAVAILABLE;
+const gigabytes = (value, digits = 1) => finite(value) && value >= 0 ? `${value.toFixed(digits)} GB` : UNAVAILABLE;
+const rate = (value) => {
+  if (!finite(value) || value < 0) return UNAVAILABLE;
+  return value >= 1024 ? `${(value / 1024).toFixed(1)} MB/s` : `${value.toFixed(0)} KB/s`;
+};
+const wsUrl = () => {
+  const base = new URL(API_BASE || window.location.origin, window.location.origin);
+  return `${base.protocol === "https:" ? "wss:" : "ws:"}//${base.host}/ws/telemetry`;
+};
+const browserCapabilities = async () => {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  let storage = null;
+  try { storage = (await navigator.storage?.estimate?.()) || null; } catch { storage = null; }
+  return {
+    source: "browser",
+    logical_processors: positive(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : null,
+    memory_class_gb: positive(navigator.deviceMemory) ? navigator.deviceMemory : null,
+    storage_used_gb: finite(storage?.usage) ? storage.usage / 1024 ** 3 : null,
+    storage_quota_gb: positive(storage?.quota) ? storage.quota / 1024 ** 3 : null,
+    connection_type: cleanText(connection?.effectiveType),
+    estimated_downlink_mbps: positive(connection?.downlink) ? connection.downlink : null,
+  };
+};
+const emptyHistory = () => ({ CPU: [], Memory: [], Disk: [], Network: [], GPU: [] });
+const addSample = (items, value) => finite(value) ? [...items, Math.max(0, value)].slice(-60) : items;
 
-  const wsRef = useRef(null);
+let lastKnownTelemetryStats = null;
+
+const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) => {
+  const isCloudExecution = Boolean(selectedModel?.startsWith("cloud:"));
+  const [stats, setStats] = useState(() => lastKnownTelemetryStats);
+  const [connectionState, setConnectionState] = useState(() => (lastKnownTelemetryStats ? "telemetry" : "connecting"));
+  const [lastUpdated, setLastUpdated] = useState(() => (lastKnownTelemetryStats ? new Date() : null));
+  const [selectedMetric, setSelectedMetric] = useState("CPU");
+  const [history, setHistory] = useState(emptyHistory);
 
   useEffect(() => {
-    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    let wsHost = window.location.host;
-    if (API_BASE && API_BASE.startsWith("http")) {
-      const url = new URL(API_BASE);
-      wsHost = url.host;
-    }
-    const wsUrl = `${wsProto}//${wsHost}/ws/telemetry`;
+    if (!showPanel) return undefined;
+    let disposed = false;
+    let socket = null;
+    let reconnectTimer = null;
+    let pollingTimer = null;
+    let fallbackTimer = null;
+    let receivedTelemetry = Boolean(lastKnownTelemetryStats);
 
-    const connectWS = () => {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+    const applyTelemetry = (payload) => {
+      if (disposed || !payload || typeof payload !== "object") return;
+      receivedTelemetry = true;
+      // Preserve inference stats if backend returned zeros but we had real data
+      const merged = { ...payload };
+      if (!positive(merged.tokens_per_sec) && lastKnownTelemetryStats?.tokens_per_sec > 0) {
+        merged.tokens_per_sec = lastKnownTelemetryStats.tokens_per_sec;
+      }
+      if (!positive(merged.response_time_ms) && lastKnownTelemetryStats?.response_time_ms > 0) {
+        merged.response_time_ms = lastKnownTelemetryStats.response_time_ms;
+      }
+      if (!positive(merged.avg_tokens_per_sec) && lastKnownTelemetryStats?.avg_tokens_per_sec > 0) {
+        merged.avg_tokens_per_sec = lastKnownTelemetryStats.avg_tokens_per_sec;
+      }
+      if (!positive(merged.total_tokens) && lastKnownTelemetryStats?.total_tokens > 0) {
+        merged.total_tokens = lastKnownTelemetryStats.total_tokens;
+      }
+      lastKnownTelemetryStats = merged;
+      setStats({ ...merged, source: "telemetry" });
+      setConnectionState("telemetry");
+      setLastUpdated(new Date());
+      setHistory((current) => ({
+        CPU: addSample(current.CPU, payload.cpu_usage),
+        Memory: addSample(current.Memory, payload.memory_usage),
+        Disk: addSample(current.Disk, payload.disk_usage),
+        Network: addSample(current.Network, payload.net_down_kb),
+        GPU: addSample(current.GPU, payload.gpu_usage),
+      }));
+    };
 
-      ws.onopen = () => setConnected(true);
+    // Listen for real-time inference updates pushed from ChatArea stream
+    const handleInferenceUpdate = (e) => {
+      if (disposed || !e.detail) return;
+      const d = e.detail;
+      lastKnownTelemetryStats = { ...lastKnownTelemetryStats, ...d };
+      setStats(prev => ({ ...prev, ...d }));
+    };
+    window.addEventListener('smaran-inference-update', handleInferenceUpdate);
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          setStats(data);
-
-          setHistory((prev) => {
-            const nextCPU = [...prev.CPU.slice(1), data.cpu_usage || 0];
-            const nextMemory = [
-              ...prev.Memory.slice(1),
-              data.memory_usage || 0,
-            ];
-            const nextDisk = [...prev.Disk.slice(1), data.disk_usage || 0];
-            const nextWiFiUp = [...prev.WiFiUp.slice(1), data.net_up_kb || 0];
-            const nextWiFiDown = [
-              ...prev.WiFiDown.slice(1),
-              data.net_down_kb || 0,
-            ];
-            const nextGPU = [...prev.GPU.slice(1), data.gpu_usage || 0];
-            return {
-              CPU: nextCPU,
-              Memory: nextMemory,
-              Disk: nextDisk,
-              WiFiUp: nextWiFiUp,
-              WiFiDown: nextWiFiDown,
-              GPU: nextGPU,
-            };
-          });
-
-          // Auto-switch to GPU tab if GPU becomes available
-          if (data.gpu_available && selectedMetric === "CPU") {
-            setSelectedMetric("GPU");
-          }
-        } catch (e) {
-          console.error("Telemetry parse error:", e);
+    const fetchDirectTelemetry = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/telemetry`);
+        if (res.ok) {
+          const payload = await res.json();
+          applyTelemetry(payload);
         }
-      };
+      } catch {
+        // Handled by polling and fallback timer
+      }
+    };
 
-      ws.onerror = () => setConnected(false);
+    const showBrowserFallback = async () => {
+      if (disposed || receivedTelemetry) return;
+      const profile = await browserCapabilities();
+      if (disposed || receivedTelemetry) return;
+      setStats(profile);
+      setConnectionState("browser");
+      setLastUpdated(new Date());
+    };
 
-      ws.onclose = () => {
-        setConnected(false);
-        setTimeout(() => {
-          if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
-            connectWS();
+    const connectWebSocket = () => {
+      if (disposed) return;
+      try {
+        socket = new WebSocket(wsUrl());
+        socket.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            applyTelemetry(payload);
+          } catch {}
+        };
+        socket.onclose = () => {
+          if (disposed) return;
+          if (!receivedTelemetry) {
+            fetchDirectTelemetry();
           }
-        }, 3000);
-      };
+          reconnectTimer = window.setTimeout(connectWebSocket, 4000);
+        };
+        socket.onerror = () => {
+          socket?.close();
+        };
+      } catch {
+        fetchDirectTelemetry();
+      }
     };
 
-    connectWS();
+    // 1. Fetch immediately via REST endpoint for 0ms latency display
+    fetchDirectTelemetry();
+
+    // 2. Start WebSocket connection for high-frequency 1s push
+    connectWebSocket();
+
+    // 3. Fallback active HTTP polling every 2s in case WebSockets are blocked
+    pollingTimer = window.setInterval(fetchDirectTelemetry, 2000);
+
+    // 4. Only show browser-only fallback if no telemetry after 8 seconds
+    fallbackTimer = window.setTimeout(showBrowserFallback, 8000);
+
     return () => {
-      if (wsRef.current) wsRef.current.close();
+      disposed = true;
+      window.clearTimeout(fallbackTimer);
+      window.clearTimeout(reconnectTimer);
+      window.clearInterval(pollingTimer);
+      window.removeEventListener('smaran-inference-update', handleInferenceUpdate);
+      socket?.close();
     };
-  }, []);
+  }, [showPanel]);
 
-  // ── Mini sparkline chart (60-point history) ───────────────────────────────
-  const renderMiniChart = (
-    data,
-    colorClass = "stroke-indigo-500",
-    maxVal = 100,
-  ) => {
-    const w = 80,
-      h = 28;
-    const pts = data
-      .map((v, i) => {
-        const x = (i / (data.length - 1)) * w;
-        const y = h - (maxVal > 0 ? v / maxVal : 0) * h;
-        return `${x},${y}`;
-      })
-      .join(" ");
-    return (
-      <svg
-        width={w}
-        height={h}
-        className="overflow-visible select-none pointer-events-none shrink-0"
-      >
-        <polyline
-          fill="none"
-          strokeWidth="1.5"
-          className={colorClass}
-          points={pts}
-        />
-      </svg>
-    );
-  };
+  const isTelemetry = stats?.source === "telemetry";
+  const isLoading = connectionState === "connecting" && !stats;
+  const gpuName = isTelemetry ? cleanText(stats?.gpu_name) : "";
+  const gpuAvailable = Boolean(isTelemetry && stats?.gpu_available && gpuName);
+  const gpuUsage = gpuAvailable && finite(stats?.gpu_usage) ? stats.gpu_usage : null;
+  const gpuVramUsed = gpuAvailable && finite(stats?.gpu_vram_used) ? stats.gpu_vram_used : null;
+  const gpuVramTotal = gpuAvailable && positive(stats?.gpu_vram_total) ? stats.gpu_vram_total : null;
+  const gpuTemperature = gpuAvailable && finite(stats?.gpu_temperature) ? stats.gpu_temperature : null;
+  const vramPercent = positive(gpuVramTotal) && finite(gpuVramUsed)
+    ? Math.min(100, Math.max(0, gpuVramUsed / gpuVramTotal * 100)) : null;
+  const allGpus = isTelemetry && Array.isArray(stats?.gpus) ? stats.gpus : [];
+  const gpus = allGpus.filter(g => g.has_live_metrics !== false || allGpus.length === 1);
+  const gpuCount = gpus.length;
 
-  // ── Large area chart (detail view) ───────────────────────────────────────
-  const renderLargeChart = (
-    data,
-    colorClass = "stroke-indigo-500 fill-indigo-500/10",
-    maxVal = 100,
-  ) => {
-    const w = 280,
-      h = 100;
-    const gridLines = [];
-    for (let i = 1; i < 4; i++) {
-      const y = (i / 4) * h;
-      gridLines.push(
-        <line
-          key={`h${i}`}
-          x1="0"
-          y1={y}
-          x2={w}
-          y2={y}
-          stroke="currentColor"
-          className="text-zinc-200 dark:text-zinc-800"
-          strokeDasharray="3,3"
-        />,
-      );
+  const metricCards = useMemo(() => {
+    if (!stats) return [];
+    if (!isTelemetry) {
+      const logical = positive(stats.logical_processors)
+        ? String(stats.logical_processors) + ' logical processors reported by browser'
+        : 'Logical processor count unavailable';
+      const memory = positive(stats.memory_class_gb)
+        ? 'Browser memory class: approximately ' + String(stats.memory_class_gb) + ' GB (not installed RAM)'
+        : 'Browser memory class unavailable';
+      const storage = positive(stats.storage_quota_gb)
+        ? gigabytes(stats.storage_used_gb) + ' used of ' + gigabytes(stats.storage_quota_gb) + ' browser quota'
+        : 'Browser storage quota unavailable';
+      const network = positive(stats.estimated_downlink_mbps)
+        ? 'Estimated downlink: ' + stats.estimated_downlink_mbps.toFixed(1) + ' Mbps' + (stats.connection_type ? ' (' + stats.connection_type + ')' : '')
+        : 'Connection estimate unavailable';
+      return [
+        { id: 'CPU', label: 'CPU', sub: logical + '; live usage unavailable', icon: Cpu },
+        { id: 'Memory', label: 'Memory', sub: memory + '; live usage unavailable', icon: LayoutDashboard },
+        { id: 'Disk', label: 'Browser storage', sub: storage, icon: HardDrive },
+        { id: 'Network', label: 'Network', sub: network + '; live throughput unavailable', icon: Wifi },
+      ];
     }
-    for (let i = 1; i < 7; i++) {
-      const x = (i / 7) * w;
-      gridLines.push(
-        <line
-          key={`v${i}`}
-          x1={x}
-          y1="0"
-          x2={x}
-          y2={h}
-          stroke="currentColor"
-          className="text-zinc-200 dark:text-zinc-800"
-          strokeDasharray="3,3"
-        />,
-      );
-    }
-    const pts = data
-      .map((v, i) => {
-        const x = (i / (data.length - 1)) * w;
-        const y = h - (maxVal > 0 ? v / maxVal : 0) * h;
-        return `${x},${y}`;
-      })
-      .join(" ");
-    const areaPts = `0,${h} ${pts} ${w},${h}`;
-    const [strokeCls, fillCls] = colorClass.split(" ");
-    return (
-      <div
-        className="relative bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl overflow-hidden"
-        style={{ height: 120 }}
-      >
-        <svg
-          width="100%"
-          height="100%"
-          viewBox={`0 0 ${w} ${h}`}
-          preserveAspectRatio="none"
-          className="select-none"
-        >
-          {gridLines}
-          <polygon
-            className={fillCls || "fill-indigo-500/10"}
-            points={areaPts}
-          />
-          <polyline
-            fill="none"
-            strokeWidth="2"
-            className={strokeCls}
-            points={pts}
-          />
-        </svg>
-        {/* Y-axis labels */}
-        <div className="absolute right-2 top-1 text-[9px] font-mono text-zinc-400 dark:text-zinc-600">
-          100%
-        </div>
-        <div className="absolute right-2 bottom-1 text-[9px] font-mono text-zinc-400 dark:text-zinc-600">
-          0%
-        </div>
-      </div>
-    );
-  };
+    const cpu = [
+      'Usage ' + percent(stats.cpu_usage),
+      positive(stats.cpu_cores) ? stats.cpu_cores + ' physical cores' : 'physical cores unavailable',
+      positive(stats.cpu_threads) ? stats.cpu_threads + ' logical threads' : 'logical threads unavailable',
+    ].join(' / ');
+    const memory = positive(stats.memory_total_gb)
+      ? gigabytes(stats.memory_used_gb) + ' used of ' + gigabytes(stats.memory_total_gb) + ' (' + percent(stats.memory_usage) + ')'
+      : 'Usage ' + percent(stats.memory_usage) + '; total RAM unavailable';
+    const disk = positive(stats.disk_total_gb)
+      ? gigabytes(stats.disk_used_gb) + ' used of ' + gigabytes(stats.disk_total_gb) + '; activity ' + percent(stats.disk_usage)
+      : 'Activity ' + percent(stats.disk_usage) + '; capacity unavailable';
+    return [
+      { id: 'CPU', label: 'CPU', sub: cpu, icon: Cpu },
+      { id: 'Memory', label: 'Memory', sub: memory, icon: LayoutDashboard },
+      { id: 'Disk', label: 'Local runtime storage', sub: disk, icon: HardDrive },
+      { id: 'Network', label: 'Network', sub: 'Down ' + rate(stats.net_down_kb) + ' / Up ' + rate(stats.net_up_kb), icon: Wifi },
+    ];
+  }, [isTelemetry, stats]);
 
-  const formatSpeed = (kbps) => {
-    if (kbps >= 1024) return `${(kbps / 1024).toFixed(1)} MB/s`;
-    return `${(kbps || 0).toFixed(0)} KB/s`;
-  };
-
-  // ── Live values ───────────────────────────────────────────────────────────
-  const cpuVal = stats?.cpu_usage ?? 0;
-  const memVal = stats?.memory_usage ?? 0;
-  const memUsed = stats?.memory_used_gb ?? 0;
-  const memTotal = stats?.memory_total_gb ?? 32;
-  const diskVal = stats?.disk_usage ?? 0; // I/O activity % — matches Task Manager
-  const diskSpacePct = stats?.disk_space_pct ?? 0; // disk space used %
-  const diskUsedGB = stats?.disk_used_gb ?? 0;
-  const diskTotalGB = stats?.disk_total_gb ?? 0;
-  const diskRead = stats?.disk_read_kb ?? 0;
-  const diskWrite = stats?.disk_write_kb ?? 0;
-  const netUp = stats?.net_up_kb ?? 0;
-  const netDown = stats?.net_down_kb ?? 0;
-  const gpuVal = stats?.gpu_usage ?? 0;
-  const gpuVramUsed = stats?.gpu_vram_used ?? 0;
-  const gpuVramTotal = stats?.gpu_vram_total ?? 16;
-  const gpuTemp = stats?.gpu_temperature ?? 0;
-  const gpuAvailable = stats?.gpu_available ?? false;
-  // GPU name: live from telemetry, or fallback
-  const gpuName = gpuAvailable ? (stats?.gpu_name ?? "N/A") : "No GPU Detected";
-  const gpuShortName =
-    gpuName
-      .replace("NVIDIA GeForce ", "")
-      .replace("NVIDIA ", "")
-      .replace(" Laptop GPU", "")
-      .trim() || "RTX 5060 Ti";
-
-  // Model info synced live from hardware_config.json → backend → WS
-  const modelDisplayName = stats?.model_display_name ?? "";
-  const ctxWindow = stats?.ctx_window ?? 0;
-  const reasoningModel = stats?.reasoning_model ?? false;
-
-  // Colour for GPU temperature
-  const tempColor =
-    gpuTemp === 0
-      ? "text-zinc-400 dark:text-zinc-500"
-      : gpuTemp < 60
-        ? "text-emerald-600 dark:text-emerald-400"
-        : gpuTemp < 80
-          ? "text-amber-600 dark:text-amber-400"
-          : "text-red-600 dark:text-red-400";
-
-  // VRAM fill %
-  const vramPct =
-    gpuVramTotal > 0 ? Math.min(100, (gpuVramUsed / gpuVramTotal) * 100) : 0;
-
-  const TABS = [
-    {
-      id: "GPU",
-      label: `GPU (${gpuShortName})`,
-      sub: `${gpuVal.toFixed(0)}% • VRAM ${gpuVramUsed.toFixed(1)}/${gpuVramTotal.toFixed(0)} GB`,
-      icon: (
-        <Zap className="w-3.5 h-3.5 text-purple-500 dark:text-purple-400" />
-      ),
-      chartData: history.GPU,
-      chartColor: "stroke-purple-500",
-      activeClasses:
-        "bg-purple-500/10 border-purple-500/30 text-purple-800 dark:text-purple-300",
-    },
-    {
-      id: "CPU",
-      label: "CPU",
-      sub: `${cpuVal.toFixed(0)}% Util · ${stats?.cpu_cores ?? 8} Cores / ${stats?.cpu_threads ?? 16} Threads`,
-      icon: (
-        <Cpu className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-      ),
-      chartData: history.CPU,
-      chartColor: "stroke-indigo-500",
-      activeClasses:
-        "bg-indigo-500/10 border-indigo-500/30 text-indigo-800 dark:text-indigo-300",
-    },
-    {
-      id: "Memory",
-      label: "Memory",
-      sub: `${memUsed.toFixed(1)} / ${memTotal.toFixed(0)} GB (${memVal.toFixed(0)}%)`,
-      icon: (
-        <LayoutDashboard className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
-      ),
-      chartData: history.Memory,
-      chartColor: "stroke-blue-500",
-      activeClasses:
-        "bg-blue-500/10 border-blue-500/30 text-blue-800 dark:text-blue-300",
-    },
-    {
-      id: "Disk",
-      label: "Disk (C:)",
-      sub: `Activity: ${diskVal.toFixed(0)}%  Space: ${diskUsedGB.toFixed(0)}/${diskTotalGB.toFixed(0)} GB (${diskSpacePct.toFixed(0)}%)  R:${formatSpeed(diskRead)} W:${formatSpeed(diskWrite)}`,
-      icon: (
-        <HardDrive className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
-      ),
-      chartData: history.Disk,
-      chartColor: "stroke-amber-500",
-      activeClasses:
-        "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300",
-    },
-    {
-      id: "WiFi",
-      label: "Network",
-      sub: `↓ ${formatSpeed(netDown)} ↑ ${formatSpeed(netUp)}`,
-      icon: (
-        <Wifi className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
-      ),
-      chartData: history.WiFiDown,
-      chartColor: "stroke-emerald-500",
-      activeClasses:
-        "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300",
-    },
-  ];
-
-  const activeTab = TABS.find((t) => t.id === selectedMetric) || TABS[0];
+  const activeCard = metricCards.find((item) => item.id === selectedMetric) || metricCards[0];
+  const activeHistory = history[selectedMetric] || [];
+  const activeChartMax = selectedMetric === 'Network' ? Math.max(1, ...activeHistory) : 100;
+  const statusLabel = connectionState === 'telemetry' ? 'Live telemetry'
+    : connectionState === 'reconnecting' ? 'Reconnecting'
+      : connectionState === 'browser' ? 'Browser only' : 'Connecting';
 
   return (
     <>
-      {/* Mobile overlay */}
-      {showPanel && (
-        <div
-          className="xl:hidden fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
-          onClick={onClose}
-        />
-      )}
-
-      <aside
-        className={[
-          "flex-col overflow-hidden select-none shrink-0 relative transition-all duration-300",
-          position === "left"
-            ? "xl:order-1 border-r border-zinc-200 dark:border-zinc-900"
-            : "xl:order-3 border-l border-zinc-200 dark:border-zinc-900",
-          "bg-[#f8f9fa] dark:bg-[#131314]",
-          showPanel
-            ? `xl:flex xl:w-[310px] xl:static xl:z-auto fixed ${position === "left" ? "left-0" : "right-0"} top-0 bottom-0 w-[310px] z-50 flex shadow-2xl xl:shadow-none`
-            : "hidden",
-        ].join(" ")}
-      >
-        {/* Ambient glow */}
-        <div className="absolute top-0 right-0 w-[200px] h-[200px] rounded-full blur-[80px] bg-indigo-500/5 dark:bg-indigo-500/10 pointer-events-none z-0" />
-        <div className="absolute bottom-0 left-0 w-[200px] h-[200px] rounded-full blur-[80px] bg-purple-500/5 dark:bg-purple-500/10 pointer-events-none z-0" />
-
-        {/* Header */}
-        <div className="p-4 border-b border-zinc-200 dark:border-zinc-900 shrink-0 z-10 relative bg-white/90 dark:bg-zinc-950/40 backdrop-blur-md flex items-start justify-between">
+      {showPanel && <div className='xl:hidden fixed inset-0 z-50 bg-black/40 backdrop-blur-sm' onClick={onClose} />}
+      <aside className={[
+        'flex-col overflow-hidden select-none shrink-0 relative transition-all duration-300',
+        position === 'left' ? 'xl:order-1 border-r border-zinc-200 dark:border-zinc-900' : 'xl:order-3 border-l border-zinc-200 dark:border-zinc-900',
+        'bg-[#f8f9fa] dark:bg-[#131314]',
+        showPanel
+          ? 'xl:flex xl:w-[330px] xl:static xl:z-auto fixed ' + (position === 'left' ? 'left-0' : 'right-0') + ' top-0 bottom-0 w-[330px] max-w-[92vw] z-50 flex shadow-2xl xl:shadow-none'
+          : 'hidden',
+      ].join(' ')}>
+        <div className='p-4 border-b border-zinc-200 dark:border-zinc-900 shrink-0 bg-white/90 dark:bg-zinc-950/40 backdrop-blur-md flex items-start justify-between animate-lightning-border'>
           <div>
-            <h2 className="text-sm font-black tracking-widest text-orange-600 dark:text-orange-500 uppercase flex items-center gap-1.5">
-              <Shield className="w-4.5 h-4.5 text-orange-600 dark:text-orange-500 shrink-0 filter drop-shadow-xs" />
-              SMARAN.AI
+            <h2 className='text-sm font-black tracking-widest text-orange-900 dark:text-orange-300 uppercase flex items-center gap-1.5 glow-text'>
+              <Shield className='w-4 h-4' /> SMARAN.AI
             </h2>
-            <p className="text-[10px] text-zinc-600 dark:text-zinc-400 font-bold uppercase tracking-wider mt-0.5">
-              {isCloudExecution
-                ? "Cloud API execution — local device telemetry"
-                : "Local System Performance Matrix"}
+            <p className='text-[10px] text-zinc-600 dark:text-zinc-400 font-bold uppercase tracking-wider mt-0.5'>
+              {isTelemetry ? 'Local system performance' : 'Browser capability summary'}
             </p>
           </div>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors cursor-pointer"
-              title="Close"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          {onClose && <button onClick={onClose} className='p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 transition-all cursor-pointer' title='Close performance panel'><X className='w-4 h-4' /></button>}
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-3 z-10 relative flex flex-col gap-3">
-          {/* Section label + live indicator */}
-          <div className="flex items-center justify-between px-1">
-            <span className="text-[10px] font-black text-zinc-700 dark:text-zinc-400 uppercase tracking-widest">
-              Performance — Task Manager
+        <div className='flex-1 overflow-y-auto p-3 flex flex-col gap-3'>
+          <div className='flex items-center justify-between px-1 gap-2'>
+            <span className='text-[10px] font-black text-zinc-700 dark:text-zinc-400 uppercase tracking-widest'>
+              {isTelemetry ? 'Reported by local SMARAN service' : isLoading ? 'Connecting to sensors...' : 'Browser capability summary'}
             </span>
-            <span
-              className={`flex items-center gap-1 text-[9px] font-extrabold px-2 py-0.5 rounded-full border ${
-                connected
-                  ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20 animate-pulse"
-                  : "text-zinc-400 dark:text-zinc-600 bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800"
-              }`}
-            >
-              <CheckCircle className="w-2.5 h-2.5" />
-              {connected ? "Live Sync" : "Connecting…"}
+            <span className={'flex items-center gap-1 text-[9px] font-extrabold px-2 py-0.5 rounded-full border whitespace-nowrap ' + (
+              connectionState === 'telemetry'
+                ? 'text-emerald-800 dark:text-emerald-300 bg-emerald-500/20 border-emerald-500/30'
+                : connectionState === 'browser'
+                  ? 'text-amber-900 dark:text-amber-200 bg-amber-500/20 border-amber-500/30'
+                  : 'text-indigo-600 dark:text-indigo-400 bg-indigo-500/15 border-indigo-500/30 animate-pulse'
+            )}>
+              <CheckCircle className='w-2.5 h-2.5' /> {statusLabel}
             </span>
           </div>
 
-          {/* ── GPU HERO CARD (only visible when GPU is detected) ── */}
-          {gpuAvailable && (
-            <div
-              className={`rounded-2xl border p-3 transition-all cursor-pointer ${
-                selectedMetric === "GPU"
-                  ? "bg-purple-500/10 border-purple-500/30"
-                  : "bg-white dark:bg-[#1e1f20]/60 border-zinc-200 dark:border-zinc-800 hover:border-purple-300 dark:hover:border-purple-800"
-              }`}
-              onClick={() => setSelectedMetric("GPU")}
-            >
-              {/* GPU header row */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5 text-purple-500 dark:text-purple-400" />
-                  <span className="text-[11px] font-black text-zinc-800 dark:text-zinc-200">
-                    GPU
-                  </span>
-                  <span
-                    className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold truncate max-w-[130px]"
-                    title={gpuName}
-                  >
-                    {gpuShortName}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {gpuTemp > 0 && (
-                    <span
-                      className={`flex items-center gap-0.5 text-[10px] font-extrabold font-mono ${tempColor}`}
-                    >
-                      <Thermometer className="w-3 h-3" />
-                      {gpuTemp.toFixed(0)}°C
-                    </span>
-                  )}
-                  <span className="text-[13px] font-black text-purple-700 dark:text-purple-300 font-mono">
-                    {gpuVal.toFixed(0)}%
-                  </span>
-                </div>
-              </div>
-
-              {/* GPU utilization bar */}
-              <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden mb-2">
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{
-                    width: `${gpuVal}%`,
-                    background:
-                      gpuVal > 80
-                        ? "linear-gradient(90deg,#a855f7,#ec4899)"
-                        : "linear-gradient(90deg,#7c3aed,#a855f7)",
-                  }}
-                />
-              </div>
-
-              {/* VRAM row */}
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[9px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                  VRAM
+          {isLoading && (
+            <div className='rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-3.5 space-y-2 text-left animate-in fade-in duration-200'>
+              <div className='flex items-center justify-between'>
+                <span className='text-[11px] font-black text-indigo-700 dark:text-indigo-300 flex items-center gap-2'>
+                  <span className='w-2 h-2 rounded-full bg-indigo-500 animate-ping' />
+                  Querying Hardware Telemetry...
                 </span>
-                <span className="text-[10px] font-extrabold text-zinc-800 dark:text-zinc-200 font-mono">
-                  {gpuVramUsed.toFixed(1)} / {gpuVramTotal.toFixed(0)} GB
-                </span>
+                <span className='text-[10px] font-mono text-indigo-400 font-bold'>Live sync</span>
               </div>
-
-              {/* VRAM bar */}
-              <div className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden mb-2">
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{
-                    width: `${vramPct}%`,
-                    background:
-                      vramPct > 85
-                        ? "linear-gradient(90deg,#f59e0b,#ef4444)"
-                        : "linear-gradient(90deg,#6366f1,#7c3aed)",
-                  }}
-                />
-              </div>
-
-              {/* Sparkline */}
-              <div className="w-full">
-                {renderMiniChart(history.GPU, "stroke-purple-500", 100)}
+              <div className='h-1.5 w-full rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden'>
+                <div className='h-full w-2/3 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 animate-pulse' />
               </div>
             </div>
           )}
 
-          {/* ── No GPU Info Banner ── */}
-          {!gpuAvailable && (
-            <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-3 flex items-center gap-2">
-              <Zap className="w-4 h-4 text-zinc-400" />
-              <div>
-                <span className="text-[11px] font-black text-zinc-600 dark:text-zinc-400">
-                  GPU — Not Detected
+          {connectionState === 'browser' && !isTelemetry && (
+            <div className='rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-[10px] leading-relaxed text-amber-800 dark:text-amber-200'>
+              Live CPU, RAM, disk, network, and GPU sensors are establishing connection. Showing browser hardware capabilities in the interim.
+            </div>
+          )}
+
+          {isTelemetry && (
+            <div className='rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-3 space-y-2 text-left'>
+              <div className='flex items-center justify-between'>
+                <span className='text-[10px] font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5'>
+                  <Gauge className='w-3.5 h-3.5 text-emerald-500' /> Live AI Inference Throughput
                 </span>
-                <p className="text-[9px] text-zinc-500 dark:text-zinc-500 mt-0.5">
-                  CPU-only inference mode active
-                </p>
+                <span className='text-[9px] font-mono text-emerald-600 dark:text-emerald-400 font-bold'>Real-Time</span>
+              </div>
+              <div className='grid grid-cols-2 gap-1.5 pt-1'>
+                <StatCard label='Tokens / sec' value={positive(stats.tokens_per_sec) ? `${stats.tokens_per_sec.toFixed(1)} tok/s` : 'Ready'} />
+                <StatCard label='Response time' value={positive(stats.response_time_ms) ? `${(stats.response_time_ms / 1000).toFixed(2)} s` : '0.0 s'} />
+                <StatCard label='Avg speed' value={positive(stats.avg_tokens_per_sec) ? `${stats.avg_tokens_per_sec.toFixed(1)} tok/s` : 'Ready'} />
+                <StatCard label='Total tokens' value={positive(stats.total_tokens) ? stats.total_tokens.toLocaleString() : '0'} />
               </div>
             </div>
           )}
 
-          {/* ── Resource Tab List (CPU / Memory / Disk / Network) ── */}
-          <div className="grid grid-cols-1 gap-1.5">
-            {TABS.filter((t) =>
-              gpuAvailable ? t.id !== "GPU" : t.id !== "GPU",
-            ).map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setSelectedMetric(tab.id)}
-                className={`w-full flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer ${
-                  selectedMetric === tab.id
-                    ? tab.activeClasses
-                    : "bg-white dark:bg-[#1e1f20]/40 border-zinc-200 dark:border-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-900/30"
-                }`}
-              >
-                <div className="flex flex-col text-left">
-                  <span className="text-[11px] font-black flex items-center gap-1.5">
-                    {tab.icon}
-                    {tab.label}
-                  </span>
-                  <span className="text-[9px] text-zinc-500 dark:text-zinc-400 font-bold mt-0.5 font-mono">
-                    {tab.sub}
-                  </span>
-                </div>
-                {renderMiniChart(
-                  tab.chartData,
-                  tab.chartColor,
-                  tab.id === "WiFi" ? Math.max(...tab.chartData, 10) : 100,
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* ── Detail Chart (selected metric) ── */}
-          <div className="bg-white dark:bg-[#1e1f20]/50 border border-zinc-200 dark:border-zinc-900 rounded-2xl p-3 flex flex-col gap-3">
-            <div className="text-[10px] font-black text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
-              <Activity className="w-3 h-3 text-zinc-400" />
-              {activeTab.label} — 60s History
-            </div>
-
-            {/* Area chart */}
-            {gpuAvailable &&
-              selectedMetric === "GPU" &&
-              renderLargeChart(
-                history.GPU,
-                "stroke-purple-500 fill-purple-500/10",
-                100,
-              )}
-            {selectedMetric === "CPU" &&
-              renderLargeChart(
-                history.CPU,
-                "stroke-indigo-500 fill-indigo-500/10",
-                100,
-              )}
-            {selectedMetric === "Memory" &&
-              renderLargeChart(
-                history.Memory,
-                "stroke-blue-500 fill-blue-500/10",
-                100,
-              )}
-            {selectedMetric === "Disk" &&
-              renderLargeChart(
-                history.Disk,
-                "stroke-amber-500 fill-amber-500/10",
-                100,
-              )}
-            {selectedMetric === "WiFi" &&
-              renderLargeChart(
-                history.WiFiDown,
-                "stroke-emerald-500 fill-emerald-500/10",
-                Math.max(...history.WiFiDown, 50),
-              )}
-
-            {/* Detail stats grid */}
-            <div className="grid grid-cols-2 gap-1.5">
-              {selectedMetric === "GPU" && (
-                <>
-                  <StatCard
-                    label="GPU Utilization"
-                    value={`${gpuVal.toFixed(1)}%`}
-                  />
-                  <StatCard
-                    label="VRAM Used"
-                    value={`${gpuVramUsed.toFixed(2)} GB`}
-                  />
-                  <StatCard
-                    label="VRAM Total"
-                    value={`${gpuVramTotal.toFixed(0)} GB`}
-                  />
-                  <StatCard
-                    label="Temperature"
-                    value={gpuTemp > 0 ? `${gpuTemp.toFixed(0)} °C` : "N/A"}
-                    valueClass={tempColor}
-                  />
-                  <div className="col-span-2">
-                    <StatCard label="Device" value={gpuName} />
-                  </div>
-                  {modelDisplayName && (
-                    <div className="col-span-2 flex flex-col bg-indigo-50 dark:bg-indigo-950/20 p-2 rounded-lg border border-indigo-200 dark:border-indigo-900 gap-1">
-                      <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider">
-                        AI Model — Live Sync
-                      </span>
-                      <span className="text-[10px] font-extrabold text-indigo-900 dark:text-indigo-200 truncate">
-                        {modelDisplayName}
-                      </span>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[9px] font-bold text-indigo-400 font-mono bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-md shadow-[0_0_8px_rgba(99,102,241,0.2)]">
-                          {ctxWindow && ctxWindow > 0
-                            ? ctxWindow >= 1000
-                              ? `${Math.round(ctxWindow / 1000)}K Context Window`
-                              : `${ctxWindow} Context Window`
-                            : "32K Context Window"}
-                        </span>
-                        <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                            reasoningModel
-                              ? "bg-emerald-100 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400"
-                              : "bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400"
-                          }`}
-                        >
-                          {reasoningModel ? "✓ Reasoning" : "⊘ Instruct"}
-                        </span>
+          {gpuAvailable ? (
+            <>
+              {gpus.map((gpu, idx) => {
+                const hasLive = gpu.has_live_metrics !== false;
+                const usage = hasLive && finite(gpu.usage) ? gpu.usage : null;
+                const vramUsed = hasLive && finite(gpu.vram_used_gb) ? gpu.vram_used_gb : null;
+                const vramTotal = positive(gpu.vram_total_gb) ? gpu.vram_total_gb : null;
+                const temp = hasLive && finite(gpu.temperature) && gpu.temperature > 0 ? gpu.temperature : null;
+                const vPct = positive(vramTotal) && vramUsed !== null ? Math.min(100, Math.max(0, vramUsed / vramTotal * 100)) : null;
+                const isPrimary = idx === 0;
+                return (
+                  <button type='button' key={gpu.index} onClick={() => setSelectedMetric('GPU')}
+                    className={'text-left rounded-2xl border p-3 transition-all duration-300 hover:shadow-[0_0_18px_rgba(168,85,247,0.2)] hover:-translate-y-0.5 ' + (selectedMetric === 'GPU' && isPrimary ? 'bg-purple-500/10 border-purple-500/40 shadow-[0_0_18px_rgba(168,85,247,0.35)]' : 'bg-white dark:bg-[#1e1f20]/60 border-zinc-200 dark:border-zinc-800 hover:border-purple-500/30')}>
+                    <div className='flex items-start justify-between gap-3'>
+                      <div className='min-w-0'>
+                        <div className='flex items-center gap-1.5'><Zap className='w-3.5 h-3.5 text-purple-500' /><span className='text-[11px] font-black'>GPU {gpu.index}</span></div>
+                        <p className='mt-1 text-[10px] font-semibold text-zinc-600 dark:text-zinc-300 break-words'>{gpu.name || gpuName}</p>
+                        {gpuCount > 1 && <span className='text-[9px] text-zinc-500 font-bold uppercase tracking-wider'>Device {gpu.index + 1} of {gpuCount}</span>}
+                        {!hasLive && <span className='text-[9px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider'>Static info only</span>}
                       </div>
+                      <span className={'text-[14px] font-black font-mono ' + (hasLive ? 'text-purple-700 dark:text-purple-300' : 'text-zinc-400')}>{hasLive ? percent(usage, 1) : 'N/A'}</span>
                     </div>
-                  )}
-                </>
-              )}
-
-              {selectedMetric === "CPU" && (
-                <>
-                  <StatCard
-                    label="Utilization"
-                    value={`${cpuVal.toFixed(1)}%`}
-                  />
-                  <StatCard
-                    label="Physical Cores"
-                    value={stats?.cpu_cores ?? 8}
-                  />
-                  <StatCard
-                    label="Logical Threads"
-                    value={stats?.cpu_threads ?? 16}
-                  />
-                  <div className="col-span-2">
-                    <StatCard
-                      label="Processor"
-                      value={stats?.cpu_name || "Detecting…"}
-                    />
-                  </div>
-                </>
-              )}
-
-              {selectedMetric === "Memory" && (
-                <>
-                  <StatCard label="In Use" value={`${memUsed.toFixed(2)} GB`} />
-                  <StatCard
-                    label="Total RAM"
-                    value={`${memTotal.toFixed(0)} GB`}
-                  />
-                  <StatCard
-                    label="Utilization"
-                    value={`${memVal.toFixed(1)}%`}
-                  />
-                  <StatCard
-                    label="Available"
-                    value={`${(memTotal - memUsed).toFixed(1)} GB`}
-                  />
-                </>
-              )}
-
-              {selectedMetric === "Disk" && (
-                <>
-                  <StatCard
-                    label="Disk Usage"
-                    value={`${diskVal.toFixed(1)}%`}
-                  />
-                  <StatCard
-                    label="Total Space"
-                    value={`${(stats?.disk_total_gb ?? 0).toFixed(0)} GB`}
-                  />
-                  <StatCard label="Read Speed" value={formatSpeed(diskRead)} />
-                  <StatCard
-                    label="Write Speed"
-                    value={formatSpeed(diskWrite)}
-                  />
-                </>
-              )}
-
-              {selectedMetric === "WiFi" && (
-                <>
-                  <StatCard label="Download" value={formatSpeed(netDown)} />
-                  <StatCard label="Upload" value={formatSpeed(netUp)} />
-                </>
-              )}
+                    <div className='mt-2 h-2 rounded-full overflow-hidden bg-zinc-200 dark:bg-zinc-800'>
+                      {hasLive && finite(usage) && <div className='h-full bg-purple-500 transition-all duration-500 shadow-[0_0_8px_rgba(168,85,247,0.6)]' style={{ width: Math.min(100, Math.max(0, usage)) + '%' }} />}
+                    </div>
+                    <div className='mt-2 flex justify-between gap-2 text-[10px] font-mono text-zinc-600 dark:text-zinc-300'>
+                      <span>VRAM {vramUsed !== null ? gigabytes(vramUsed) : 'N/A'} / {positive(vramTotal) ? gigabytes(vramTotal) : UNAVAILABLE}</span>
+                      {temp && <span className='flex items-center gap-1'><Thermometer className='w-3 h-3' />{temp.toFixed(0)} C</span>}
+                    </div>
+                    {hasLive && finite(vPct) && <div className='mt-1 h-1.5 rounded-full overflow-hidden bg-zinc-200 dark:bg-zinc-800'><div className='h-full bg-indigo-500 transition-all duration-500 shadow-[0_0_6px_rgba(99,102,241,0.5)]' style={{ width: vPct + '%' }} /></div>}
+                  </button>
+                );
+              })}
+            </>
+          ) : (
+            <div className='rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/50 p-3 flex items-start gap-2'>
+              <Zap className='w-4 h-4 text-zinc-400 mt-0.5' />
+              <div>
+                <p className='text-[11px] font-black text-zinc-700 dark:text-zinc-300'>GPU information unavailable</p>
+                <p className='text-[9px] text-zinc-500 mt-0.5'>The connected local telemetry service did not report a GPU. Browsers cannot reliably expose GPU model or VRAM.</p>
+              </div>
             </div>
+          )}
+          <div className='grid grid-cols-1 gap-1.5'>
+            {metricCards.map((card) => {
+              const Icon = card.icon;
+               return <button type='button' key={card.id} onClick={() => setSelectedMetric(card.id)}
+                 className={'w-full flex items-center justify-between gap-2 p-2.5 rounded-xl border text-left transition-all duration-300 hover:shadow-[0_0_14px_rgba(99,102,241,0.12)] hover:-translate-y-0.5 ' + (selectedMetric === card.id ? 'bg-indigo-500/10 border-indigo-500/35 shadow-[0_0_14px_rgba(99,102,241,0.15)]' : 'bg-white dark:bg-[#1e1f20]/40 border-zinc-200 dark:border-zinc-900')}>
+                <div className='min-w-0'>
+                  <span className='text-[11px] font-black flex items-center gap-1.5'><Icon className='w-3.5 h-3.5 text-indigo-500' />{card.label}</span>
+                  <span className='block text-[9px] text-zinc-700 dark:text-zinc-300 font-semibold mt-0.5 break-words'>{card.sub}</span>
+                </div>
+                {isTelemetry && <MiniLightningChart data={history[card.id] || []} maxValue={card.id === 'Network' ? Math.max(1, ...(history.Network || [])) : 100} colorKey={card.id} />}
+              </button>;
+            })}
           </div>
-        </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-zinc-200 dark:border-zinc-900 z-10 shrink-0 bg-white/40 dark:bg-zinc-950/20 backdrop-blur-xs">
-          <div className="flex items-center gap-2.5">
-            <div className="relative flex shrink-0">
-              <span className="w-3 h-3 rounded-full bg-[#f97316] shadow-[0_0_12px_#f97316] dark:shadow-[0_0_15px_#f97316] animate-ping absolute" />
-              <span className="w-3 h-3 rounded-full bg-[#f97316] relative border border-white/20" />
+          {isTelemetry && activeCard && <div className='bg-white dark:bg-[#1e1f20]/50 border border-zinc-200 dark:border-zinc-900 rounded-2xl p-3 flex flex-col gap-3'>
+            <div className='text-[10px] font-black text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-1.5'>
+              <Activity className='w-3 h-3 text-zinc-400' /> {selectedMetric} - live history
             </div>
-            <span className="text-xs font-black text-zinc-900 dark:text-zinc-200">
-              Hello, I am here to help you.
-            </span>
+            <LightningChart data={activeHistory} maxValue={activeChartMax} colorKey={selectedMetric} />
+            <MetricDetails metric={selectedMetric} stats={stats} gpu={{ name: gpuName, usage: gpuUsage, vramUsed: gpuVramUsed, vramTotal: gpuVramTotal, temperature: gpuTemperature }} gpus={gpus} />
+            {lastUpdated && <p className='text-[9px] text-zinc-500'>Last sample: {lastUpdated.toLocaleTimeString()}</p>}
+          </div>}
+        </div>
+        <div className='p-4 border-t border-zinc-200 dark:border-zinc-900 bg-white/40 dark:bg-zinc-950/20'>
+          <div className='flex items-center gap-2.5'>
+            <span className='w-3 h-3 rounded-full bg-orange-500 shadow-[0_0_12px_#f97316]' />
+            <span className='text-xs font-black text-zinc-900 dark:text-zinc-200'>{isCloudExecution ? 'Cloud model selected; metrics remain local.' : 'Local model and device status.'}</span>
           </div>
         </div>
       </aside>
@@ -717,18 +381,130 @@ const RightPanel = ({
   );
 };
 
-// ── Small stat tile ──────────────────────────────────────────────────────────
-const StatCard = ({ label, value, valueClass = "" }) => (
-  <div className="flex flex-col bg-zinc-50 dark:bg-zinc-950/30 p-2 rounded-lg border border-zinc-100 dark:border-zinc-900 overflow-hidden">
-    <span className="text-[8px] text-zinc-500 dark:text-zinc-500 font-bold uppercase tracking-wider">
-      {label}
-    </span>
-    <span
-      className={`text-[11px] font-extrabold font-mono mt-0.5 truncate ${valueClass || "text-zinc-900 dark:text-white"}`}
-    >
-      {value}
-    </span>
-  </div>
-);
+const chartPoints = (data, width, height, maxValue) => data.map((value, index) => {
+  const x = data.length <= 1 ? width : index / (data.length - 1) * width;
+  const y = height - Math.min(maxValue, Math.max(0, value)) / maxValue * height;
+  return x + ',' + y;
+}).join(' ');
+
+const metricColors = {
+  CPU:     { stroke: '#f97316', glow: '#fb923c', fill: 'rgba(249,115,22,0.08)', bg: 'bg-orange-500/5',  border: 'border-orange-500/20', text: 'text-orange-600',   darkText: 'dark:text-orange-400',   mini: 'text-orange-500',   large: 'text-orange-500' },
+  Memory:  { stroke: '#06b6d4', glow: '#22d3ee', fill: 'rgba(6,182,212,0.08)',  bg: 'bg-cyan-500/5',    border: 'border-cyan-500/20',  text: 'text-cyan-600',    darkText: 'dark:text-cyan-400',     mini: 'text-cyan-500',    large: 'text-cyan-500' },
+  Disk:    { stroke: '#10b981', glow: '#34d399', fill: 'rgba(16,185,129,0.08)', bg: 'bg-emerald-500/5', border: 'border-emerald-500/20', text: 'text-emerald-600', darkText: 'dark:text-emerald-400',  mini: 'text-emerald-500', large: 'text-emerald-500' },
+  Network: { stroke: '#3b82f6', glow: '#60a5fa', fill: 'rgba(59,130,246,0.08)', bg: 'bg-blue-500/5',    border: 'border-blue-500/20',   text: 'text-blue-600',    darkText: 'dark:text-blue-400',     mini: 'text-blue-500',    large: 'text-blue-500' },
+  GPU:     { stroke: '#a855f7', glow: '#c084fc', fill: 'rgba(168,85,247,0.08)', bg: 'bg-violet-500/5',  border: 'border-violet-500/20',  text: 'text-violet-600',  darkText: 'dark:text-violet-400',   mini: 'text-violet-500',  large: 'text-violet-500' },
+};
+
+const LightningChart = ({ data, maxValue, colorKey }) => {
+  const colors = metricColors[colorKey] || metricColors.CPU;
+  if (!data.length) return <div className='h-28 rounded-xl bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center text-[10px] text-zinc-500'>Waiting for live samples</div>;
+  const points = chartPoints(data, 280, 90, Math.max(1, maxValue));
+  const areaPoints = `0,90 ${points} 280,90`;
+  
+  return (
+    <div className='h-28 rounded-xl overflow-hidden bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 relative animate-message-glow transition-all duration-300 hover:border-indigo-500/30 hover:shadow-[0_0_18px_rgba(99,102,241,0.15)]'>
+      <svg width='100%' height='100%' viewBox='0 0 280 90' preserveAspectRatio='none' aria-label='Live usage history'>
+        <defs>
+          <linearGradient id={`gradient-${colorKey}`} x1='0' y1='0' x2='0' y2='1'>
+            <stop offset='0%' stopColor={colors.stroke} stopOpacity='0.3' />
+            <stop offset='50%' stopColor={colors.stroke} stopOpacity='0.08' />
+            <stop offset='100%' stopColor={colors.stroke} stopOpacity='0' />
+          </linearGradient>
+          <filter id={`glow-${colorKey}`} x='-20%' y='-20%' width='140%' height='140%'>
+            <feGaussianBlur stdDeviation='3' result='blur' />
+            <feComposite in='SourceGraphic' in2='blur' operator='over' />
+          </filter>
+          <filter id={`lightning-${colorKey}`} x='-20%' y='-20%' width='140%' height='140%'>
+            <feGaussianBlur stdDeviation='1.5' result='blur' />
+            <feComposite in='SourceGraphic' in2='blur' operator='over' />
+          </filter>
+        </defs>
+        <polygon fill={`url(#gradient-${colorKey})`} points={areaPoints} />
+        <polyline fill='none' stroke={colors.stroke} strokeWidth='2.5' filter={`url(#glow-${colorKey})`} points={points} opacity='0.9' />
+        <polyline fill='none' stroke={colors.glow} strokeWidth='1' filter={`url(#lightning-${colorKey})`} points={points} opacity='0.6' />
+      </svg>
+    </div>
+  );
+};
+
+const MiniLightningChart = ({ data, maxValue, colorKey }) => {
+  const colors = metricColors[colorKey] || metricColors.CPU;
+  if (!data.length) return <span className='text-[9px] text-zinc-500'>Waiting for samples</span>;
+  const points = chartPoints(data, 74, 26, Math.max(1, maxValue));
+  
+  return (
+    <svg width='74' height='26' className='shrink-0' aria-label='Recent usage chart'>
+      <defs>
+        <filter id={`mini-glow-${colorKey}`} x='-20%' y='-20%' width='140%' height='140%'>
+          <feGaussianBlur stdDeviation='1.5' result='blur' />
+          <feComposite in='SourceGraphic' in2='blur' operator='over' />
+        </filter>
+      </defs>
+      <polyline fill='none' stroke={colors.stroke} strokeWidth='1.5' filter={`url(#mini-glow-${colorKey})`} points={points} opacity='0.85' />
+      <polyline fill='none' stroke={colors.glow} strokeWidth='0.75' points={points} opacity='0.5' />
+    </svg>
+  );
+};
+
+const StatCard = ({ label, value }) => <div className='flex flex-col bg-zinc-50 dark:bg-zinc-950/30 p-2 rounded-lg border border-zinc-100 dark:border-zinc-900 overflow-hidden'>
+  <span className='text-[8px] text-zinc-500 font-bold uppercase tracking-wider'>{label}</span>
+  <span className='text-[11px] font-extrabold font-mono mt-0.5 break-words text-zinc-900 dark:text-white'>{value}</span>
+</div>;
+
+const MetricDetails = ({ metric, stats, gpu, gpus }) => {
+  if (metric === 'GPU') {
+    if (gpus && gpus.length > 1) {
+      return <div className='flex flex-col gap-2'>
+        {gpus.map((g, idx) => {
+          const hasLive = g.has_live_metrics !== false;
+          return (
+            <div key={g.index} className='grid grid-cols-2 gap-1.5 p-2 rounded-xl bg-zinc-50 dark:bg-zinc-950/30 border border-zinc-100 dark:border-zinc-900'>
+              <div className='col-span-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest'>GPU {g.index} — {cleanText(g.name) || UNAVAILABLE}</div>
+              {!hasLive && <div className='col-span-2 text-[9px] text-amber-600 dark:text-amber-400 font-bold'>Live metrics unavailable — showing static hardware info only</div>}
+              <StatCard label='Utilization' value={hasLive ? percent(g.usage, 1) : UNAVAILABLE} />
+              <StatCard label='Temperature' value={hasLive && finite(g.temperature) && g.temperature > 0 ? g.temperature.toFixed(0) + ' C' : UNAVAILABLE} />
+              <StatCard label='VRAM used' value={hasLive && finite(g.vram_used_gb) ? gigabytes(g.vram_used_gb, 2) : UNAVAILABLE} />
+              <StatCard label='VRAM total' value={positive(g.vram_total_gb) ? gigabytes(g.vram_total_gb) : UNAVAILABLE} />
+            </div>
+          );
+        })}
+      </div>;
+    }
+    const hasLive = gpu.has_live_metrics !== false;
+    return <div className='grid grid-cols-2 gap-1.5'>
+      <StatCard label='Utilization' value={hasLive ? percent(gpu.usage, 1) : UNAVAILABLE} />
+      <StatCard label='VRAM used' value={hasLive && finite(gpu.vramUsed) ? gigabytes(gpu.vramUsed, 2) : UNAVAILABLE} />
+      <StatCard label='VRAM total' value={positive(gpu.vramTotal) ? gigabytes(gpu.vramTotal) : UNAVAILABLE} />
+      <StatCard label='Temperature' value={hasLive && finite(gpu.temperature) && gpu.temperature > 0 ? gpu.temperature.toFixed(0) + ' C' : UNAVAILABLE} />
+      <div className='col-span-2'><StatCard label='Device' value={gpu.name || UNAVAILABLE} /></div>
+    </div>;
+  }
+  if (metric === 'CPU') return <div className='grid grid-cols-2 gap-1.5'>
+    <StatCard label='Utilization' value={percent(stats.cpu_usage, 1)} />
+    <StatCard label='Physical cores' value={positive(stats.cpu_cores) ? stats.cpu_cores : UNAVAILABLE} />
+    <StatCard label='Logical threads' value={positive(stats.cpu_threads) ? stats.cpu_threads : UNAVAILABLE} />
+    <div className='col-span-2'><StatCard label='Processor' value={cleanText(stats.cpu_name) || UNAVAILABLE} /></div>
+  </div>;
+  if (metric === 'Memory') {
+    const available = positive(stats.memory_total_gb) && finite(stats.memory_used_gb)
+      ? Math.max(0, stats.memory_total_gb - stats.memory_used_gb) : null;
+    return <div className='grid grid-cols-2 gap-1.5'>
+      <StatCard label='In use' value={finite(stats.memory_used_gb) ? gigabytes(stats.memory_used_gb, 2) : UNAVAILABLE} />
+      <StatCard label='Total RAM' value={positive(stats.memory_total_gb) ? gigabytes(stats.memory_total_gb) : UNAVAILABLE} />
+      <StatCard label='Utilization' value={percent(stats.memory_usage, 1)} />
+      <StatCard label='Available' value={finite(available) ? gigabytes(available) : UNAVAILABLE} />
+    </div>;
+  }
+  if (metric === 'Disk') return <div className='grid grid-cols-2 gap-1.5'>
+    <StatCard label='Activity' value={percent(stats.disk_usage, 1)} />
+    <StatCard label='Capacity' value={positive(stats.disk_total_gb) ? gigabytes(stats.disk_total_gb) : UNAVAILABLE} />
+    <StatCard label='Read' value={rate(stats.disk_read_kb)} />
+    <StatCard label='Write' value={rate(stats.disk_write_kb)} />
+  </div>;
+  return <div className='grid grid-cols-2 gap-1.5'>
+    <StatCard label='Download' value={rate(stats.net_down_kb)} />
+    <StatCard label='Upload' value={rate(stats.net_up_kb)} />
+  </div>;
+};
 
 export default RightPanel;

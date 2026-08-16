@@ -96,7 +96,7 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-md">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-md truncate whitespace-nowrap">
                         {m.company}
                       </span>
                       <span className={`text-[10px] font-black uppercase border px-2 py-0.5 rounded-md ${rankInfo.bg}`}>
