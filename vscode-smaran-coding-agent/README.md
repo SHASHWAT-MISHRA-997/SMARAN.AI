@@ -1,168 +1,95 @@
 # ⚡ SMARAN.AI Coder
 
 <h3 align="center">
-  🧠 Enterprise Cognitive Intelligence &nbsp;•&nbsp; 🔥 Autonomous Code Synthesis &nbsp;•&nbsp; ⚡ Multi-LLM Orchestration
+  🧠 Autonomous AI Pair Programmer &nbsp;•&nbsp; ⚡ Multi-LLM Orchestration &nbsp;•&nbsp; 📊 100% Genuine Host Telemetry
 </h3>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/⚡_SMARAN.AI-v1.0.4-00F0FF?style=for-the-badge&labelColor=090a0f" alt="Version">
+  <img src="https://img.shields.io/badge/⚡_SMARAN.AI-v1.0.6-00F0FF?style=for-the-badge&labelColor=090a0f" alt="Version">
+  &nbsp;
+  <a href="https://hub.docker.com/r/shashwatmishra062/smaran-ai"><img src="https://img.shields.io/badge/🐳_Docker-shashwatmishra062%2Fsmaran--ai-2496ED?style=for-the-badge&labelColor=090a0f" alt="Docker"></a>
   &nbsp;
   <a href="https://www.linkedin.com/in/sm980/"><img src="https://img.shields.io/badge/🔗_LinkedIn-Shashwat_Mishra-0A66C2?style=for-the-badge&labelColor=090a0f" alt="LinkedIn"></a>
-  &nbsp;
-  <img src="https://img.shields.io/badge/🚀_Engine-Headroom_+_MultiLLM-00FF66?style=for-the-badge&labelColor=090a0f" alt="Engine">
   &nbsp;
   <img src="https://img.shields.io/badge/🔒_License-MIT-F59E0B?style=for-the-badge&labelColor=090a0f" alt="License">
 </p>
 
 ---
 
-## 🔥 What is SMARAN.AI Coder?
+## 🌟 Two Ways to Use SMARAN.AI
 
-> 🧠 **SMARAN.AI Coder is a transparent multi-LLM cognitive intelligence platform** that shows you exactly which models, plugins, memory systems, and compression engines are active on every response.
+### 🌐 Mode 1: Web Browser Studio (`http://localhost:3003`)
+If you want the full standalone software engineering experience with **Interactive Live HTML/CSS Preview**, **Document RAG**, **Live Web Research**, and **100% Host Hardware Telemetry**:
 
-Runs a live AI pipeline with 19 routing strategies, **Headroom** 60–90% prompt compression, **Claude-Mem** persistent cross-session memory, and a **transparent skill execution engine** — all visible in real-time execution receipts above every response.
+1. Run the Docker container on any machine:
+   ```bash
+   docker run -d -p 3003:3003 --name smaran-ai-app shashwatmishra062/smaran-ai:latest
+   ```
+2. Open your web browser and visit:
+   👉 **`http://localhost:3003`**
+3. Enjoy autonomous coding, document intelligence, and real hardware monitoring!
 
 ---
 
-## ✨ Feature Arsenal
+### 💻 Mode 2: In-Editor VS Code Extension
+Use SMARAN.AI directly inside VS Code for real-time code generation, AST context analysis, and inline refactoring:
 
-### ⚡ Multi-LLM Dynamic Routing
+1. Open the **SMARAN.AI Coder** tab in the sidebar (🧠 icon).
+2. **If local server is running**: Connects automatically to `http://localhost:3003`.
+3. **If using standalone cloud mode**: Click **Settings (⚙️)** in the extension header and enter your free **OpenRouter** (`sk-or-v1-...`) or **Groq** (`gsk_...`) API key for direct cloud inference!
+
+---
+
+## ⚡ Multi-LLM Dynamic Routing Arsenal
+
 > 🎯 **19 Intelligent Routing Strategies** → Priority, Weighted, Round-Robin, Cost-Optimized, Latency-First, Auto-Combo
 
-| 🏷️ Provider | 🤖 Model | 🌟 Speciality |
+| 🏷️ Provider | 🤖 Model | 🌟 Capability |
 |:---|:---|:---|
-| 🟣 DeepSeek | V4 Pro (671B MoE) / R1 | ◈ Ultra-deep reasoning & code generation |
-| 🟢 Nvidia NIM | Nemotron 3 Ultra 70B | ◈ Hardware-accelerated inference |
-| 🔵 Google | Gemma 4 32B / Gemini 2.5 Flash | ◈ Free tier + multimodal |
-| 🟡 Moonshot | Kimi K3 Ultra | ◈ 200K token context window |
-| 🔴 Anthropic | Claude Opus 4.6 / Sonnet | ◈ Enterprise-grade reasoning |
-| ⚡ Groq Cloud | LLaMA 3.3 70B | ◈ 500+ tokens/sec ultra-fast |
-| 🟠 OpenRouter | Free Routes | ◈ Zero-cost community models |
-| 🟤 Zhipu AI | GLM 5.3 Code | ◈ Code-specialist agent |
-| 💻 Local | DeepSeek-Coder / Qwen 2.5 | ◈ Offline Ollama / vLLM |
+| 🟣 DeepSeek | DeepSeek R1 Reasoning | ◈ Ultra-deep mathematical reasoning & step-by-step logic |
+| ⚡ Groq Cloud | LLaMA 3.3 70B Versatile | ◈ 500+ tokens/sec ultra-fast code generation |
+| 🔵 Google | Gemini 2.0 / 2.5 Flash | ◈ High-speed multimodal code synthesis |
+| 🟠 OpenRouter | Community Free Routes | ◈ Zero-cost community models with automatic failover |
+| 🟢 Nvidia NIM | Nemotron 70B Instruct | ◈ Hardware-accelerated code and instruction following |
+| 🔴 Anthropic | Claude 3.5 Sonnet / Opus | ◈ Enterprise-grade architecture & refactoring |
+| 💻 Local | Qwen 2.5 Coder / DeepSeek | ◈ 100% offline private local inference via Ollama / vLLM |
 
 ---
 
-### 🗜️ Headroom Compression Engine
-> 🔋 **60–90% Token Reduction** → Slashes latency & cost while preserving full semantic fidelity
+## 🗜️ Headroom Compression & Memory Vault
 
-```
-┌──────────────────────────────────────────────┐
-│   📥 Raw Prompt (10,000 tokens)              │
-│        ↓ RTK Filter Pipeline                 │
-│        ↓ Caveman Prose Reduction             │
-│        ↓ Stacked Compression Modes           │
-│   📤 Compressed (1,500 tokens) → 85% Saved!  │
-└──────────────────────────────────────────────┘
-```
+* 🚀 **Headroom 60–90% Token Reduction**: RTK filtering and AST context relay minimize token costs and optimize response latency.
+* 🧠 **Claude-Mem Long-Term Memory**: Persistent episodic memory retains user preferences and project architecture across sessions.
+* 🛡️ **STRIX Security & Local Sandbox**: Static AST code vulnerability scanning (SQLi CWE-89, IDOR, Secret Leakage) with zero telemetry leakage.
 
 ---
 
-### 🧠 Claude-Mem Persistent Memory
-> 💾 **Cross-session cognitive memory** → Remembers your architecture, past fixes, and design patterns
-
-- 🔁 Retains debugging history across conversations
-- 🏗️ Remembers project structure and tech stack decisions
-- 🎯 Auto-retrieves relevant past context for new queries
-- 🔗 Syncs with long-term knowledge graph
-
----
-
-### 🛠️ Live Transparency Receipts
-> 👁️ **Every response shows exactly what ran** → Complete execution visibility
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  ⚡ Dynamic Auto-Combo    │  🗜️ Headroom: 65–90% Saved   │
-│  🧠 Memory: Synced        │  🛠️ task-observer, ui-ux-pro  │
-│  📁 Workspace: Active     │                                │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-### 📎 Attach Files & Logs
-> 🖇️ Click the paperclip icon in the prompt bar to attach code files, logs, or snapshots directly for targeted debugging
-
-- 📄 Supports `.ts`, `.js`, `.py`, `.json`, `.html`, `.css`, `.md`, `.txt`, `.csv`, `.yaml`, `.sql`, `.sh`
-- 🖼️ Image files: `.png`, `.jpg`, `.webp`
-
----
-
-### 💬 Multi-Session History
-> 📚 Manage sessions with individual delete and smart auto-titles
-
-- ➕ **New Chat** → Start fresh conversation
-- 🕒 **Session History** → Browse & restore past sessions
-- 🗑️ **Individual Delete** → Remove specific sessions
-- 🧹 **Clear All** → Wipe all history
-
----
-
-### 🔑 BYO Provider API Keys
-> 🔧 Configure your own keys or use the zero-cost free model catalog
-
-| Provider | Key Format | Cost |
-|:---|:---|:---|
-| 🟠 OpenRouter | `sk-or-v1-...` | Free + Paid tiers |
-| ⚡ Groq Cloud | `gsk_...` | Free (500+ T/s) |
-| 🟣 DeepSeek | `sk-...` | Pay-per-use |
-| 🔴 Anthropic | `sk-ant-...` | Pay-per-use |
-| 🟢 OpenAI | `sk-...` | Pay-per-use |
-| 🔵 Google Gemini | `AIzaSy...` | Free + Paid |
-
----
-
-## 🎯 Quick Action Chips
+## 🎯 Quick Action Chips in VS Code
 
 | Chip | Action | What It Does |
 |:---:|:---|:---|
 | ⚡ | **Explain** | Deep structural and logical breakdown of selected code |
-| 🛠️ | **Refactor** | Performance, readability, and architecture optimization |
-| 🧪 | **Unit Tests** | Comprehensive test generation covering all edge cases |
-| 🐞 | **Fix Bugs** | Security vulnerability detection and performance leak repair |
+| 🛠️ | **Refactor** | Performance, readability, and clean architecture optimization |
+| 🧪 | **Unit Tests** | Comprehensive test suite generation covering edge cases |
+| 🐞 | **Fix Bugs** | Security vulnerability detection and bug repair |
 
 ---
 
-## 💻 Quick Start Guide
+## 👨‍💻 About the Developer
 
-```
-Step 1 → Install the extension from VS Code
-Step 2 → Open SMARAN.AI Coder tab in the sidebar (🧠 icon)
-Step 3 → Type your coding task or click a Quick Action chip
-Step 4 → Attach files with 📎 for targeted context
-Step 5 → Click ⚡ Apply to File or 📋 Insert at Cursor
-```
+<div align="center">
 
----
+### **Shashwat Mishra**
+**AI Engineer & Robotics Engineer • Creator & Architect of SMARAN.AI**
 
-## 🔒 Security & Privacy
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-sm980-0A66C2?style=for-the-badge&logo=linkedin)](https://www.linkedin.com/in/sm980/)
+[![Portfolio](https://img.shields.io/badge/Portfolio-Visit-7C3AED?style=for-the-badge&logo=vercel&logoColor=white)](https://shashwatmishra-portfolio.netlify.app/)
+[![GitHub](https://img.shields.io/badge/GitHub-SHASHWAT--MISHRA--997-181717?style=for-the-badge&logo=github)](https://github.com/SHASHWAT-MISHRA-997)
 
-| 🛡️ Feature | ✅ Status |
-|:---|:---|
-| 🔑 API Keys stored locally only | ✅ Never transmitted |
-| 📡 Zero telemetry collection | ✅ Your code stays private |
-| 🔐 bcrypt password hashing | ✅ Industry standard |
-| 🚫 CORS-restricted backend | ✅ Origin-validated |
-| ⏱️ Rate limiting (brute-force protection) | ✅ slowapi enforced |
-| 🔒 Email verification flow | ✅ Active |
+</div>
 
 ---
 
-## 👨‍💻 Developer
-
-**Shashwat Mishra** — Full-Stack AI Engineer & Software Architect  
-[Connect on LinkedIn](https://www.linkedin.com/in/sm980/)
-
----
-
-## 📄 License
-
-MIT License — Free to use, modify, and distribute.
-
----
-
-<p align="center">
-  <strong>Built with ❤️ by Shashwat Mishra</strong><br/>
-  <em>Empowering developers with autonomous cognitive intelligence</em>
-</p>
+<div align="center">
+  <sub>Built with ❤️ by Shashwat Mishra • SMARAN.AI v1.0.6 Production Extension</sub>
+</div>

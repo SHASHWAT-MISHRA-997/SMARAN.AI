@@ -30,14 +30,14 @@ export class SmaranApiClient {
 
     return [
       { id: 'auto', name: '⚡ Auto-Combo (Multi-LLM Dynamic Selection)', provider: 'Dynamic' },
-      { id: 'deepseek/deepseek-v4-pro', name: '🤖 DeepSeek V4 Pro (671B MoE)', provider: 'DeepSeek' },
-      { id: 'deepseek/deepseek-r1', name: '🧠 DeepSeek R1 Reasoning', provider: 'DeepSeek' },
-      { id: 'groq/llama-3.3-70b', name: '⚡ Groq Cloud (500+ T/s Ultra-Fast)', provider: 'Groq' },
-      { id: 'openrouter/free', name: '🟢 OpenRouter Free Routes', provider: 'OpenRouter' },
-      { id: 'google/gemini-2.5-flash', name: '✨ Gemini 2.5 Flash Free', provider: 'Google' },
-      { id: 'nvidia/nemotron-3-ultra-70b', name: '⚡ Nemotron 3 Ultra 70B', provider: 'Nvidia' },
-      { id: 'claude-3-5-sonnet', name: '🧠 Claude 3.5 Sonnet / Opus', provider: 'Anthropic' },
-      { id: 'qwen2.5-coder', name: '⚡ Qwen 2.5 Coder 32B', provider: 'Local / Ollama' }
+      { id: 'deepseek/deepseek-r1', name: '🧠 DeepSeek R1 Reasoning (Free)', provider: 'DeepSeek' },
+      { id: 'groq/llama-3.3-70b', name: '⚡ Groq LLaMA 3.3 70B (500+ T/s)', provider: 'Groq' },
+      { id: 'google/gemini-2.5-flash', name: '✨ Gemini 2.0 / 2.5 Flash', provider: 'Google' },
+      { id: 'openrouter/free', name: '🟢 OpenRouter LLaMA 3.3 70B (Free)', provider: 'OpenRouter' },
+      { id: 'deepseek/deepseek-v4-pro', name: '🤖 DeepSeek V3 / V4 Chat', provider: 'DeepSeek' },
+      { id: 'nvidia/nemotron-3-ultra-70b', name: '⚡ NVIDIA Nemotron 70B', provider: 'NVIDIA' },
+      { id: 'claude-3-5-sonnet', name: '🧠 Claude 3.5 Sonnet', provider: 'Anthropic' },
+      { id: 'qwen2.5-coder', name: '⚡ Qwen 2.5 Coder (Local)', provider: 'Local / Ollama' }
     ];
   }
 
@@ -62,23 +62,46 @@ export class SmaranApiClient {
       enable_headroom: config.get<boolean>('enableHeadroomCompression', true)
     };
 
-    // 1. Attempt connection to Local SMARAN.AI Desktop backend
+    // 1. First attempt connection to Local SMARAN.AI Desktop / Docker backend
     try {
       return await this._callLocalBackend(baseUrl, payload, onToken);
     } catch (localErr: any) {
-      // 2. If local backend is offline, check if user has configured cloud API keys (Groq or OpenRouter)
-      if (apiKeys.groq && (model.startsWith('groq') || model === 'auto')) {
-        return await this._callGroqDirect(apiKeys.groq, prompt, contextFiles, onToken);
+      // 2. If local backend is offline, check configured cloud API keys
+      const openRouterKey = apiKeys.openRouter || apiKeys.openrouter;
+      const groqKey = apiKeys.groq;
+      const geminiKey = apiKeys.gemini || apiKeys.google;
+      const deepseekKey = apiKeys.deepseek;
+
+      // Direct Groq Cloud
+      if (groqKey && (model.startsWith('groq') || model === 'auto')) {
+        return await this._callGroqDirect(groqKey, prompt, model, contextFiles, onToken);
       }
-      if (apiKeys.openRouter && (model.startsWith('openrouter') || model === 'auto')) {
-        return await this._callOpenRouterDirect(apiKeys.openRouter, prompt, contextFiles, onToken);
+
+      // Direct OpenRouter
+      if (openRouterKey) {
+        return await this._callOpenRouterDirect(openRouterKey, prompt, model, contextFiles, onToken);
+      }
+
+      // Fallback Groq if OpenRouter not configured
+      if (groqKey) {
+        return await this._callGroqDirect(groqKey, prompt, model, contextFiles, onToken);
+      }
+
+      // Direct Gemini
+      if (geminiKey) {
+        return await this._callGeminiDirect(geminiKey, prompt, contextFiles, onToken);
+      }
+
+      // Direct DeepSeek
+      if (deepseekKey) {
+        return await this._callDeepSeekDirect(deepseekKey, prompt, contextFiles, onToken);
       }
 
       throw new Error(
-        `SMARAN.AI Desktop is not currently running on ${baseUrl}.\n\n` +
-        `💡 To resolve:\n` +
-        `1. Start SMARAN.AI Desktop by running SMARAN_AI.exe or Docker (port 3003)\n` +
-        `2. Or click Settings (⚙️) above and enter a Groq or OpenRouter API Key for direct cloud inference.`
+        `SMARAN.AI Desktop backend is not running on ${baseUrl}.\n\n` +
+        `💡 Two easy ways to use SMARAN.AI:\n` +
+        `1. Start SMARAN.AI Desktop or Docker container (runs on http://localhost:3003)\n` +
+        `2. Or click Settings (⚙️) above and enter a free OpenRouter or Groq API Key for direct cloud pair programming.`
       );
     }
   }
@@ -164,15 +187,20 @@ export class SmaranApiClient {
     });
   }
 
-  private _callGroqDirect(apiKey: string, prompt: string, contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
+  private _callGroqDirect(apiKey: string, prompt: string, model: string = 'auto', contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
     return new Promise((resolve, reject) => {
       let sysMsg = "You are SMARAN.AI, an autonomous senior AI coding assistant and pair programmer.";
       if (contextFiles && contextFiles.length > 0) {
         sysMsg += "\n\nWorkspace Context Files:\n" + contextFiles.map(c => `--- ${c.path} ---\n${c.content}`).join('\n\n');
       }
 
+      let groqModel = "llama-3.3-70b-versatile";
+      if (model.includes('r1') || model.includes('reasoning')) {
+        groqModel = "deepseek-r1-distill-llama-70b";
+      }
+
       const body = JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: groqModel,
         messages: [
           { role: "system", content: sysMsg },
           { role: "user", content: prompt }
@@ -209,15 +237,29 @@ export class SmaranApiClient {
     });
   }
 
-  private _callOpenRouterDirect(apiKey: string, prompt: string, contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
+  private _callOpenRouterDirect(apiKey: string, prompt: string, model: string = 'auto', contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
     return new Promise((resolve, reject) => {
-      let sysMsg = "You are SMARAN.AI, an autonomous senior AI coding assistant.";
+      let sysMsg = "You are SMARAN.AI, an autonomous senior AI coding assistant and pair programmer.";
       if (contextFiles && contextFiles.length > 0) {
         sysMsg += "\n\nWorkspace Context Files:\n" + contextFiles.map(c => `--- ${c.path} ---\n${c.content}`).join('\n\n');
       }
 
+      // Map model to OpenRouter identifier
+      let targetModel = "meta-llama/llama-3.3-70b-instruct:free";
+      if (model.includes('deepseek-r1') || model.includes('r1')) {
+        targetModel = "deepseek/deepseek-r1:free";
+      } else if (model.includes('deepseek-v4') || model.includes('deepseek')) {
+        targetModel = "deepseek/deepseek-chat";
+      } else if (model.includes('gemini')) {
+        targetModel = "google/gemini-2.0-flash-exp:free";
+      } else if (model.includes('nemotron')) {
+        targetModel = "nvidia/llama-3.1-nemotron-70b-instruct:free";
+      } else if (model.includes('claude')) {
+        targetModel = "anthropic/claude-3.5-sonnet";
+      }
+
       const body = JSON.stringify({
-        model: "meta-llama/llama-3.3-70b-instruct:free",
+        model: targetModel,
         messages: [
           { role: "system", content: sysMsg },
           { role: "user", content: prompt }
@@ -227,6 +269,91 @@ export class SmaranApiClient {
       const req = https.request({
         hostname: "openrouter.ai",
         path: "/api/v1/chat/completions",
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          "HTTP-Referer": "https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI",
+          "X-Title": "SMARAN AI Coder"
+        }
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            const ans = parsed.choices?.[0]?.message?.content || "No response";
+            if (onToken) onToken(ans);
+            resolve(ans);
+          } catch (e) {
+            reject(new Error(`OpenRouter API Error: ${data}`));
+          }
+        });
+      });
+      req.on('error', e => reject(e));
+      req.write(body);
+      req.end();
+    });
+  }
+
+  private _callGeminiDirect(apiKey: string, prompt: string, contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let fullPrompt = prompt;
+      if (contextFiles && contextFiles.length > 0) {
+        fullPrompt = "Workspace Context Files:\n" + contextFiles.map(c => `--- ${c.path} ---\n${c.content}`).join('\n\n') + "\n\nUser Task:\n" + prompt;
+      }
+
+      const body = JSON.stringify({
+        contents: [{ parts: [{ text: fullPrompt }] }]
+      });
+
+      const req = https.request({
+        hostname: "generativelanguage.googleapis.com",
+        path: `/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body)
+        }
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            const ans = parsed.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
+            if (onToken) onToken(ans);
+            resolve(ans);
+          } catch (e) {
+            reject(new Error(`Gemini API Error: ${data}`));
+          }
+        });
+      });
+      req.on('error', e => reject(e));
+      req.write(body);
+      req.end();
+    });
+  }
+
+  private _callDeepSeekDirect(apiKey: string, prompt: string, contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let sysMsg = "You are SMARAN.AI, an autonomous senior AI coding assistant.";
+      if (contextFiles && contextFiles.length > 0) {
+        sysMsg += "\n\nWorkspace Context Files:\n" + contextFiles.map(c => `--- ${c.path} ---\n${c.content}`).join('\n\n');
+      }
+
+      const body = JSON.stringify({
+        model: "deepseek-chat",
+        messages: [
+          { role: "system", content: sysMsg },
+          { role: "user", content: prompt }
+        ]
+      });
+
+      const req = https.request({
+        hostname: "api.deepseek.com",
+        path: "/chat/completions",
         method: "POST",
         headers: {
           "Authorization": `Bearer ${apiKey}`,
@@ -243,7 +370,7 @@ export class SmaranApiClient {
             if (onToken) onToken(ans);
             resolve(ans);
           } catch (e) {
-            reject(new Error(`OpenRouter API Error: ${data}`));
+            reject(new Error(`DeepSeek API Error: ${data}`));
           }
         });
       });

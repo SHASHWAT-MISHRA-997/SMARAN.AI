@@ -11,7 +11,7 @@ const highlightCards = [
   {
     icon: <BarChart2 className="w-4 h-4 text-cyan-400" />,
     title: '100% Real Hardware Telemetry',
-    description: 'Direct Windows WMI & native host bridge syncing real CPU (AMD Ryzen 9 4900H), GPU (RTX 2060), and RAM with live Tokens/sec & latency metrics.',
+    description: 'Direct Windows WMI & native host bridge dynamically syncing the user\'s real CPU, dedicated/integrated GPU, and RAM with live Tokens/sec & latency metrics.',
     color: '#06b6d4',
   },
   {

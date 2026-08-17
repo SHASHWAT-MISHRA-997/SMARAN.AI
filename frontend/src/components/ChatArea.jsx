@@ -923,7 +923,9 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete }) => {
                       100% Genuine Execution Telemetry
                     </div>
                     <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-500 dark:text-zinc-400 font-bold">
-                      <span>Sync: AMD Ryzen 9 • RTX 2060</span>
+                      <span>
+                        {telemetry?.cpu_name ? `Sync: ${telemetry.cpu_name.replace(/Processor|\(R\)|\(TM\)/gi, '').trim()}${telemetry?.gpu_name ? ` • ${telemetry.gpu_name}` : ''}` : (telemetry?.gpu_name ? `Sync: ${telemetry.gpu_name}` : 'Host Hardware Synced')}
+                      </span>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 text-[10px] font-mono">
@@ -2404,83 +2406,157 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       )}
 
       {/* Input Box Console */}
-      <div className="px-3 sm:px-5 pb-4 sm:pb-5 pt-2 bg-transparent shrink-0 relative z-10">
-        <form onSubmit={handleSend} className="max-w-4xl mx-auto flex items-center gap-1.5 bg-gradient-to-r from-zinc-100/95 via-white/90 to-indigo-50/80 dark:from-zinc-950/95 dark:via-zinc-900/95 dark:to-indigo-950/45 border border-indigo-300/60 dark:border-indigo-500/35 rounded-[26px] sm:rounded-[30px] px-3 sm:px-4 py-2 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.75)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all">
+      <div className="px-2 sm:px-5 pb-3 sm:pb-5 pt-1 bg-transparent shrink-0 relative z-10 w-full max-w-full">
+        <form onSubmit={handleSend} className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 bg-gradient-to-r from-zinc-100/95 via-white/90 to-indigo-50/80 dark:from-zinc-950/95 dark:via-zinc-900/95 dark:to-indigo-950/45 border border-indigo-300/60 dark:border-indigo-500/35 rounded-2xl sm:rounded-[30px] p-2 sm:px-4 sm:py-2 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.75)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all w-full overflow-hidden">
           
-          {/* Attach File */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!activeSessionId || directUploading}
-            className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-650 dark:text-zinc-400 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
-            title="Attach Files"
-          >
-            <Upload className="w-5 h-5" />
-          </button>
+          {/* Mobile Top Toolbar (Strictly inside input box) */}
+          <div className="flex sm:hidden items-center justify-between gap-1 pb-1.5 border-b border-indigo-200/40 dark:border-zinc-800/80 w-full">
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!activeSessionId || directUploading}
+                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-md transition-colors cursor-pointer disabled:opacity-35 shrink-0"
+                title="Attach Files"
+              >
+                <Upload className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => folderInputRef.current?.click()}
+                disabled={!activeSessionId || directUploading}
+                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-md transition-colors cursor-pointer disabled:opacity-35 shrink-0"
+                title="Upload Folder"
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsPasteTableOpen(true)}
+                disabled={!activeSessionId || directUploading}
+                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-emerald-600 dark:text-emerald-500 rounded-md transition-colors cursor-pointer disabled:opacity-35 shrink-0"
+                title="Paste Table"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsRagEnabled(!isRagEnabled)}
+                disabled={!activeSessionId || directUploading}
+                className={`px-1.5 py-0.5 rounded-md transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1 text-[9px] font-black ${
+                  isRagEnabled
+                    ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/40'
+                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+                title="Toggle RAG Document Grounding"
+              >
+                <Brain className="w-3 h-3" />
+                <span>{isRagEnabled ? 'RAG' : 'Direct'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+                disabled={!activeSessionId || directUploading}
+                className={`px-1.5 py-0.5 rounded-md transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1 text-[9px] font-black ${
+                  isWebSearchEnabled
+                    ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/40'
+                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+                title="Toggle Live Web Search"
+              >
+                <Globe className={`w-3 h-3 ${isWebSearchEnabled ? 'animate-pulse text-blue-500' : ''}`} />
+                <span>{isWebSearchEnabled ? 'Web' : 'Off'}</span>
+              </button>
+            </div>
 
-          {/* Upload Folder (Recursive Subfolder Ingestion) */}
-          <button
-            type="button"
-            onClick={() => folderInputRef.current?.click()}
-            disabled={!activeSessionId || directUploading}
-            className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
-            title="Upload Entire Folder (Recursive Subfolders & Files)"
-          >
-            <FolderPlus className="w-5 h-5" />
-          </button>
+            {/* Mobile Language Selector */}
+            <select
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value)}
+              className="text-[9px] font-bold text-zinc-700 dark:text-zinc-200 bg-white/80 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md px-1.5 py-0.5 outline-none shrink-0"
+              title="Response Language"
+            >
+              <option value="en">EN</option>
+              <option value="hi">HI</option>
+              <option value="gu">GU</option>
+              <option value="pa">PA</option>
+              <option value="mr">MR</option>
+              <option value="ta">TA</option>
+              <option value="te">TE</option>
+              <option value="ml">ML</option>
+              <option value="kn">KN</option>
+            </select>
+          </div>
+
+          {/* Desktop Left Action Buttons (Exact original desktop single row) */}
+          <div className="hidden sm:flex items-center gap-1 shrink-0">
+            {/* Attach File */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!activeSessionId || directUploading}
+              className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-650 dark:text-zinc-400 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
+              title="Attach Files"
+            >
+              <Upload className="w-5 h-5" />
+            </button>
+
+            {/* Upload Folder (Recursive Subfolder Ingestion) */}
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              disabled={!activeSessionId || directUploading}
+              className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
+              title="Upload Entire Folder (Recursive Subfolders & Files)"
+            >
+              <FolderPlus className="w-5 h-5" />
+            </button>
+            
+            {/* Paste Excel Table */}
+            <button
+              type="button"
+              onClick={() => setIsPasteTableOpen(true)}
+              disabled={!activeSessionId || directUploading}
+              className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-emerald-600 dark:text-emerald-500 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
+              title="Paste Excel Table"
+            >
+              <BookOpen className="w-5 h-5" />
+            </button>
+
+            {/* RAG Mode Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsRagEnabled(!isRagEnabled)}
+              disabled={!activeSessionId || directUploading}
+              className={`px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1.5 text-xs font-black ${
+                isRagEnabled
+                  ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/40 shadow-xs'
+                  : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+              }`}
+              title={isRagEnabled ? 'RAG Document Grounding ON' : 'Direct AI Mode'}
+            >
+              <Brain className={`w-4 h-4 ${isRagEnabled ? 'text-purple-600 dark:text-purple-400' : ''}`} />
+              <span className="text-[11px] font-extrabold">{isRagEnabled ? 'RAG ON' : 'Direct AI'}</span>
+            </button>
+
+            {/* Live Web Search Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+              disabled={!activeSessionId || directUploading}
+              className={`px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1.5 text-xs font-black ${
+                isWebSearchEnabled
+                  ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/40 shadow-xs'
+                  : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+              }`}
+              title={isWebSearchEnabled ? 'Live Web Search ON' : 'Live Web Search OFF'}
+            >
+              <Globe className={`w-4 h-4 ${isWebSearchEnabled ? 'animate-pulse text-blue-500 dark:text-blue-400' : ''}`} />
+              <span className="text-[11px] font-extrabold">{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
+            </button>
+          </div>
           
-          {/* Paste Excel Table */}
-          <button
-            type="button"
-            onClick={() => setIsPasteTableOpen(true)}
-            disabled={!activeSessionId || directUploading}
-            className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-emerald-600 dark:text-emerald-500 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
-            title="Paste Excel Table"
-          >
-            <BookOpen className="w-5 h-5" />
-          </button>
-
-          {/* RAG Mode Toggle (Combination: RAG + Direct Chat) */}
-          <button
-            type="button"
-            onClick={() => {
-              const nextRagState = !isRagEnabled;
-              setIsRagEnabled(nextRagState);
-              if (nextRagState) setIsWebSearchEnabled(false);
-            }}
-            disabled={!activeSessionId || directUploading}
-            className={`px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1.5 text-xs font-black ${
-              isRagEnabled
-                ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/40 shadow-xs'
-                : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-            }`}
-            title={isRagEnabled ? 'RAG Document Grounding ON (Searching uploaded collections)' : 'Direct AI Mode (RAG Disabled - Fast Unrestricted General Knowledge)'}
-          >
-            <Brain className={`w-4 h-4 ${isRagEnabled ? 'text-purple-600 dark:text-purple-400' : ''}`} />
-            <span className="text-[11px] font-extrabold">{isRagEnabled ? 'RAG ON' : 'Direct AI'}</span>
-          </button>
-
-          {/* Gemini-Style Live Web Search Toggle */}
-          <button
-            type="button"
-            onClick={() => {
-              const nextWebState = !isWebSearchEnabled;
-              setIsWebSearchEnabled(nextWebState);
-              if (nextWebState) setIsRagEnabled(false);
-            }}
-            disabled={!activeSessionId || directUploading}
-            className={`px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1.5 text-xs font-black ${
-              isWebSearchEnabled
-                ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/40 shadow-xs'
-                : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-            }`}
-            title={isWebSearchEnabled ? 'Live Web Search is ON ? click to turn it OFF' : 'Live Web Search is OFF ? click to turn it ON'}
-          >
-            <Globe className={`w-4 h-4 ${isWebSearchEnabled ? 'animate-pulse text-blue-500 dark:text-blue-400' : ''}`} />
-            <span className="text-[11px] font-extrabold">{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
-          </button>
-          
-          {/* Single unified hidden file input  accepts ALL file types */}
+          {/* Single unified hidden file input accepts ALL file types */}
           <input
             type="file"
             ref={fileInputRef}
@@ -2490,7 +2566,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             className="hidden"
           />
 
-          {/* Recursive directory upload input  accepts entire folders and subfolders */}
+          {/* Recursive directory upload input accepts entire folders and subfolders */}
           <input
             type="file"
             ref={folderInputRef}
@@ -2501,65 +2577,72 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             className="hidden"
           />
 
-          <textarea
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={(e) => {
-              const isShortcut = e.ctrlKey || e.metaKey;
-              if (isShortcut) {
-                const allowedKeys = ['c', 'x', 'v', 'a', 'z', 'y', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
-                if (allowedKeys.includes(e.key.toLowerCase()) || allowedKeys.includes(e.key)) {
-                  return;
+          {/* Main Input Textarea Row */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-1 w-full min-w-0">
+            <textarea
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={(e) => {
+                const isShortcut = e.ctrlKey || e.metaKey;
+                if (isShortcut) {
+                  const allowedKeys = ['c', 'x', 'v', 'a', 'z', 'y', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+                  if (allowedKeys.includes(e.key.toLowerCase()) || allowedKeys.includes(e.key)) {
+                    return;
+                  }
                 }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend(e);
+                }
+              }}
+              onPaste={(e) => { e.stopPropagation(); }}
+              onCopy={(e) => e.stopPropagation()}
+              onCut={(e) => e.stopPropagation()}
+              placeholder={
+                activeSessionId
+                  ? isWebSearchEnabled
+                    ? 'Search and ask the live web...'
+                    : isRagEnabled
+                      ? 'Ask from uploaded files only...'
+                      : 'Ask SMARAN.AI directly...'
+                  : 'Start a new conversation'
               }
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend(e);
-              }
-            }}
-            onPaste={(e) => { e.stopPropagation(); }}
-            onCopy={(e) => e.stopPropagation()}
-            onCut={(e) => e.stopPropagation()}
-            placeholder={
-              activeSessionId
-                ? isWebSearchEnabled
-                  ? 'Search and ask the live web...'
-                  : isRagEnabled
-                    ? 'Ask from uploaded files only...'
-                    : 'Ask SMARAN.AI directly...'
-                : 'Start a new conversation'
-            }
-            disabled={!activeSessionId || streaming || directUploading}
-            rows={1}
-            className="flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-sm text-zinc-900 dark:text-zinc-200 font-semibold resize-none max-h-28 py-2 px-2"
-          />
-          {isTranslating && (
-            <span className="text-[10px] text-indigo-500 animate-pulse shrink-0">Translating...</span>
-          )}
-          {/* Language Selector */}
-          <select
-            value={selectedLanguage}
-            onChange={(e) => setSelectedLanguage(e.target.value)}
-            className="response-language-select text-[10px] font-extrabold text-zinc-700 dark:text-zinc-200 bg-gradient-to-r from-white to-indigo-50 dark:from-zinc-900 dark:to-indigo-950/70 border border-indigo-300/80 dark:border-indigo-500/45 rounded-2xl px-3 py-2 outline-none cursor-pointer shrink-0 transition-all duration-300 hover:border-violet-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:shadow-[0_0_22px_rgba(99,102,241,0.38)] hover:-translate-y-0.5 focus:border-violet-400 focus:ring-2 focus:ring-violet-500/35"
-            title="Response Language"
-          >
-            <option value="en">English (EN)</option>
-            <option value="hi">Hindi (HI)</option>
-            <option value="gu">Gujarati (GU)</option>
-            <option value="pa">Punjabi (PA)</option>
-            <option value="mr">Marathi (MR)</option>
-            <option value="ta">Tamil (TA)</option>
-            <option value="te">Telugu (TE)</option>
-            <option value="ml">Malayalam (ML)</option>
-            <option value="kn">Kannada (KN)</option>
-          </select>
-          <button
-            type="submit"
-            disabled={!activeSessionId || !input.trim() || streaming || directUploading}
-            className="p-2.5 text-white bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 disabled:from-zinc-300 disabled:to-zinc-400 dark:disabled:from-zinc-700 dark:disabled:to-zinc-800 rounded-full shadow-[0_0_18px_rgba(139,92,246,0.38)] hover:shadow-[0_0_28px_rgba(139,92,246,0.62)] hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none shrink-0"
-          >
-            <Send className="w-5 h-5" />
-          </button>
+              disabled={!activeSessionId || streaming || directUploading}
+              rows={1}
+              className="flex-1 w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-xs sm:text-sm text-zinc-900 dark:text-zinc-200 font-semibold resize-none max-h-28 py-1 sm:py-2 px-1 sm:px-2 min-w-0"
+            />
+
+            {isTranslating && (
+              <span className="text-[10px] text-indigo-500 animate-pulse shrink-0">Translating...</span>
+            )}
+
+            {/* Desktop Language Selector (Hidden on mobile because it is in mobile toolbar) */}
+            <select
+              value={selectedLanguage}
+              onChange={(e) => setSelectedLanguage(e.target.value)}
+              className="hidden sm:block response-language-select text-[10px] font-extrabold text-zinc-700 dark:text-zinc-200 bg-gradient-to-r from-white to-indigo-50 dark:from-zinc-900 dark:to-indigo-950/70 border border-indigo-300/80 dark:border-indigo-500/45 rounded-2xl px-3 py-2 outline-none cursor-pointer shrink-0 transition-all duration-300 hover:border-violet-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:shadow-[0_0_22px_rgba(99,102,241,0.38)] hover:-translate-y-0.5 focus:border-violet-400 focus:ring-2 focus:ring-violet-500/35"
+              title="Response Language"
+            >
+              <option value="en">English (EN)</option>
+              <option value="hi">Hindi (HI)</option>
+              <option value="gu">Gujarati (GU)</option>
+              <option value="pa">Punjabi (PA)</option>
+              <option value="mr">Marathi (MR)</option>
+              <option value="ta">Tamil (TA)</option>
+              <option value="te">Telugu (TE)</option>
+              <option value="ml">Malayalam (ML)</option>
+              <option value="kn">Kannada (KN)</option>
+            </select>
+
+            {/* Send Button */}
+            <button
+              type="submit"
+              disabled={!activeSessionId || !input.trim() || streaming || directUploading}
+              className="p-1.5 sm:p-2.5 text-white bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 disabled:from-zinc-300 disabled:to-zinc-400 dark:disabled:from-zinc-700 dark:disabled:to-zinc-800 rounded-full shadow-[0_0_18px_rgba(139,92,246,0.38)] hover:shadow-[0_0_28px_rgba(139,92,246,0.62)] hover:scale-105 sm:hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none shrink-0"
+            >
+              <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          </div>
 
         </form>
       </div>

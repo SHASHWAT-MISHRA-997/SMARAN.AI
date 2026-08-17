@@ -2279,7 +2279,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         "- Headroom Token Compressor: Uses RTK filters and Caveman rules for 60-90% token reduction.\n"
         "- Claude-Mem: Episodic memory extraction and persistent cross-session facts.\n"
         "- STRIX Security: Automated penetration testing, SQLi, IDOR, and XSS vulnerability scanning.\n"
-        "- Real-Time Hardware Bridge: Direct WMI & psutil telemetry for CPU (AMD Ryzen 9), GPU (NVIDIA RTX 2060), RAM, and live tokens/sec.\n"
+        "- Real-Time Hardware Bridge: Direct WMI & psutil telemetry for the user's host CPU, dedicated/integrated GPU, RAM, and live tokens/sec.\n"
         "When asked about these internal capabilities or architecture, explain them accurately and confidently."
     )
 
