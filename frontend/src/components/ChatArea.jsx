@@ -2638,9 +2638,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             <button
               type="submit"
               disabled={!activeSessionId || !input.trim() || streaming || directUploading}
-              className="p-1.5 sm:p-2.5 text-white bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 disabled:from-zinc-300 disabled:to-zinc-400 dark:disabled:from-zinc-700 dark:disabled:to-zinc-800 rounded-full shadow-[0_0_18px_rgba(139,92,246,0.38)] hover:shadow-[0_0_28px_rgba(139,92,246,0.62)] hover:scale-105 sm:hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none shrink-0"
+              className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center text-white bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 disabled:from-zinc-300 disabled:to-zinc-400 dark:disabled:from-zinc-700 dark:disabled:to-zinc-800 rounded-full shadow-[0_0_18px_rgba(139,92,246,0.38)] hover:shadow-[0_0_28px_rgba(139,92,246,0.62)] hover:scale-105 sm:hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none shrink-0"
+              title="Send Message"
             >
-              <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+              <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4 translate-x-[1.5px] -translate-y-[0.5px]" />
             </button>
           </div>
 
