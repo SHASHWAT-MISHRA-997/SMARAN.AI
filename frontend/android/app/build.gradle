@@ -33,7 +33,9 @@ android {
             def propsFile = rootProject.file('keystore.properties')
             if (propsFile.exists()) {
                 propsFile.withInputStream { props.load(it) }
-                storeFile file(props['storeFile'])
+                // Resolved from the android/ root, not the app module:
+                // bare file() here would look inside app/ and miss it.
+                storeFile rootProject.file(props['storeFile'])
                 storePassword props['storePassword']
                 keyAlias props['keyAlias']
                 keyPassword props['keyPassword']

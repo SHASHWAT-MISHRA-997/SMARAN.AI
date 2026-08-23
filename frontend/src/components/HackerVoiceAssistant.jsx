@@ -1388,6 +1388,14 @@ export const HackerVoiceAssistant = ({
     liveSessionRef.current = null;
     setLiveActive(false);
     setLiveState('idle');
+    // Clear what was being said as well as the flags. Without this the
+    // last utterance stayed on screen after the session ended, and was
+    // still sitting there when the next one started.
+    setTranscript('');
+    setInterimTranscript('');
+    transcriptRef.current = '';
+    interimTranscriptRef.current = '';
+    finalTranscriptRef.current = '';
     if (session) await session.stop();
   }, []);
 
@@ -1674,7 +1682,16 @@ export const HackerVoiceAssistant = ({
   // The line shown large over the character: what the assistant last said, or
   // the words being picked up while the user is talking.
   const lastAssistantLine = [...chatHistory].reverse().find((m) => m.role === 'assistant')?.text || '';
-  const latestSpokenLine = currentSpeakingText || voiceAiResponse || lastAssistantLine;
+  // Only while a conversation is actually running. Once it ends the line
+  // is history, and leaving it up made an ended session look live.
+  // Listing the resting states rather than the busy ones: 'capturing' and
+  // 'uploading' are also mid-conversation, and a whitelist would have
+  // silently dropped the caption during them.
+  const RESTING = ['idle', 'error', 'muted', 'permission'];
+  const conversing = liveActive || !RESTING.includes(voiceState);
+  const latestSpokenLine = conversing
+    ? (currentSpeakingText || voiceAiResponse || lastAssistantLine)
+    : '';
 
   const statusToneClasses = {
     amber: 'text-amber-400',
