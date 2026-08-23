@@ -53,8 +53,12 @@ search for `releases/latest/download`.
 
 Both configs are already in the folder, and neither host needs a build command.
 
-**Netlify** — drag the `website` folder onto <https://app.netlify.com/drop>,
-or connect the repo and set the base directory to `website`.
+**Netlify** — deploy this folder, not the repository root. The root holds
+`.git`, `node_modules` and the build outputs, which together are several
+gigabytes and will fail the upload. Drag this folder onto
+<https://app.netlify.com/drop>, run `netlify deploy --prod --dir .` from
+inside it, or connect the repo through Git with the base directory set to
+`website`.
 
 **Vercel** — `vercel --cwd website`, or connect the repo and set the root
 directory to `website`.

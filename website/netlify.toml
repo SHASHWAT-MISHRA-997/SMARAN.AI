@@ -1,5 +1,10 @@
-# Netlify. There is nothing to build — the site is already static — so the
-# publish directory is the folder itself.
+# Netlify. The site is already static, so there is nothing to build and the
+# publish directory is this folder itself.
+#
+# Deploys upload this folder as the site root, which is why the config lives
+# here rather than at the repository root. If you connect the repository to
+# Netlify through Git instead, set the base directory to `website` and this
+# file is picked up unchanged.
 [build]
   publish = "."
   command = ""
@@ -12,8 +17,8 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), interest-cohort=()"
 
-# Fingerprinted these are not, so a long cache would strand visitors on an old
-# stylesheet. An hour is long enough to help and short enough to fix a typo.
+# Nothing here is fingerprinted, so a long cache would strand visitors on an
+# old stylesheet. An hour helps without making a typo permanent.
 [[headers]]
   for = "/*.css"
   [headers.values]
