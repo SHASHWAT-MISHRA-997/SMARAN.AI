@@ -1,8 +1,80 @@
+<div align="center">
+
+<img src="frontend/public/smaran-logo.png" alt="SMARAN.AI" width="110" />
+
 # SMARAN.AI 2.8.2
+
+**A local-first AI workspace.** Chat, voice, vision and your own documents,
+running on your own machine.
+
+[![Download for Windows](https://img.shields.io/badge/Windows-Download%20installer-ef4444?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI-Setup.exe)
+[![Download APK](https://img.shields.io/badge/Android-Download%20APK-ef4444?style=for-the-badge&logo=android&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk)
+
+![Version](https://img.shields.io/badge/version-2.8.2-b91c1c)
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-b91c1c)
+![Android](https://img.shields.io/badge/Android-7.0%2B-b91c1c)
+![Models](https://img.shields.io/badge/catalogue-63%20models-b91c1c)
+
+</div>
+
+---
 
 SMARAN.AI is a local-first AI workspace with responsive chat, optional live web search, uploaded-file RAG, local speech input/read-aloud, source-labelled performance telemetry, and user-configured local or cloud models.
 
 This document intentionally separates code that exists from services that are currently installed, connected, or active.
+
+## What it looks like
+
+Every image below is a real screenshot of this build, captured by
+`frontend/tests/screenshots.spec.js` against a running app. None of them are
+mock-ups, and they can be retaken whenever the interface changes.
+
+### The workspace
+
+Chat, with live hardware readings from the actual machine alongside it.
+
+![The SMARAN.AI workspace: chat on the left, live device and model telemetry on the right](docs/images/workspace.png)
+
+### Speak
+
+A voice session laid out like a phone call — answer and hang up, with an
+animated character and a live waveform. Interruption is handled, so cutting in
+stops the assistant mid-sentence.
+
+![The Speak view: an animated character on stage with mute, screen, camera, call, gesture, ambience and wake controls](docs/images/speak.png)
+
+### Model Hub
+
+Sixty-three models, filterable by company and capability. Each card states its
+memory and GPU requirement before you download anything, and is explicit about
+what is catalogued versus actually installed.
+
+![The Model Hub showing downloadable models with parameter counts, capabilities and hardware requirements](docs/images/model-hub.png)
+
+### Sign in
+
+Email and password, with Google Sign-In appearing only when the installation
+has an OAuth client id configured.
+
+![The sign-in panel](docs/images/sign-in.png)
+
+### Pair your phone
+
+Scan once from the Android app. After that conversations sync both ways, and
+either device can drive the other.
+
+![The device pairing screen showing a QR code](docs/images/pairing.png)
+
+### Settings
+
+![The settings screen](docs/images/settings.png)
+
+### On a phone
+
+The interface is tested from 320 px upward; the Playwright matrix in
+`frontend/tests/visual/responsive.spec.js` covers nine viewports.
+
+<img src="docs/images/mobile.png" alt="SMARAN.AI running on a 390 px wide phone viewport" width="320" />
 
 ## Recommended installation — Windows desktop app
 
@@ -120,6 +192,16 @@ cd frontend
 npm run build
 node node_modules/@playwright/test/cli.js test tests/visual/responsive.spec.js --config=playwright.local.config.js --project=chromium
 ```
+
+The README screenshots are produced by the same runner, against a live app:
+
+```powershell
+cd frontend
+npx playwright test tests/screenshots.spec.js --config=playwright.local.config.js
+```
+
+Set `SHOT_BASE` if the app is not on `http://127.0.0.1:8805`. Retake them when
+the interface changes rather than letting them drift.
 
 The responsive matrix covers `320x568`, `375x667`, `390x844`, `844x390`, `768x1024`, `950x900`, `1024x768`, `1280x720`, and `1440x900`, plus a portrait-to-landscape resize.
 
