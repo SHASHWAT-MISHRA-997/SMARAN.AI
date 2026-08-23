@@ -6,22 +6,30 @@ import SettingsModal from './components/SettingsModal';
 import RightPanel from './components/RightPanel';
 import StarfieldCanvas from './components/StarfieldCanvas';
 import ErrorBoundary from './components/ErrorBoundary';
-import LoginModal from './components/LoginModal';
-import AuthLandingPage from './components/AuthLandingPage';
-import { API_BASE, fetchWithAuth, getCurrentUser, logoutUser } from './context/AuthContext';
-import { Brain, RefreshCw } from 'lucide-react';
+import AnalyticsModal from './components/AnalyticsModal';
+import DeveloperModal from './components/DeveloperModal';
+import DevicePairing from './components/DevicePairing';
+import PinLock from './components/PinLock';
+import AuthModal from './components/AuthModal';
+import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 
+
+// SMARAN.AI runs as a free, offline, single-user desktop app. There is no
+// login, sign-up, Google auth, or legal gate — the local device is the user.
+const LOCAL_USER = { id: 'local', username: 'You', email: 'local@smaran.ai', role: 'user' };
 
 const App = () => {
-  // Auth state
-  const [currentUser, setCurrentUser] = useState(null);
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  // Auth state — always the local device user; never gated.
+  const [currentUser, setCurrentUser] = useState(LOCAL_USER);
 
   // Navigation & View state
   const [activeView, setActiveView] = useState('chat');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isModelHubOpen, setIsModelHubOpen] = useState(false);
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+  const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
+  const [isPairingOpen, setIsPairingOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [activeCollections, setActiveCollections] = useState([]);
@@ -43,29 +51,21 @@ const App = () => {
     return ['left', 'right', 'hidden'].includes(saved) ? saved : 'right';
   });
 
-  // Verify authentication on mount
+  // Refine the local user from the backend when reachable, but never gate or
+  // log the user out — a backend hiccup must never show a login/legal screen.
   useEffect(() => {
-    async function checkAuth() {
-      const isLoggedOut = localStorage.getItem('sm_auth_logged_out') === 'true';
-      if (isLoggedOut) {
-        setCurrentUser(null);
-        setIsAuthChecking(false);
-        return;
-      }
+    let cancelled = false;
+    (async () => {
       try {
         const user = await getCurrentUser();
-        if (user && (user.id || user.email || user.username)) {
-          setCurrentUser(user);
-        } else {
-          setCurrentUser(null);
+        if (!cancelled && user && (user.id || user.email || user.username)) {
+          setCurrentUser({ ...LOCAL_USER, ...user });
         }
       } catch (e) {
-        setCurrentUser(null);
-      } finally {
-        setIsAuthChecking(false);
+        /* stay on the local user */
       }
-    }
-    checkAuth();
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -197,57 +197,17 @@ const App = () => {
   const handleNavigate = (view) => {
     if (view === 'settings') {
       setIsSettingsOpen(true);
-    } else if (view === 'login') {
-      setIsLoginOpen(true);
-    } else {
+    } else if (view !== 'login') {
+      // 'login' is intentionally inert: this build has no accounts.
       setActiveView(view);
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await logoutUser();
-    } catch (e) {
-      console.warn('Logout error:', e);
-    }
-    setCurrentUser(null);
-    setSessions([]);
-    setActiveSessionId(null);
-    setActiveView('chat');
-  };
-
-  // Loading splash screen while verifying device session
-  if (isAuthChecking) {
-    return (
-      <div className="h-screen w-full bg-[#090a0f] flex flex-col items-center justify-center text-zinc-100 font-sans select-none">
-        <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-indigo-600 p-0.5 shadow-[0_0_30px_rgba(249,115,22,0.5)] mb-4 animate-pulse">
-          <div className="w-full h-full rounded-[14px] bg-[#0d0e14] flex items-center justify-center">
-            <Brain className="w-8 h-8 text-amber-400 animate-pulse" />
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
-          <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
-          <span>Synchronizing SMARAN.AI local workspace...</span>
-        </div>
-      </div>
-    );
-  }
-
-  // Unauthenticated: render full-screen AuthLandingPage (no dashboard underneath)
-  if (!currentUser) {
-    return (
-      <AuthLandingPage
-        onLoginSuccess={(user) => {
-          setCurrentUser(user);
-          localStorage.removeItem('sm_auth_logged_out');
-          fetchSessions();
-        }}
-      />
-    );
-  }
-
   return (
-    <div className="h-screen w-full flex flex-col md:flex-row bg-[#ffffff] dark:bg-[#0c0c0e] text-[#1f1f1f] dark:text-[#e3e3e3] overflow-hidden font-sans relative transition-colors duration-300">
+    // Nothing behind the lock is rendered until the PIN is accepted, so the
+    // workspace is never briefly visible on the way in.
+    <PinLock>
+    <div className="h-[100dvh] min-h-0 w-full flex flex-col md:flex-row bg-[#ffffff] dark:bg-[#0c0c0e] text-[#1f1f1f] dark:text-[#e3e3e3] overflow-hidden font-sans relative transition-colors duration-300">
       <StarfieldCanvas />
 
       {/* Sidebar Panel */}
@@ -268,15 +228,22 @@ const App = () => {
         setIsModelHubOpen={setIsModelHubOpen}
         onModelChange={setSelectedModel}
         position={sidebarPosition}
-        onLogout={handleLogout}
         onTogglePerformance={() => setShowRightPanel((v) => !v)}
         showPerformance={showRightPanel}
+        onOpenAnalytics={() => setIsAnalyticsOpen(true)}
+        onOpenDeveloper={() => setIsDeveloperOpen(true)}
+        onOpenPairing={() => setIsPairingOpen(true)}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        token={currentUser?.session_token}
+        user={currentUser}
       />
 
       {/* Main Workspace Frame */}
-      <main className="order-2 flex-1 flex flex-col overflow-hidden relative z-10 glass-panel border-t md:border-t-0 border-zinc-200 dark:border-zinc-850/50">
+      <main className="order-2 flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden relative z-10 glass-panel border-t md:border-t-0 border-zinc-200 dark:border-zinc-850/50">
         {activeView === 'chat' && (
           <ChatArea
+            token={currentUser?.session_token}
+            currentUser={currentUser}
             activeSessionId={activeSessionId}
             activeCollections={activeCollections}
             setActiveCollections={setActiveCollections}
@@ -284,6 +251,7 @@ const App = () => {
             turboMode={turboMode}
             onTogglePanel={() => setShowRightPanel((v) => !v)}
             onOpenModelHub={() => setIsModelHubOpen(true)}
+            onOpenAnalytics={() => setIsAnalyticsOpen(true)}
           />
         )}
         
@@ -309,14 +277,42 @@ const App = () => {
         />
       </ErrorBoundary>
 
-      {/* Login Modal Overlay */}
+      {/* Analytics Dashboard Overlay */}
       <ErrorBoundary>
-        <LoginModal
-          isOpen={isLoginOpen}
-          onClose={() => setIsLoginOpen(false)}
+        <AnalyticsModal
+          isOpen={isAnalyticsOpen}
+          onClose={() => setIsAnalyticsOpen(false)}
+          token={currentUser?.session_token}
+          apiBase={API_BASE}
         />
       </ErrorBoundary>
+
+      {/* Sign in or create an account, including the Google route. */}
+      <ErrorBoundary>
+        <AuthModal
+          isOpen={isAuthOpen}
+          onClose={() => setIsAuthOpen(false)}
+        />
+      </ErrorBoundary>
+
+      {/* Pairing a phone with this computer, and the devices already linked. */}
+      <ErrorBoundary>
+        <DevicePairing
+          isOpen={isPairingOpen}
+          onClose={() => setIsPairingOpen(false)}
+        />
+      </ErrorBoundary>
+
+      {/* Developer Profile Overlay */}
+      <ErrorBoundary>
+        <DeveloperModal
+          isOpen={isDeveloperOpen}
+          onClose={() => setIsDeveloperOpen(false)}
+        />
+      </ErrorBoundary>
+
     </div>
+    </PinLock>
   );
 };
 

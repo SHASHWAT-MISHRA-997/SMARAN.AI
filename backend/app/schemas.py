@@ -40,6 +40,7 @@ class ChatRequest(BaseModel):
     turbo: bool = False
     web_search: bool = False
     rag_enabled: bool = False
+    voice_mode: bool = False  # Spoken conversation: short, proactive replies
     target_language: Optional[str] = "en"  # Default English
     cloud_provider: Optional[str] = None
     cloud_model: Optional[str] = None

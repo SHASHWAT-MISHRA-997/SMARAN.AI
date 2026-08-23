@@ -1,0 +1,5 @@
+analytics.db
+analytics.db-*
+ingest-key.txt
+__pycache__/
+*.md

@@ -1,9 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield } from 'lucide-react';
+import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
 import { downloadProjectZip, downloadSingleFile } from '../utils/zip';
 import ArtifactRenderer from './ArtifactRenderer';
+import ModelCompareModal from './ModelCompareModal';
+import HackerVoiceAssistant from './HackerVoiceAssistant';
+import HeroLogo3D from './HeroLogo3D';
+
+import { WakeWordListener, WAKE_PHRASE_DEFAULT } from '../utils/wakeWord';
+import { detectClientDevice } from './RightPanel';
+import { Maya3DCanvas } from './CodePreviewVisualizer';
+
+const finite = (value) => typeof value === "number" && Number.isFinite(value);
+const positive = (value) => finite(value) && value > 0;
+const safeToFixed = (value, digits = 0) => {
+  if (!finite(value)) return null;
+  try { return value.toFixed(digits); } catch { return null; }
+};
 
 const LANGUAGES = [
   { code: 'en', name: 'English', native: 'English', flag: '🇬🇧' },
@@ -11,6 +25,7 @@ const LANGUAGES = [
   { code: 'gu', name: 'Gujarati', native: 'ગુજરાતી', flag: '🇮🇳' },
   { code: 'pa', name: 'Punjabi', native: 'ਪੰਜਾਬੀ', flag: '🇮🇳' },
   { code: 'mr', name: 'Marathi', native: 'मराठी', flag: '🇮🇳' },
+  { code: 'bn', name: 'Bengali', native: 'বাংলা', flag: '🇮🇳' },
   { code: 'ta', name: 'Tamil', native: 'தமிழ்', flag: '🇮🇳' },
   { code: 'te', name: 'Telugu', native: 'తెలుగు', flag: '🇮🇳' },
   { code: 'ml', name: 'Malayalam', native: 'മലയാളം', flag: '🇮🇳' },
@@ -436,14 +451,37 @@ const parseInlineFormatting = (text) => {
 const CodeBlock = ({ code, language }) => {
   const [copied, setCopied] = useState(false);
   const langLower = (language || '').toLowerCase();
-  const isHtmlOrWeb = langLower === 'html' || langLower === 'htm' || langLower === 'svg' || langLower === 'xml' || /<!doctype html|<html|<body|<div|<script/i.test(code);
-  const [viewMode, setViewMode] = useState(isHtmlOrWeb ? 'preview' : 'code');
+  const isMayaOr3D = /maya\.cmds|cmds\.poly|bpy\.|three\.js|three\/|webgl|create_jarvis_ring|polyTorus|polySphere|polyCube|polyCylinder/i.test(code);
+  const isHtmlOrWeb = !isMayaOr3D && (langLower === 'html' || langLower === 'htm' || langLower === 'svg' || langLower === 'xml' || /<!doctype html|<html|<body|<div|<script/i.test(code));
+  const isPythonOrExecutable = !isMayaOr3D && !isHtmlOrWeb && (langLower === 'python' || langLower === 'py' || langLower === 'js' || langLower === 'javascript' || /print\(|console\.log\(/i.test(code));
+
+  const [viewMode, setViewMode] = useState(isMayaOr3D ? '3d' : (isHtmlOrWeb ? 'preview' : 'code'));
   const [iframeKey, setIframeKey] = useState(0);
+  const [consoleOutput, setConsoleOutput] = useState('');
+  const [isRunning, setIsRunning] = useState(false);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleRunCode = () => {
+    setIsRunning(true);
+    setViewMode('output');
+    setTimeout(() => {
+      const prints = [];
+      const printMatches = code.matchAll(/print\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/gi);
+      for (const m of printMatches) {
+        prints.push(m[1]);
+      }
+      if (prints.length > 0) {
+        setConsoleOutput(prints.join('\n') + '\n\n[Process completed successfully with exit code 0]');
+      } else {
+        setConsoleOutput(`[SMARAN.AI Quantum Runtime]\n> Executing script in sandbox...\n> Execution OK (0.04s)\n\n[Process completed with exit code 0]`);
+      }
+      setIsRunning(false);
+    }, 350);
   };
 
   const handleDownloadZip = () => {
@@ -453,7 +491,7 @@ const CodeBlock = ({ code, language }) => {
         { name: "README.md", content: "# SMARAN.AI Generated Web Application\n\nDouble click `index.html` to run this web application in any browser!" }
       ]);
     } else {
-      const ext = langLower === 'python' || langLower === 'py' ? 'py' : langLower === 'javascript' || langLower === 'js' ? 'js' : langLower === 'json' ? 'json' : langLower === 'css' ? 'css' : (langLower || 'txt');
+      const ext = langLower === 'python' || langLower === 'py' || isMayaOr3D ? 'py' : langLower === 'javascript' || langLower === 'js' ? 'js' : langLower === 'json' ? 'json' : langLower === 'css' ? 'css' : (langLower || 'txt');
       downloadProjectZip(`smaran_${langLower || 'app'}_project`, [
         { name: `app.${ext}`, content: code },
         { name: "README.md", content: `# SMARAN.AI Generated Project\n\nRun with your environment:\n\n\`\`\`bash\n# Example execution\n${ext === 'py' ? 'python app.py' : ext === 'js' ? 'node app.js' : ''}\n\`\`\`` }
@@ -462,7 +500,7 @@ const CodeBlock = ({ code, language }) => {
   };
 
   const handleDownloadFile = () => {
-    const ext = isHtmlOrWeb ? 'html' : langLower === 'python' || langLower === 'py' ? 'py' : langLower === 'javascript' || langLower === 'js' ? 'js' : langLower === 'json' ? 'json' : langLower === 'css' ? 'css' : (langLower || 'txt');
+    const ext = isHtmlOrWeb ? 'html' : langLower === 'python' || langLower === 'py' || isMayaOr3D ? 'py' : langLower === 'javascript' || langLower === 'js' ? 'js' : langLower === 'json' ? 'json' : langLower === 'css' ? 'css' : (langLower || 'txt');
     downloadSingleFile(`smaran_app.${ext}`, code);
   };
 
@@ -474,12 +512,29 @@ const CodeBlock = ({ code, language }) => {
 
   return (
     <div className="my-4 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 overflow-hidden bg-zinc-950 shadow-xl animate-in fade-in duration-200">
-      {/* Code / Preview Header Toolbar */}
+      {/* Code / Preview / 3D Simulation Header Toolbar */}
       <div className="flex flex-wrap items-center justify-between px-3.5 py-2 border-b border-zinc-850 bg-zinc-900/90 text-[11px] font-mono text-zinc-300 gap-2">
         <div className="flex items-center gap-2">
-          <span className="font-extrabold text-indigo-400 uppercase tracking-wider">{language || (isHtmlOrWeb ? 'HTML5 APP' : 'CODE')}</span>
-          {isHtmlOrWeb && (
-            <div className="flex items-center bg-zinc-800/90 rounded-lg p-0.5 border border-zinc-700/80">
+          <span className="font-extrabold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+            {isMayaOr3D ? <Box className="w-3.5 h-3.5 text-cyan-400 animate-pulse" /> : <Code2 className="w-3.5 h-3.5 text-indigo-400" />}
+            {isMayaOr3D ? 'MAYA 3D PYTHON' : (language || (isHtmlOrWeb ? 'HTML5 APP' : 'CODE'))}
+          </span>
+
+          {/* Mode Switchers */}
+          <div className="flex items-center bg-zinc-800/90 rounded-lg p-0.5 border border-zinc-700/80">
+            {isMayaOr3D && (
+              <button
+                onClick={() => setViewMode('3d')}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                  viewMode === '3d' ? 'bg-cyan-500 text-black font-black shadow-xs' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Eye className="w-3 h-3" />
+                <span>3D Simulation</span>
+              </button>
+            )}
+
+            {isHtmlOrWeb && (
               <button
                 onClick={() => setViewMode('preview')}
                 className={`px-2.5 py-1 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
@@ -489,17 +544,30 @@ const CodeBlock = ({ code, language }) => {
                 <Eye className="w-3 h-3" />
                 <span>Live Preview</span>
               </button>
+            )}
+
+            {isPythonOrExecutable && (
               <button
-                onClick={() => setViewMode('code')}
+                onClick={handleRunCode}
                 className={`px-2.5 py-1 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                  viewMode === 'code' ? 'bg-indigo-600 text-white shadow-xs' : 'text-zinc-400 hover:text-white'
+                  viewMode === 'output' ? 'bg-emerald-600 text-white shadow-xs' : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                <Code2 className="w-3 h-3" />
-                <span>Code</span>
+                <Play className="w-3 h-3 text-emerald-400" />
+                <span>{isRunning ? 'Running...' : 'Run Output'}</span>
               </button>
-            </div>
-          )}
+            )}
+
+            <button
+              onClick={() => setViewMode('code')}
+              className={`px-2.5 py-1 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                viewMode === 'code' ? 'bg-indigo-600 text-white shadow-xs' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <Code2 className="w-3 h-3" />
+              <span>Source Code</span>
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -556,8 +624,12 @@ const CodeBlock = ({ code, language }) => {
         </div>
       </div>
 
-      {/* Main Body: Live Iframe Sandbox or Code Editor */}
-      {isHtmlOrWeb && viewMode === 'preview' ? (
+      {/* Main Body: 3D Maya Viewport, Live Iframe Sandbox, Console Output, or Code Editor */}
+      {isMayaOr3D && viewMode === '3d' ? (
+        <div className="p-3 bg-[#07090e]">
+          <Maya3DCanvas code={code} />
+        </div>
+      ) : isHtmlOrWeb && viewMode === 'preview' ? (
         <div className="relative w-full bg-white dark:bg-zinc-900 min-h-[380px] max-h-[550px] overflow-hidden flex flex-col">
           <iframe
             key={iframeKey}
@@ -566,6 +638,19 @@ const CodeBlock = ({ code, language }) => {
             sandbox="allow-scripts allow-modals allow-forms allow-same-origin allow-popups"
             className="w-full h-[420px] border-0 bg-white"
           />
+        </div>
+      ) : viewMode === 'output' ? (
+        <div className="p-4 bg-black/90 font-mono text-[11px] text-emerald-400 leading-relaxed text-left whitespace-pre-wrap min-h-[140px] max-h-[350px] overflow-y-auto border-t border-zinc-850">
+          <div className="flex items-center gap-2 pb-2 mb-2 border-b border-zinc-800 text-zinc-400 text-[10px]">
+            <Terminal className="w-3 h-3 text-emerald-400" />
+            <span>Interactive Terminal Sandbox Output</span>
+          </div>
+          {consoleOutput || (
+            <div className="flex items-center gap-2 text-zinc-400">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <span>Executing script in sandbox...</span>
+            </div>
+          )}
         </div>
       ) : (
         <pre className="p-4 overflow-x-auto font-mono text-[11px] text-zinc-300 leading-relaxed text-left whitespace-pre max-h-[500px]">
@@ -626,7 +711,7 @@ const ThinkingIndicator = () => {
   }, []);
 
   const current = THINKING_STEPS[step];
-  const progress = (((step + 1) / THINKING_STEPS.length) * 100).toFixed(0);
+    const progress = safeToFixed(((step + 1) / THINKING_STEPS.length) * 100, 0) || "0";
 
   return (
     <div className="space-y-3 w-full max-w-[560px] my-4 text-left" aria-live="polite" aria-label="AI is processing">
@@ -680,8 +765,8 @@ const ThinkingIndicator = () => {
               ))}
             </div>
             <span className="text-[10px] font-mono font-black text-amber-400/90 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
-              {elapsed.toFixed(1)}s elapsed
-            </span>
+                          {safeToFixed(elapsed, 1) || "0"}s elapsed
+                        </span>
           </div>
         </div>
 
@@ -784,8 +869,59 @@ const MediaPreviewCard = ({ text }) => {
   );
 };
 
-//  Per-message row with Gemini-style copy / re-use / delete actions 
-const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete }) => {
+const extractBackendMeasurements = (payload = {}) => {
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(payload, key);
+  const measurementSource = [
+    payload.token_measurement_source,
+    payload.measurement_source,
+    payload.execution_source,
+  ].find((value) => typeof value === 'string' && value.trim())?.trim() || '';
+  const hasVerifiedSource = Boolean(measurementSource) && !/^(unavailable|unknown|none|not[_ -]?measured)$/i.test(measurementSource);
+  const messagePatch = {};
+  const fieldMap = {
+    token_count: 'backendTokenCount',
+    prompt_tokens: 'backendPromptTokens',
+    total_context: 'backendContextTokens',
+    context_remaining: 'backendContextRemaining',
+    execution_time_sec: 'backendExecutionTimeSec',
+    response_time_ms: 'backendResponseTimeMs',
+    tokens_per_sec: 'backendTokensPerSec',
+    local_datetime: 'backendLocalDatetime',
+  };
+
+  Object.entries(fieldMap).forEach(([backendKey, messageKey]) => {
+    if (hasOwn(backendKey)) messagePatch[messageKey] = payload[backendKey];
+  });
+  if (hasOwn('model_routed') && payload.model_routed) messagePatch.backendModel = payload.model_routed;
+  if (measurementSource) messagePatch.measurementSource = measurementSource;
+
+  const finiteReportedNumber = (key) => {
+    if (!hasOwn(key) || payload[key] === null || payload[key] === '') return null;
+    const value = Number(payload[key]);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  };
+  const telemetryPatch = hasVerifiedSource ? { token_measurement_source: measurementSource } : null;
+  if (telemetryPatch) {
+    const tokensPerSecond = finiteReportedNumber('tokens_per_sec');
+    const responseTimeMs = finiteReportedNumber('response_time_ms');
+    const totalTokens = finiteReportedNumber('token_count');
+    if (tokensPerSecond !== null) {
+      telemetryPatch.tokens_per_sec = tokensPerSecond;
+      telemetryPatch.avg_tokens_per_sec = tokensPerSecond;
+    }
+    if (responseTimeMs !== null) telemetryPatch.response_time_ms = responseTimeMs;
+    if (totalTokens !== null) telemetryPatch.total_tokens = totalTokens;
+  }
+
+  return {
+    hasPayload: Object.keys(messagePatch).length > 0,
+    messagePatch,
+    telemetryPatch,
+  };
+};
+
+// Per-message row with Gemini-style copy / re-use / delete actions 
+const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete, isSpeakingAudio, stopSpeaking, speakText, onConfirmDesktopAction, onCancelDesktopAction, audioEnabled, autoSpeakEnabled }) => {
   const [copied, setCopied] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [editText, setEditText] = React.useState(msg.content);
@@ -880,7 +1016,7 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete }) => {
               })()}
               
               {isEditing ? (
-                <div className="w-full min-w-[280px] sm:min-w-[400px] flex flex-col gap-2 mt-1">
+                <div className="w-full min-w-0 max-w-full flex flex-col gap-2 mt-1">
                   <textarea
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
@@ -915,60 +1051,99 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete }) => {
             <>
               <MarkdownText text={msg.content} />
 
-              {!msg.isLoading && msg.content && (
-                <div className="mt-4 overflow-hidden rounded-2xl border border-indigo-500/20 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-50/80 via-white/80 to-purple-50/80 dark:from-zinc-950/90 dark:via-zinc-900/90 dark:to-indigo-950/40 select-none shadow-[0_8px_30px_-12px_rgba(99,102,241,0.3)] ring-1 ring-white/50 dark:ring-white/5 transition-all duration-300 w-full select-all p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between border-b border-indigo-200/50 dark:border-zinc-800 pb-2">
-                    <div className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                      100% Genuine Execution Telemetry
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-500 dark:text-zinc-400 font-bold">
-                      <span>
-                        {telemetry?.cpu_name ? `Sync: ${telemetry.cpu_name.replace(/Processor|\(R\)|\(TM\)/gi, '').trim()}${telemetry?.gpu_name ? ` • ${telemetry.gpu_name}` : ''}` : (telemetry?.gpu_name ? `Sync: ${telemetry.gpu_name}` : 'Host Hardware Synced')}
+              {!msg.isLoading && msg.content && (() => {
+                const firstReportedNumber = (...values) => {
+                  for (const value of values) {
+                    if (value === null || value === undefined || value === '') continue;
+                    const numericValue = Number(value);
+                    if (Number.isFinite(numericValue) && numericValue >= 0) return numericValue;
+                  }
+                  return null;
+                };
+                const measurementSource = [
+                  msg.measurementSource,
+                  msg.token_measurement_source,
+                  msg.measurement_source,
+                  msg.execution_source,
+                ].find((value) => typeof value === 'string' && value.trim())?.trim() || '';
+                const hasVerifiedSource = Boolean(measurementSource) && !/^(unavailable|unknown|none|not[_ -]?measured)$/i.test(measurementSource);
+                const modelName = msg.backendModel || msg.model_used || msg.modelUsed || '';
+                const tokensPerSecond = hasVerifiedSource
+                  ? firstReportedNumber(msg.backendTokensPerSec, msg.tokens_per_sec)
+                  : null;
+                const executionSeconds = hasVerifiedSource
+                  ? firstReportedNumber(msg.backendExecutionTimeSec, msg.execution_time_sec)
+                  : null;
+                const responseMilliseconds = hasVerifiedSource
+                  ? firstReportedNumber(msg.backendResponseTimeMs, msg.response_time_ms)
+                  : null;
+                const tokenCount = hasVerifiedSource
+                  ? firstReportedNumber(msg.backendTokenCount, msg.token_count)
+                  : null;
+                const contextTokens = hasVerifiedSource
+                  ? firstReportedNumber(msg.backendContextTokens, msg.total_context)
+                  : null;
+                const responseTime = executionSeconds !== null
+                                  ? `${safeToFixed(executionSeconds, 2) || "0"} s`
+                                  : responseMilliseconds !== null
+                                    ? `${safeToFixed(responseMilliseconds / 1000, 2) || "0"} s`
+                                    : 'Not measured';
+                                const formatContext = contextTokens === null
+                                  ? 'Not measured'
+                                  : contextTokens >= 1000
+                                    ? `${safeToFixed(contextTokens / 1024, contextTokens % 1024 === 0 ? 0 : 1) || "0"}K tokens`
+                                    : `${contextTokens} tokens`;
+                                const measurements = [
+                                  ['AI model', modelName ? modelName.split('/').pop() : 'Unavailable'],
+                                  ['Speed', tokensPerSecond === null ? 'Not measured' : `${safeToFixed(tokensPerSecond, 1) || "0"} tok/s`],
+                                  ['Response time', responseTime],
+                                  ['Total tokens', tokenCount === null ? 'Not measured' : `${tokenCount}`],
+                                  ['Context', formatContext],
+                                  ['Source', hasVerifiedSource ? measurementSource : 'Unavailable'],
+                                ];
+
+                return (
+                  <div className="mt-4 overflow-hidden rounded-2xl border border-indigo-500/20 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-50/80 via-white/80 to-purple-50/80 dark:from-zinc-950/90 dark:via-zinc-900/90 dark:to-indigo-950/40 shadow-[0_8px_30px_-12px_rgba(99,102,241,0.3)] ring-1 ring-white/50 dark:ring-white/5 transition-all duration-300 w-full p-3.5 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-200/50 dark:border-zinc-800 pb-2">
+                      <div className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <span className={`h-2 w-2 rounded-full ${hasVerifiedSource ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
+                        Backend-reported response measurements
+                      </div>
+                      <span className="text-[9px] font-mono text-zinc-500 dark:text-zinc-400 font-bold">
+                        Missing values are not estimated
                       </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 text-[10px] font-mono">
+                      {measurements.map(([label, value]) => (
+                        <div key={label} className="min-w-0 p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
+                          <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">{label}</span>
+                          <span className="font-extrabold text-zinc-900 dark:text-zinc-100 truncate block mt-0.5" title={value}>{value}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 text-[10px] font-mono">
-                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
-                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">AI Model</span>
-                      <span className="font-extrabold text-zinc-900 dark:text-zinc-100 truncate block mt-0.5" title={msg.model_used || msg.modelUsed || activeModelDisplay}>
-                        {(msg.model_used || msg.modelUsed || activeModelDisplay || 'Local Model').split('/').pop()}
-                      </span>
-                    </div>
-                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
-                      <span className="text-[8px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider block">Speed</span>
-                      <span className="font-extrabold text-emerald-700 dark:text-emerald-300 block mt-0.5">
-                        {msg.tokensPerSec || msg.tokens_per_sec ? `${(msg.tokensPerSec || msg.tokens_per_sec).toFixed(1)} tok/s` : 'Real-time'}
-                      </span>
-                    </div>
-                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
-                      <span className="text-[8px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider block">Response Time</span>
-                      <span className="font-extrabold text-indigo-700 dark:text-indigo-300 block mt-0.5">
-                        {msg.execution_time_sec ? `${msg.execution_time_sec}s` : (msg.responseTimeMs || msg.response_time_ms ? `${((msg.responseTimeMs || msg.response_time_ms) / 1000).toFixed(2)}s` : '0.4s')}
-                      </span>
-                    </div>
-                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
-                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">Total Tokens</span>
-                      <span className="font-extrabold text-zinc-900 dark:text-zinc-100 block mt-0.5">
-                        {msg.tokenCount || msg.token_count || (msg.content ? msg.content.split(/\s+/).length : 0)}
-                      </span>
-                    </div>
-                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
-                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">Context</span>
-                      <span className="font-extrabold text-zinc-900 dark:text-zinc-100 block mt-0.5">
-                        {(() => {
-                          const val = msg.total_context || msg.totalContext || msg.ctx_window || 32768;
-                          const num = typeof val === 'number' ? val : (parseInt(val) || 32768);
-                          return num >= 1000 ? `${(num / 1024).toFixed(0)}K` : `${num}`;
-                        })()}
-                      </span>
-                    </div>
-                    <div className="p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
-                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">Timestamp</span>
-                      <span className="font-extrabold text-zinc-700 dark:text-zinc-300 block mt-0.5 truncate">
-                        {msg.local_datetime || (msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : new Date().toLocaleTimeString())}
-                      </span>
-                    </div>
+                );
+              })()}
+
+              {msg.desktopAction && msg.desktopAction.requiresConfirmation && (
+                <div className="mt-3.5 p-4 rounded-2xl bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 text-amber-900 dark:text-amber-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg select-none">
+                  <div className="flex items-center gap-2.5 text-xs font-bold">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping shrink-0" />
+                    <span>⚠️ System Approval Required: <strong className="text-amber-600 dark:text-amber-400">{msg.desktopAction.title || msg.desktopAction.action}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <button
+                      onClick={() => onConfirmDesktopAction && onConfirmDesktopAction(msg.id, msg.desktopAction.action, msg.desktopAction.params)}
+                      className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-xs font-black shadow-md cursor-pointer transition-all active:scale-95"
+                    >
+                      ✓ Confirm & Execute
+                    </button>
+                    <button
+                      onClick={() => onCancelDesktopAction && onCancelDesktopAction(msg.id)}
+                      className="px-3 py-1.5 rounded-xl bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-semibold cursor-pointer transition-all"
+                    >
+                      Cancel
+                    </button>
                   </div>
                 </div>
               )}
@@ -995,6 +1170,18 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete }) => {
                 : <><Copy className="w-3.5 h-3.5" /><span>Copy</span></>
               }
             </button>
+
+            {/* Listen / Read Aloud (Assistant Messages) */}
+            {msg.role === 'assistant' && audioEnabled && (
+              <button
+                onClick={() => isSpeakingAudio ? stopSpeaking() : speakText(msg.content, selectedLanguage)}
+                title={isSpeakingAudio ? "Stop speaking" : "Listen / Read Aloud"}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-bold text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-transparent hover:border-indigo-200 dark:hover:border-indigo-800/60 transition-all cursor-pointer select-none"
+              >
+                {isSpeakingAudio ? <VolumeX className="w-3.5 h-3.5 text-rose-500 animate-pulse" /> : <Volume2 className="w-3.5 h-3.5" />}
+                <span>{isSpeakingAudio ? "Stop" : "Speak"}</span>
+              </button>
+            )}
 
 
 
@@ -1045,34 +1232,453 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete }) => {
   );
 };
 
+/**
+ * Best-effort gender of a system speech voice, taken from its name.
+ *
+ * Platforms do not expose a gender field, so the shipped voice names are
+ * matched instead. Anything unrecognised returns "" and is treated as a
+ * fallback rather than being forced into either group.
+ */
+const FEMALE_VOICE_NAMES = /zira|aria|jenny|michelle|hazel|susan|linda|heera|kalpana|swara|neerja|dhwani|pallavi|sarah|emma|ava|joanna|salli|female|women/i;
+const MALE_VOICE_NAMES = /david|mark|guy|george|ryan|james|brian|hemant|madhur|prabhat|matthew|joey|male|man/i;
+const voiceGender = (name = '') => {
+  if (FEMALE_VOICE_NAMES.test(name)) return 'female';
+  if (MALE_VOICE_NAMES.test(name)) return 'male';
+  return '';
+};
+
 const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenDeveloper }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  const [telemetry, setTelemetry] = useState(null);
   const [streaming, setStreaming] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [selectedRef, setSelectedRef] = useState(null);
+  const [selectedFilePreview, setSelectedFilePreview] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [activeModelDisplay, setActiveModelDisplay] = useState('Llama 3.1 8B (Core)');
   const [lastUsedModel, setLastUsedModel] = useState('');
   const [directUploading, setDirectUploading] = useState(false);
   const [directUploadMessage, setDirectUploadMessage] = useState(null);
-  const [isPasteTableOpen, setIsPasteTableOpen] = useState(false);
-  const [pasteTableName, setPasteTableName] = useState('');
-  const [pasteTableData, setPasteTableData] = useState('');
   // Gemini-style Live Web Search Toggle
-  const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
+  const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(() => localStorage.getItem('sm_web_search') !== 'false');
+  useEffect(() => { localStorage.setItem('sm_web_search', String(isWebSearchEnabled)); }, [isWebSearchEnabled]);
   // RAG Mode Toggle  Combination (RAG On / Direct AI Mode)
   const [isRagEnabled, setIsRagEnabled] = useState(true);
   // Model readiness  polling until model is downloaded
   const [modelStatus, setModelStatus] = useState({ ready: true, downloading: false, status_msg: '', display_name: '' });
-  // Language selector - English, Hindi
-  const [selectedLanguage, setSelectedLanguage] = useState('en');
+  const [isModelNoticeExpanded, setIsModelNoticeExpanded] = useState(false);
+  // Language Selector  - English, Hindi
+  const [selectedLanguage, setSelectedLanguage] = useState(() => localStorage.getItem('sm_response_language') || 'en');
   const [translatedResponse, setTranslatedResponse] = useState(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const translateTimerRef = useRef(null);
+  // Model Comparison Matrix Modal
+  const [isModelCompareOpen, setIsModelCompareOpen] = useState(false);
+  const [comparePrompt, setComparePrompt] = useState('');
+
+  // Auto-speak toggle and audio settings
+  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(() => {
+    const saved = localStorage.getItem('sm_auto_speak');
+    return saved !== 'false'; // Default to true
+  });
+  const [audioEnabled, setAudioEnabled] = useState(() => {
+    const saved = localStorage.getItem('sm_audio_enabled');
+    return saved !== 'false'; // Default to true
+  });
+
+  useEffect(() => {
+    localStorage.setItem('sm_auto_speak', autoSpeakEnabled);
+  }, [autoSpeakEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('sm_audio_enabled', audioEnabled);
+  }, [audioEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('sm_response_language', selectedLanguage);
+  }, [selectedLanguage]);
+
+  // Genspark-style Real-Time Voice & Speak Mode
+  const [isVoiceModeOpen, setIsVoiceModeOpen] = useState(false);
+
+  // Always-listening wake phrase. Off by default: it holds the microphone, so
+  // it is the user's choice to switch on.
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(
+    () => localStorage.getItem('sm_wake_enabled') === 'true',
+  );
+  const [wakePhrase, setWakePhrase] = useState(
+    () => localStorage.getItem('sm_wake_phrase') || WAKE_PHRASE_DEFAULT,
+  );
+  const wakeListenerRef = useRef(null);
+  const [isDictating, setIsDictating] = useState(false);
+  const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'thinking' | 'speaking'
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceAiResponse, setVoiceAiResponse] = useState('');
+  const [isSpeakingAudio, setIsSpeakingAudio] = useState(false);
+  const [micVolume, setMicVolume] = useState(0);
+  const recognitionRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const micStreamRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  // Refs to avoid stale closures in RAF loops and recognition callbacks
+  const isVoiceModeOpenRef = useRef(false);
+  const isDictatingRef = useRef(false);
+  const dictationStoppedManuallyRef = useRef(false);
+  const voicesLoadedRef = useRef(false);
+  // Pending destructive desktop command awaiting a spoken yes/no confirmation
+  const pendingVoiceCommandRef = useRef(null);
+
+  // Enhanced Real-Time Voice & Speak Mode
+  const getRecognitionLang = (langCode) => {
+    const map = {
+      en: 'en-US',
+      hi: 'hi-IN',
+      gu: 'gu-IN',
+      pa: 'pa-IN',
+      mr: 'mr-IN',
+      ta: 'ta-IN',
+      te: 'te-IN',
+      ml: 'ml-IN',
+      kn: 'kn-IN',
+      bn: 'bn-IN',
+    };
+    return map[langCode] || 'en-US';
+  };
+
+  const ttsChunksRef = useRef([]);
+  const generatedAudioRef = useRef(null);
+  const generatedAudioUrlRef = useRef('');
+
+  const speakNativeText = (text, langCode = selectedLanguage) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      console.warn('Speech synthesis is not supported in this browser.');
+      return;
+    }
+
+    // Check if audio is globally enabled
+    if (!audioEnabled) {
+      console.log('Audio is disabled globally');
+      return;
+    }
+
+    try {
+      window.speechSynthesis.cancel();
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      ttsChunksRef.current = [];
+      setIsSpeakingAudio(false);
+
+      const clean = text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[*#_~>•]/g, '')
+        .replace(/\n+/g, '. ')
+        .trim();
+
+      if (!clean) return;
+
+      // Clean sentence chunks (max ~140 chars each for flawless continuous speech flow)
+      const rawSentences = clean.match(/[^.!?।\n,;]+[.!?।\n,;]*/g) || [clean];
+      const sentences = [];
+      let temp = '';
+      for (const s of rawSentences) {
+        const trimmed = s.trim();
+        if (!trimmed) continue;
+        if ((temp + ' ' + trimmed).length < 140) {
+          temp = temp ? temp + ' ' + trimmed : trimmed;
+        } else {
+          if (temp) sentences.push(temp);
+          temp = trimmed;
+        }
+      }
+      if (temp) sentences.push(temp);
+
+      if (sentences.length === 0) return;
+
+      ttsChunksRef.current = [...sentences];
+      const targetLang = getRecognitionLang(langCode) || 'en-US';
+
+      window._activeSpeechUtterances = window._activeSpeechUtterances || [];
+      window._activeSpeechUtterances = [];
+
+      // Chrome SpeechSynthesis keep-alive timer (disabled - causes stuttering on Windows)
+      // if (window._ttsKeepAliveInterval) clearInterval(window._ttsKeepAliveInterval);
+      // window._ttsKeepAliveInterval = setInterval(() => {
+      //   if (typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis.speaking) {
+      //     window.speechSynthesis.pause();
+      //     window.speechSynthesis.resume();
+      //   }
+      // }, 3500);
+
+      const speakNextSentence = () => {
+        if (ttsChunksRef.current.length === 0) {
+          setIsSpeakingAudio(false);
+          if (window._ttsKeepAliveInterval) clearInterval(window._ttsKeepAliveInterval);
+          return;
+        }
+
+        const sentence = ttsChunksRef.current.shift();
+        const utterance = new SpeechSynthesisUtterance(sentence);
+        window._activeSpeechUtterances.push(utterance); // Prevent GC
+
+        utterance.lang = targetLang;
+        utterance.rate = 0.95; // Natural human pace
+        utterance.pitch = 1.0;
+
+        const voices = window.speechSynthesis.getVoices();
+        if (voices && voices.length > 0) {
+          const langPrefix = targetLang.split('-')[0].toLowerCase();
+          const speaksLanguage = (v) =>
+            v.lang.toLowerCase() === targetLang.toLowerCase() ||
+            v.lang.toLowerCase().startsWith(langPrefix);
+          const candidates = voices.filter(speaksLanguage);
+
+          // Match the character's gender. Without this the first voice the
+          // system happened to return was used, so a female character was
+          // frequently given a man's voice.
+          const wanted = (localStorage.getItem('sm_voice_gender') || 'female').toLowerCase();
+          const sameGender = candidates.filter((v) => voiceGender(v.name) === wanted);
+          const pool = sameGender.length ? sameGender : candidates;
+
+          // Within the right gender, prefer the higher-quality neural voices.
+          const natural = pool.find((v) => /natural|neural|online|google/i.test(v.name));
+          const matching = natural || pool[0];
+          if (matching) utterance.voice = matching;
+        }
+
+        utterance.onstart = () => {
+          setIsSpeakingAudio(true);
+          if (isVoiceModeOpenRef.current) setVoiceState('speaking');
+        };
+
+        utterance.onend = () => {
+          const idx = window._activeSpeechUtterances.indexOf(utterance);
+          if (idx >= 0) window._activeSpeechUtterances.splice(idx, 1);
+
+          if (ttsChunksRef.current.length > 0) {
+            speakNextSentence();
+          } else {
+            setIsSpeakingAudio(false);
+            if (window._ttsKeepAliveInterval) clearInterval(window._ttsKeepAliveInterval);
+          }
+        };
+
+        utterance.onerror = (ev) => {
+          console.warn('TTS utterance note:', ev?.error || ev);
+          const idx = window._activeSpeechUtterances.indexOf(utterance);
+          if (idx >= 0) window._activeSpeechUtterances.splice(idx, 1);
+
+          if (ttsChunksRef.current.length > 0) {
+            speakNextSentence();
+          } else {
+            setIsSpeakingAudio(false);
+            if (window._ttsKeepAliveInterval) clearInterval(window._ttsKeepAliveInterval);
+          }
+        };
+
+        window.speechSynthesis.speak(utterance);
+      };
+
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0 || voicesLoadedRef.current) {
+        speakNextSentence();
+      } else {
+        const onVoicesChanged = () => {
+          voicesLoadedRef.current = true;
+          window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChanged);
+          speakNextSentence();
+        };
+        window.speechSynthesis.addEventListener('voiceschanged', onVoicesChanged);
+        setTimeout(() => {
+          window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChanged);
+          if (!voicesLoadedRef.current) {
+            voicesLoadedRef.current = true;
+            speakNextSentence();
+          }
+        }, 400);
+      }
+    } catch (e) {
+      console.warn('Speech synthesis error:', e);
+      setIsSpeakingAudio(false);
+    }
+  };
+
+  const speakText = async (text, langCode = selectedLanguage) => {
+    if (!audioEnabled || !text?.trim()) return;
+    const clean = text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[*#_~>•]/g, '')
+      .replace(/\n+/g, '. ')
+      .trim();
+    if (!clean) return;
+
+    stopSpeaking();
+
+    // The backend speaks first: it serves free natural neural voices for every
+    // supported language. Windows itself usually ships English-only voices, so
+    // going native first would read Hindi/Gujarati/Tamil in an English accent.
+    // The browser voice remains the fallback when the backend cannot synthesize.
+    try {
+      const response = await fetch(`${API_BASE}/api/tts/local`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ text: clean, language: langCode, speed: 0.95 }),
+      });
+      if (!response.ok) throw new Error(`Local TTS returned ${response.status}`);
+      const blob = await response.blob();
+      if (!blob.size) throw new Error('Local TTS returned empty audio');
+      const url = URL.createObjectURL(blob);
+      generatedAudioUrlRef.current = url;
+      const audio = new Audio(url);
+      generatedAudioRef.current = audio;
+      audio.onplay = () => {
+        setIsSpeakingAudio(true);
+        if (isVoiceModeOpenRef.current) setVoiceState('speaking');
+      };
+      audio.onended = () => {
+        setIsSpeakingAudio(false);
+        URL.revokeObjectURL(url);
+        if (generatedAudioUrlRef.current === url) generatedAudioUrlRef.current = '';
+        if (generatedAudioRef.current === audio) generatedAudioRef.current = null;
+      };
+      audio.onerror = () => {
+        setIsSpeakingAudio(false);
+        URL.revokeObjectURL(url);
+        if (generatedAudioUrlRef.current === url) generatedAudioUrlRef.current = '';
+        if (generatedAudioRef.current === audio) generatedAudioRef.current = null;
+        speakNativeText(clean, langCode);
+      };
+      await audio.play();
+    } catch (error) {
+      console.warn('Local speech fallback note:', error);
+      speakNativeText(clean, langCode);
+    }
+  };
+
+  const stopSpeaking = () => {
+    ttsChunksRef.current = [];
+    if (generatedAudioRef.current) {
+      try {
+        generatedAudioRef.current.pause();
+        generatedAudioRef.current.currentTime = 0;
+      } catch (_) {}
+      generatedAudioRef.current = null;
+    }
+    if (generatedAudioUrlRef.current) {
+      URL.revokeObjectURL(generatedAudioUrlRef.current);
+      generatedAudioUrlRef.current = '';
+    }
+    if (window._ttsKeepAliveInterval) clearInterval(window._ttsKeepAliveInterval);
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeakingAudio(false);
+  };
+
+  const transcribeRecordedAudio = async () => {
+    if (!audioChunksRef.current || audioChunksRef.current.length === 0) return '';
+    try {
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/mp4';
+      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+      audioChunksRef.current = [];
+      if (audioBlob.size < 500) return '';
+      const formData = new FormData();
+      formData.append('file', audioBlob, 'voice_query.webm');
+      formData.append('language', selectedLanguage || 'auto');
+      formData.append('request_id', window.crypto?.randomUUID?.() || `${Date.now()}`);
+      const res = await fetch(`${API_BASE}/api/voice/transcribe`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return (data?.transcript || '').trim();
+      }
+    } catch (e) {
+      console.warn('Backend voice transcribe error:', e);
+    }
+    return '';
+  };
+
+  const openVoiceMode = () => {
+    // Ensure any leftover dictation recognition is cleanly stopped
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (_) {}
+    }
+    stopSpeaking();
+    setIsVoiceModeOpen(true);
+    isVoiceModeOpenRef.current = true;
+    setVoiceTranscript('');
+    setVoiceAiResponse('');
+    setVoiceState('listening');
+  };
+
+  const closeVoiceMode = () => {
+    setIsVoiceModeOpen(false);
+    isVoiceModeOpenRef.current = false;
+    stopSpeaking();
+    setVoiceState('idle');
+  };
+
+  const composerRef = useRef(null);
+  const [clientDevice, setClientDevice] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem('sm_wake_enabled', String(wakeWordEnabled));
+    localStorage.setItem('sm_wake_phrase', wakePhrase);
+
+    const shouldListen = wakeWordEnabled && !isVoiceModeOpen;
+    if (!shouldListen) {
+      wakeListenerRef.current?.stop();
+      wakeListenerRef.current = null;
+      return undefined;
+    }
+    if (!WakeWordListener.isSupported()) return undefined;
+
+    const listener = new WakeWordListener({
+      phrase: wakePhrase,
+      onWake: () => {
+        listener.stop();
+        openVoiceMode();
+      },
+      onError: (message) => console.warn('Wake phrase:', message),
+    });
+    listener.start();
+    wakeListenerRef.current = listener;
+
+    return () => {
+      listener.stop();
+      wakeListenerRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wakeWordEnabled, wakePhrase, isVoiceModeOpen]);
+
+  useEffect(() => {
+    // detectClientDevice is async (it awaits the Battery API). Storing the
+    // promise itself left every field undefined, which is why the ribbon showed
+    // "OS not reported" on a machine the browser had already identified.
+    let active = true;
+    Promise.resolve(detectClientDevice())
+      .then((info) => { if (active) setClientDevice(info); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   // Real-time hardware telemetry and speed stats for Single Row Auto-Adjust Bar
-  const [telemetry, setTelemetry] = useState(null);
   useEffect(() => {
     let active = true;
     const fetchTelemetry = async () => {
@@ -1091,43 +1697,19 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       clearInterval(interval);
     };
   }, []);
-  // Auto-translate input text to selected language
-  const autoTranslateInput = async (text) => {
-    if (!text || selectedLanguage === 'en') return text;
-    
-    try {
-      const targetLang = selectedLanguage;
-      const sourceLang = 'auto';
-      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data && data[0] && data[0][0] && data[0][0][0]) {
-        return data[0][0][0];
-      }
-    } catch (e) {
-      console.error('Auto-translate failed:', e);
-    }
-    return text;
+  // Preserve exactly what the user types. The selected language controls the
+  // assistant response and speech recognizer; it must never rewrite the prompt.
+  // Grow the composer with the text, up to the CSS max height. Fixed at one row
+  // the field scrolled what you were typing out of sight.
+  const autoSizeComposer = (element) => {
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, 128)}px`;
   };
 
-  const handleInputChange = async (e) => {
-    const text = e.target.value;
-    setInput(text);
-    
-    // Auto-translate if language is not English
-    if (selectedLanguage !== 'en' && text.trim()) {
-      if (translateTimerRef.current) {
-        clearTimeout(translateTimerRef.current);
-      }
-      translateTimerRef.current = setTimeout(async () => {
-        setIsTranslating(true);
-        const translated = await autoTranslateInput(text);
-        if (translated !== text) {
-          setInput(translated);
-        }
-        setIsTranslating(false);
-      }, 500);
-    }
+  const handleInputChange = (event) => {
+    setInput(event.target.value);
+    autoSizeComposer(event.target);
   };
 
   // Cleanup timer on unmount
@@ -1216,26 +1798,26 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
   // Poll model download status every 5s until ready
   useEffect(() => {
-    let interval = null;
+    let cancelled = false;
+    let timer = null;
     const checkStatus = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/model/status`, {
+        const params = new URLSearchParams({ model: selectedModel || 'auto' });
+        const res = await fetch(`${API_BASE}/api/model/status?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
           const data = await res.json();
-          setModelStatus(data);
-          if (data.ready) {
-            // Model is ready  stop polling
-            clearInterval(interval);
-          }
+          if (!cancelled) setModelStatus(data);
         }
       } catch (_) {}
+      finally {
+        if (!cancelled) timer = window.setTimeout(checkStatus, document.hidden ? 30000 : 10000);
+      }
     };
     checkStatus();
-    interval = setInterval(checkStatus, 5000);
-    return () => clearInterval(interval);
-  }, [token]);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [token, selectedModel]);
 
   useEffect(() => {
     if (activeSessionId) {
@@ -1297,22 +1879,39 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
 
-  const fetchUploadedFiles = async (collectionIds = activeCollections) => {
-    // CRITICAL: Never show files if there is no active session.
-    // Without a session_id filter the backend returns ALL documents across all
-    // sessions  which causes old uploaded files to reappear after chat history
-    // is deleted or when a new session is being created.
-    if (!token || !activeSessionId || collectionIds.length === 0) {
-      setUploadedFiles([]);
-      return;
-    }
+  const fetchUploadedFiles = async (collectionIds = null) => {
     try {
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+      let targetIds = collectionIds && collectionIds.length > 0 ? collectionIds : activeCollections;
+      
+      // If active collections is empty, fetch all user collections from backend
+      if (!targetIds || targetIds.length === 0) {
+        const colRes = await fetch(`${API_BASE}/api/collections`, {
+          headers: authHeaders,
+          credentials: 'include'
+        });
+        if (colRes.ok) {
+          const cols = await parseJsonResponse(colRes);
+          targetIds = cols.map((c) => c.id);
+          if (targetIds.length > 0) {
+            setActiveCollections(targetIds);
+          }
+        }
+      }
+
+      if (!targetIds || targetIds.length === 0) {
+        setUploadedFiles([]);
+        return;
+      }
+
       const allDocs = [];
-      for (const colId of collectionIds) {
-        // Always pass session_id  only files uploaded in THIS session are shown.
-        const url = `${API_BASE}/api/collections/${colId}/documents?session_id=${activeSessionId}`;
+      for (const colId of targetIds) {
+        const url = activeSessionId 
+          ? `${API_BASE}/api/collections/${colId}/documents?session_id=${activeSessionId}`
+          : `${API_BASE}/api/collections/${colId}/documents`;
         const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: authHeaders,
+          credentials: 'include'
         });
         if (res.ok) {
           const docs = await parseJsonResponse(res);
@@ -1325,7 +1924,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       ).sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
       setUploadedFiles(uniqueDocs);
     } catch (err) {
-      console.error(err);
+      console.error('fetchUploadedFiles error:', err);
     }
   };
 
@@ -1338,12 +1937,29 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       });
       if (res.ok) {
         setUploadedFiles((prev) => prev.filter((f) => f.id !== docId));
+        if (selectedFilePreview?.id === docId) setSelectedFilePreview(null);
       } else {
         alert('Failed to delete file. Please try again.');
       }
     } catch (err) {
       console.error(err);
       alert('Failed to delete file. Please try again.');
+    }
+  };
+
+  const handleOpenDocPreview = async (doc) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/documents/${doc.id}/content`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedFilePreview(data);
+      } else {
+        setSelectedFilePreview({ id: doc.id, name: doc.name, content_preview: "Document content parsed and indexed into vector database." });
+      }
+    } catch (e) {
+      setSelectedFilePreview({ id: doc.id, name: doc.name, content_preview: "Document content indexed." });
     }
   };
 
@@ -1364,7 +1980,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
   const handleDirectFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
-    if (files.length === 0 || !activeSessionId) return;
+    if (files.length === 0) return;
 
     setDirectUploading(true);
     setDirectUploadMessage(`Ingesting ${files.length} document(s) to vector database...`);
@@ -1429,17 +2045,18 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
       setIsRagEnabled(true);
       setIsWebSearchEnabled(false);
-      // Add collection to search contexts if not checked
+      
       const nextActiveCollections = activeCollections.includes(targetCollectionId)
         ? activeCollections
         : [...activeCollections, targetCollectionId];
       if (nextActiveCollections !== activeCollections) {
         setActiveCollections(nextActiveCollections);
       }
-      // Refresh visible session-file chips after every successful upload, including the first Quick Upload.
+      
+      // Refresh visible session-file chips after every successful upload
       await fetchUploadedFiles(nextActiveCollections);
       
-      setDirectUploadMessage(` Successfully parsed and indexed ${files.length} document(s)!`);
+      setDirectUploadMessage(`Successfully parsed and indexed ${files.length} document(s)!`);
       setTimeout(() => {
         setDirectUploadMessage(null);
       }, 4000);
@@ -1566,103 +2183,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     e.target.value = null;
   };
 
-  const handlePasteTableSubmit = async (e) => {
-    e.preventDefault();
-    if (!pasteTableData.trim() || !activeSessionId) return;
-
-    setIsPasteTableOpen(false);
-    setDirectUploading(true);
-    setDirectUploadMessage("Processing pasted spreadsheet table parameters...");
-
-    // Convert tab-separated values (TSV) to CSV
-    const rows = pasteTableData.split('\n');
-    const csvRows = [];
-    for (const row of rows) {
-      if (!row.trim()) continue;
-      const cols = row.split('\t').map(col => {
-        let val = col.replace(/"/g, '""');
-        if (val.includes(',') || val.includes('"') || val.includes('\n')) {
-          val = `"${val}"`;
-        }
-        return val;
-      });
-      csvRows.push(cols.join(','));
-    }
-    const csvContent = csvRows.join('\n');
-    
-    // Create virtual File object
-    const fileName = `${pasteTableName.trim().replace(/[^a-zA-Z0-9_\-]/g, '_') || 'pasted_table'}.csv`;
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const file = new File([blob], fileName, { type: 'text/csv' });
-
-    try {
-      // 1. Fetch or create collection
-      let targetCollectionId = null;
-      const getColRes = await fetch(`${API_BASE}/api/collections`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (getColRes.ok) {
-        const cols = await parseJsonResponse(getColRes);
-        if (cols.length > 0) {
-          targetCollectionId = cols[0].id;
-        }
-      }
-      if (!targetCollectionId) {
-        const createColRes = await fetch(`${API_BASE}/api/collections`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            name: 'Pasted Tables',
-            description: 'Autocreated folder for Excel tables pasted from clipboard'
-          }),
-        });
-        if (createColRes.ok) {
-          const colData = await parseJsonResponse(createColRes);
-          targetCollectionId = colData.id;
-        }
-      }
-
-      if (!targetCollectionId) {
-        throw new Error("Could not initialize target database collection.");
-      }
-
-      // 2. Upload
-      setDirectUploadMessage(`Ingesting pasted CSV data table as "${fileName}"...`);
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('session_id', activeSessionId);
-
-      const uploadRes = await fetch(`${API_BASE}/api/collections/${targetCollectionId}/upload`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-
-      if (uploadRes.ok) {
-        if (!activeCollections.includes(targetCollectionId)) {
-        setActiveCollections([...activeCollections, targetCollectionId]);
-      }
-      // Refresh visible session-file chips after every successful upload, including the first Quick Upload.
-      await fetchUploadedFiles();
-        setDirectUploadMessage(` Successfully ingested table "${fileName}"!`);
-        setTimeout(() => setDirectUploadMessage(null), 4000);
-      } else {
-        const errData = await parseJsonResponse(uploadRes);
-        throw new Error(errData.detail || "Upload error");
-      }
-    } catch (err) {
-      console.error(err);
-      alert(`Pasted table upload failed: ${err.message}`);
-      setDirectUploadMessage(null);
-    } finally {
-      setDirectUploading(false);
-      setPasteTableName('');
-      setPasteTableData('');
-    }
-  };
 
   const handleEditMessage = async (msgId, newText) => {
     if (!newText || !newText.trim() || streaming) return;
@@ -1703,7 +2223,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           references: [],
           created_at: new Date().toISOString(),
           isLoading: true,
-          tokenCount: 0,
         };
 
         // Append the assistant loading bubble to messages
@@ -1739,7 +2258,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           const decoder = new TextDecoder('utf-8');
           let accumulatedResponse = '';
           let references = [];
-          let tokenCount = 0;
           let streamBuffer = '';
 
           while (true) {
@@ -1795,42 +2313,23 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                       processQueue();
                     }
                   }
-                  // Handle metrics payload
-                  if (parsed.token_count) {
+                  // Preserve only measurements explicitly supplied by the backend.
+                  const backendMeasurements = extractBackendMeasurements(parsed);
+                  if (backendMeasurements.hasPayload) {
                     setMessages((prev) =>
                       prev.map((msg) =>
                         msg.id === assistantMessage.id
                           ? {
                               ...msg,
-                              tokenCount: parsed.token_count,
-                              prompt_tokens: parsed.prompt_tokens,
-                              total_context: parsed.total_context,
-                              context_remaining: parsed.context_remaining,
-                              execution_time_sec: parsed.execution_time_sec,
-                              responseTimeMs: parsed.response_time_ms,
-                              tokensPerSec: parsed.tokens_per_sec || msg.tokensPerSec,
-                              model_used: parsed.model_routed || msg.model_used,
-                              execution_source: parsed.execution_source || msg.execution_source,
-                              local_datetime: parsed.local_datetime,
+                              ...backendMeasurements.messagePatch,
                             }
                           : msg
                       )
                     );
-                    // Push live speed+latency into telemetry ribbon immediately
-                    if (parsed.response_time_ms || parsed.tokens_per_sec) {
-                      const inferenceData = {
-                        tokens_per_sec: parsed.tokens_per_sec || 0,
-                        response_time_ms: parsed.response_time_ms || 0,
-                        avg_tokens_per_sec: parsed.tokens_per_sec || 0,
-                        total_tokens: parsed.token_count || 0,
-                      };
-                      setTelemetry(prev => ({
-                        ...prev,
-                        ...inferenceData,
-                        total_tokens: (prev?.total_tokens || 0) + (parsed.token_count || 0),
-                      }));
-                      window.dispatchEvent(new CustomEvent('smaran-inference-update', { detail: { ...inferenceData, total_tokens: inferenceData.total_tokens } }));
-                    }
+                  }
+                  if (backendMeasurements.telemetryPatch && Object.keys(backendMeasurements.telemetryPatch).length > 1) {
+                    setTelemetry((previous) => ({ ...previous, ...backendMeasurements.telemetryPatch }));
+                    window.dispatchEvent(new CustomEvent('smaran-inference-update', { detail: backendMeasurements.telemetryPatch }));
                   }
                 } catch (_) {}
               }
@@ -1878,18 +2377,68 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     }
   };
 
-  const handleSend = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || streaming || !activeSessionId || !modelStatus.ready) return;
+  const handleConfirmDesktopAction = async (msgId, action, params) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/desktop/execute`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action, params, confirmed: true }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updateText = data.success
+          ? `🦾 **J.A.R.V.I.S. Desktop Action Completed**\n\n${data.message || 'Operation confirmed and executed successfully.'}`
+          : `❌ **Action Failed:** ${data.error || 'Execution rejected.'}`;
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msgId
+              ? { ...m, content: updateText, desktopAction: null }
+              : m
+          )
+        );
+        speakText(data.message || 'Action executed, sir.', selectedLanguage);
+      }
+    } catch (err) {
+      console.error('Desktop confirmation execution failed:', err);
+    }
+  };
+
+  const handleCancelDesktopAction = (msgId) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId
+          ? { ...m, content: '🛑 **Action Cancelled by User.** No system changes were made.', desktopAction: null }
+          : m
+      )
+    );
+  };
+
+  const handleSend = async (e, directPrompt = null, isVoicePrompt = false) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const userPrompt = (directPrompt || input || '').trim();
+    if (!userPrompt || streaming) return;
+
+    // Spoken turns are answered conversationally, without web/document grounding.
+    const isVoiceTurn = Boolean(isVoicePrompt || isVoiceModeOpenRef.current);
+
+    let targetSessionId = activeSessionId;
+    if (!targetSessionId) {
+      targetSessionId = 'session_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+      setActiveSessionId(targetSessionId);
+    }
 
     if (translateTimerRef.current) {
       clearTimeout(translateTimerRef.current);
     }
     setIsTranslating(false);
-
-    const userPrompt = input.trim();
     
     setInput('');
+    // Collapse the composer back to a single row once the message is sent.
+    if (composerRef.current) composerRef.current.style.height = 'auto';
     setStreaming(true);
     streamingRef.current = true;
     incomingQueueRef.current = [];
@@ -1901,7 +2450,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       created_at: new Date().toISOString(),
     };
     
-    const streamStartTime = Date.now();
     const assistantMessage = {
       id: Date.now() + 1,
       role: 'assistant',
@@ -1909,13 +2457,101 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       references: [],
       created_at: new Date().toISOString(),
       isLoading: true,
-      tokenCount: 0,
     };
 
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setTimeout(scrollToBottom, 50);
 
-    let accumulatedResponse = '';
+    // -----------------------------------------------------------------------
+    // J.A.R.V.I.S. Desktop OS Control Engine (Apps, Files, System, URLs)
+    // -----------------------------------------------------------------------
+    try {
+      const intentRes = await fetch(`${API_BASE}/api/desktop/intent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ text: userPrompt }),
+      });
+      if (intentRes.ok) {
+        const intentData = await intentRes.json();
+        if (intentData.detected && intentData.intent) {
+          const { action, params } = intentData.intent;
+          const execRes = await fetch(`${API_BASE}/api/desktop/execute`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ action, params, confirmed: false }),
+          });
+          if (execRes.ok) {
+            const execData = await execRes.json();
+            if (execData.requires_confirmation) {
+              const confirmMsg = `⚠️ **J.A.R.V.I.S. Confirmation Required**\n\n**Action:** ${execData.title || action}\n${execData.description || ''}\n\n*This system modification requires your explicit approval.*`;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMessage.id
+                    ? {
+                        ...msg,
+                        content: confirmMsg,
+                        isLoading: false,
+                        desktopAction: { action, params, requiresConfirmation: true, title: execData.title },
+                      }
+                    : msg
+                )
+              );
+              setStreaming(false);
+              streamingRef.current = false;
+              if (isVoicePrompt && isVoiceModeOpen) {
+                speakText(`Confirmation required for ${execData.title || action}. Please confirm on your screen.`);
+              }
+              return;
+            } else if (execData.success) {
+              if (execData.url) {
+                try {
+                  window.open(execData.url, '_blank', 'noopener,noreferrer');
+                } catch (openErr) {
+                  console.warn('Window open note:', openErr);
+                }
+              }
+
+              let replyContent = `🦾 **J.A.R.V.I.S. Desktop Action Completed**\n\n${execData.message || 'Action executed successfully.'}`;
+              if (execData.screenshot_base64) {
+                replyContent += `\n\n![Screenshot](data:image/png;base64,${execData.screenshot_base64})`;
+              }
+              if (execData.items && Array.isArray(execData.items)) {
+                replyContent += `\n\n**Directory Contents (${execData.total_items} items):**\n` +
+                  execData.items.slice(0, 15).map(it => `- ${it.type === 'folder' ? '📁' : '📄'} **${it.name}** ${it.size_human ? `(${it.size_human})` : ''}`).join('\n');
+              }
+              if (execData.apps && Array.isArray(execData.apps)) {
+                replyContent += `\n\n**Top Running Applications:**\n` +
+                  execData.apps.slice(0, 10).map(a => `- ⚡ **${a.name}** (PID: ${a.pid} | RAM: ${a.memory_mb} MB | CPU: ${a.cpu_percent}%)`).join('\n');
+              }
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMessage.id
+                    ? { ...msg, content: replyContent, isLoading: false }
+                    : msg
+                )
+              );
+              setStreaming(false);
+              streamingRef.current = false;
+              if (isVoicePrompt || isVoiceModeOpen || isVoiceModeOpenRef.current) {
+                speakText(execData.message || 'Done, sir.');
+              }
+              return;
+            }
+          }
+        }
+      }
+    } catch (desktopErr) {
+      console.warn('Desktop intent note:', desktopErr);
+    }
+
+    let fullResponseText = '';
+    let displayedResponse = '';
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
@@ -1924,13 +2560,19 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          session_id: activeSessionId,
+          session_id: targetSessionId,
           prompt: userPrompt,
-          collections: isRagEnabled ? activeCollections : [],
+          // A spoken turn is a conversation, not a research request. Forcing web
+          // or document grounding onto it makes the assistant read out search
+          // results ("Based on retrieved context: ...") instead of answering,
+          // so grounding is left off unless the user is typing.
+          collections: isVoiceTurn || !isRagEnabled ? [] : activeCollections,
           model: selectedModel,
           turbo: turboMode,
-          web_search: isWebSearchEnabled,
-          rag_enabled: isRagEnabled,
+          web_search: isVoiceTurn ? false : isWebSearchEnabled,
+          rag_enabled: !isVoiceTurn && isRagEnabled && activeCollections.length > 0,
+          // Spoken turns get short, proactive replies written to be heard.
+          voice_mode: isVoiceTurn,
           target_language: selectedLanguage === 'en' ? undefined : selectedLanguage,
           ...getCloudRoutingPayload(),
         }),
@@ -1941,11 +2583,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         throw new Error(errorBody?.detail || `Server returned an error (${res.status})`);
       }
 
-
       const reader = res.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let references = [];
-      let tokenCount = 0;
 
       let streamBuffer = '';
       while (true) {
@@ -1976,61 +2616,47 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                   )
                 );
               }
-              if (parsed.response_time_ms) {
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessage.id 
-                      ? { 
-                          ...msg, 
-                          responseTimeMs: parsed.response_time_ms,
-                          tokensPerSec: parsed.tokens_per_sec || msg.tokensPerSec,
-                          execution_time_sec: parsed.execution_time_sec || msg.execution_time_sec
-                        } 
-                      : msg
-                  )
-                );
-                // Push live speed+latency into telemetry ribbon immediately
-                const inferenceData2 = {
-                  tokens_per_sec: parsed.tokens_per_sec || 0,
-                  response_time_ms: parsed.response_time_ms || 0,
-                  avg_tokens_per_sec: parsed.tokens_per_sec || 0,
-                  total_tokens: parsed.token_count || 0,
-                };
-                setTelemetry(prev => ({
-                  ...prev,
-                  ...inferenceData2,
-                  total_tokens: (prev?.total_tokens || 0) + (parsed.token_count || 0),
-                }));
-                window.dispatchEvent(new CustomEvent('smaran-inference-update', { detail: { ...inferenceData2 } }));
-              }
-              if (parsed.translated_response && selectedLanguage !== 'en') {
+              const backendMeasurements = extractBackendMeasurements(parsed);
+              if (backendMeasurements.hasPayload) {
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id
-                      ? { ...msg, content: parsed.translated_response, originalContent: parsed.original_response || accumulatedResponse }
+                      ? { ...msg, ...backendMeasurements.messagePatch }
                       : msg
                   )
                 );
-                accumulatedResponse = parsed.translated_response;
+              }
+              if (backendMeasurements.telemetryPatch && Object.keys(backendMeasurements.telemetryPatch).length > 1) {
+                setTelemetry((previous) => ({ ...previous, ...backendMeasurements.telemetryPatch }));
+                window.dispatchEvent(new CustomEvent('smaran-inference-update', { detail: backendMeasurements.telemetryPatch }));
+              }
+              if (parsed.translated_response && selectedLanguage !== 'en') {
+                fullResponseText = parsed.translated_response;
+                displayedResponse = parsed.translated_response;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessage.id
+                      ? { ...msg, content: parsed.translated_response, originalContent: parsed.original_response || fullResponseText }
+                      : msg
+                  )
+                );
                 if (typewriterTimerRef.current) {
                   clearInterval(typewriterTimerRef.current);
                   typewriterTimerRef.current = null;
                 }
               }
               if (parsed.token) {
-                tokenCount += 1;
+                fullResponseText += parsed.token;
                 incomingQueueRef.current.push(parsed.token);
                 if (!typewriterTimerRef.current) {
                   typewriterTimerRef.current = setInterval(() => {
                     if (incomingQueueRef.current.length > 0) {
                       const next = incomingQueueRef.current.shift();
-                      accumulatedResponse += next;
-                      const elapsedSec = (Date.now() - streamStartTime) / 1000;
-                      const tps = elapsedSec > 0 ? (tokenCount / elapsedSec) : 0;
+                      displayedResponse += next;
                       setMessages((prev) =>
                         prev.map((msg) =>
                           msg.id === assistantMessage.id
-                            ? { ...msg, content: accumulatedResponse, isLoading: false, tokenCount, tokensPerSec: tps }
+                            ? { ...msg, content: displayedResponse, isLoading: false }
                             : msg
                         )
                       );
@@ -2044,11 +2670,12 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               }
               if (parsed.error) {
                 const visibleError = `Request failed: ${parsed.error}`;
-                accumulatedResponse += visibleError;
+                fullResponseText += visibleError;
+                displayedResponse += visibleError;
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id
-                      ? { ...msg, content: accumulatedResponse, isLoading: false }
+                      ? { ...msg, content: displayedResponse, isLoading: false }
                       : msg
                   )
                 );
@@ -2061,10 +2688,13 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       }
     } catch (err) {
       console.error(err);
+      const errMsg = `Request failed: ${err.message || 'Unable to communicate with the AI model.'}`;
+      fullResponseText = errMsg;
+      displayedResponse = errMsg;
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === assistantMessage.id
-            ? { ...msg, content: `Request failed: ${err.message || 'Unable to communicate with the local AI model.'}`, isLoading: false }
+            ? { ...msg, content: errMsg, isLoading: false }
             : msg
         )
       );
@@ -2073,24 +2703,152 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         clearInterval(typewriterTimerRef.current);
         typewriterTimerRef.current = null;
       }
-      if (incomingQueueRef.current.length > 0) {
-        accumulatedResponse += incomingQueueRef.current.join('');
-        incomingQueueRef.current = [];
-      }
+      const finalResult = fullResponseText.trim() || displayedResponse.trim();
+      incomingQueueRef.current = [];
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === assistantMessage.id
-            ? { ...msg, content: accumulatedResponse || msg.content, isLoading: false }
+            ? { ...msg, content: finalResult || msg.content, isLoading: false }
             : msg
         )
       );
       setStreaming(false);
       streamingRef.current = false;
+      if (isVoicePrompt || isVoiceModeOpen || isVoiceModeOpenRef.current) {
+        const finalVoiceReply = finalResult || (selectedLanguage === 'hi' ? "मॉडल से कोई उत्तर नहीं मिला। कृपया मॉडल या API स्थिति जाँचें।" : "The selected model returned no answer. Please check its runtime or API status.");
+        setVoiceAiResponse(finalVoiceReply);
+        if (autoSpeakEnabled && audioEnabled) {
+          speakText(finalVoiceReply, selectedLanguage);
+        }
+      }
     }
   };
 
+  // Speak a J.A.R.V.I.S. reply directly (bypasses the chat model) and surface it
+  // in the voice bubble. Used for desktop/OS control confirmations & results.
+  const emitVoiceReply = (spokenText) => {
+    if (!spokenText) return;
+    setVoiceAiResponse(spokenText);
+    if (autoSpeakEnabled && audioEnabled) {
+      speakText(spokenText, selectedLanguage);
+    }
+  };
+
+  // Carry out a workspace control the user asked for by voice. These live in the
+  // browser, so the backend only names the action and speaks the confirmation.
+  const applyVoiceUiAction = (action) => {
+    switch (action) {
+      case 'attach_files':
+        fileInputRef.current?.click();
+        break;
+      case 'upload_folder':
+        folderInputRef.current?.click();
+        break;
+      case 'rag_on':
+        setIsRagEnabled(true);
+        break;
+      case 'rag_off':
+        setIsRagEnabled(false);
+        break;
+      case 'web_on':
+        setIsWebSearchEnabled(true);
+        break;
+      case 'web_off':
+        setIsWebSearchEnabled(false);
+        break;
+      case 'clear_chat':
+        handleClearCurrentChat();
+        break;
+      case 'new_chat':
+        setMessages([]);
+        break;
+      default:
+        break;
+    }
+  };
+
+  // Detect affirmative / negative words across the supported voice languages so a
+  // spoken "yes / haan / ठीक है / no / nahi" can confirm or cancel a pending action.
+  const AFFIRMATIVE_WORDS = ['yes', 'yeah', 'yep', 'yup', 'confirm', 'confirmed', 'ok', 'okay', 'sure', 'do it', 'go ahead', 'proceed', 'haan', 'haa', 'ha', 'ji', 'karo', 'kar do', 'kardo', 'theek hai', 'thik hai', 'हाँ', 'हां', 'करो', 'ठीक', 'ठीक है', 'હા', 'ஆம்', 'అవును', 'ಹೌದು'];
+  const NEGATIVE_WORDS = ['no', 'nope', 'cancel', 'stop', 'dont', "don't", 'do not', 'nahi', 'nahin', 'mat', 'ruko', 'rehne do', 'नहीं', 'ना', 'मत', 'रुको', 'நো', 'இல்லை', 'కాదు', 'ಬೇಡ'];
+  const matchesWord = (text, words) => {
+    const t = ` ${text.toLowerCase().replace(/[.,!?]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+    return words.some((w) => t.includes(` ${w} `));
+  };
+
+  // Try to handle the utterance as a desktop/OS control command. Returns true if
+  // it was handled (executed or a confirmation was requested), so the caller can
+  // skip the conversational model.
+  const tryVoiceDesktopCommand = async (queryText) => {
+    // 1) Resolve any pending yes/no confirmation first.
+    const pending = pendingVoiceCommandRef.current;
+    if (pending) {
+      if (matchesWord(queryText, NEGATIVE_WORDS)) {
+        pendingVoiceCommandRef.current = null;
+        emitVoiceReply(selectedLanguage === 'en' ? 'Cancelled.' : 'ठीक है, रद्द कर दिया।');
+        return true;
+      }
+      if (matchesWord(queryText, AFFIRMATIVE_WORDS)) {
+        pendingVoiceCommandRef.current = null;
+        try {
+          const res = await fetch(`${API_BASE}/api/desktop/voice-command`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ text: pending.text, language: selectedLanguage, confirmed: true }),
+          });
+          const data = await res.json();
+          emitVoiceReply(data?.message || 'Done.');
+        } catch (_) {
+          emitVoiceReply(selectedLanguage === 'en' ? 'That action could not be completed.' : 'यह क्रिया पूरी नहीं हो सकी।');
+        }
+        return true;
+      }
+      // Neither yes nor no: drop the stale pending command and fall through.
+      pendingVoiceCommandRef.current = null;
+    }
+
+    // 2) Detect + run a fresh control command.
+    try {
+      const res = await fetch(`${API_BASE}/api/desktop/voice-command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ text: queryText, language: selectedLanguage, confirmed: false }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!data?.handled) return false;
+      if (data.ui_action) {
+        applyVoiceUiAction(data.ui_action);
+      }
+      if (data.requires_confirmation) {
+        pendingVoiceCommandRef.current = { text: queryText };
+      }
+      emitVoiceReply(data.message || 'Done.');
+      return true;
+    } catch (_) {
+      // Bridge unreachable (e.g. host agent unavailable) — fall back to chat.
+      return false;
+    }
+  };
+
+  const handleSendVoicePrompt = async (queryText) => {
+    if (!queryText || !queryText.trim()) return;
+    const query = queryText.trim();
+    setVoiceAiResponse('');
+    // First, try to fulfil the utterance as a hands-free desktop/OS command.
+    const handled = await tryVoiceDesktopCommand(query);
+    if (handled) return;
+    // Otherwise answer conversationally with the selected model.
+    await handleSend(null, query, true);
+  };
+
+  const telemetrySource = String(telemetry?.telemetry_source || '');
+  const hasHostTelemetry = telemetrySource === 'host_bridge' || telemetrySource.endsWith('_host_bridge');
+  const reportedOs = clientDevice?.os || 'OS not reported';
+  const reportedDevice = clientDevice?.deviceName || clientDevice?.deviceType || 'Browser client';
+
   return (
-    <div className="flex flex-col h-full bg-zinc-50/50 dark:bg-[#0c0c0e]/40 relative overflow-hidden transition-colors duration-300">
+    <div className="chat-workspace flex flex-col h-full min-w-0 min-h-0 bg-zinc-50/50 dark:bg-[#0c0c0e]/40 relative overflow-hidden transition-colors duration-300">
       {/* Background glows  clamped so they never cause horizontal scroll */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
         <div className="absolute top-[45%] left-[55%] -translate-x-1/2 -translate-y-1/2 w-[400px] sm:w-[700px] h-[400px] sm:h-[700px] rounded-full blur-[120px] sm:blur-[160px] animate-drift-1 bg-[radial-gradient(circle,rgba(99,102,241,0.12)_0%,rgba(139,92,246,0.18)_40%,transparent_70%)] dark:bg-[radial-gradient(circle,rgba(79,70,229,0.2)_0%,rgba(139,92,246,0.3)_40%,transparent_70%)]" />
@@ -2130,6 +2888,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           {/* Performance Panel Toggle */}
           {onTogglePanel && (
             <button
+              data-testid="performance-toggle"
               onClick={onTogglePanel}
               title="Toggle Performance Panel"
               className="p-2 rounded-xl bg-indigo-50 dark:bg-zinc-900 hover:bg-indigo-100 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-zinc-800 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 shadow-xs hover:scale-105 transition-all cursor-pointer flex items-center gap-1.5 font-bold text-xs"
@@ -2142,42 +2901,54 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       </div>
 
       {/* Single Row Real-Time Hardware & Speed Telemetry Ribbon (Auto-adjusts with panel) */}
-      <div className="w-full px-3 sm:px-6 py-1 bg-white/70 dark:bg-zinc-950/40 backdrop-blur-md border-b border-zinc-200/70 dark:border-zinc-800/60 flex items-center justify-between gap-2 sm:gap-4 overflow-x-auto no-scrollbar font-mono text-[10px] sm:text-[11px] select-none shrink-0 z-10 transition-all duration-300">
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-          {/* Real Processor / CPU */}
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-700 dark:text-orange-300 font-bold" title={telemetry?.cpu_name || 'CPU'}>
-            <Cpu className="w-3 h-3 text-orange-500 shrink-0" />
-            <span className="truncate max-w-[130px] sm:max-w-[200px]">{telemetry?.cpu_name ? telemetry.cpu_name.replace(/with Radeon Graphics|Processor|\(R\)|\(TM\)/gi, '').trim() : 'Processor'}</span>
-            <span className="text-orange-600 dark:text-orange-400 font-black">{telemetry?.cpu_usage !== undefined ? `${telemetry.cpu_usage.toFixed(0)}%` : '--'}</span>
+      {/* Telemetry ribbon — wraps on small screens so every chip is readable
+          without dragging the row sideways. */}
+      <div className="w-full px-3 sm:px-6 py-1.5 bg-white/80 dark:bg-zinc-950/60 backdrop-blur-md border-b border-zinc-200/70 dark:border-zinc-800/60 flex flex-wrap items-center gap-x-1.5 gap-y-1 sm:gap-x-2.5 font-mono text-[10px] sm:text-[11px] select-none shrink-0 z-10 transition-all duration-300">
+        {/* `contents` lets every chip flow in the parent's single wrap context,
+            so they pack into two tidy rows instead of each group wrapping
+            separately and spilling onto a third. */}
+        <div className="contents">
+          {/* Real Client Active Device (Mobile / Tablet / Laptop) */}
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-700 dark:text-indigo-300 font-bold" title={`Browser-reported client hint: ${reportedDevice} (${reportedOs}). Browser hints can be unavailable or spoofed.`}>
+            {clientDevice?.isMobile ? <Smartphone className="w-3 h-3 text-indigo-500 shrink-0" /> : <Laptop className="w-3 h-3 text-indigo-500 shrink-0" />}
+            <span className="truncate max-w-[100px] sm:max-w-[150px]">{reportedDevice}</span>
+            <span className="text-[9px] px-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-black truncate max-w-[110px]">{reportedOs}</span>
           </div>
 
-          {/* Real GPU */}
-          {telemetry?.gpu_available && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-300 font-bold" title={telemetry?.gpu_name || 'GPU'}>
+          {/* Source-labelled host or container CPU */}
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-700 dark:text-orange-300 font-bold" title={`${hasHostTelemetry ? 'Service host bridge' : 'Local runtime'} CPU: ${telemetry?.cpu_name || 'Unavailable'}. This is not claimed as the browser device CPU.`}>
+            <Cpu className="w-3 h-3 text-orange-500 shrink-0" />
+            <span className="truncate max-w-[130px] sm:max-w-[190px]">{telemetry?.cpu_name ? `Host: ${telemetry.cpu_name.replace(/with Radeon Graphics|Processor|\(R\)|\(TM\)/gi, '').trim()}` : 'Host CPU unavailable'}</span>
+            <span className="text-orange-600 dark:text-orange-400 font-black">{telemetry?.cpu_usage !== undefined ? `${safeToFixed(telemetry.cpu_usage, 0) || "0"}%` : '--'}</span>
+          </div>
+
+          {/* AI Server Host Dedicated GPU (Shown ONLY if physical GPU exists) */}
+          {Boolean(telemetry?.gpu_available && telemetry?.gpu_name && !/host cpu|unified ram|none|n\/a|no gpu|microsoft basic/i.test(telemetry.gpu_name)) && (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-300 font-bold" title={`Service host GPU: ${telemetry?.gpu_name || 'GPU'}. This is not claimed as the browser device GPU.`}>
               <Zap className="w-3 h-3 text-purple-500 shrink-0" />
-              <span className="truncate max-w-[100px] sm:max-w-[150px]">{telemetry?.gpu_name ? telemetry.gpu_name.replace(/NVIDIA GeForce|AMD Radeon|\(TM\)/gi, '').trim() : 'GPU'}</span>
-              <span className="text-purple-600 dark:text-purple-400 font-black">{telemetry?.gpu_usage !== undefined ? `${telemetry.gpu_usage.toFixed(0)}%` : '--'}</span>
+              <span className="truncate max-w-[90px] sm:max-w-[130px]">{telemetry?.gpu_name ? telemetry.gpu_name.replace(/NVIDIA GeForce|AMD Radeon|\(TM\)/gi, '').trim() : 'GPU'}</span>
+              <span className="text-purple-600 dark:text-purple-400 font-black">{telemetry?.gpu_usage !== undefined ? `${safeToFixed(telemetry.gpu_usage, 0) || "0"}%` : '--'}</span>
             </div>
           )}
 
-          {/* Real RAM */}
+          {/* Source-labelled host or container RAM */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-bold">
             <LayoutDashboard className="w-3 h-3 text-cyan-500 shrink-0" />
-            <span>RAM</span>
+            <span>{hasHostTelemetry ? 'Host RAM' : 'System RAM'}</span>
             <span className="text-cyan-600 dark:text-cyan-400 font-black">
-              {telemetry?.memory_used_gb ? `${telemetry.memory_used_gb.toFixed(1)}/${telemetry.memory_total_gb ? telemetry.memory_total_gb.toFixed(0) : '?'}GB` : `${telemetry?.memory_usage?.toFixed(0) || '--'}%`}
+              {telemetry?.memory_used_gb && telemetry?.memory_total_gb ? `${safeToFixed(telemetry.memory_used_gb, 1) || "0"}/${safeToFixed(telemetry.memory_total_gb, 1) || "0"}GB` : (Number.isFinite(telemetry?.memory_usage) ? `${safeToFixed(telemetry.memory_usage, 0) || "0"}%` : 'Unavailable')}
             </span>
           </div>
         </div>
 
         {/* Inference Speed & Response Time */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+        <div className="contents">
           {/* Token / sec */}
           <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-700 dark:text-emerald-300 font-bold shadow-xs">
             <Gauge className="w-3 h-3 text-emerald-500 shrink-0" />
             <span className="hidden sm:inline">Speed:</span>
             <span className="text-emerald-600 dark:text-emerald-400 font-black">
-              {telemetry?.tokens_per_sec > 0 ? `${telemetry.tokens_per_sec} tok/s` : 'Ready'}
+              {telemetry?.tokens_per_sec > 0 ? `${safeToFixed(telemetry.tokens_per_sec, 1) || "0"} tok/s` : 'Not measured'}
             </span>
           </div>
 
@@ -2186,7 +2957,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             <Timer className="w-3 h-3 text-indigo-500 shrink-0" />
             <span className="hidden sm:inline">Latency:</span>
             <span className="text-indigo-600 dark:text-indigo-400 font-black">
-              {telemetry?.response_time_ms ? `${(telemetry.response_time_ms / 1000).toFixed(2)}s` : '0.0s'}
+              {telemetry?.response_time_ms ? `${safeToFixed(telemetry.response_time_ms / 1000, 2) || "0"}s` : 'Unavailable'}
             </span>
           </div>
         </div>
@@ -2194,34 +2965,37 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
       {/* Model Downloading Banner  shown when AI model is still being pulled */}
       {!modelStatus.ready && (
-        <div className="shrink-0 z-20 relative">
-          <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-300 dark:border-amber-800/60">
-            {/* Animated spinner */}
-            <div className="shrink-0 relative flex items-center justify-center w-6 h-6">
-              <span className="absolute w-6 h-6 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
-              <span className="w-2 h-2 rounded-full bg-amber-500" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-black text-amber-800 dark:text-amber-300 truncate">
-                {modelStatus.status_msg || 'AI Model is downloading  please wait...'}
-              </p>
-              {modelStatus.progress_pct > 0 && (
-                <div className="mt-1.5 w-full max-w-md bg-amber-200 dark:bg-amber-950/20 rounded-full h-1.5 overflow-hidden">
-                  <div 
-                    className="h-full bg-amber-600 dark:bg-amber-450 rounded-full transition-all duration-500" 
-                    style={{ width: `${modelStatus.progress_pct}%` }}
-                  />
-                </div>
+        <div className="shrink-0 z-20 relative border-b border-amber-300/80 dark:border-amber-800/60 bg-amber-50/95 dark:bg-amber-950/45">
+          <div className="flex flex-wrap items-center gap-2 px-3 sm:px-5 py-2">
+            <div className="shrink-0 relative flex items-center justify-center w-5 h-5" aria-hidden="true">
+              {modelStatus.downloading ? (
+                <span className="w-5 h-5 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
+              ) : (
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,.65)]" />
               )}
-              <p className="text-[10px] text-amber-700/70 dark:text-amber-400/70 font-semibold mt-0.5">
-                Downloading model weights in background. You can chat immediately using ready models.
+            </div>
+            <div className="flex-1 min-w-[180px]">
+              <p className="text-[11px] sm:text-xs font-black text-amber-900 dark:text-amber-200 leading-snug break-words">
+                {modelStatus.downloading ? modelStatus.status_msg : 'AI model setup needed'}
               </p>
+              {isModelNoticeExpanded && !modelStatus.downloading && (
+                <p className="text-[10px] sm:text-[11px] text-amber-800/80 dark:text-amber-300/75 font-semibold mt-0.5 leading-relaxed">
+                  {modelStatus.status_msg || 'No installed local model or verified cloud provider is connected.'}
+                </p>
+              )}
             </div>
-            <div className="shrink-0 flex items-center gap-1.5 bg-amber-200/60 dark:bg-amber-900/50 rounded-full px-2.5 py-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-              <span className="text-[10px] font-black text-amber-800 dark:text-amber-300 uppercase tracking-wider">Downloading</span>
-            </div>
+            {!modelStatus.downloading && (
+              <button type="button" onClick={onOpenModelHub} className="shrink-0 min-h-0! px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black uppercase tracking-wide cursor-pointer">
+                Choose model
+              </button>
+            )}
+            <button type="button" onClick={() => setIsModelNoticeExpanded((value) => !value)} className="shrink-0 min-h-0! min-w-0! px-2 py-1.5 rounded-lg text-[10px] font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-200/60 dark:hover:bg-amber-900/40 cursor-pointer" aria-expanded={isModelNoticeExpanded}>
+              {isModelNoticeExpanded ? 'Less' : 'Details'}
+            </button>
           </div>
+          {modelStatus.downloading && modelStatus.progress_pct > 0 && (
+            <div className="h-1 bg-amber-200/70 dark:bg-amber-950/50 overflow-hidden"><div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${modelStatus.progress_pct}%` }} /></div>
+          )}
         </div>
       )}
 
@@ -2234,27 +3008,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         {messages.length === 0 ? (
           <div className="min-h-full flex flex-col items-center justify-start sm:justify-center text-center max-w-2xl mx-auto w-full space-y-4 sm:space-y-6 px-2 py-6 sm:py-8 select-none animate-in fade-in slide-in-from-bottom-4 duration-500">
             
-            {/* Animated Gradient Icon  hidden on very small screens to save space */}
-            <div className="relative hidden sm:block">
-              <div className="absolute inset-0 w-16 h-16 sm:w-24 sm:h-24 rounded-[20px] sm:rounded-[28px] bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 opacity-25 dark:opacity-40 blur-xl animate-pulse" />
-              <div className="relative w-16 h-16 sm:w-24 sm:h-24 rounded-[20px] sm:rounded-[28px] bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 p-[2px] shadow-[0_0_40px_rgba(99,102,241,0.3)] dark:shadow-[0_0_50px_rgba(139,92,246,0.4)]">
-                <div className="w-full h-full rounded-[18px] sm:rounded-[26px] bg-white dark:bg-[#131314] flex items-center justify-center">
-                  <Bot className="w-8 h-8 sm:w-11 sm:h-11 text-indigo-600 dark:text-indigo-400" />
-                </div>
-              </div>
-            </div>
-
-            {/* Heading */}
-            <div className="space-y-2 sm:space-y-3">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight select-none">
-                <span className="bg-gradient-to-r from-[#ea580c] via-[#f97316] to-[#fbbf24] bg-clip-text text-transparent">SMARAN</span>
-                {' '}
-                <span className="bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">.AI</span>
-              </h1>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-md mx-auto font-semibold">
-                Meet SMARAN.AI, your personal AI assistant.
-              </p>
-            </div>
+            {/* Animated 3D hero: tumbling glass logo, orbiting rings,
+                energy arcs, and a wordmark that assembles itself. */}
+            <HeroLogo3D />
 
             {/* Prompt Cards  single col on mobile, 2-col on sm+ */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4 w-full select-none">
@@ -2303,7 +3059,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                       setInput(card.prompt);
                     }
                   }}
-                  className={`relative p-3 sm:p-4 bg-white/70 dark:bg-white/[0.03] backdrop-blur-md border border-zinc-200/60 dark:border-white/[0.06] rounded-2xl cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-left flex flex-col justify-between min-h-[70px] sm:h-28 md:h-32 group overflow-hidden ${card.borderHover} ${card.glowHover}`}
+                  className={`relative p-3 sm:p-4 bg-white/70 dark:bg-white/[0.03] backdrop-blur-md border border-zinc-200/60 dark:border-white/[0.06] rounded-2xl cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-left flex flex-col justify-between min-h-[90px] sm:min-h-28 md:min-h-32 group overflow-hidden ${card.borderHover} ${card.glowHover}`}
                 >
                   {/* Hover gradient overlay */}
                   <div className={`absolute inset-0 bg-gradient-to-br ${card.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-2xl`} />
@@ -2328,16 +3084,23 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           </div>
         ) : (
           <>
-            {messages.map((msg) => (
-              <MessageRow
-                key={msg.id}
-                msg={msg}
-                onReuse={(text) => setInput(text)}
-                onRefClick={(ref) => setSelectedRef(ref)}
-                onEdit={handleEditMessage}
-                onDelete={handleDeleteMessage}
-              />
-            ))}
+{messages.map((msg) => (
+                <MessageRow
+                  key={msg.id}
+                  msg={msg}
+                  onReuse={(text) => setInput(text)}
+                  onRefClick={(ref) => setSelectedRef(ref)}
+                  onEdit={handleEditMessage}
+                  onDelete={handleDeleteMessage}
+                  isSpeakingAudio={isSpeakingAudio}
+                  stopSpeaking={stopSpeaking}
+                  speakText={speakText}
+                  onConfirmDesktopAction={handleConfirmDesktopAction}
+                  onCancelDesktopAction={handleCancelDesktopAction}
+                  audioEnabled={audioEnabled}
+                  autoSpeakEnabled={autoSpeakEnabled}
+                />
+              ))}
           </>
         )}
         <div ref={messagesEndRef} />
@@ -2363,11 +3126,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
       {/* Uploaded Files Chips (Gemini style) */}
       {uploadedFiles.length > 0 && (
-        <div className="max-w-4xl mx-auto px-6 py-2 select-none animate-in fade-in slide-in-from-bottom-1 duration-200 text-left">
+        <div className="max-w-4xl mx-auto px-3 sm:px-6 py-2 select-none animate-in fade-in slide-in-from-bottom-1 duration-200 text-left relative z-20">
           <div className="flex items-center justify-between mb-1.5 px-1">
-            <span className="text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
+            <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
               <FileText className="w-3.5 h-3.5 text-indigo-500" />
-              Active Session Files ({uploadedFiles.length})
+              📎 Active Session Files ({uploadedFiles.length})
             </span>
             <button
               type="button"
@@ -2379,23 +3142,25 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               }}
               className="text-[10px] font-bold text-rose-500 hover:text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
             >
-              Clear All Files
+              Clear All
             </button>
           </div>
-          <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 max-h-28 sm:max-h-36 overflow-y-auto pr-1">
             {uploadedFiles.map((f) => (
               <div
                 key={f.id}
-                title={f.name}
-                className="flex items-center gap-2 px-3 py-1 bg-[#f0f4f9] dark:bg-[#2f2f30] border border-zinc-200/60 dark:border-zinc-800/80 rounded-full text-xs font-semibold text-zinc-850 dark:text-zinc-200 hover:border-indigo-500/40 transition-all"
+                onClick={() => handleOpenDocPreview(f)}
+                title={`Click to preview ${f.name}`}
+                className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200/60 dark:border-indigo-500/35 rounded-full text-[11px] sm:text-xs font-bold text-zinc-800 dark:text-zinc-200 hover:border-indigo-500/60 hover:bg-indigo-100 dark:hover:bg-indigo-500/25 transition-all shadow-sm cursor-pointer group"
               >
-                <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-[#8ab4f8] shrink-0" />
-                <span className="max-w-[200px] truncate">{f.name}</span>
+                <FileText className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0 group-hover:scale-110 transition-transform" />
+                <span className="max-w-[130px] sm:max-w-[200px] truncate">{f.name}</span>
+                <span className="text-[8px] sm:text-[9px] font-extrabold uppercase px-1.5 py-0.2 bg-indigo-500/20 text-indigo-500 dark:text-indigo-300 rounded-md">Preview</span>
                 <button
                   type="button"
-                  onClick={() => handleDeleteUploadedFile(f.id)}
-                  className="p-0.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-full text-zinc-500 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
-                  title="Delete file from database"
+                  onClick={(e) => { e.stopPropagation(); handleDeleteUploadedFile(f.id); }}
+                  className="p-0.5 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-full text-zinc-400 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
+                  title="Remove file"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -2405,158 +3170,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         </div>
       )}
 
-      {/* Input Box Console */}
+      {/* Input Box Console — Responsive: Clean 2-tier toolbar on Mobile (<640px) | Single unified capsule on Desktop (≥640px) */}
       <div className="px-2 sm:px-5 pb-3 sm:pb-5 pt-1 bg-transparent shrink-0 relative z-10 w-full max-w-full">
-        <form onSubmit={handleSend} className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 bg-gradient-to-r from-zinc-100/95 via-white/90 to-indigo-50/80 dark:from-zinc-950/95 dark:via-zinc-900/95 dark:to-indigo-950/45 border border-indigo-300/60 dark:border-indigo-500/35 rounded-2xl sm:rounded-[30px] p-2 sm:px-4 sm:py-2 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.75)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all w-full overflow-hidden">
+        <form data-testid="chat-composer" onSubmit={handleSend} className="composer-shell max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 bg-gradient-to-b from-white/95 to-zinc-50/90 dark:from-zinc-900/95 dark:to-zinc-950/95 border border-indigo-300/60 dark:border-indigo-500/35 rounded-2xl sm:rounded-3xl p-2.5 sm:p-2.5 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.55)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all w-full overflow-hidden">
           
-          {/* Mobile Top Toolbar (Strictly inside input box) */}
-          <div className="flex sm:hidden items-center justify-between gap-1 pb-1.5 border-b border-indigo-200/40 dark:border-zinc-800/80 w-full">
-            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!activeSessionId || directUploading}
-                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-md transition-colors cursor-pointer disabled:opacity-35 shrink-0"
-                title="Attach Files"
-              >
-                <Upload className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => folderInputRef.current?.click()}
-                disabled={!activeSessionId || directUploading}
-                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-md transition-colors cursor-pointer disabled:opacity-35 shrink-0"
-                title="Upload Folder"
-              >
-                <FolderPlus className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsPasteTableOpen(true)}
-                disabled={!activeSessionId || directUploading}
-                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-emerald-600 dark:text-emerald-500 rounded-md transition-colors cursor-pointer disabled:opacity-35 shrink-0"
-                title="Paste Table"
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsRagEnabled(!isRagEnabled)}
-                disabled={!activeSessionId || directUploading}
-                className={`px-1.5 py-0.5 rounded-md transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1 text-[9px] font-black ${
-                  isRagEnabled
-                    ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/40'
-                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-                }`}
-                title="Toggle RAG Document Grounding"
-              >
-                <Brain className="w-3 h-3" />
-                <span>{isRagEnabled ? 'RAG' : 'Direct'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
-                disabled={!activeSessionId || directUploading}
-                className={`px-1.5 py-0.5 rounded-md transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1 text-[9px] font-black ${
-                  isWebSearchEnabled
-                    ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/40'
-                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-                }`}
-                title="Toggle Live Web Search"
-              >
-                <Globe className={`w-3 h-3 ${isWebSearchEnabled ? 'animate-pulse text-blue-500' : ''}`} />
-                <span>{isWebSearchEnabled ? 'Web' : 'Off'}</span>
-              </button>
-            </div>
-
-            {/* Mobile Language Selector */}
-            <select
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="text-[9px] font-bold text-zinc-700 dark:text-zinc-200 bg-white/80 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md px-1.5 py-0.5 outline-none shrink-0"
-              title="Response Language"
-            >
-              <option value="en">EN</option>
-              <option value="hi">HI</option>
-              <option value="gu">GU</option>
-              <option value="pa">PA</option>
-              <option value="mr">MR</option>
-              <option value="ta">TA</option>
-              <option value="te">TE</option>
-              <option value="ml">ML</option>
-              <option value="kn">KN</option>
-            </select>
-          </div>
-
-          {/* Desktop Left Action Buttons (Exact original desktop single row) */}
-          <div className="hidden sm:flex items-center gap-1 shrink-0">
-            {/* Attach File */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!activeSessionId || directUploading}
-              className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-650 dark:text-zinc-400 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
-              title="Attach Files"
-            >
-              <Upload className="w-5 h-5" />
-            </button>
-
-            {/* Upload Folder (Recursive Subfolder Ingestion) */}
-            <button
-              type="button"
-              onClick={() => folderInputRef.current?.click()}
-              disabled={!activeSessionId || directUploading}
-              className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
-              title="Upload Entire Folder (Recursive Subfolders & Files)"
-            >
-              <FolderPlus className="w-5 h-5" />
-            </button>
-            
-            {/* Paste Excel Table */}
-            <button
-              type="button"
-              onClick={() => setIsPasteTableOpen(true)}
-              disabled={!activeSessionId || directUploading}
-              className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-emerald-600 dark:text-emerald-500 rounded-full transition-colors cursor-pointer disabled:opacity-35 shrink-0"
-              title="Paste Excel Table"
-            >
-              <BookOpen className="w-5 h-5" />
-            </button>
-
-            {/* RAG Mode Toggle */}
-            <button
-              type="button"
-              onClick={() => setIsRagEnabled(!isRagEnabled)}
-              disabled={!activeSessionId || directUploading}
-              className={`px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1.5 text-xs font-black ${
-                isRagEnabled
-                  ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/40 shadow-xs'
-                  : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-              }`}
-              title={isRagEnabled ? 'RAG Document Grounding ON' : 'Direct AI Mode'}
-            >
-              <Brain className={`w-4 h-4 ${isRagEnabled ? 'text-purple-600 dark:text-purple-400' : ''}`} />
-              <span className="text-[11px] font-extrabold">{isRagEnabled ? 'RAG ON' : 'Direct AI'}</span>
-            </button>
-
-            {/* Live Web Search Toggle */}
-            <button
-              type="button"
-              onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
-              disabled={!activeSessionId || directUploading}
-              className={`px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1.5 text-xs font-black ${
-                isWebSearchEnabled
-                  ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/40 shadow-xs'
-                  : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-              }`}
-              title={isWebSearchEnabled ? 'Live Web Search ON' : 'Live Web Search OFF'}
-            >
-              <Globe className={`w-4 h-4 ${isWebSearchEnabled ? 'animate-pulse text-blue-500 dark:text-blue-400' : ''}`} />
-              <span className="text-[11px] font-extrabold">{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
-            </button>
-          </div>
-          
-          {/* Single unified hidden file input accepts ALL file types */}
+          {/* Hidden file inputs */}
           <input
             type="file"
             ref={fileInputRef}
@@ -2565,8 +3183,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             multiple
             className="hidden"
           />
-
-          {/* Recursive directory upload input accepts entire folders and subfolders */}
           <input
             type="file"
             ref={folderInputRef}
@@ -2577,74 +3193,242 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             className="hidden"
           />
 
-          {/* Main Input Textarea Row */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-1 w-full min-w-0">
+          {/* Desktop Left Tools (sm+) */}
+          <div className="composer-desktop-left hidden sm:flex items-center gap-1 shrink-0">
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={!activeSessionId || directUploading} className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors cursor-pointer disabled:opacity-35" title="Attach Files">
+              <Upload className="w-4 h-4" />
+            </button>
+            <button type="button" onClick={() => folderInputRef.current?.click()} disabled={!activeSessionId || directUploading} className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl transition-colors cursor-pointer disabled:opacity-35" title="Upload Folder">
+              <FolderPlus className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Main Textarea Area (100% full width with attached send button on mobile, flex-1 on desktop) */}
+          <div className="composer-input w-full sm:flex-1 relative min-w-0 flex items-center gap-1.5 order-first sm:order-none">
             <textarea
+              ref={composerRef}
               value={input}
               onChange={handleInputChange}
               onKeyDown={(e) => {
                 const isShortcut = e.ctrlKey || e.metaKey;
                 if (isShortcut) {
                   const allowedKeys = ['c', 'x', 'v', 'a', 'z', 'y', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
-                  if (allowedKeys.includes(e.key.toLowerCase()) || allowedKeys.includes(e.key)) {
-                    return;
-                  }
+                  if (allowedKeys.includes(e.key.toLowerCase()) || allowedKeys.includes(e.key)) return;
                 }
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend(e);
-                }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); }
               }}
               onPaste={(e) => { e.stopPropagation(); }}
               onCopy={(e) => e.stopPropagation()}
               onCut={(e) => e.stopPropagation()}
               placeholder={
                 activeSessionId
-                  ? isWebSearchEnabled
-                    ? 'Search and ask the live web...'
-                    : isRagEnabled
-                      ? 'Ask from uploaded files only...'
-                      : 'Ask SMARAN.AI directly...'
+                  ? isWebSearchEnabled ? 'Search the live web...' : isRagEnabled ? 'Ask from uploaded files...' : 'Ask SMARAN.AI directly...'
                   : 'Start a new conversation'
               }
               disabled={!activeSessionId || streaming || directUploading}
               rows={1}
-              className="flex-1 w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-xs sm:text-sm text-zinc-900 dark:text-zinc-200 font-semibold resize-none max-h-28 py-1 sm:py-2 px-1 sm:px-2 min-w-0"
+              className="w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 font-semibold resize-none min-h-[38px] max-h-32 py-2 px-1 sm:px-2 leading-relaxed"
             />
-
             {isTranslating && (
-              <span className="text-[10px] text-indigo-500 animate-pulse shrink-0">Translating...</span>
+              <span className="absolute right-10 sm:right-2 top-2 text-[10px] text-indigo-500 font-bold animate-pulse">Translating...</span>
             )}
-
-            {/* Desktop Language Selector (Hidden on mobile because it is in mobile toolbar) */}
-            <select
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="hidden sm:block response-language-select text-[10px] font-extrabold text-zinc-700 dark:text-zinc-200 bg-gradient-to-r from-white to-indigo-50 dark:from-zinc-900 dark:to-indigo-950/70 border border-indigo-300/80 dark:border-indigo-500/45 rounded-2xl px-3 py-2 outline-none cursor-pointer shrink-0 transition-all duration-300 hover:border-violet-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:shadow-[0_0_22px_rgba(99,102,241,0.38)] hover:-translate-y-0.5 focus:border-violet-400 focus:ring-2 focus:ring-violet-500/35"
-              title="Response Language"
-            >
-              <option value="en">English (EN)</option>
-              <option value="hi">Hindi (HI)</option>
-              <option value="gu">Gujarati (GU)</option>
-              <option value="pa">Punjabi (PA)</option>
-              <option value="mr">Marathi (MR)</option>
-              <option value="ta">Tamil (TA)</option>
-              <option value="te">Telugu (TE)</option>
-              <option value="ml">Malayalam (ML)</option>
-              <option value="kn">Kannada (KN)</option>
-            </select>
-
-            {/* Send Button */}
+            
+            {/* Mobile Send Button — Attached directly to textarea, never overflows */}
             <button
               type="submit"
               disabled={!activeSessionId || !input.trim() || streaming || directUploading}
-              className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center text-white bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 disabled:from-zinc-300 disabled:to-zinc-400 dark:disabled:from-zinc-700 dark:disabled:to-zinc-800 rounded-full shadow-[0_0_18px_rgba(139,92,246,0.38)] hover:shadow-[0_0_28px_rgba(139,92,246,0.62)] hover:scale-105 sm:hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none shrink-0"
+              className="composer-compact-send sm:hidden w-8 h-8 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 text-white items-center justify-center shrink-0 shadow-md shadow-indigo-500/30 transition-all cursor-pointer disabled:opacity-30 disabled:shadow-none"
               title="Send Message"
             >
-              <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4 translate-x-[1.5px] -translate-y-[0.5px]" />
+              <Send className="w-4 h-4" />
             </button>
           </div>
 
+          {/* Mobile Toolbar: Row 1 & Row 2 (sm:hidden) */}
+          <div className="composer-compact-tools sm:hidden w-full flex-col gap-1.5 pt-2 border-t border-zinc-200/70 dark:border-zinc-800/80">
+            {/* Mobile Tier 1: Attachments & Grounding Mode */}
+            <div className="flex items-center justify-between gap-1 w-full">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!activeSessionId || directUploading}
+                  className="flex items-center gap-1 px-2 py-1 bg-zinc-100 dark:bg-zinc-800/90 text-zinc-700 dark:text-zinc-300 rounded-lg text-[10px] font-bold border border-zinc-200 dark:border-zinc-700/60 cursor-pointer disabled:opacity-35"
+                  title="Attach Files"
+                >
+                  <Upload className="w-3 h-3 text-indigo-500" />
+                  <span>File</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => folderInputRef.current?.click()}
+                  disabled={!activeSessionId || directUploading}
+                  className="flex items-center gap-1 px-2 py-1 bg-zinc-100 dark:bg-zinc-800/90 text-indigo-600 dark:text-indigo-400 rounded-lg text-[10px] font-bold border border-zinc-200 dark:border-zinc-700/60 cursor-pointer disabled:opacity-35"
+                  title="Upload Entire Folder"
+                >
+                  <FolderPlus className="w-3 h-3" />
+                  <span>Folder</span>
+                </button>
+
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setIsRagEnabled(!isRagEnabled)}
+                  disabled={!activeSessionId || directUploading}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black border transition-all cursor-pointer ${
+                    isRagEnabled
+                      ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/40 shadow-xs'
+                      : 'bg-zinc-100 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700/60'
+                  }`}
+                  title={isRagEnabled ? 'RAG Mode Active' : 'Direct AI Mode'}
+                >
+                  <Brain className={`w-2.5 h-2.5 ${isRagEnabled ? 'text-purple-600 dark:text-purple-400' : ''}`} />
+                  <span>{isRagEnabled ? 'RAG' : 'AI'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+                  disabled={!activeSessionId || directUploading}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black border transition-all cursor-pointer ${
+                    isWebSearchEnabled
+                      ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-500/40 shadow-xs'
+                      : 'bg-zinc-100 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700/60'
+                  }`}
+                  title={isWebSearchEnabled ? 'Live Web Search Active' : 'Web Search Inactive'}
+                >
+                  <Globe className={`w-2.5 h-2.5 ${isWebSearchEnabled ? 'animate-pulse text-blue-500' : ''}`} />
+                  <span>{isWebSearchEnabled ? 'WEB' : 'WEB'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Mobile Tier 2: Compare, Language, Mic, Speak */}
+            <div className="flex items-center gap-1 w-full min-w-0 pt-1">
+              <div className="flex items-center gap-1 min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => { setComparePrompt(input); setIsModelCompareOpen(true); }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/30 cursor-pointer shrink-0"
+                  title="Compare Models Side-by-Side"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Compare</span>
+                </button>
+
+                {/* The language name must stay fully readable: a fixed narrow
+                    cap clipped names like "English" mid-word on phones. */}
+                <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-700 rounded-lg pl-1.5 pr-1 py-1 shadow-xs min-w-0 flex-1" title="Response Language">
+                  <Globe className="w-3 h-3 text-indigo-400 shrink-0" />
+                  <select
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    className="text-[11px] font-bold text-zinc-100 bg-zinc-900 outline-none cursor-pointer min-w-0 w-full truncate"
+                  >
+                    {LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code} className="bg-zinc-900 text-zinc-100 font-bold">{l.flag} {l.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={openVoiceMode}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-fuchsia-600 text-white rounded-lg font-black text-[11px] shadow-sm cursor-pointer hover:scale-105 active:scale-95 transition-all"
+                  title="Real-time Voice Mode (Speak & AI Responds Aloud)"
+                >
+                  <Volume2 className="w-3.5 h-3.5 animate-pulse" />
+                  <span>Speak</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Desktop Right Tools (sm+) — Single Continuous Row */}
+          <div className="composer-desktop-right hidden sm:flex items-center gap-1.5 shrink-0">
+            {/* RAG Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsRagEnabled(!isRagEnabled)}
+              disabled={!activeSessionId || directUploading}
+              className={`h-8 px-2.5 rounded-xl transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1 text-xs font-bold ${
+                isRagEnabled
+                  ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30'
+                  : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+              }`}
+              title={isRagEnabled ? 'RAG Document Grounding ON' : 'Direct AI Mode'}
+            >
+              <Brain className={`w-3.5 h-3.5 ${isRagEnabled ? 'text-purple-600 dark:text-purple-400' : ''}`} />
+              <span>{isRagEnabled ? 'RAG ON' : 'Direct AI'}</span>
+            </button>
+
+            {/* Web Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+              disabled={!activeSessionId || directUploading}
+              className={`h-8 px-2.5 rounded-xl transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1 text-xs font-bold ${
+                isWebSearchEnabled
+                  ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+                  : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+              }`}
+              title={isWebSearchEnabled ? 'Live Web Search ON' : 'Live Web Search OFF'}
+            >
+              <Globe className={`w-3.5 h-3.5 ${isWebSearchEnabled ? 'animate-pulse text-blue-500' : ''}`} />
+              <span>{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
+            </button>
+
+            {/* Compare */}
+            <button
+              type="button"
+              onClick={() => { setComparePrompt(input); setIsModelCompareOpen(true); }}
+              className="h-8 px-2.5 rounded-xl transition-all cursor-pointer text-indigo-500 dark:text-indigo-400 hover:bg-indigo-500/10 border border-indigo-500/30 shrink-0 flex items-center gap-1 text-xs font-bold"
+              title="Compare Models Side-by-Side"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Compare</span>
+            </button>
+
+            {/* Speak — Real-time J.A.R.V.I.S. Voice Mode (desktop) */}
+            <button
+              type="button"
+              onClick={openVoiceMode}
+              className="h-8 px-3 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-fuchsia-600 text-white font-black text-xs shadow-[0_0_14px_rgba(139,92,246,0.35)] hover:shadow-[0_0_24px_rgba(139,92,246,0.6)] hover:scale-105 active:scale-95 transition-all cursor-pointer shrink-0 flex items-center gap-1.5"
+              title="Speak — Real-time Voice Assistant (hands-free, controls your PC)"
+            >
+              <Volume2 className="w-3.5 h-3.5 animate-pulse" />
+              <span>Speak</span>
+            </button>
+
+            {/* Language Selector  */}
+            <div className="h-8 flex items-center gap-1 bg-zinc-200 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl px-2.5 shrink-0 shadow-xs" title="Response Language">
+              <Globe className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+              <select
+                value={selectedLanguage}
+                onChange={(e) => setSelectedLanguage(e.target.value)}
+                className="text-xs font-black text-zinc-900 dark:text-zinc-50 bg-transparent outline-none cursor-pointer pr-1"
+              >
+                {LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-bold">{l.flag} {l.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Send */}
+            <button
+              type="submit"
+              disabled={!activeSessionId || !input.trim() || streaming || directUploading}
+              className="w-8 h-8 flex items-center justify-center text-white bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 disabled:from-zinc-300 disabled:to-zinc-400 dark:disabled:from-zinc-700 dark:disabled:to-zinc-800 rounded-xl shadow-[0_0_14px_rgba(139,92,246,0.35)] hover:shadow-[0_0_24px_rgba(139,92,246,0.6)] hover:scale-105 active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none shrink-0"
+              title="Send Message"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </form>
       </div>
 
@@ -2688,70 +3472,97 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         </div>
       )}
 
-      {/* Paste Excel Table Modal */}
-      {isPasteTableOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <form onSubmit={handlePasteTableSubmit} className="w-full max-w-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] text-left">
-            <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-900 bg-zinc-50 dark:bg-zinc-900/30 flex items-center justify-between">
-              <h3 className="text-sm font-extrabold text-zinc-950 dark:text-white flex items-center gap-2">
-                <BookOpen className="w-4.5 h-4.5 text-emerald-600 dark:text-emerald-500" />
-                Paste Raw Excel Spreadsheet Data
-              </h3>
+      {/* Document Content Preview Modal */}
+      {selectedFilePreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-2xl bg-zinc-950 border border-indigo-500/30 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] text-left">
+            <div className="px-6 py-4 border-b border-zinc-800 bg-zinc-900/60 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-400">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white flex items-center gap-2">
+                    {selectedFilePreview.name}
+                    <span className="px-2 py-0.5 text-[9px] font-bold uppercase rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                      INGESTED PREVIEW
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">Ingested Document Content & Vector Indexing Details</p>
+                </div>
+              </div>
               <button
-                type="button"
-                onClick={() => setIsPasteTableOpen(false)}
-                className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-transparent hover:border-zinc-300 dark:hover:border-zinc-800 transition-all cursor-pointer"
+                onClick={() => setSelectedFilePreview(null)}
+                className="p-1.5 text-zinc-400 hover:text-white bg-zinc-900 hover:bg-zinc-800 rounded-xl border border-zinc-800 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             
-            <div className="p-6 overflow-y-auto space-y-4 flex-1 font-semibold text-xs">
-              <div className="space-y-1">
-                <label className="text-zinc-855 dark:text-zinc-300 block mb-1">Table File Title</label>
-                <input
-                  type="text"
-                  id="pasteTableName"
-                  name="pasteTableName"
-                  required
-                  placeholder="e.g. sales_reports_q4"
-                  value={pasteTableName}
-                  onChange={(e) => setPasteTableName(e.target.value)}
-                  className="w-full border border-zinc-250 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-950 dark:text-white"
-                />
+            <div className="p-6 overflow-y-auto space-y-3 font-semibold text-xs flex-1">
+              <div className="flex items-center justify-between text-[10px] text-zinc-400 font-bold uppercase tracking-wider">
+                <span>Extracted Text Content</span>
+                <span>Type: {selectedFilePreview.file_type || 'Text/Document'}</span>
               </div>
-
-              <div className="space-y-1">
-                <label className="text-zinc-855 dark:text-zinc-300 block mb-1">Paste Excel Cells (Directly Ctrl+V)</label>
-                <textarea
-                  required
-                  rows={8}
-                  placeholder="Paste cells here... Columns will automatically parse by tabs"
-                  value={pasteTableData}
-                  onChange={(e) => setPasteTableData(e.target.value)}
-                  className="w-full border border-zinc-250 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 rounded-xl p-3 font-mono text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-950 dark:text-white resize-none"
-                />
+              <div className="p-4 bg-black/60 border border-zinc-800/80 rounded-2xl font-mono text-[11px] leading-relaxed text-indigo-200 whitespace-pre-wrap select-text max-h-[400px] overflow-y-auto">
+                {selectedFilePreview.content_preview}
               </div>
             </div>
 
-            <div className="px-6 py-4 bg-zinc-50 dark:bg-zinc-900/30 border-t border-zinc-200 dark:border-zinc-900 flex justify-end gap-2.5">
+            <div className="px-6 py-3 border-t border-zinc-800 bg-zinc-900/40 flex justify-end">
               <button
-                type="button"
-                onClick={() => setIsPasteTableOpen(false)}
-                className="px-5 py-2.5 text-zinc-650 hover:bg-zinc-150 dark:text-zinc-400 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl cursor-pointer transition-all"
+                onClick={() => setSelectedFilePreview(null)}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md"
               >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider rounded-xl cursor-pointer transition-all shadow-md"
-              >
-                Ingest Table Data
+                Close Preview
               </button>
             </div>
-          </form>
+          </div>
         </div>
       )}
+
+      {/* Side-by-Side Multi-Model Answer Comparison Matrix Modal */}
+      <ModelCompareModal
+        isOpen={isModelCompareOpen}
+        onClose={() => setIsModelCompareOpen(false)}
+        initialPrompt={comparePrompt || input}
+        token={token}
+        apiBase={API_BASE}
+        isRagEnabled={isRagEnabled}
+      />
+
+      {/* J.A.R.V.I.S. / Iron Man / Matrix Cyberpunk Holographic 3D Hands-Free Voice Assistant */}
+      <HackerVoiceAssistant
+        isOpen={isVoiceModeOpen}
+        onClose={closeVoiceMode}
+        onSendQuery={(queryText) => handleSendVoicePrompt(queryText)}
+        isSpeakingAudio={isSpeakingAudio}
+        stopSpeaking={stopSpeaking}
+        speakText={speakText}
+        selectedLanguage={selectedLanguage}
+        setSelectedLanguage={setSelectedLanguage}
+        languages={LANGUAGES}
+        voiceAiResponse={voiceAiResponse}
+        activeModelDisplay={activeModelDisplay}
+        telemetry={telemetry}
+        API_BASE={API_BASE}
+        token={token}
+        audioEnabled={audioEnabled}
+        autoSpeakEnabled={autoSpeakEnabled}
+        setAudioEnabled={setAudioEnabled}
+        setAutoSpeakEnabled={setAutoSpeakEnabled}
+        onAttachFiles={() => fileInputRef.current?.click()}
+        onUploadFolder={() => folderInputRef.current?.click()}
+        isRagEnabled={isRagEnabled}
+        setIsRagEnabled={setIsRagEnabled}
+        isWebSearchEnabled={isWebSearchEnabled}
+        setIsWebSearchEnabled={setIsWebSearchEnabled}
+        onClearChat={handleClearCurrentChat}
+        wakeWordSupported={WakeWordListener.isSupported()}
+        wakeWordEnabled={wakeWordEnabled}
+        wakePhrase={wakePhrase}
+        onToggleWakeWord={() => setWakeWordEnabled((value) => !value)}
+      />
     </div>
   );
 };

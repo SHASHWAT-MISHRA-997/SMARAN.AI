@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { SmaranApiClient } from './apiClient';
 
 interface AttachedFile {
@@ -11,6 +12,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'smaran-ai.chatView';
   private _view?: vscode.WebviewView;
   private _client: SmaranApiClient;
+  private _terminal?: vscode.Terminal;
 
   constructor(private readonly _extensionUri: vscode.Uri) {
     this._client = new SmaranApiClient();
@@ -33,7 +35,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage(async (data) => {
       switch (data.type) {
         case 'sendMessage': {
-          await this._handleUserPrompt(data.prompt, data.model, data.attachments || []);
+          await this._handleUserPrompt(data.prompt, data.model, data.attachments || [], data.language || 'en');
           break;
         }
         case 'pickAttachment': {
@@ -48,6 +50,14 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
           await this._insertSnippetToEditor(data.code);
           break;
         }
+        case 'createWorkspaceFile': {
+          await this._createWorkspaceFile(data.filePath, data.content);
+          break;
+        }
+        case 'runTerminalCommand': {
+          await this._runTerminalCommand(data.command);
+          break;
+        }
         case 'saveApiKeys': {
           const config = vscode.workspace.getConfiguration('smaran');
           if (data.keys) {
@@ -55,7 +65,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
             if (data.keys.backendUrl) {
               await config.update('backendUrl', data.keys.backendUrl, vscode.ConfigurationTarget.Global);
             }
-            vscode.window.showInformationMessage('⚡ SMARAN.AI: Settings and API Keys saved successfully!');
+            vscode.window.showInformationMessage('⚡ SMARAN.AI: Provider keys and settings saved!');
           }
           break;
         }
@@ -85,7 +95,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       canSelectMany: true,
       openLabel: 'Attach to SMARAN.AI',
       filters: {
-        'Code & Data Files': ['ts', 'js', 'py', 'json', 'html', 'css', 'md', 'txt', 'csv', 'yaml', 'yml', 'sql', 'sh', 'bat', 'png', 'jpg']
+        'Code & Data Files': ['ts', 'js', 'py', 'json', 'html', 'css', 'md', 'txt', 'csv', 'yaml', 'yml', 'sql', 'sh', 'png', 'jpg']
       }
     });
 
@@ -102,7 +112,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
           const raw = await vscode.workspace.fs.readFile(uri);
           content = new TextDecoder('utf-8').decode(raw);
           if (content.length > 50000) {
-            content = content.slice(0, 50000) + '\n...[Truncated for prompt optimization]';
+            content = content.slice(0, 50000) + '\n...[Truncated for token optimization]';
           }
         }
 
@@ -116,7 +126,83 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async _handleUserPrompt(userPrompt: string, model: string = 'auto', attachments: AttachedFile[] = []) {
+  private async _createWorkspaceFile(relativePath: string, content: string): Promise<boolean> {
+    try {
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (!workspaceFolders || workspaceFolders.length === 0) {
+        vscode.window.showWarningMessage('No active workspace open to create files.');
+        return false;
+      }
+
+      const rootUri = workspaceFolders[0].uri;
+      const requestedPath = String(relativePath || '').trim();
+      if (!requestedPath || path.isAbsolute(requestedPath)) {
+        vscode.window.showErrorMessage('SMARAN.AI rejected an empty or absolute generated file path.');
+        return false;
+      }
+
+      const rootPath = path.resolve(rootUri.fsPath);
+      const targetPath = path.resolve(rootPath, requestedPath);
+      const pathFromRoot = path.relative(rootPath, targetPath);
+      if (
+        !pathFromRoot ||
+        pathFromRoot === '..' ||
+        pathFromRoot.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(pathFromRoot)
+      ) {
+        vscode.window.showErrorMessage('SMARAN.AI rejected a generated file path outside the first workspace folder.');
+        return false;
+      }
+      const targetUri = vscode.Uri.file(targetPath);
+
+      const approval = await vscode.window.showWarningMessage(
+        `SMARAN.AI wants to write: ${pathFromRoot}`,
+        { modal: true, detail: `Review the exact workspace target before allowing it: ${targetPath}` },
+        'Allow'
+      );
+      if (approval !== 'Allow') return false;
+
+      // Create parent directories if missing
+      const parentDir = vscode.Uri.file(path.dirname(targetUri.fsPath));
+      await vscode.workspace.fs.createDirectory(parentDir);
+
+      // Write file
+      const encoder = new TextEncoder();
+      await vscode.workspace.fs.writeFile(targetUri, encoder.encode(content));
+
+      // Open document in editor
+      const doc = await vscode.workspace.openTextDocument(targetUri);
+      await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One });
+
+      vscode.window.showInformationMessage(`⚡ SMARAN.AI: Wrote workspace file ${pathFromRoot}`);
+      return true;
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`File creation error: ${err.message}`);
+      return false;
+    }
+  }
+
+  private async _runTerminalCommand(command: string) {
+    const approval = await vscode.window.showWarningMessage(
+      `SMARAN.AI wants to run a terminal command`,
+      { modal: true, detail: command },
+      'Allow'
+    );
+    if (approval !== 'Allow') return;
+    if (!this._terminal || this._terminal.exitStatus !== undefined) {
+      this._terminal = vscode.window.createTerminal({ name: 'SMARAN.AI Agent' });
+    }
+    this._terminal.show(true);
+    this._terminal.sendText(command);
+    vscode.window.showInformationMessage(`💻 SMARAN.AI executing: ${command}`);
+  }
+
+  private async _handleUserPrompt(
+    userPrompt: string,
+    model: string = 'auto',
+    attachments: AttachedFile[] = [],
+    responseLanguage: string = 'en'
+  ) {
     if (!this._view) return;
 
     let contextFiles: { path: string; content: string }[] = [];
@@ -133,68 +219,121 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       });
     }
 
-    // 2. Real Workspace Structure
+    // 2. Bounded workspace file manifest (paths only, maximum 60 entries)
     let workspaceName = 'Workspace Active';
-    let totalWorkspaceFiles = 0;
     if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
       const rootFolder = vscode.workspace.workspaceFolders[0];
       workspaceName = rootFolder.name;
       try {
         const foundFiles = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 60);
-        totalWorkspaceFiles = foundFiles.length;
         const fileTree = foundFiles.map(f => vscode.workspace.asRelativePath(f)).join('\n');
         contextFiles.push({
-          path: 'workspace://directory_manifest.txt',
-          content: `Project / Workspace: ${rootFolder.name}\nPath: ${rootFolder.uri.fsPath}\nTracked Files (${foundFiles.length} total):\n${fileTree}`
+          path: 'workspace://file_manifest.txt',
+          content: `Project Root: ${rootFolder.name}\nPath: ${rootFolder.uri.fsPath}\nTracked Files (${foundFiles.length} total):\n${fileTree}`
         });
       } catch (_) {}
     }
 
-    // 3. User attachments
-    for (const att of attachments) {
-      contextFiles.push({
-        path: `attachment://${att.name}`,
-        content: att.content
-      });
+    // 3. Add attached files
+    if (attachments && attachments.length > 0) {
+      for (const att of attachments) {
+        contextFiles.push({ path: att.name, content: att.content });
+      }
     }
+
+    const supportedLanguages: Record<string, string> = {
+      en: 'English', hi: 'Hindi', gu: 'Gujarati', pa: 'Punjabi', mr: 'Marathi',
+      ta: 'Tamil', te: 'Telugu', ml: 'Malayalam', kn: 'Kannada', bn: 'Bengali'
+    };
+    const normalizedLanguage = supportedLanguages[responseLanguage] ? responseLanguage : 'en';
+    const languageName = supportedLanguages[normalizedLanguage];
+
+    // Explain the extension's real, approval-gated tools to the selected model.
+    const agentInstruction = `You are SMARAN.AI, a software engineering assistant.
+You can see only the active editor or selection, the bounded file-path manifest, and attachments supplied with this request. You do not have unrestricted workspace or system access.
+You may propose either of these structured actions. VS Code will ask the user before executing each generated workspace write or terminal command:
+<tool_call name="create_file">
+<path>relative/path/to/file.ext</path>
+<content>
+// full file code
+</content>
+</tool_call>
+
+<tool_call name="run_command">
+<command>npm run build</command>
+</tool_call>
+
+Respond in ${languageName} (${normalizedLanguage}) unless code, commands, identifiers, or quoted source text require their original language. Do not claim that an unavailable tool, file, model, or web result was inspected.
+
+User Request:
+${userPrompt}`;
 
     this._view.webview.postMessage({
       type: 'agentThinking',
-      step: 'Reasoning with Multi-LLM Engine & Memory...'
+      step: 'Preparing supplied context and requesting a model response...'
     });
 
     try {
-      const response = await this._client.askAgent(userPrompt, contextFiles, model, (token) => {
-        this._view?.webview.postMessage({
-          type: 'streamToken',
-          token: token
-        });
-      });
+      const rawResponse = await this._client.askAgent(
+        agentInstruction,
+        contextFiles,
+        model,
+        (token) => {
+          this._view?.webview.postMessage({
+            type: 'streamToken',
+            token: token
+          });
+        },
+        normalizedLanguage
+      );
+
+      // Parse and execute any tool calls emitted by the model
+      await this._parseAndExecuteToolCalls(rawResponse);
 
       this._view.webview.postMessage({
         type: 'agentResponse',
-        response: response,
+        response: rawResponse,
         meta: {
-          model: model === 'auto' ? '⚡ Auto-Combo' : model,
-          workspace: workspaceName,
-          filesInspected: totalWorkspaceFiles,
-          headroomSaved: '65–90% Prompt Compression',
-          claudeMem: '🧠 Cognitive Memory Active',
-          plugins: ['task-observer', 'ui-ux-pro-max', 'reverse-skill', 'mcp-hub']
+          model: model === 'auto' ? 'Auto-Combo Router' : model,
+          workspace: workspaceName
         }
       });
     } catch (err: any) {
       this._view.webview.postMessage({
         type: 'agentError',
-        error: err.message || 'Connection error with SMARAN.AI backend'
+        error: err.message || 'Unable to process request.'
       });
+    }
+  }
+
+  private async _parseAndExecuteToolCalls(response: string) {
+    // 1. Check for <tool_call name="create_file">
+    const createFileRegex = /<tool_call\s+name=["']create_file["']>[\s\S]*?<path>([\s\S]*?)<\/path>[\s\S]*?<content>([\s\S]*?)<\/content>[\s\S]*?<\/tool_call>/gi;
+    let match;
+    while ((match = createFileRegex.exec(response)) !== null) {
+      const filePath = match[1].trim();
+      const content = match[2].trim();
+      if (filePath && content) {
+        await this._createWorkspaceFile(filePath, content);
+      }
+    }
+
+    // 2. Check for <tool_call name="run_command">
+    const runCommandRegex = /<tool_call\s+name=["']run_command["']>[\s\S]*?<command>([\s\S]*?)<\/command>[\s\S]*?<\/tool_call>/gi;
+    let cmdMatch;
+    while ((cmdMatch = runCommandRegex.exec(response)) !== null) {
+      const command = cmdMatch[1].trim();
+      if (command) {
+        await this._runTerminalCommand(command);
+      }
     }
   }
 
   private async _applyCodeToEditor(code: string) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-      vscode.window.showWarningMessage('No active editor open to apply code.');
+      const newDoc = await vscode.workspace.openTextDocument({ content: code, language: 'typescript' });
+      await vscode.window.showTextDocument(newDoc);
       return;
     }
 
@@ -258,6 +397,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https: data:; font-src https:;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SMARAN.AI Coder</title>
   <style>
@@ -301,14 +441,14 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       gap: 7px;
     }
     .brand-logo {
-      width: 20px;
-      height: 20px;
-      border-radius: 5px;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: linear-gradient(135deg, rgba(245,158,11,0.25), rgba(0,240,255,0.25));
-      border: 1px solid rgba(245,158,11,0.5);
+      background: linear-gradient(135deg, rgba(245,158,11,0.3), rgba(0,240,255,0.3));
+      border: 1px solid rgba(0,240,255,0.5);
       font-size: 11px;
     }
     .brand-title {
@@ -349,7 +489,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       background: rgba(0, 240, 255, 0.15);
     }
 
-    /* ─── Drawer Panels (History & Settings) ─── */
+    /* ─── Drawers (History & Settings) ─── */
     .drawer {
       display: none;
       background: #0d0f1a;
@@ -359,13 +499,8 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       gap: 7px;
       max-height: 240px;
       overflow-y: auto;
-      animation: slideDown 0.2s ease-out;
     }
     .drawer.open { display: flex; }
-    @keyframes slideDown {
-      from { opacity: 0; transform: translateY(-8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
     .drawer-title {
       font-size: 10px;
       font-weight: 800;
@@ -449,25 +584,25 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
     .btn-save {
       background: linear-gradient(135deg, #00F0FF, #7000FF);
       border: none;
-      color: #fff;
-      font-weight: 800;
-      padding: 6px;
-      border-radius: 4px;
-      cursor: pointer;
+      color: #000;
+      font-weight: 900;
       font-size: 10px;
+      padding: 6px 10px;
+      border-radius: 5px;
+      cursor: pointer;
       margin-top: 4px;
     }
 
     /* ─── Context Bar ─── */
     .context-bar {
-      padding: 4px 12px;
-      background: rgba(0,0,0,0.3);
+      padding: 4px 10px;
+      background: #0d0e17;
       border-bottom: 1px solid var(--border);
-      font-size: 10px;
-      color: var(--text-muted);
       display: flex;
       align-items: center;
       justify-content: space-between;
+      font-size: 10px;
+      color: var(--text-muted);
       flex-shrink: 0;
     }
     .context-info {
@@ -478,18 +613,19 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .active-file {
-      color: #a1a1aa;
-      font-family: monospace;
-      font-size: 10px;
-    }
     .workspace-tag {
       color: var(--neon-amber);
       font-weight: 700;
-      font-size: 10px;
+      font-size: 9px;
+    }
+    .active-file {
+      color: var(--accent);
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
-    /* ─── Messages ─── */
+    /* ─── Chat Messages Area ─── */
     .messages {
       flex: 1;
       overflow-y: auto;
@@ -499,52 +635,33 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       gap: 10px;
     }
     .msg {
-      padding: 9px 12px;
+      padding: 8px 12px;
       border-radius: 8px;
-      line-height: 1.5;
-      font-size: 12px;
-      word-break: break-word;
+      line-height: 1.45;
+      font-size: 11.5px;
+      word-wrap: break-word;
     }
     .msg-user {
-      background: #181b29;
-      border: 1px solid #282d45;
+      background: #181c2e;
+      border: 1px solid #2b304c;
       align-self: flex-end;
-      max-width: 88%;
       color: #fff;
+      max-width: 90%;
+      border-bottom-right-radius: 2px;
     }
     .msg-agent {
-      background: var(--card-bg);
+      background: #121420;
       border: 1px solid var(--border);
-      border-left: 3px solid var(--accent);
       align-self: flex-start;
-      width: 100%;
+      color: #d1d5db;
+      max-width: 98%;
+      border-bottom-left-radius: 2px;
     }
-
-    /* Transparency Receipt Pill */
-    .receipt-pill {
-      margin-bottom: 6px;
-      padding: 4px 8px;
-      background: rgba(0, 240, 255, 0.05);
-      border: 1px solid rgba(0, 240, 255, 0.2);
-      border-radius: 5px;
-      font-size: 9px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      color: #9d9fb5;
-    }
-    .receipt-item {
-      display: flex;
-      align-items: center;
-      gap: 3px;
-    }
-    .receipt-item strong {
-      color: var(--accent);
-    }
+    .msg-agent strong { color: #fff; }
 
     .code-block {
-      background: #06070a;
-      border: 1px solid #202230;
+      background: #08090f;
+      border: 1px solid #202438;
       border-radius: 6px;
       padding: 8px;
       margin: 8px 0;
@@ -630,7 +747,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       color: #fff;
     }
 
-    /* ─── Sleek Codex/Claude Code Input Bar ─── */
+    /* ─── Input Area ─── */
     .input-area {
       padding: 8px 10px;
       background: #0b0d14;
@@ -640,7 +757,14 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       gap: 6px;
       flex-shrink: 0;
     }
-    .model-select {
+    .selector-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(104px, 0.42fr) 30px;
+      gap: 5px;
+      align-items: stretch;
+    }
+    .model-select,
+    .language-select {
       background: #121420;
       border: 1px solid #202438;
       color: var(--accent);
@@ -651,8 +775,11 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       outline: none;
       width: 100%;
       cursor: pointer;
+      min-width: 0;
     }
-    .model-select option { background: #0d0f17; color: #fff; }
+    .language-select { color: var(--neon-amber); }
+    .model-select option,
+    .language-select option { background: #0d0f17; color: #fff; }
     .model-select optgroup { background: #141622; color: var(--accent); font-weight: 800; }
     
     .input-container {
@@ -663,7 +790,6 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       border-radius: 8px;
       padding: 4px 6px;
       gap: 6px;
-      transition: border-color 0.2s, box-shadow 0.2s;
     }
     .input-container:focus-within {
       border-color: var(--accent);
@@ -679,18 +805,37 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.15s;
       flex-shrink: 0;
     }
     .btn-attach:hover {
       color: var(--accent);
       background: rgba(0, 240, 255, 0.12);
     }
-    .btn-attach svg {
-      width: 16px;
-      height: 16px;
-      stroke: currentColor;
+    .btn-attach.active,
+    .voice-toggle.active {
+      color: #071016;
+      background: var(--accent);
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.35);
     }
+    .voice-toggle {
+      width: 30px;
+      min-width: 30px;
+      height: 29px;
+      padding: 0;
+      border: 1px solid #25283b;
+      background: #121420;
+      color: #7b7e96;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .voice-status {
+      min-height: 12px;
+      color: var(--text-muted);
+      font-size: 9px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+    .voice-status.error { color: #ff99c2; }
     textarea {
       flex: 1;
       background: transparent;
@@ -721,9 +866,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 4px;
       flex-shrink: 0;
-      transition: opacity 0.15s;
     }
     .btn-send:hover { opacity: 0.9; }
 
@@ -736,7 +879,14 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       font-size: 11px;
       line-height: 1.5;
     }
-    .error-card strong { color: #FF007A; }
+    @media (max-width: 310px) {
+      .selector-row { grid-template-columns: minmax(0, 1fr) 30px; }
+      .model-select { grid-column: 1 / -1; }
+      .language-select { grid-column: 1; }
+      .btn-send { padding-inline: 8px; font-size: 10px; }
+      .input-container { gap: 3px; padding-inline: 4px; }
+      .btn-attach { padding-inline: 4px; }
+    }
   </style>
 </head>
 <body>
@@ -748,7 +898,7 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       <span class="brand-title">SMARAN.AI</span>
     </div>
     <div class="header-actions">
-      <button id="newChatBtn" class="btn-icon" onclick="startNewChat()" title="Start New Chat (Ctrl+N)">➕</button>
+      <button id="newChatBtn" class="btn-icon" onclick="startNewChat()" title="Start New Chat">➕</button>
       <button id="historyBtn" class="btn-icon" onclick="toggleDrawer('historyDrawer')" title="Chat Sessions History">🕒</button>
       <button id="gearBtn" class="btn-icon" onclick="toggleDrawer('settingsDrawer')" title="API Keys & Model Settings">⚙️</button>
     </div>
@@ -788,8 +938,8 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
   <!-- Chat Messages -->
   <div class="messages" id="chat">
     <div class="msg msg-agent">
-      <strong>👋 SMARAN.AI Ready!</strong><br>
-      Ask me to write code, refactor functions, generate tests, explain algorithms, inspect workspace files, or debug terminal diagnostics directly in your editor.
+      <strong>👋 SMARAN.AI Coding Assistant Ready</strong><br>
+      Ask me to inspect context, propose edits, create files, or run commands. Workspace writes and terminal commands require your approval.
     </div>
   </div>
 
@@ -802,53 +952,286 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
     <div class="pill" onclick="quickSend('🛠️ Refactor for peak performance, cleanliness and readability')">🛠️ Refactor</div>
     <div class="pill" onclick="quickSend('🧪 Generate comprehensive unit tests covering edge cases')">🧪 Unit Tests</div>
     <div class="pill" onclick="quickSend('🐞 Find and fix potential security bugs and performance leaks')">🐞 Fix Bugs</div>
+    <div class="pill" onclick="quickSend('📁 Build full implementation plan for project requirements')">📁 Plan</div>
   </div>
 
   <!-- Input Area -->
   <div class="input-area">
-    <select id="modelSelect" class="model-select">
-      <option value="auto">⚡ Auto-Combo (Multi-LLM Dynamic Routing)</option>
-      <optgroup label="🚀 Flagship AI Models">
-        <option value="deepseek/deepseek-v4-pro">🤖 DeepSeek V4 Pro (671B MoE)</option>
-        <option value="deepseek/deepseek-r1">🧠 DeepSeek R1 Reasoning</option>
-        <option value="groq/llama-3.3-70b">⚡ Groq Ultra-Fast (500+ T/s)</option>
-        <option value="openrouter/free">🟢 OpenRouter Zero-Cost Routes</option>
-        <option value="google/gemini-2.5-flash">✨ Gemini 2.5 Flash Free</option>
-        <option value="nvidia/nemotron-3-ultra-70b">⚡ Nemotron 3 Ultra 70B</option>
-        <option value="claude-3-5-sonnet">🧠 Claude 3.5 Sonnet / Opus</option>
-        <option value="qwen2.5-coder">⚡ Qwen 2.5 Coder 32B (Local)</option>
-      </optgroup>
-    </select>
+    <div class="selector-row">
+      <select id="modelSelect" class="model-select" aria-label="Model route">
+        <option value="auto">⚡ Auto (available configured route)</option>
+        <optgroup label="Routes — availability depends on installation or key">
+          <option value="deepseek/deepseek-r1">🧠 DeepSeek R1 (provider required)</option>
+          <option value="groq/llama-3.3-70b">⚡ Groq LLaMA 3.3 (Groq key)</option>
+          <option value="openrouter/free">🟢 OpenRouter free route (may vary)</option>
+          <option value="google/gemini-2.5-flash">✨ Gemini Flash (Gemini key)</option>
+          <option value="nvidia/nemotron-3-ultra-70b">⚡ Nemotron (provider required)</option>
+          <option value="claude-3-5-sonnet">🧠 Claude (provider required)</option>
+          <option value="qwen2.5-coder">⚡ Qwen 2.5 Coder (installed Ollama)</option>
+        </optgroup>
+      </select>
+      <select id="languageSelect" class="language-select" aria-label="Response and voice language" title="Response, dictation, and read-aloud language">
+        <option value="en">English</option>
+        <option value="hi">हिन्दी</option>
+        <option value="pa">ਪੰਜਾਬੀ</option>
+        <option value="gu">ગુજરાતી</option>
+        <option value="mr">मराठी</option>
+        <option value="bn">বাংলা</option>
+        <option value="ta">தமிழ்</option>
+        <option value="te">తెలుగు</option>
+        <option value="ml">മലയാളം</option>
+        <option value="kn">ಕನ್ನಡ</option>
+      </select>
+      <button id="autoSpeakBtn" class="voice-toggle" type="button" aria-pressed="false" title="Automatically read final responses aloud">🔇</button>
+    </div>
     
     <div class="input-container">
-      <button class="btn-attach" onclick="pickAttachment()" title="Attach File / Screenshot">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-        </svg>
-      </button>
-      <textarea id="promptInput" placeholder="Instruct SMARAN.AI... (Enter to send, Shift+Enter for new line)"></textarea>
+      <button class="btn-attach" onclick="pickAttachment()" title="Attach a text file or image metadata">📎</button>
+      <button id="speakBtn" class="btn-attach" type="button" title="Dictate prompt using this VS Code runtime">🎙️</button>
+      <textarea id="promptInput" placeholder="Instruct SMARAN.AI... (Enter to send, Shift+Enter for newline)"></textarea>
+      <button id="readBtn" class="btn-attach" type="button" title="Read the last model response aloud">🔊</button>
       <button id="sendBtn" class="btn-send">SEND</button>
     </div>
+    <div id="voiceStatus" class="voice-status" role="status" aria-live="polite"></div>
   </div>
 
   <script>
-    const vscode = acquireVsCodeApi();
-    const promptInput = document.getElementById('promptInput');
-    const sendBtn = document.getElementById('sendBtn');
-    const modelSelect = document.getElementById('modelSelect');
-    const chat = document.getElementById('chat');
-    const activeFile = document.getElementById('activeFile');
-    const workspaceTag = document.getElementById('workspaceTag');
-    const selectionBadge = document.getElementById('selectionBadge');
-    const attachmentBar = document.getElementById('attachmentBar');
+    var vscode = acquireVsCodeApi();
+    var promptInput = document.getElementById('promptInput');
+    var sendBtn = document.getElementById('sendBtn');
+    var speakBtn = document.getElementById('speakBtn');
+    var readBtn = document.getElementById('readBtn');
+    var autoSpeakBtn = document.getElementById('autoSpeakBtn');
+    var modelSelect = document.getElementById('modelSelect');
+    var languageSelect = document.getElementById('languageSelect');
+    var voiceStatus = document.getElementById('voiceStatus');
+    var chat = document.getElementById('chat');
+    var activeFile = document.getElementById('activeFile');
+    var workspaceTag = document.getElementById('workspaceTag');
+    var selectionBadge = document.getElementById('selectionBadge');
+    var attachmentBar = document.getElementById('attachmentBar');
 
-    let currentEl = null;
-    let attachments = [];
-    let sessions = JSON.parse(localStorage.getItem('smaran_sessions') || '[]');
-    let currentSessionId = 'session_' + Date.now();
+    var currentEl = null;
+    var attachments = [];
+    var sessions = [];
+    try { sessions = JSON.parse(localStorage.getItem('smaran_sessions') || '[]'); } catch(e){}
+    var currentSessionId = 'session_' + Date.now();
+    var languageLocales = {
+      en: 'en-US', hi: 'hi-IN', pa: 'pa-IN', gu: 'gu-IN', mr: 'mr-IN',
+      bn: 'bn-IN', ta: 'ta-IN', te: 'te-IN', ml: 'ml-IN', kn: 'kn-IN'
+    };
+    var savedUiState = vscode.getState() || {};
+    languageSelect.value = languageLocales[savedUiState.language] ? savedUiState.language : 'en';
+    var autoSpeakEnabled = savedUiState.autoSpeak === true;
+    var lastAssistantText = '';
+    var speechRecognition = null;
+    var recognitionBaseText = '';
+    var recognitionHeard = false;
+    var recognitionHadError = false;
+    var speechQueue = [];
+    var activeUtterance = null;
+    var speechRunId = 0;
 
-    sendBtn.addEventListener('click', () => submit());
-    promptInput.addEventListener('keydown', (e) => {
+    function persistUiState() {
+      vscode.setState({ language: languageSelect.value, autoSpeak: autoSpeakEnabled });
+    }
+
+    function setVoiceStatus(message, isError) {
+      voiceStatus.textContent = message || '';
+      voiceStatus.classList.toggle('error', Boolean(isError));
+    }
+
+    function updateAutoSpeakButton() {
+      autoSpeakBtn.classList.toggle('active', autoSpeakEnabled);
+      autoSpeakBtn.setAttribute('aria-pressed', autoSpeakEnabled ? 'true' : 'false');
+      autoSpeakBtn.textContent = autoSpeakEnabled ? '🔊' : '🔇';
+      autoSpeakBtn.title = autoSpeakEnabled
+        ? 'Automatic read-aloud is on. Click to disable.'
+        : 'Automatic read-aloud is off. Click to enable.';
+    }
+
+    function plainSpeechText(text) {
+      var value = String(text || '');
+      var tick = String.fromCharCode(96);
+      var fenced = new RegExp(tick + tick + tick + '[\\s\\S]*?' + tick + tick + tick, 'g');
+      var links = new RegExp('\\[([^\\]]+)\\]\\([^)]+\\)', 'g');
+      return value
+        .replace(fenced, ' ')
+        .replace(links, '$1')
+        .replace(/[*#_~>]/g, ' ')
+        .replace(/<tool_call[\\s\\S]*?<\\/tool_call>/gi, ' ')
+        .replace(/\\s+/g, ' ')
+        .trim();
+    }
+
+    function stopSpeaking(message) {
+      speechRunId += 1;
+      speechQueue = [];
+      activeUtterance = null;
+      if ('speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+      }
+      readBtn.classList.remove('active');
+      if (message !== undefined) setVoiceStatus(message, false);
+    }
+
+    function speakNext(runId) {
+      if (runId !== speechRunId || speechQueue.length === 0) {
+        activeUtterance = null;
+        readBtn.classList.remove('active');
+        if (runId === speechRunId) setVoiceStatus('Read-aloud finished.', false);
+        return;
+      }
+
+      var part = speechQueue.shift();
+      var utterance = new SpeechSynthesisUtterance(part);
+      var locale = languageLocales[languageSelect.value] || 'en-US';
+      utterance.lang = locale;
+      utterance.rate = 0.95;
+      utterance.pitch = 1;
+
+      try {
+        var voices = window.speechSynthesis.getVoices() || [];
+        var prefix = locale.split('-')[0].toLowerCase();
+        var matchingVoice = voices.find(function(voice) {
+          return String(voice.lang || '').toLowerCase().indexOf(prefix) === 0;
+        });
+        if (matchingVoice) utterance.voice = matchingVoice;
+      } catch (_) {}
+
+      utterance.onstart = function() {
+        if (runId !== speechRunId) return;
+        readBtn.classList.add('active');
+        setVoiceStatus('Reading response using an available OS voice (' + locale + ').', false);
+      };
+      utterance.onend = function() {
+        if (runId === speechRunId) speakNext(runId);
+      };
+      utterance.onerror = function(event) {
+        if (runId !== speechRunId) return;
+        var reason = event && event.error ? event.error : 'speech synthesis failed';
+        if (reason === 'canceled' || reason === 'interrupted') return;
+        speechQueue = [];
+        activeUtterance = null;
+        readBtn.classList.remove('active');
+        setVoiceStatus('Read-aloud error: ' + reason + '. Check installed OS voices and audio output.', true);
+      };
+      activeUtterance = utterance;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    function speakText(text) {
+      if (!('speechSynthesis' in window) || typeof window.SpeechSynthesisUtterance === 'undefined') {
+        setVoiceStatus('Read-aloud is unavailable in this VS Code runtime.', true);
+        return;
+      }
+      var clean = plainSpeechText(text);
+      if (!clean) {
+        setVoiceStatus('There is no readable response text.', true);
+        return;
+      }
+
+      stopSpeaking();
+      var runId = speechRunId;
+      for (var offset = 0; offset < clean.length; offset += 220) {
+        speechQueue.push(clean.slice(offset, offset + 220));
+      }
+      setVoiceStatus('Starting read-aloud…', false);
+      speakNext(runId);
+    }
+
+    sendBtn.addEventListener('click', function() { submit(); });
+    languageSelect.addEventListener('change', function() {
+      stopSpeaking();
+      persistUiState();
+      setVoiceStatus('Response and voice language set to ' + languageSelect.options[languageSelect.selectedIndex].text + '.', false);
+    });
+    autoSpeakBtn.addEventListener('click', function() {
+      autoSpeakEnabled = !autoSpeakEnabled;
+      if (!autoSpeakEnabled) stopSpeaking('Automatic read-aloud disabled.');
+      else setVoiceStatus('Automatic read-aloud enabled for final model responses.', false);
+      updateAutoSpeakButton();
+      persistUiState();
+    });
+    readBtn.addEventListener('click', function() {
+      if (activeUtterance || (window.speechSynthesis && window.speechSynthesis.speaking)) {
+        stopSpeaking('Read-aloud stopped.');
+        return;
+      }
+      if (!lastAssistantText) {
+        setVoiceStatus('No completed model response is available to read.', true);
+        return;
+      }
+      speakText(lastAssistantText);
+    });
+    speakBtn.addEventListener('click', function() {
+      var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!Recognition) {
+        setVoiceStatus('Dictation is unavailable in this VS Code runtime. Use OS voice typing or type the prompt.', true);
+        return;
+      }
+      if (speechRecognition) {
+        setVoiceStatus('Stopping dictation…', false);
+        try { speechRecognition.stop(); } catch (_) {}
+        return;
+      }
+
+      try {
+        recognitionBaseText = promptInput.value.trim();
+        recognitionHeard = false;
+        recognitionHadError = false;
+        speechRecognition = new Recognition();
+        speechRecognition.continuous = false;
+        speechRecognition.interimResults = true;
+        speechRecognition.maxAlternatives = 1;
+        speechRecognition.lang = languageLocales[languageSelect.value] || 'en-US';
+        speechRecognition.onstart = function() {
+          speakBtn.textContent = '⏹️';
+          speakBtn.classList.add('active');
+          setVoiceStatus('Listening in ' + speechRecognition.lang + '… Click stop when finished.', false);
+        };
+        speechRecognition.onresult = function(event) {
+          var spoken = '';
+          for (var i = 0; i < event.results.length; i++) {
+            spoken += event.results[i][0].transcript + ' ';
+          }
+          spoken = spoken.trim();
+          recognitionHeard = spoken.length > 0;
+          promptInput.value = [recognitionBaseText, spoken].filter(Boolean).join(' ');
+          setVoiceStatus(recognitionHeard ? 'Speech captured. Waiting for dictation to finish…' : 'Listening…', false);
+        };
+        speechRecognition.onerror = function(event) {
+          recognitionHadError = true;
+          var reason = event && event.error ? event.error : 'unknown microphone error';
+          var help = reason === 'not-allowed' || reason === 'service-not-allowed'
+            ? ' Allow microphone access for VS Code, then try again.'
+            : reason === 'no-speech'
+              ? ' No speech was detected.'
+              : '';
+          setVoiceStatus('Dictation error: ' + reason + '.' + help, true);
+        };
+        speechRecognition.onend = function() {
+          var shouldSubmit = recognitionHeard && !recognitionHadError && promptInput.value.trim().length > 0;
+          speechRecognition = null;
+          speakBtn.textContent = '🎙️';
+          speakBtn.classList.remove('active');
+          if (shouldSubmit) {
+            setVoiceStatus('Speech captured. Sending prompt…', false);
+            window.setTimeout(function() { submit(); }, 0);
+          } else if (!recognitionHadError) {
+            setVoiceStatus('Dictation stopped without captured speech.', true);
+          }
+        };
+        speechRecognition.start();
+      } catch (error) {
+        speechRecognition = null;
+        speakBtn.textContent = '🎙️';
+        speakBtn.classList.remove('active');
+        setVoiceStatus('Could not start dictation in this VS Code runtime.', true);
+      }
+    });
+    updateAutoSpeakButton();
+    promptInput.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         submit();
@@ -873,23 +1256,23 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
         return;
       }
       attachmentBar.classList.add('has-items');
-      attachmentBar.innerHTML = attachments.map((a, i) =>
-        '<div class="att-chip"><span>📄 ' + esc(a.name) + '</span><span class="att-remove" onclick="removeAttachment(' + i + ')">✕</span></div>'
-      ).join('');
+      attachmentBar.innerHTML = attachments.map(function(a, i) {
+        return '<div class="att-chip"><span>📄 ' + esc(a.name) + '</span><span class="att-remove" onclick="removeAttachment(' + i + ')">✕</span></div>';
+      }).join('');
     }
 
     function submit() {
-      const t = promptInput.value.trim();
+      var t = promptInput.value.trim();
       if (!t && attachments.length === 0) return;
       
-      let userHtml = esc(t);
+      var userHtml = esc(t);
       if (attachments.length > 0) {
         userHtml += '<div style="margin-top:4px;font-size:9px;color:var(--accent);">' +
-          attachments.map(a => '📎 ' + esc(a.name)).join(' | ') + '</div>';
+          attachments.map(function(a) { return '📎 ' + esc(a.name); }).join(' | ') + '</div>';
       }
 
       addMsg('msg-user', userHtml);
-      const payloadAttachments = [...attachments];
+      var payloadAttachments = attachments.slice(0);
       attachments = [];
       renderAttachments();
 
@@ -898,12 +1281,13 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
         type: 'sendMessage',
         prompt: t || 'Analyze attached context files',
         model: modelSelect.value,
+        language: languageSelect.value,
         attachments: payloadAttachments
       });
     }
 
     function addMsg(cls, html) {
-      const d = document.createElement('div');
+      var d = document.createElement('div');
       d.className = 'msg ' + cls;
       d.innerHTML = html;
       chat.appendChild(d);
@@ -916,14 +1300,23 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
     function insertSnippet(enc) { vscode.postMessage({ type: 'insertSnippet', code: decodeURIComponent(enc) }); }
 
     function fmtMd(text) {
-      return text.replace(/\\\`\\\`\\\`([a-zA-Z0-9]*)\\n([\\s\\S]*?)\\\`\\\`\\\`/g, function(m, lang, code) {
-        const enc = encodeURIComponent(code);
+      var safe = String(text || '');
+      var bt = String.fromCharCode(96) + String.fromCharCode(96) + String.fromCharCode(96);
+      var codeBlockRegex = new RegExp(bt + '([a-zA-Z0-9]*)\\n([\\s\\S]*?)' + bt, 'g');
+      safe = safe.replace(codeBlockRegex, function(m, lang, code) {
+        var enc = encodeURIComponent(code);
         return '<div class="code-block"><pre><code>' + esc(code) + '</code></pre>' +
           '<div class="code-actions">' +
           '<button class="btn-action" onclick="applyCode(\\'' + enc + '\\')">⚡ Apply to File</button>' +
           '<button class="btn-action" onclick="insertSnippet(\\'' + enc + '\\')">📋 Insert at Cursor</button>' +
           '</div></div>';
-      }).replace(/\\n/g, '<br>');
+      });
+      safe = safe.replace(/### (.*?)\\n/g, '<h4 style="color:#00F0FF;margin:6px 0;">$1</h4>');
+      safe = safe.replace(/## (.*?)\\n/g, '<h3 style="color:#FFB800;margin:8px 0;">$1</h3>');
+      safe = safe.replace(/# (.*?)\\n/g, '<h2 style="color:#fff;margin:10px 0;">$1</h2>');
+      safe = safe.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      safe = safe.replace(/\\n/g, '<br>');
+      return safe;
     }
 
     function esc(s) {
@@ -931,10 +1324,10 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
     }
 
     function toggleDrawer(id) {
-      const target = document.getElementById(id);
-      const isCurrentlyOpen = target.classList.contains('open');
-      document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
-      document.querySelectorAll('.btn-icon').forEach(b => b.classList.remove('active'));
+      var target = document.getElementById(id);
+      var isCurrentlyOpen = target.classList.contains('open');
+      document.querySelectorAll('.drawer').forEach(function(d) { d.classList.remove('open'); });
+      document.querySelectorAll('.btn-icon').forEach(function(b) { b.classList.remove('active'); });
 
       if (!isCurrentlyOpen) {
         target.classList.add('open');
@@ -949,30 +1342,32 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
     }
 
     function renderSessionList() {
-      const listEl = document.getElementById('sessionList');
+      var listEl = document.getElementById('sessionList');
       if (sessions.length === 0) {
         listEl.innerHTML = '<div style="color:#6b6e82;font-size:10px;padding:6px;">No saved sessions yet.</div>';
         return;
       }
-      listEl.innerHTML = sessions.map(s =>
-        '<div class="session-item ' + (s.id === currentSessionId ? 'active' : '') + '" onclick="restoreSession(\\'' + s.id + '\\')">' +
+      listEl.innerHTML = sessions.map(function(s) {
+        return '<div class="session-item ' + (s.id === currentSessionId ? 'active' : '') + '" onclick="restoreSession(\\'' + s.id + '\\')">' +
           '<span class="session-title">' + esc(s.title || 'Untitled Session') + '</span>' +
           '<button class="btn-trash" onclick="event.stopPropagation(); deleteSession(\\'' + s.id + '\\')" title="Delete Session">🗑️</button>' +
-        '</div>'
-      ).join('');
+        '</div>';
+      }).join('');
     }
 
     function startNewChat() {
       saveCurrentSession();
+      stopSpeaking();
+      lastAssistantText = '';
       currentSessionId = 'session_' + Date.now();
-      chat.innerHTML = '<div class="msg msg-agent"><strong>👋 SMARAN.AI New Session Started!</strong><br>How can I assist you with your project today?</div>';
-      document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
-      document.querySelectorAll('.btn-icon').forEach(b => b.classList.remove('active'));
+      chat.innerHTML = '<div class="msg msg-agent"><strong>👋 SMARAN.AI New Session Started</strong><br>How can I assist with the supplied project context?</div>';
+      document.querySelectorAll('.drawer').forEach(function(d) { d.classList.remove('open'); });
+      document.querySelectorAll('.btn-icon').forEach(function(b) { b.classList.remove('active'); });
     }
 
     function saveCurrentSession() {
-      const msgs = [];
-      chat.querySelectorAll('.msg').forEach(m => {
+      var msgs = [];
+      chat.querySelectorAll('.msg').forEach(function(m) {
         msgs.push({
           role: m.classList.contains('msg-user') ? 'user' : 'agent',
           html: m.innerHTML
@@ -980,11 +1375,11 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
       });
       if (msgs.length <= 1) return;
 
-      const firstUserMsg = msgs.find(m => m.role === 'user');
-      const title = firstUserMsg ? firstUserMsg.html.replace(/<[^>]*>/g, '').slice(0, 32) : 'Session';
+      var firstUserMsg = msgs.find(function(m) { return m.role === 'user'; });
+      var title = firstUserMsg ? firstUserMsg.html.replace(/<[^>]*>/g, '').slice(0, 32) : 'Session';
 
-      const existingIndex = sessions.findIndex(s => s.id === currentSessionId);
-      const rec = {
+      var existingIndex = sessions.findIndex(function(s) { return s.id === currentSessionId; });
+      var rec = {
         id: currentSessionId,
         title: title,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -997,23 +1392,27 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
         sessions.unshift(rec);
       }
       if (sessions.length > 25) sessions.pop();
-      localStorage.setItem('smaran_sessions', JSON.stringify(sessions));
+      try { localStorage.setItem('smaran_sessions', JSON.stringify(sessions)); } catch(e){}
     }
 
     function restoreSession(id) {
-      const session = sessions.find(s => s.id === id);
+      var session = sessions.find(function(s) { return s.id === id; });
       if (!session) return;
       currentSessionId = id;
-      chat.innerHTML = session.messages.map(m =>
-        '<div class="msg ' + (m.role === 'user' ? 'msg-user' : 'msg-agent') + '">' + m.html + '</div>'
-      ).join('');
+      chat.innerHTML = session.messages.map(function(m) {
+        return '<div class="msg ' + (m.role === 'user' ? 'msg-user' : 'msg-agent') + '">' + m.html + '</div>';
+      }).join('');
+      var restoredAgentMessages = chat.querySelectorAll('.msg-agent');
+      if (restoredAgentMessages.length > 0) {
+        lastAssistantText = restoredAgentMessages[restoredAgentMessages.length - 1].textContent || '';
+      }
       chat.scrollTop = chat.scrollHeight;
       toggleDrawer('historyDrawer');
     }
 
     function deleteSession(id) {
-      sessions = sessions.filter(s => s.id !== id);
-      localStorage.setItem('smaran_sessions', JSON.stringify(sessions));
+      sessions = sessions.filter(function(s) { return s.id !== id; });
+      try { localStorage.setItem('smaran_sessions', JSON.stringify(sessions)); } catch(e){}
       if (currentSessionId === id) {
         startNewChat();
       } else {
@@ -1023,12 +1422,12 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
 
     function clearAllSessions() {
       sessions = [];
-      localStorage.removeItem('smaran_sessions');
+      try { localStorage.removeItem('smaran_sessions'); } catch(e){}
       startNewChat();
     }
 
     function saveKeys() {
-      const keys = {
+      var keys = {
         openRouter: document.getElementById('keyOpenRouter').value.trim(),
         groq: document.getElementById('keyGroq').value.trim(),
         custom: document.getElementById('keyCustom').value.trim(),
@@ -1037,13 +1436,13 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
         gemini: document.getElementById('keyGemini').value.trim(),
         backendUrl: document.getElementById('keyBackendUrl').value.trim() || 'http://localhost:3003'
       };
-      vscode.postMessage({ type: 'saveApiKeys', keys });
+      vscode.postMessage({ type: 'saveApiKeys', keys: keys });
       document.getElementById('settingsDrawer').classList.remove('open');
       document.getElementById('gearBtn').classList.remove('active');
     }
 
-    window.addEventListener('message', (event) => {
-      const m = event.data;
+    window.addEventListener('message', function(event) {
+      var m = event.data;
       switch (m.type) {
         case 'attachmentAdded':
           attachments.push(m.file);
@@ -1083,25 +1482,18 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
           chat.scrollTop = chat.scrollHeight;
           break;
         case 'agentResponse':
-          let fullHtml = '';
-          if (m.meta) {
-            fullHtml += '<div class="receipt-pill">' +
-              '<span class="receipt-item">⚡ <strong>' + esc(m.meta.model) + '</strong></span>' +
-              '<span class="receipt-item">🗜️ <strong>Headroom:</strong> ' + esc(m.meta.headroomSaved) + '</span>' +
-              '<span class="receipt-item">🧠 <strong>Memory:</strong> Synced</span>' +
-              '<span class="receipt-item">🛠️ <strong>Plugins:</strong> ' + esc(m.meta.plugins.join(', ')) + '</span>' +
-            '</div>';
-          }
-          fullHtml += fmtMd(m.response);
+          lastAssistantText = String(m.response || '');
+          var fullHtml = fmtMd(m.response);
           if (currentEl) { currentEl.innerHTML = fullHtml; }
           else { addMsg('msg-agent', fullHtml); }
           currentEl = null;
           chat.scrollTop = chat.scrollHeight;
           saveCurrentSession();
+          if (autoSpeakEnabled) speakText(lastAssistantText);
           break;
         case 'agentError':
-          const errCard = '<div class="error-card">' +
-            '<strong>⚠️ Connection Notice</strong><br>' +
+          var errCard = '<div class="error-card">' +
+            '<strong>⚠️ Notice</strong><br>' +
             esc(m.error).replace(/\\n/g, '<br>') +
             '</div>';
           if (currentEl) { currentEl.innerHTML = errCard; }

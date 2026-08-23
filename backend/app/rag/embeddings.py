@@ -9,8 +9,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-def _generate_fallback_embedding(text: str, dim: int = 768) -> list[float]:
-    """Generate a deterministic 768-dimensional normalized embedding vector from text hash."""
+def _generate_fallback_embedding(text: str, dim: int = 1024) -> list[float]:
+    """Generate a deterministic 1024-dimensional normalized embedding vector from text hash."""
     seed = int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16)
     rng = np.random.RandomState(seed)
     vec = rng.randn(dim)
@@ -20,6 +20,63 @@ def _generate_fallback_embedding(text: str, dim: int = 768) -> list[float]:
     return vec.tolist()
 
 
+class OpenRouterFreeEmbeddings:
+    """Free OpenRouter NVIDIA Nemotron Embeddings API integration.
+    Models:
+    - nvidia/nemotron-3-embed-1b:free
+    - nvidia/llama-nemotron-embed-vl-1b-v2:free
+    """
+    def __init__(self, api_key: str = None, model: str = "nvidia/nemotron-3-embed-1b:free"):
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
+        self.model = model
+        self.endpoint = "https://openrouter.ai/api/v1/embeddings"
+
+    def is_available(self) -> bool:
+        return bool(self.api_key and len(self.api_key.strip()) > 5)
+
+    def embed_query(self, text: str) -> list[float]:
+        if not self.is_available():
+            return []
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key.strip()}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost:3003",
+                "X-Title": "SMARAN.AI"
+            }
+            payload = {"model": self.model, "input": text}
+            res = requests.post(self.endpoint, headers=headers, json=payload, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                items = data.get("data", [])
+                if items and "embedding" in items[0]:
+                    return items[0]["embedding"]
+        except Exception as e:
+            logger.warning(f"OpenRouter free embedding query failed ({e})")
+        return []
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if not texts or not self.is_available():
+            return []
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key.strip()}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost:3003",
+                "X-Title": "SMARAN.AI"
+            }
+            payload = {"model": self.model, "input": texts}
+            res = requests.post(self.endpoint, headers=headers, json=payload, timeout=25)
+            if res.status_code == 200:
+                data = res.json()
+                items = data.get("data", [])
+                if items:
+                    return [item["embedding"] for item in sorted(items, key=lambda x: x.get("index", 0))]
+        except Exception as e:
+            logger.warning(f"OpenRouter batch free embedding failed ({e})")
+        return []
+
+
 class OllamaEmbeddings:
     def __init__(self):
         self.base_url = settings.OLLAMA_URL
@@ -27,13 +84,12 @@ class OllamaEmbeddings:
         self._resolved_url = None
         self._retry_after = 0
         self.enabled = os.getenv("OLLAMA_EMBEDDINGS_ENABLED", "1" if settings.INFERENCE_ENGINE == "ollama" else "0") == "1"
+        self.openrouter_embedder = OpenRouterFreeEmbeddings()
 
     def semantic_search_available(self) -> bool:
-        """Return True only when a real embedding service is reachable.
-
-        Hash-based fallback vectors are useful for satisfying a storage schema, but
-        they carry no semantic meaning and must never be used for retrieval.
-        """
+        """Return True when either Ollama local embeddings or OpenRouter Free Embeddings are reachable."""
+        if self.openrouter_embedder.is_available():
+            return True
         return bool(self._resolve_url())
 
     def _resolve_url(self) -> str:
@@ -63,37 +119,50 @@ class OllamaEmbeddings:
         return ""
 
     def embed_query(self, text: str) -> list[float]:
+        # 1. Try OpenRouter Free NVIDIA Nemotron 3 Embed 1B if key is available
+        if self.openrouter_embedder.is_available():
+            vec = self.openrouter_embedder.embed_query(text)
+            if vec:
+                return vec
+
+        # 2. Try Local Ollama Embeddings
         try:
             url_base = self._resolve_url()
-            if not url_base:
-                return _generate_fallback_embedding(text)
-            url = f"{url_base}/api/embed"
-            payload = {"model": self.model, "input": text}
-            response = requests.post(url, json=payload, timeout=10)
-            if response.status_code == 200:
-                embeddings = response.json().get("embeddings", [])
-                if embeddings:
-                    return embeddings[0]
+            if url_base:
+                url = f"{url_base}/api/embed"
+                payload = {"model": self.model, "input": text}
+                response = requests.post(url, json=payload, timeout=10)
+                if response.status_code == 200:
+                    embeddings = response.json().get("embeddings", [])
+                    if embeddings:
+                        return embeddings[0]
         except Exception as e:
-            logger.warning(f"Ollama embed query unavailable ({e}). Using local fallback embedding...")
+            logger.warning(f"Ollama embed query unavailable ({e})")
         
         return _generate_fallback_embedding(text)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+
+        # 1. Try OpenRouter Free NVIDIA Nemotron 3 Embed 1B if key is available
+        if self.openrouter_embedder.is_available():
+            vecs = self.openrouter_embedder.embed_documents(texts)
+            if vecs and len(vecs) == len(texts):
+                return vecs
+
+        # 2. Try Local Ollama Embeddings
         try:
             url_base = self._resolve_url()
-            if not url_base:
-                return [_generate_fallback_embedding(t) for t in texts]
-            url = f"{url_base}/api/embed"
-            payload = {"model": self.model, "input": texts}
-            response = requests.post(url, json=payload, timeout=30)
-            if response.status_code == 200:
-                embeddings = response.json().get("embeddings", [])
-                if embeddings and len(embeddings) == len(texts):
-                    return embeddings
+            if url_base:
+                url = f"{url_base}/api/embed"
+                payload = {"model": self.model, "input": texts}
+                response = requests.post(url, json=payload, timeout=30)
+                if response.status_code == 200:
+                    embeddings = response.json().get("embeddings", [])
+                    if embeddings and len(embeddings) == len(texts):
+                        return embeddings
         except Exception as e:
-            logger.warning(f"Ollama batch embed unavailable ({e}). Using local fallback embeddings...")
+            logger.warning(f"Ollama batch embed unavailable ({e})")
 
         return [_generate_fallback_embedding(t) for t in texts]

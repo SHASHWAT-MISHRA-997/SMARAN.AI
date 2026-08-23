@@ -1,0 +1,150 @@
+"""
+SMARAN.AI — Windows EXE builder
+===============================
+Produces a standalone `SMARAN.AI.exe` that runs without Docker, Python, or a
+sign-in. Everything the app needs (backend, prebuilt UI, dependencies) is
+bundled into the executable.
+
+Usage:
+    python build_exe.py            # build the EXE
+    python build_exe.py --onefile  # single-file EXE (slower first start)
+
+Output:
+    dist/SMARAN.AI/SMARAN.AI.exe   (default, folder build — fastest startup)
+    dist/SMARAN.AI.exe             (--onefile)
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+APP_NAME = "SMARAN.AI"
+ENTRY = os.path.join(ROOT, "desktop_app.py")
+ICON = os.path.join(ROOT, "smaran.ico")
+FRONTEND_DIST = os.path.join(ROOT, "backend", "frontend_dist")
+
+# Packages PyInstaller cannot discover through dynamic imports.
+HIDDEN_IMPORTS = [
+    "app.main",
+    # Routers reached only through app.main. They are picked up by following
+    # its imports, but naming them means a rename can never silently drop a
+    # whole feature out of the build.
+    "app.companion",
+    "app.app_lock",
+    "app.web_intents",
+    "app.desktop_agent",
+    # QR rendering. The import sits inside the endpoint so the module loads
+    # without it, which also meant PyInstaller's static scan never saw it and
+    # the packaged build shipped without the library.
+    "segno",
+    "uvicorn.logging",
+    "uvicorn.loops.auto",
+    "uvicorn.protocols.http.auto",
+    "uvicorn.protocols.websockets.auto",
+    "uvicorn.lifespan.on",
+    "webview",
+    "webview.platforms.winforms",
+    "edge_tts",
+    "passlib.handlers.bcrypt",
+    "sqlalchemy.dialects.sqlite",
+    "email_validator",
+]
+
+# Packages that ship data files / metadata they read at runtime.
+COLLECT_ALL = [
+    "chromadb",
+    "faster_whisper",
+    "deep_translator",
+    "tokenizers",
+    "tiktoken_ext",
+]
+
+# Optional heavy dependencies that ChromaDB advertises but SMARAN.AI never uses:
+# embeddings run through Ollama, and no local model is executed in-process.
+# Excluding them removes roughly a gigabyte from the bundle.
+EXCLUDES = [
+    # The AWS SDK is never imported by this app; PyInstaller only picks it up
+    # transitively. It also ships thousands of deeply nested data files whose
+    # paths overflow the Windows 260-character limit, which aborted the
+    # installer compile part-way through botocore's endpoint rule sets.
+    "boto3",
+    "botocore",
+    "s3transfer",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "transformers",
+    "polars",
+    "faiss",
+    "sklearn",
+    "scikit-learn",
+    "onnxruntime",
+    "tensorflow",
+    "matplotlib",
+    "IPython",
+    "notebook",
+    "pytest",
+    "PyInstaller",
+]
+
+
+def _ensure_frontend_built() -> None:
+    index = os.path.join(FRONTEND_DIST, "index.html")
+    if os.path.isfile(index):
+        return
+    print("[build] frontend_dist missing — building the UI first...")
+    subprocess.run(["npx", "vite", "build"], cwd=os.path.join(ROOT, "frontend"),
+                   check=True, shell=os.name == "nt")
+
+
+def build(onefile: bool = False) -> int:
+    _ensure_frontend_built()
+
+    for stale in ("build", "dist"):
+        path = os.path.join(ROOT, stale)
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+
+    sep = ";" if os.name == "nt" else ":"
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--windowed",                      # no console window
+        "--name", APP_NAME,
+        "--onefile" if onefile else "--onedir",
+        # Bundle the backend package and the prebuilt UI.
+        "--paths", os.path.join(ROOT, "backend"),
+        "--add-data", f"{FRONTEND_DIST}{sep}frontend_dist",
+    ]
+
+    if os.path.isfile(ICON):
+        cmd += ["--icon", ICON]
+
+    for module in HIDDEN_IMPORTS:
+        cmd += ["--hidden-import", module]
+    for package in COLLECT_ALL:
+        cmd += ["--collect-all", package]
+    for package in EXCLUDES:
+        cmd += ["--exclude-module", package]
+
+    cmd.append(ENTRY)
+
+    print("[build] running PyInstaller...")
+    result = subprocess.run(cmd, cwd=ROOT)
+    if result.returncode != 0:
+        print("[build] FAILED", file=sys.stderr)
+        return result.returncode
+
+    target = (os.path.join(ROOT, "dist", f"{APP_NAME}.exe") if onefile
+              else os.path.join(ROOT, "dist", APP_NAME, f"{APP_NAME}.exe"))
+    print(f"[build] done -> {target}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(build(onefile="--onefile" in sys.argv))

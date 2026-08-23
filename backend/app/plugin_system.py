@@ -173,6 +173,11 @@ class PluginManager:
         self.configs: Dict[str, PluginConfig] = {}
         self.app_context: Dict[str, Any] = {}
         self._hooks: Dict[str, List[Callable]] = {}
+        # Registration, configuration and runtime availability are deliberately
+        # separate.  A class being imported is not proof that its dependencies,
+        # credentials or remote service are ready.
+        self._load_errors: Dict[str, str] = {}
+        self._load_attempted: Dict[str, bool] = {}
     
     def set_app_context(self, context: Dict[str, Any]):
         """Set the application context available to plugins"""
@@ -220,14 +225,34 @@ class PluginManager:
         if not self.configs[name].enabled:
             logger.info(f"Plugin {name} is disabled, skipping")
             return False
-        
+
+        self._load_attempted[name] = True
+        self._load_errors.pop(name, None)
+        plugin._initialized = False
         try:
-            success = await plugin.initialize(self.app_context)
+            initialized = bool(await plugin.initialize(self.app_context))
+            capabilities = plugin.get_capabilities() if initialized else []
+            # Some legacy implementations return True without marking their
+            # runtime state.  Accept them only when they also expose a concrete
+            # capability after initialization; never infer readiness from
+            # registration or enabled=True alone.
+            success = initialized and bool(capabilities)
+            plugin._initialized = success
             if success:
                 logger.info(f"Loaded plugin: {name}")
                 await self.trigger_hook("plugin_loaded", name, plugin)
+            else:
+                reason = (
+                    "initialize() returned false"
+                    if not initialized
+                    else "initialization exposed no runtime capabilities"
+                )
+                self._load_errors[name] = reason
+                logger.warning("Plugin %s is not runtime-ready: %s", name, reason)
             return success
         except Exception as e:
+            plugin._initialized = False
+            self._load_errors[name] = str(e)
             logger.error(f"Failed to load plugin {name}: {e}")
             return False
     
@@ -245,6 +270,7 @@ class PluginManager:
         
         try:
             await self.plugins[name].shutdown()
+            self.plugins[name]._initialized = False
             logger.info(f"Unloaded plugin: {name}")
             await self.trigger_hook("plugin_unloaded", name)
             return True
@@ -255,12 +281,24 @@ class PluginManager:
     def get_plugin(self, name: str) -> Optional[BasePlugin]:
         """Get a plugin by name"""
         return self.plugins.get(name)
-    
+
+    def is_plugin_active(self, name: str) -> bool:
+        """Return True only for an enabled, initialized runtime instance."""
+        plugin = self.plugins.get(name)
+        config = self.configs.get(name)
+        return bool(
+            plugin is not None
+            and config is not None
+            and config.enabled
+            and getattr(plugin, "_initialized", False)
+        )
+
     def get_plugins_by_type(self, plugin_type: PluginType) -> List[BasePlugin]:
         """Get all plugins of a specific type"""
         return [
             p for p in self.plugins.values() 
-            if p.metadata.plugin_type == plugin_type and p.is_enabled()
+            if p.metadata.plugin_type == plugin_type
+            and self.is_plugin_active(p.metadata.name)
         ]
     
     def get_all_tools(self) -> List[Dict]:
@@ -314,29 +352,8 @@ class PluginManager:
                     return await plugin.execute_operation(operation_name, parameters)
         raise ValueError(f"Connector operation {operation_name} not found")
     
-    # Canonical display-category mapping for built-in plugins.
-    # PluginType.TOOL is an internal detail; the Hub UI shows these as
-    # "plugin", "skill", or "connector" depending on the plugin's purpose.
-    _DISPLAY_CATEGORY: Dict[str, str] = {
-        "omni-route":        "plugin",
-        "headroom":          "plugin",
-        "claude-mem":        "plugin",
-        "paperclip":         "plugin",
-        "task-observer":     "skill",
-        "ui-ux-pro-max":     "skill",
-        "ui-ux-pro-max-skill": "skill",
-        "reverse-skill":     "skill",
-        "3d-website":        "skill",
-        "strix-security":    "connector",
-        "google-agents-cli": "connector",
-        "mcp-21st-dev":      "connector",
-    }
-
     def _resolve_display_type(self, name: str, raw_type: str) -> str:
-        """Return the user-facing category for a plugin."""
-        if name in self._DISPLAY_CATEGORY:
-            return self._DISPLAY_CATEGORY[name]
-        # Fallback: map "tool" → "plugin", keep skill/connector as-is
+        """Map the actual registered Python plugin type to a UI category."""
         return "plugin" if raw_type == "tool" else raw_type
 
     def get_status(self) -> Dict:
@@ -345,24 +362,73 @@ class PluginManager:
         result = {}
         for name, m in self.metadata.items():
             display_type = self._resolve_display_type(name, m.plugin_type.value)
-            loaded = name in self.plugins and hasattr(self.plugins[name], '_initialized')
-            caps = self.plugins[name].get_capabilities() if name in self.plugins else []
+            enabled = bool(self.configs.get(name) and self.configs[name].enabled)
+            loaded = self.is_plugin_active(name)
+            caps = []
+            if loaded:
+                try:
+                    caps = self.plugins[name].get_capabilities()
+                except Exception as exc:
+                    loaded = False
+                    self.plugins[name]._initialized = False
+                    self._load_errors[name] = str(exc)
+            if loaded:
+                runtime_status = "active"
+                status_detail = "This backend process reports initialized=true and exposes runtime capability definitions."
+            elif not enabled:
+                runtime_status = "disabled"
+                status_detail = "Registered, but disabled by configuration."
+            elif name in self._load_errors:
+                runtime_status = "error"
+                status_detail = f"Initialization failed: {self._load_errors[name]}"
+            else:
+                runtime_status = "setup_required"
+                status_detail = "Registered definition only; not initialized in this backend process."
             result[name] = {
                 "name": m.name,
                 "version": m.version,
                 "description": m.description,
                 "type": display_type,
                 "author": m.author,
-                "enabled": self.configs[name].enabled if name in self.configs else True,
+                "enabled": enabled,
                 "loaded": loaded,
+                "available": loaded,
+                "registered": True,
+                "runtime_status": runtime_status,
+                "status_detail": status_detail,
+                "load_attempted": bool(self._load_attempted.get(name, False)),
                 "capabilities": caps,
                 "tags": m.tags,
                 "homepage": m.homepage or "",
                 "repository": m.repository or "",
             }
         return result
-    
-    async def install_plugin_from_repo(self, repo_url: str, install_path: Optional[str] = None) -> bool:
+
+    def get_active_plugins_prompt_context(self) -> str:
+        """Describe only extensions initialized in this backend process."""
+        lines = []
+        for name in self.metadata:
+            if self.is_plugin_active(name):
+                m = self.metadata[name]
+                try:
+                    capabilities = self.plugins[name].get_capabilities()
+                except Exception:
+                    continue
+                if capabilities:
+                    lines.append(
+                        f"- **{m.name}** ({m.plugin_type.value}); runtime capabilities: "
+                        + ", ".join(capabilities)
+                    )
+        if not lines:
+            return ""
+        return (
+            "\n\nINITIALIZED RUNTIME EXTENSIONS:\n"
+            "Only the following locally initialized capabilities are available. "
+            "Do not claim that an extension was used unless its operation is actually invoked:\n"
+            + "\n".join(lines)
+        )
+
+    def install_plugin_from_repo(self, repo_url: str, install_path: Optional[str] = None) -> bool:
         """Install a plugin from a git repository"""
         try:
             if install_path is None:

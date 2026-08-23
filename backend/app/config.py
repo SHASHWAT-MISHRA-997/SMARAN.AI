@@ -2,9 +2,14 @@ import os
 import json
 from pydantic_settings import BaseSettings
 
+# Dynamic root data directory resolution
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_root_data = os.path.join(_project_root, "data")
+_default_data_dir = _root_data if os.path.isdir(_root_data) else os.getenv("DATA_DIR", "./data")
+
 # ── Read auto-detected hardware config written by bootstrapper.py ─────────────
 _hw_config = {}
-_hw_config_path = os.path.join(os.getenv("DATA_DIR", "./data"), "hardware_config.json")
+_hw_config_path = os.path.join(os.getenv("DATA_DIR", _default_data_dir), "hardware_config.json")
 try:
     if os.path.exists(_hw_config_path):
         with open(_hw_config_path) as _f:
@@ -14,7 +19,7 @@ except Exception:
 
 # Infer active inference engine from hardware config (vllm | ollama)
 _detected_engine  = _hw_config.get("engine", "ollama")
-_detected_model   = _hw_config.get("model_id", "llama3.2:3b")
+_detected_model   = _hw_config.get("model_id", "")
 _detected_api_url = _hw_config.get("api_url", "http://127.0.0.1:11434")
 
 
@@ -22,14 +27,14 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "SMARAN.AI Knowledge Management"
 
     # Storage Directories
-    DATA_DIR: str = os.getenv("DATA_DIR", "./data")
-    UPLOAD_DIR: str = os.path.join(os.getenv("DATA_DIR", "./data"), "uploads")
-    CHROMA_DIR: str = os.path.join(os.getenv("DATA_DIR", "./data"), "chroma")
-    SQLITE_DB_PATH: str = os.path.join(os.getenv("DATA_DIR", "./data"), "sqlite.db")
+    DATA_DIR: str = os.getenv("DATA_DIR", _default_data_dir)
+    UPLOAD_DIR: str = os.path.join(os.getenv("DATA_DIR", _default_data_dir), "uploads")
+    CHROMA_DIR: str = os.path.join(os.getenv("DATA_DIR", _default_data_dir), "chroma")
+    SQLITE_DB_PATH: str = os.path.join(os.getenv("DATA_DIR", _default_data_dir), "sqlite.db")
     MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "100"))
 
     # Database
-    DATABASE_URL: str = f"sqlite:///{os.path.join(os.getenv('DATA_DIR', './data'), 'sqlite.db')}"
+    DATABASE_URL: str = f"sqlite:///{os.path.join(os.getenv('DATA_DIR', _default_data_dir), 'sqlite.db')}"
 
     # ── Inference Engine (auto-detected by bootstrapper.py) ──────────────────
     # "vllm"  → Uses vLLM OpenAI-compatible API (preferred, faster)

@@ -38,9 +38,16 @@ class ErrorBoundary extends React.Component {
             <h1 className="text-xl font-black text-zinc-950 dark:text-white tracking-wide mb-3">
               Oops! Something went wrong.
             </h1>
-            <p className="text-sm text-zinc-650 dark:text-zinc-400 leading-relaxed font-bold mb-6">
+            <p className="text-sm text-zinc-650 dark:text-zinc-400 leading-relaxed font-bold mb-4">
               It looks like we hit a small snag. Our team is already looking into it to get you back on track as quickly as possible.
             </p>
+
+            {this.state.error && (
+              <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-left overflow-x-auto max-h-32 text-[11px] font-mono text-rose-400">
+                <span className="font-bold text-rose-300 block mb-1">{String(this.state.error?.message || this.state.error)}</span>
+                <span className="text-[10px] text-zinc-400 block whitespace-pre-wrap">{this.state.error?.stack}</span>
+              </div>
+            )}
 
             {/* Note */}
             <p className="text-[11px] text-zinc-400 dark:text-zinc-550 font-extrabold uppercase tracking-wider mb-6">

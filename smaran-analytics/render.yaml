@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: smaran-analytics
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      # Generate this once and use the same value when building the app.
+      - key: ANALYTICS_INGEST_KEY
+        generateValue: true
+      - key: ANALYTICS_DB
+        value: /data/analytics.db
+    disk:
+      name: analytics-data
+      mountPath: /data
+      sizeGB: 1

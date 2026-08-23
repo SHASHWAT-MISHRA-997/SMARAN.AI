@@ -64,14 +64,46 @@ INDIAN_LANGUAGES = {
 
 
 def detect_language(text: str) -> Optional[str]:
-    try:
-        translator = GoogleTranslator(source="auto", target="en")
-        detected = translator.detect(text)
-        if detected and detected.lang:
-            return detected.lang.lower()
-    except Exception as e:
-        logger.error(f"Language detection failed: {e}")
-    return None
+    """Detect common UI languages locally from their Unicode script.
+
+    ``deep-translator`` does not expose ``GoogleTranslator.detect``.  Script
+    detection is deterministic, offline, and sufficient for deciding whether
+    an already-generated answer needs a translation fallback.
+    """
+    if not text or not text.strip():
+        return None
+
+    script_ranges = (
+        ("pa", 0x0A00, 0x0A7F),
+        ("gu", 0x0A80, 0x0AFF),
+        ("bn", 0x0980, 0x09FF),
+        ("or", 0x0B00, 0x0B7F),
+        ("ta", 0x0B80, 0x0BFF),
+        ("te", 0x0C00, 0x0C7F),
+        ("kn", 0x0C80, 0x0CFF),
+        ("ml", 0x0D00, 0x0D7F),
+        ("hi", 0x0900, 0x097F),
+        ("ur", 0x0600, 0x06FF),
+        ("ru", 0x0400, 0x04FF),
+        ("ja", 0x3040, 0x30FF),
+        ("zh-CN", 0x4E00, 0x9FFF),
+        ("ko", 0xAC00, 0xD7AF),
+    )
+    counts = {code: 0 for code, _, _ in script_ranges}
+    latin_count = 0
+    for character in text:
+        value = ord(character)
+        if ("A" <= character <= "Z") or ("a" <= character <= "z"):
+            latin_count += 1
+        for code, start, end in script_ranges:
+            if start <= value <= end:
+                counts[code] += 1
+                break
+
+    detected, detected_count = max(counts.items(), key=lambda item: item[1])
+    if detected_count > 0 and detected_count >= latin_count * 0.2:
+        return detected
+    return "en" if latin_count else None
 
 
 def translate_text(text: str, target_lang: str, source_lang: Optional[str] = None) -> str:

@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>SMARAN.AI — Your private AI assistant, running on your own machine</title>
+
+<meta name="description" content="SMARAN.AI is a desktop AI assistant that runs local models on your own computer. Voice, vision, gesture control, your own documents, and a phone app that pairs with your PC. Free download for Windows and Android." />
+<meta name="theme-color" content="#0a0a0b" />
+<link rel="icon" href="assets/logo.png" />
+<link rel="canonical" href="https://smaran.ai/" />
+
+<meta property="og:type" content="website" />
+<meta property="og:title" content="SMARAN.AI — Your private AI assistant" />
+<meta property="og:description" content="Local AI on your own machine. Voice, vision, gestures, your documents. Free for Windows and Android." />
+<meta property="og:image" content="assets/logo.png" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+
+<!-- Ambient layers. All decorative, all skipped for reduced-motion users. -->
+<canvas id="field" aria-hidden="true"></canvas>
+<div class="grid-floor" aria-hidden="true"></div>
+<div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+<div class="rain" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<div class="scanlines" aria-hidden="true"></div>
+<div class="noise" aria-hidden="true"></div>
+<div class="spotlight" id="spotlight" aria-hidden="true"></div>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="SMARAN.AI home">
+      <span class="brand-mark"><img src="assets/logo.png" alt="" width="34" height="34" /></span>
+      <span class="brand-text">SMARAN<span class="dot">.</span>AI</span>
+    </a>
+
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#showcase">In action</a>
+      <a href="#how">How it works</a>
+      <a href="#download">Download</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+
+    <div class="nav-cta">
+      <a class="btn btn-ghost sm" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GitHub
+      </a>
+      <a class="btn btn-primary sm magnetic" href="#download">Get it free</a>
+    </div>
+
+    <button class="nav-toggle" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="mobileMenu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+
+  <div class="mobile-menu" id="mobileMenu" hidden>
+    <a href="#features">Features</a>
+    <a href="#showcase">In action</a>
+    <a href="#how">How it works</a>
+    <a href="#download">Download</a>
+    <a href="#privacy">Privacy</a>
+    <a href="#faq">FAQ</a>
+    <a class="btn btn-primary" href="#download">Get it free</a>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============================ HERO ============================ -->
+<section class="hero" id="top">
+  <div class="wrap hero-inner">
+
+    <div class="hero-copy">
+      <span class="pill reveal">
+        <span class="pill-dot"></span>
+        Version 2.8.2 · Windows &amp; Android · Free
+      </span>
+
+      <h1 class="reveal" data-delay="1">
+        <span class="glitch" data-text="Your AI.">Your AI.</span><br />
+        <span class="grad">Your machine.</span><br />
+        <span class="outline">Nobody else's.</span>
+      </h1>
+
+      <p class="lede reveal" data-delay="2">
+        SMARAN.AI runs models on your own computer. Talk to it, show it things,
+        wave at it, hand it your documents — and none of that has to leave the
+        room to work.
+      </p>
+
+      <p class="typer-line reveal" data-delay="3">
+        <span class="prompt">&gt;</span>
+        <span id="typer" class="typer"></span><span class="caret"></span>
+      </p>
+
+      <div class="hero-cta reveal" data-delay="4">
+        <a class="btn btn-primary lg magnetic" href="#download" data-dl="windows">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10 4.6v6.9H3V5.5Zm0 13 7 .9v-6.8H3v5.9Zm8 1 10 1.3V12.5H11v7Zm0-15.9v7h10V3.2L11 4.6Z"/></svg>
+          <span>Download for Windows<em>233 MB · .exe installer</em></span>
+        </a>
+        <a class="btn btn-ghost lg magnetic" href="#download" data-dl="android">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M17.6 9.5H6.4v8.2c0 .6.5 1.1 1.1 1.1h1.1v3a1.2 1.2 0 0 0 2.4 0v-3h2v3a1.2 1.2 0 0 0 2.4 0v-3h1.1c.6 0 1.1-.5 1.1-1.1V9.5ZM4.2 9.3A1.2 1.2 0 0 0 3 10.5v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2Zm15.6 0a1.2 1.2 0 0 0-1.2 1.2v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2ZM15.1 3l1-1.5a.3.3 0 0 0-.5-.3l-1 1.5a6.3 6.3 0 0 0-5.2 0l-1-1.5a.3.3 0 0 0-.5.3l1 1.5A5.3 5.3 0 0 0 6.4 8.3h11.2a5.3 5.3 0 0 0-2.5-5.3ZM9.5 6.2a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Zm5 0a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Z"/></svg>
+          <span>Download APK<em>31 MB · Android 7.0+</em></span>
+        </a>
+      </div>
+
+      <ul class="hero-marks reveal" data-delay="5">
+        <li><b>No subscription.</b> Not a trial.</li>
+        <li><b>Works offline</b> once a model is downloaded.</li>
+        <li><b>No account needed</b> to use it.</li>
+      </ul>
+    </div>
+
+    <!-- The mark, given depth: rotating rings, a lit core, orbiting sparks. -->
+    <div class="hero-art reveal" data-delay="2" aria-hidden="true">
+      <div class="orb">
+        <div class="orb-glow"></div>
+        <div class="ring r1"></div>
+        <div class="ring r2"></div>
+        <div class="ring r3"></div>
+        <div class="orb-core"><img src="assets/logo.png" alt="" width="150" height="150" /></div>
+        <div class="spark s1"></div>
+        <div class="spark s2"></div>
+        <div class="spark s3"></div>
+        <div class="hud-brackets"><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="orb-readout">
+        <span><b id="statModels">0</b> models</span>
+        <span><b id="statLocal">100</b>% local</span>
+        <span><b id="statCost">0</b>₹ / month</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track">
+      <span>LOCAL MODELS</span><i>◆</i><span>VOICE</span><i>◆</i><span>VISION</span><i>◆</i>
+      <span>GESTURE CONTROL</span><i>◆</i><span>YOUR DOCUMENTS</span><i>◆</i><span>PHONE PAIRING</span><i>◆</i>
+      <span>NO SUBSCRIPTION</span><i>◆</i><span>OFFLINE CAPABLE</span><i>◆</i>
+      <span>LOCAL MODELS</span><i>◆</i><span>VOICE</span><i>◆</i><span>VISION</span><i>◆</i>
+      <span>GESTURE CONTROL</span><i>◆</i><span>YOUR DOCUMENTS</span><i>◆</i><span>PHONE PAIRING</span><i>◆</i>
+      <span>NO SUBSCRIPTION</span><i>◆</i><span>OFFLINE CAPABLE</span><i>◆</i>
+    </div>
+  </div>
+</section>
+
+<!-- ========================== FEATURES ========================== -->
+<section class="section" id="features">
+  <div class="wrap">
+    <header class="head reveal">
+      <span class="eyebrow">What it does</span>
+      <h2>Everything in one window,<br /><span class="grad">nothing phoning home.</span></h2>
+      <p>Assistants usually mean a browser tab and a monthly bill. This one is a program on your computer that happens to be very good at talking.</p>
+    </header>
+
+    <div class="bento">
+      <article class="card tilt span2 reveal">
+        <div class="card-glow"></div>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg></div>
+        <h3>Talk to it like a person</h3>
+        <p>A real-time voice session with interruption handling — start speaking and it stops to listen, the way a conversation actually works. Pick a voice and a persona; it answers in the language you set.</p>
+        <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </article>
+
+      <article class="card tilt reveal" data-delay="1">
+        <div class="card-glow"></div>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <h3>It can see</h3>
+        <p>Point the camera at a thing, or drop in a screenshot. Vision models read what is in front of them.</p>
+      </article>
+
+      <article class="card tilt reveal" data-delay="2">
+        <div class="card-glow"></div>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 12V6a2 2 0 1 1 4 0v5"/><path d="M10 11V4.5a2 2 0 1 1 4 0V11"/><path d="M14 11V6a2 2 0 1 1 4 0v8a7 7 0 0 1-14 0v-2l-1.5-3a1.8 1.8 0 0 1 3-1.8L6 12"/></svg></div>
+        <h3>Gesture mode</h3>
+        <p>Hands in the air, Stark-style. Pinch, swipe and hold to drive the interface without touching anything.</p>
+        <span class="tag">Webcam required</span>
+      </article>
+
+      <article class="card tilt reveal">
+        <div class="card-glow"></div>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg></div>
+        <h3>Your own documents</h3>
+        <p>Hand it PDFs, notes, spreadsheets. It answers from those, and says so when the answer is not in them rather than inventing one.</p>
+      </article>
+
+      <article class="card tilt span2 reveal" data-delay="1">
+        <div class="card-glow"></div>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="2" y="4" width="14" height="10" rx="2"/><path d="M8 18h6M11 14v4"/><rect x="17" y="9" width="5" height="11" rx="1.5"/></svg></div>
+        <h3>Your phone and your PC, paired</h3>
+        <p>Scan a QR code once. After that the conversation follows you between devices, and either one can drive the other — speak to your phone, and your computer does the work.</p>
+        <div class="pairbar"><span class="pairdot"></span><span class="pairline"></span><span class="pairdot"></span></div>
+      </article>
+
+      <article class="card tilt reveal" data-delay="2">
+        <div class="card-glow"></div>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 3.8 8.4 9 9 5.2-.6 9-4 9-9V7Z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h3>Locked like a phone</h3>
+        <p>A PIN on startup, with the attempt limits and lockouts you would expect. Your history is not one click away for whoever walks past.</p>
+      </article>
+
+      <article class="card tilt reveal">
+        <div class="card-glow"></div>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20v-11"/></svg></div>
+        <h3>Real hardware readings</h3>
+        <p>CPU, memory, GPU and battery from the actual machine — including whether it is charging — not a decorative animation.</p>
+      </article>
+
+      <article class="card tilt span2 reveal" data-delay="1">
+        <div class="card-glow"></div>
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg></div>
+        <h3>Sixty-three models, one hub</h3>
+        <p>Download local models and keep them forever, or plug in a key for a cloud provider when you want the big ones. The hub is honest about the difference between catalogued, downloaded and actually running.</p>
+        <div class="chips">
+          <span>Reasoning</span><span>Vision</span><span>Code</span><span>Text</span><span>Audio</span><span>Video</span>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ========================== SHOWCASE =========================== -->
+<!-- Alternating capability blocks. Each "screen" is drawn in CSS rather
+     than screenshotted, so the page stays small and never shows a stale
+     build of the interface. -->
+<section class="section alt" id="showcase">
+  <div class="wrap">
+    <header class="head reveal">
+      <span class="eyebrow">In action</span>
+      <h2>Six things it does<br /><span class="grad">that a chat box cannot.</span></h2>
+    </header>
+
+    <div class="shows">
+
+      <article class="show reveal">
+        <div class="show-copy">
+          <span class="show-kicker">01 &mdash; The workspace</span>
+          <h3>One window, every mode</h3>
+          <p>Chat, voice, vision and your documents are tabs of the same thing, not four separate apps. Switch mid-conversation and it keeps the thread.</p>
+          <ul class="show-list">
+            <li>Live hardware readings while it works</li>
+            <li>Artifacts render beside the conversation</li>
+            <li>Conversations kept per collection and per device</li>
+          </ul>
+        </div>
+        <div class="show-art" aria-hidden="true">
+          <div class="screen">
+            <div class="screen-bar"><i></i><i></i><i></i><span>SMARAN.AI</span></div>
+            <div class="screen-body ui-chat">
+              <div class="ui-side">
+                <span class="ui-row w70"></span><span class="ui-row w90"></span>
+                <span class="ui-row w50"></span><span class="ui-row w80"></span>
+                <span class="ui-row w60"></span>
+              </div>
+              <div class="ui-main">
+                <div class="bub user"><span class="ui-row w80"></span></div>
+                <div class="bub ai">
+                  <span class="ui-row w95"></span><span class="ui-row w85"></span>
+                  <span class="ui-row w60"></span>
+                </div>
+                <div class="bub user"><span class="ui-row w50"></span></div>
+                <div class="bub ai typing"><i></i><i></i><i></i></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="show flip reveal">
+        <div class="show-copy">
+          <span class="show-kicker">02 &mdash; Speak</span>
+          <h3>A call, not a walkie-talkie</h3>
+          <p>Press once and talk. It hears you while it is still speaking, and stops when you cut in &mdash; no push-to-talk, no waiting for a beep.</p>
+          <ul class="show-list">
+            <li>Interruption handled mid-sentence</li>
+            <li>Choose a voice and a persona</li>
+            <li>Answers in the language you picked</li>
+          </ul>
+        </div>
+        <div class="show-art" aria-hidden="true">
+          <div class="screen phone">
+            <div class="callui">
+              <div class="call-ring"><span></span><span></span><span></span></div>
+              <div class="call-face"><img src="assets/logo.png" alt="" width="60" height="60" /></div>
+              <p class="call-name">SMARAN.AI</p>
+              <p class="call-status">listening<span class="ell">&hellip;</span></p>
+              <div class="call-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="call-btns">
+                <span class="cb mute"></span>
+                <span class="cb end"></span>
+                <span class="cb spk"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="show reveal">
+        <div class="show-copy">
+          <span class="show-kicker">03 &mdash; Gesture mode</span>
+          <h3>Hands in the air</h3>
+          <p>Your webcam tracks the joints of each hand. Pinch to select, swipe to move, hold to confirm &mdash; the interface responds without a keyboard anywhere near it.</p>
+          <ul class="show-list">
+            <li>Runs on the GPU, falls back to CPU quietly</li>
+            <li>Nothing from the camera is uploaded</li>
+            <li>Turn it off and the camera stops</li>
+          </ul>
+        </div>
+        <div class="show-art" aria-hidden="true">
+          <div class="screen">
+            <div class="screen-body handui">
+              <svg viewBox="0 0 200 160" class="hand">
+                <g class="hand-lines">
+                  <path d="M100 140 L100 96 M100 96 L72 62 M100 96 L88 50 M100 96 L104 44 M100 96 L120 52 M100 96 L134 70" />
+                </g>
+                <g class="hand-dots">
+                  <circle cx="100" cy="140" r="5"/><circle cx="100" cy="96" r="4"/>
+                  <circle cx="72" cy="62" r="3.5"/><circle cx="88" cy="50" r="3.5"/>
+                  <circle cx="104" cy="44" r="3.5"/><circle cx="120" cy="52" r="3.5"/>
+                  <circle cx="134" cy="70" r="3.5"/>
+                </g>
+              </svg>
+              <span class="hand-tag">PINCH</span>
+              <span class="hand-scan"></span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="show flip reveal">
+        <div class="show-copy">
+          <span class="show-kicker">04 &mdash; Model Hub</span>
+          <h3>Sixty-three models, plainly labelled</h3>
+          <p>Filter by what you need &mdash; reasoning, vision, code, audio, video. Download a local one and it is yours forever, or point it at a cloud provider with your own key.</p>
+          <ul class="show-list">
+            <li>Says what each one needs before you download</li>
+            <li>Honest about catalogued vs. actually running</li>
+            <li>Local models cost nothing to run, ever</li>
+          </ul>
+        </div>
+        <div class="show-art" aria-hidden="true">
+          <div class="screen">
+            <div class="screen-body hubui">
+              <div class="hub-tabs"><span class="on">All</span><span>Vision</span><span>Code</span><span>Audio</span></div>
+              <div class="hub-row"><span class="hub-dot on"></span><span class="ui-row w60"></span><span class="hub-pill">7B</span></div>
+              <div class="hub-row"><span class="hub-dot"></span><span class="ui-row w75"></span><span class="hub-pill">14B</span></div>
+              <div class="hub-row"><span class="hub-dot on"></span><span class="ui-row w50"></span><span class="hub-pill">3B</span></div>
+              <div class="hub-row"><span class="hub-dot"></span><span class="ui-row w70"></span><span class="hub-pill">32B</span></div>
+              <div class="hub-bar"><i></i></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="show reveal">
+        <div class="show-copy">
+          <span class="show-kicker">05 &mdash; Pairing</span>
+          <h3>Your phone becomes a remote</h3>
+          <p>Scan the code once. After that, speak to your phone and your computer does the work &mdash; or leave the computer off and the phone carries on alone.</p>
+          <ul class="show-list">
+            <li>Conversations sync in both directions</li>
+            <li>Only a vetted set of remote actions is allowed</li>
+            <li>Unpair from either device at any time</li>
+          </ul>
+        </div>
+        <div class="show-art" aria-hidden="true">
+          <div class="pairart">
+            <div class="screen mini"><div class="qr"></div></div>
+            <div class="pairflow"><span></span><span></span><span></span></div>
+            <div class="screen phone tiny">
+              <div class="tiny-body"><span class="ui-row w80"></span><span class="ui-row w60"></span><span class="ui-row w70"></span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="show flip reveal">
+        <div class="show-copy">
+          <span class="show-kicker">06 &mdash; Your documents</span>
+          <h3>It reads what you give it</h3>
+          <p>Drop in PDFs, notes or spreadsheets. Answers come from those pages &mdash; and when the answer is not in them, it says so instead of inventing one.</p>
+          <ul class="show-list">
+            <li>Scoped per collection, not one giant pile</li>
+            <li>Answers only from the collection you point it at</li>
+            <li>Files never leave your drive</li>
+          </ul>
+        </div>
+        <div class="show-art" aria-hidden="true">
+          <div class="screen">
+            <div class="screen-body docui">
+              <div class="doc"><span class="doc-tag">PDF</span><span class="ui-row w70"></span><span class="ui-row w50"></span></div>
+              <div class="doc"><span class="doc-tag">MD</span><span class="ui-row w60"></span><span class="ui-row w80"></span></div>
+              <div class="doc hi"><span class="doc-tag">CSV</span><span class="ui-row w75"></span><span class="ui-row w45"></span></div>
+              <div class="doc-beam"></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============================ STATS ============================ -->
+<section class="statband">
+  <div class="wrap statgrid">
+    <div class="stat reveal"><b data-count="63">0</b><span>models in the hub</span></div>
+    <div class="stat reveal" data-delay="1"><b data-count="9">0</b><span>screen sizes tested</span></div>
+    <div class="stat reveal" data-delay="2"><b data-count="3">0</b><span>platforms shipped</span></div>
+    <div class="stat reveal" data-delay="3"><b data-count="0">0</b><span>rupees per month</span></div>
+  </div>
+</section>
+
+<!-- ============================ HOW ============================= -->
+<section class="section alt" id="how">
+  <div class="wrap">
+    <header class="head reveal">
+      <span class="eyebrow">Getting started</span>
+      <h2>Three steps, <span class="grad">then it is yours.</span></h2>
+    </header>
+
+    <ol class="steps">
+      <li class="step reveal">
+        <span class="step-n">01</span>
+        <h3>Install it</h3>
+        <p>Run the installer. Python and the app are bundled, so there is no environment to prepare. To run models locally you also need <a href="https://ollama.com/download" target="_blank" rel="noopener">Ollama</a>, which is a separate free install.</p>
+      </li>
+      <li class="step reveal" data-delay="1">
+        <span class="step-n">02</span>
+        <h3>Pick a model</h3>
+        <p>Open the Model Hub and download one. A small one runs on almost anything; a bigger one wants more memory. It tells you which is which.</p>
+      </li>
+      <li class="step reveal" data-delay="2">
+        <span class="step-n">03</span>
+        <h3>Start talking</h3>
+        <p>Type, or press Speak. If you want it on your phone too, scan the pairing code.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ========================== DOWNLOAD =========================== -->
+<section class="section" id="download">
+  <div class="wrap">
+    <header class="head reveal">
+      <span class="eyebrow">Download</span>
+      <h2>Free, and <span class="grad">actually free.</span></h2>
+      <p>No trial period, no locked features, no card. Local models you download are yours to keep and cost nothing to run.</p>
+    </header>
+
+    <div class="dl-grid">
+      <article class="dl-card reveal">
+        <div class="dl-halo"></div>
+        <div class="dl-top">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10 4.6v6.9H3V5.5Zm0 13 7 .9v-6.8H3v5.9Zm8 1 10 1.3V12.5H11v7Zm0-15.9v7h10V3.2L11 4.6Z"/></svg>
+          <div>
+            <h3>Windows</h3>
+            <p class="dl-meta">10 &amp; 11 · 64-bit · 233 MB</p>
+          </div>
+        </div>
+        <a class="btn btn-primary block magnetic" id="dlWin"
+           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI-Setup.exe">
+          Download installer
+        </a>
+        <ul class="dl-list">
+          <li>The smallest models in the hub ask for 4 GB of memory</li>
+          <li>Disk depends entirely on which models you download</li>
+          <li>A GPU makes it faster; it is not required</li>
+          <li>Webcam only if you want vision or gestures</li>
+          <li>Ollama installed separately, for running models locally</li>
+        </ul>
+        <p class="dl-note">
+          Windows may warn about an unrecognised publisher — the app is not
+          code-signed yet, because a certificate costs money this project does
+          not take. Choose <b>More info → Run anyway</b> if you are happy to.
+        </p>
+      </article>
+
+      <article class="dl-card reveal" data-delay="1">
+        <div class="dl-halo"></div>
+        <div class="dl-top">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M17.6 9.5H6.4v8.2c0 .6.5 1.1 1.1 1.1h1.1v3a1.2 1.2 0 0 0 2.4 0v-3h2v3a1.2 1.2 0 0 0 2.4 0v-3h1.1c.6 0 1.1-.5 1.1-1.1V9.5ZM4.2 9.3A1.2 1.2 0 0 0 3 10.5v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2Zm15.6 0a1.2 1.2 0 0 0-1.2 1.2v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2ZM15.1 3l1-1.5a.3.3 0 0 0-.5-.3l-1 1.5a6.3 6.3 0 0 0-5.2 0l-1-1.5a.3.3 0 0 0-.5.3l1 1.5A5.3 5.3 0 0 0 6.4 8.3h11.2a5.3 5.3 0 0 0-2.5-5.3ZM9.5 6.2a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Zm5 0a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Z"/></svg>
+          <div>
+            <h3>Android</h3>
+            <p class="dl-meta">7.0 and newer · 31 MB</p>
+          </div>
+        </div>
+        <a class="btn btn-ghost block magnetic" id="dlApk"
+           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk">
+          Download APK
+        </a>
+        <ul class="dl-list">
+          <li>Works on its own, and pairs with your PC</li>
+          <li>Voice, chat and camera on the phone</li>
+          <li>Conversations sync both ways once paired</li>
+          <li>Heavy models still run on the computer</li>
+        </ul>
+        <p class="dl-note">
+          Android will ask you to allow installing from your browser, because
+          this is not from the Play Store. That prompt is Android doing its job.
+        </p>
+      </article>
+    </div>
+
+    <div class="eco reveal">
+      <h3 class="eco-h">The rest of the family</h3>
+      <div class="eco-row">
+        <a class="eco-card" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/tree/main/vscode-smaran-coding-agent" target="_blank" rel="noopener">
+          <span class="eco-ico">&lt;/&gt;</span>
+          <b>VS Code extension</b>
+          <em>Coding help inside your editor</em>
+        </a>
+        <a class="eco-card" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI" target="_blank" rel="noopener">
+          <span class="eco-ico">{ }</span>
+          <b>Source code</b>
+          <em>Read it, build it yourself</em>
+        </a>
+        <a class="eco-card" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases" target="_blank" rel="noopener">
+          <span class="eco-ico">&darr;</span>
+          <b>All releases</b>
+          <em>Older versions and changelogs</em>
+        </a>
+      </div>
+    </div>
+
+
+  </div>
+</section>
+
+<!-- ========================== PRIVACY ============================ -->
+<section class="section alt" id="privacy">
+  <div class="wrap">
+    <div class="privacy">
+      <div class="reveal">
+        <span class="eyebrow">Privacy</span>
+        <h2>The honest version.</h2>
+        <p class="lede">
+          Most assistants say "we care about your privacy" and then send every
+          word you type to a server. Here is what this one actually does.
+        </p>
+      </div>
+
+      <div class="pcols">
+        <div class="pcol good reveal">
+          <h3><span class="pmark">✓</span> Stays on your machine</h3>
+          <ul>
+            <li>Everything you type or say</li>
+            <li>Your files and what is in them</li>
+            <li>Your conversation history</li>
+            <li>Any API keys you enter</li>
+            <li>Camera and microphone input</li>
+          </ul>
+        </div>
+        <div class="pcol warn reveal" data-delay="1">
+          <h3><span class="pmark">↗</span> Leaves only if you choose it</h3>
+          <ul>
+            <li>Cloud models — only after you add a key, and only the message you send</li>
+            <li>Web search — only when you switch it on</li>
+            <li>A counter of installs and launches, with a random id and no content, which you can turn off in Settings</li>
+          </ul>
+        </div>
+      </div>
+
+      <p class="pnote reveal">
+        The usage counter exists so the number of people using this is a fact
+        rather than a guess. It carries an install id, the platform and a version
+        number. It never carries anything you wrote. The switch that turns it off
+        genuinely turns it off.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FAQ ============================== -->
+<section class="section" id="faq">
+  <div class="wrap narrow">
+    <header class="head reveal">
+      <span class="eyebrow">Questions</span>
+      <h2>Reasonable things <span class="grad">to ask.</span></h2>
+    </header>
+
+    <div class="faq">
+      <details class="reveal">
+        <summary>Is it really free, or free-for-now?</summary>
+        <p>Free. There is no paid tier, no usage cap and no card anywhere in the app. A local model you download runs on your own hardware, so there is nothing to bill you for. If you connect a cloud provider, that provider bills you directly — nothing to do with this app.</p>
+      </details>
+      <details class="reveal">
+        <summary>Do I need internet?</summary>
+        <p>To download the app, Ollama and a model, yes. After that a local model works with the network off. Web search and cloud models obviously need a connection.</p>
+      </details>
+      <details class="reveal">
+        <summary>What hardware do I need?</summary>
+        <p>It depends on the model, and the hub is specific about it. Across the 63 models in the catalogue the stated memory requirement runs from 4 GB to 512 GB, and 18 of them ask for 8 GB or less. Every entry shows its requirement before you download it.</p>
+      </details>
+      <details class="reveal">
+        <summary>Why does Windows warn me about the installer?</summary>
+        <p>Because it is not code-signed. A signing certificate is a yearly cost, and this project does not charge anyone. The warning is Windows saying it has not seen this publisher before — not that it found anything wrong. You can check the file on VirusTotal, or build it yourself from the source.</p>
+      </details>
+      <details class="reveal">
+        <summary>Can the phone app work when my PC is off?</summary>
+        <p>Yes. The phone app is a working assistant on its own. Pairing adds shared history and lets each device drive the other, but it is not required.</p>
+      </details>
+      <details class="reveal">
+        <summary>Where is my data stored?</summary>
+        <p>In your own user folder on your own drive. Nothing is uploaded, and there is no account holding it. Deleting the app's data folder deletes it.</p>
+      </details>
+      <details class="reveal">
+        <summary>Is the source available?</summary>
+        <p>The code is on GitHub. Note that there is no licence file yet, so it is not correct to call it open source — read it, build it, but the owner has not granted redistribution rights.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ CTA ============================== -->
+<section class="cta">
+  <div class="wrap cta-inner reveal">
+    <div class="cta-halo" aria-hidden="true"></div>
+    <h2>Stop renting your assistant.</h2>
+    <p>Install it once. It is yours after that.</p>
+    <div class="hero-cta center">
+      <a class="btn btn-primary lg magnetic" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI-Setup.exe">
+        <span>Windows installer<em>233 MB</em></span>
+      </a>
+      <a class="btn btn-ghost lg magnetic" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk">
+        <span>Android APK<em>31 MB</em></span>
+      </a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <div>
+      <a class="brand" href="#top">
+        <span class="brand-mark"><img src="assets/logo.png" alt="" width="28" height="28" /></span>
+        <span class="brand-text">SMARAN<span class="dot">.</span>AI</span>
+      </a>
+      <p class="foot-note">A private AI assistant that runs on your own machine.<br />Built by Shashwat Mishra.</p>
+    </div>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="#features">Features</a>
+      <a href="#download">Download</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://www.linkedin.com/in/shashwat-mishra-b7b41b21b/" target="_blank" rel="noopener">LinkedIn</a>
+    </nav>
+  </div>
+  <div class="wrap foot-bottom">
+    <span>© <span id="year">2026</span> Shashwat Mishra</span>
+    <span class="foot-v">v2.8.2</span>
+  </div>
+</footer>
+
+<script src="main.js"></script>
+</body>
+</html>

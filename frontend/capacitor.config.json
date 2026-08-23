@@ -1,0 +1,17 @@
+{
+  "appId": "ai.smaran.app",
+  "appName": "SMARAN.AI",
+  "webDir": "../backend/frontend_dist",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  }
+}

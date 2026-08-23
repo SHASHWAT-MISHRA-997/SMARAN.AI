@@ -66,6 +66,7 @@ export default function SystemAgentModal({ isOpen, onClose, selectedModel = 'aut
   const [actionResult, setActionResult] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [operations, setOperations] = useState([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -75,6 +76,30 @@ export default function SystemAgentModal({ isOpen, onClose, selectedModel = 'aut
       .catch((err) => { if (active) setError(err.message); });
     return () => { active = false; };
   }, [isOpen]);
+
+  // Poll the operations log while the panel is open so voice-driven actions
+  // show up without the user reopening it.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    let active = true;
+    const load = () => {
+      jsonRequest('/api/desktop/operations?limit=50')
+        .then((value) => { if (active) setOperations(value?.operations || []); })
+        .catch(() => { /* the log is informational; a failure is not worth an alert */ });
+    };
+    load();
+    const timer = window.setInterval(load, 4000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [isOpen, actionResult]);
+
+  async function clearOperations() {
+    try {
+      await jsonRequest('/api/desktop/operations', { method: 'DELETE' });
+      setOperations([]);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
 
   const actions = status?.actions || [];
   const action = useMemo(() => actions.find((item) => item.id === operation), [actions, operation]);
@@ -328,6 +353,51 @@ export default function SystemAgentModal({ isOpen, onClose, selectedModel = 'aut
                 <ValueBlock value={actionResult} />
               </div>
             )}
+
+            {/* Operations log — every machine action the assistant has run this
+                session, so voice-driven changes are never invisible. */}
+            <div className="space-y-3 rounded-2xl border border-zinc-800 bg-black/25 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-black text-white">Operations log</h3>
+                  <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+                    Machine actions run this session, newest first.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearOperations}
+                  disabled={!operations.length}
+                  className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wider text-zinc-400 transition hover:border-rose-500/40 hover:text-rose-300 disabled:opacity-35"
+                >
+                  Clear
+                </button>
+              </div>
+              {operations.length === 0 ? (
+                <p className="py-3 text-center text-[11px] text-zinc-600">Nothing has been run yet.</p>
+              ) : (
+                <ul className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+                  {operations.map((entry, index) => (
+                    <li
+                      key={`${entry.at}-${index}`}
+                      className={`rounded-xl border px-3 py-2 ${
+                        entry.success ? 'border-emerald-500/20 bg-emerald-500/[.06]' : 'border-rose-500/25 bg-rose-500/[.07]'
+                      }`}
+                    >
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-[11px] font-black text-zinc-100">{entry.title}</span>
+                        <span className="shrink-0 font-mono text-[9px] text-zinc-500">
+                          {String(entry.at).slice(11, 19)}
+                        </span>
+                      </div>
+                      {entry.message && (
+                        <p className="mt-1 text-[10px] leading-4 text-zinc-400">{entry.message}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </section>
         </div>
       </div>

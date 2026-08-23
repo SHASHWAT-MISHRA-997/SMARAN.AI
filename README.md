@@ -1,154 +1,142 @@
-<div align="center">
+# SMARAN.AI 2.8.2
 
-# ⚡ SMARAN.AI ⚡
+SMARAN.AI is a local-first AI workspace with responsive chat, optional live web search, uploaded-file RAG, local speech input/read-aloud, source-labelled performance telemetry, and user-configured local or cloud models.
 
-### 🌟 Autonomous AI Pair Programmer • Multi-LLM Routing • Real Host Telemetry • 100% Truthful Execution 🌟
+This document intentionally separates code that exists from services that are currently installed, connected, or active.
 
-[![Version](https://img.shields.io/badge/version-2.5.0-6d4aff?style=for-the-badge&logo=rocket&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI)
-[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-shashwatmishra062%2Fsmaran--ai-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/shashwatmishra062/smaran-ai)
-[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace%20v1.0.6-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/)
-[![License](https://img.shields.io/badge/license-MIT-10B981?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-F59E0B?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI)
+## Recommended installation — Windows desktop app
 
-<p align="center">
-  <strong>SMARAN.AI</strong> is a high-performance, privacy-centric autonomous software engineering platform. <br />
-  Engineered with <strong>100% Genuine Host Hardware Synchronization</strong>, <strong>OmniRoute 19-Strategy Multi-LLM Failover</strong>, <br />
-  <strong>Headroom 60–90% Token Compression</strong>, <strong>Claude-Mem Episodic Memory</strong>, and an <strong>Interactive Code & Web Studio</strong>.
-</p>
+Download `SMARAN.AI-Setup.exe`, double-click it, and launch SMARAN.AI from the
+Start Menu or the desktop shortcut.
 
----
+- No Docker, no containers, no Python install
+- No account, sign-in, or licence key — the app opens straight into the workspace
+- Starts offline; the window opens only after the local engine is ready, so you
+  never land on "This site can't be reached"
+- Desktop/voice control (open apps, screenshots, system info) works because the
+  app runs natively on your machine rather than inside a container
 
-[🚀 Quick Start with Docker](#-quick-start-with-docker-step-by-step) • 
-[✨ Key Innovations](#-key-architectural-innovations) • 
-[📊 Real Hardware Telemetry](#-100-genuine-hardware-synchronization) • 
-[🧩 VS Code Extension](#-vs-code-ide-extension) • 
-[🛡️ Security & Privacy](#%EF%B8%8F-enterprise-security--zero-telemetry-sandbox) • 
-[👨‍💻 Architect Profile](#-about-the-developer)
+Your data (chats, uploads, models, vector store) is stored in
+`%LOCALAPPDATA%\SMARAN.AI\data` and is preserved across upgrades.
 
----
+To build the app and installer yourself, see
+[`installer/BUILD_AND_SIGN.md`](installer/BUILD_AND_SIGN.md):
 
-</div>
-
-<br />
-
-## 🐳 Quick Start with Docker (Step-by-Step)
-
-Users can pull and run **SMARAN.AI** directly from Docker Hub with a single command on any machine (Windows, Linux, macOS)!
-
-### 📌 Step 1: Open Terminal / PowerShell
-Command Prompt (`cmd`), Windows PowerShell, ya Linux/macOS Terminal open karein.
-
-### 📌 Step 2: Pull the Official Image
 ```bash
-docker pull shashwatmishra062/smaran-ai:latest
+cd frontend && npx vite build && cd ..
+python build_exe.py
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\SMARAN.AI.iss
 ```
 
-### 📌 Step 3: Run the Container
-```bash
-docker run -d -p 3003:3003 --name smaran-ai-app shashwatmishra062/smaran-ai:latest
-```
+## Alternative installation — Docker (server / headless use)
 
-*(Optional with NVIDIA GPU Acceleration on Linux/WSL2):*
-```bash
-docker run -d -p 3003:3003 --gpus all --name smaran-ai-app shashwatmishra062/smaran-ai:latest
-```
+The container build is optional. It suits headless or server deployments, but it
+cannot reach the Windows host, so host telemetry and desktop voice control are
+unavailable inside it.
 
-### 📌 Step 4: Open in Web Browser
-Browser kholein aur visit karein:
-👉 **`http://localhost:3003`**
+The installers show every important step, install/start Docker when possible, pull the latest SMARAN.AI image, create a private Ollama runtime, download the `qwen2.5:1.5b` starter with visible progress, verify port `3003`, start the host telemetry bridge, health-check the app, and only then open the browser.
 
-```
-╔══════════════════════════════════════════════════════════════════╗
-║  🚀 SMARAN.AI is running live at http://localhost:3003          ║
-║  ⚡ Ready for local inference, multi-modal coding, and RAG       ║
-╚══════════════════════════════════════════════════════════════════╝
-```
+### Windows PowerShell
 
----
-
-## ✨ Key Architectural Innovations
-
-```mermaid
-flowchart TD
-    User([👤 User / Developer]) -->|Prompt / Code Task| UI[🖥️ SMARAN.AI Web Studio :3003]
-    UI -->|Stream Request| Backend[⚙️ FastAPI Core Engine]
-    
-    subgraph "Intelligent Routing & Token Optimizers"
-        Backend --> Omni[⚡ OmniRoute 19-Strategy Multi-LLM Router]
-        Backend --> Headroom[🚀 Headroom Token Compressor 60-90%]
-        Backend --> Mem[🧠 Claude-Mem Persistent Memory Vault]
-    end
-    
-    subgraph "Execution Engines"
-        Omni -->|Local Host| vLLM[🖥️ Local vLLM / Ollama Engine]
-        Omni -->|Cloud Failover| Cloud[☁️ 11 Cloud AI Providers]
-        Backend --> Strix[🛡️ STRIX Static Security Scanner]
-    end
-
-    subgraph "100% Truthful Telemetry"
-        Backend --> WMI[📊 Windows WMI & psutil Native Bridge]
-        WMI --> LiveData[⚡ Tokens/sec • Latency • CPU • RTX 2060 GPU]
-    end
-```
-
-| 🚀 Innovation | 🛠️ Implementation Engine | 🎯 Real Benefit to Developer |
-|---|---|---|
-| **⚡ OmniRoute 19-Strategy Router** | `backend/app/plugins/omni_route.py` | Auto-combines local models with 11 cloud providers (Groq, OpenRouter, Together, Cerebras, DeepSeek, SambaNova, Mistral, NVIDIA, OpenAI, Anthropic, Gemini) with zero-drop circuit breakers. |
-| **🚀 Headroom Token Compressor** | `backend/app/plugins/headroom.py` | 60–90% prompt token reduction using stacked RTK filters, Caveman prose rules, and AST-level context relay. |
-| **🧠 Claude-Mem Cognitive Vault** | `backend/app/plugins/claude_mem.py` | Persistent episodic memory store in SQLite with semantic categorization (`user_preference`, `architecture`, `bug_fix`). |
-| **💻 Autonomous Code & Web Studio** | `frontend/src/components/ChatArea.jsx` | Full-stack software/website generator with syntax-highlighted code inspector, interactive live preview iframe, and one-click ZIP export. |
-| **🛡️ STRIX Security & Sandbox** | `backend/app/plugins/strix_security.py` | Local automated vulnerability detection (SQLi CWE-89, IDOR, XSS, Secret Leaks) with zero external telemetry leakage. |
-| **🌐 21st.dev MCP Protocol** | `backend/app/plugins/mcp_21st_dev.py` | Model Context Protocol integration supporting extensible GitHub skill tools and stdio/SSE endpoints. |
-
----
-
-## 📊 100% Genuine Hardware Synchronization
-
-SMARAN.AI **never uses placeholder or hallucinated hardware specs**. All metrics are polled directly via native OS APIs (WMI on Windows, psutil on Linux):
-
-* 🖥️ **Real CPU Tracking**: Direct WMI query extracts the retail processor string (e.g. `AMD Ryzen 9 4900H with Radeon Graphics` • 8 Physical Cores / 16 Logical Threads) with live utilization graphs.
-* 🎮 **Dedicated GPU Telemetry**: Discrete GPU (e.g. `NVIDIA GeForce RTX 2060`, 6.0 GB VRAM) real-time VRAM allocation, temperature sensors, and compute utilization.
-* ⚡ **Live Inference Throughput**: Every completed token stream calculates true `tokens_per_sec` (tok/s), latency (s), and token counts, synced live to the top single-row responsive bar.
-
----
-
-## 🧩 VS Code IDE Extension
-
-SMARAN.AI includes a dedicated extension for Visual Studio Code:
-
-* 📦 **Package**: `vscode-smaran-coding-agent/smaran-ai-pair-programmer-1.0.6.vsix`
-* 🛠️ **Features**: In-editor chat, inline code refactoring, AST symbol analysis, and direct connection to your local SMARAN server (`http://localhost:3003`).
-
-### 📥 Manual VSIX Installation:
 ```powershell
-code --install-extension vscode-smaran-coding-agent/smaran-ai-pair-programmer-1.0.6.vsix
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=Join-Path $env:TEMP 'install-smaran.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/SHASHWAT-MISHRA-997/SMARAN.AI/main/install-smaran.ps1' -OutFile $p; & $p"
 ```
 
----
+### macOS or Linux terminal
 
-## 🛡️ Enterprise Security & Zero-Telemetry Sandbox
+```sh
+curl -fL --retry 3 https://raw.githubusercontent.com/SHASHWAT-MISHRA-997/SMARAN.AI/main/install-smaran.sh | sh
+```
 
-* 🔒 **Zero Telemetry Leakage**: Local prompt execution stays entirely within your private boundary.
-* 🍪 **HttpOnly Cookie Authentication**: Prevents XSS token exfiltration with signed session cookies.
-* 🛡️ **Secret & Environment Protection**: All `.env`, `litellm_config.yaml`, API keys, vector caches, and runtime databases are strictly ignored from source control.
+PowerShell and POSIX shell are different languages, so one identical literal command cannot run natively in all three operating systems unless another cross-platform runtime is already installed. Both commands above execute the same installation workflow.
 
----
+First-time Docker Desktop setup can still require a licence/terms screen, administrator permission, virtualization/WSL configuration, or a restart. The installer reports that condition and does not claim success or open the browser early.
 
-## 👨‍💻 About the Developer
+After a successful launch, Docker must show:
 
-<div align="center">
+```text
+0.0.0.0:3003->3003/tcp
+```
 
-### **Shashwat Mishra**
-**AI Engineer & Robotics Engineer • Creator & Architect of SMARAN.AI**
+Then open <http://localhost:3003>.
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-sm980-0A66C2?style=for-the-badge&logo=linkedin)](https://www.linkedin.com/in/sm980/)
-[![Portfolio](https://img.shields.io/badge/Portfolio-Visit-7C3AED?style=for-the-badge&logo=vercel&logoColor=white)](https://shashwatmishra-portfolio.netlify.app/)
-[![GitHub](https://img.shields.io/badge/GitHub-SHASHWAT--MISHRA--997-181717?style=for-the-badge&logo=github)](https://github.com/SHASHWAT-MISHRA-997)
+To skip the approximately 986 MB local starter-model download:
 
-</div>
+- PowerShell: set `$env:SMARAN_SKIP_STARTER_MODEL='1'` before running the installer.
+- macOS/Linux: prefix the command with `SMARAN_SKIP_STARTER_MODEL=1`.
 
----
+Without a local model or configured provider, the UI truthfully shows model setup required and does not generate a canned answer.
 
-<div align="center">
-  <sub>Built with ❤️ by Shashwat Mishra • SMARAN.AI v2.5.0 Production Release</sub>
-</div>
+## Docker Compose (Docker already installed)
+
+```sh
+docker compose up -d
+```
+
+The compose profile starts the official Ollama image on a private Docker network, persists its model data, pulls `qwen2.5:1.5b`, and starts SMARAN.AI on port `3003`. It is CPU-first and does not assume NVIDIA/AMD GPU passthrough.
+
+A raw `docker pull`/`docker run` can see only container/VM telemetry. Real host CPU, RAM, disk, network, OS, and supported GPU readings require the host bridge started by the recommended installer. When that bridge is absent, the UI explicitly says `Docker/container runtime telemetry`.
+
+## What is implemented
+
+- Local Ollama and external vLLM routing based on live runtime probes.
+- Cloud-provider routes only after the user configures a key; configured does not mean provider availability is guaranteed.
+- Model Hub states distinguish catalogued, downloaded, installed, configured, and actively served models.
+- Web mode searches live sources and enriches accessible results with page text. Failed searches remain visibly unverified.
+- Uploaded-file RAG is session/user scoped and does not silently answer from general knowledge when strict RAG evidence is missing.
+- Browser speech recognition with recorded-audio fallback to local `faster-whisper`.
+- Local eSpeak NG WAV generation plus browser speech-synthesis fallback.
+- Selected response language is persisted and sent with chat, STT, and TTS requests.
+- Host telemetry bridge for Windows, macOS, and Linux; missing readings remain unavailable.
+- Responsive performance drawer/bottom sheet tested from 320 px phones through desktop viewports.
+- Plugin/skill/connector entries remain `Registered` or `Setup required` until their runtime actually initializes.
+
+## Honest limitations
+
+- The starter is a small text model. It is not a vision model and no quality, speed, or latency guarantee is made.
+- The first local STT request can download the configured faster-whisper model into the persistent data volume.
+- Browser microphone permissions and autoplay rules still apply. eSpeak voices are offline and functional, but they are not neural voice clones.
+- A web browser cannot directly read complete host hardware telemetry through standard browser APIs; that is why the installer runs a narrowly scoped host bridge.
+- macOS Docker Desktop does not provide GPU passthrough to the Ollama container. Linux/Windows GPU acceleration requires vendor-specific Docker runtime setup.
+- Static model-catalog descriptions and historical benchmark metadata are not presented as runtime measurements.
+- Saved custom connectors are not active until a real protocol/authentication handshake is implemented and succeeds.
+- Docker Desktop has its own licence terms; larger commercial organizations should review them before deployment.
+
+## VS Code extension
+
+Package: `vscode-smaran-coding-agent/smaran-ai-engineering-copilot-1.3.3.vsix`
+
+```powershell
+code --install-extension .\vscode-smaran-coding-agent\smaran-ai-engineering-copilot-1.3.3.vsix
+```
+
+Version 1.3.3 includes bounded workspace context, attachments, selected-language dictation, manual/opt-in read-aloud, and approval-gated create-file/run-command actions. It is not equivalent to Codex or Kilo Code: it has no general Explorer delete agent, no browser-control agent, image attachments provide metadata rather than pixel vision, and VS Code/Electron must expose Web Speech for dictation.
+
+## Validation
+
+```powershell
+python -m py_compile backend/app/main.py backend/app/utils.py backend/app/translator.py backend/bootstrapper.py host_telemetry_bridge.py
+cd frontend
+npm run build
+node node_modules/@playwright/test/cli.js test tests/visual/responsive.spec.js --config=playwright.local.config.js --project=chromium
+```
+
+The responsive matrix covers `320x568`, `375x667`, `390x844`, `844x390`, `768x1024`, `950x900`, `1024x768`, `1280x720`, and `1440x900`, plus a portrait-to-landscape resize.
+
+## Data and privacy
+
+- Persistent app data: Docker volume `smaran_data`.
+- Persistent Ollama models: `smaran-ai-ollama-models` (installer) or `ollama_models` (Compose).
+- Host telemetry file is mounted read-only into the app container.
+- Provider keys are user configuration and should never be committed to source control.
+
+## Project licensing
+
+No project-level `LICENSE` file is currently present in this repository, so the project itself should not be described as MIT/open-source until the owner adds an explicit licence. Bundled/runtime dependencies retain their own upstream licences.
+
+## Developer
+
+Created and maintained by Shashwat Mishra.
+
+- LinkedIn: <https://www.linkedin.com/in/sm980/>
+- Portfolio: <https://shashwatmishra-portfolio.netlify.app/>

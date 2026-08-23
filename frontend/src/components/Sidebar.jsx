@@ -3,12 +3,10 @@ import { createPortal } from 'react-dom';
 import {
   MessageSquare, Plus, Trash2, X,
   Settings, Pencil, Check, Brain, Sparkles,
-  ChevronLeft, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, LogOut, User,
-  Activity, LayoutDashboard,
+  ChevronLeft, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, User,
+  Activity, LayoutDashboard, QrCode, LogIn,
 } from 'lucide-react';
 import ModelHubModal from './ModelHubModal';
-import DeveloperModal from './DeveloperModal';
-import PluginHubModal from './PluginHubModal';
 import { SmaranLogo } from './SmaranLogo';
 import { API_BASE, logoutUser, getCurrentUser, fetchWithAuth } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
@@ -80,7 +78,7 @@ const RailBtn = ({ icon, label, onClick, active = false, danger = false, violet 
       className={`
         flex flex-col items-center justify-center gap-1 w-12 h-12 rounded-xl
         transition-all duration-200 cursor-pointer group relative
-        btn-lightning-hover sidebar-item-highlight
+        btn-lightning-hover sidebar-item-highlight nav-neon sheen
         ${active
           ? 'bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-400/40'
           : danger
@@ -99,13 +97,14 @@ const RailBtn = ({ icon, label, onClick, active = false, danger = false, violet 
 
 const Sidebar = ({
   token, user, sessions, activeSessionId, setActiveSessionId,
-  onCreateSession, onDeleteSession, onRenameSession, onClearHistory, onLogout,
+  onCreateSession, onDeleteSession, onRenameSession, onClearHistory,
   activeCollections, setActiveCollections,
   onNavigate, activeView, onExpandChange,
   isModelHubOpen: externalModelHubOpen,
   setIsModelHubOpen: externalSetIsModelHubOpen,
   onModelChange, position = 'left',
-  onTogglePerformance, showPerformance,
+  onTogglePerformance, showPerformance, onOpenAnalytics,
+  onOpenDeveloper, onOpenPairing, onOpenAuth,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -126,11 +125,7 @@ const Sidebar = ({
   const isModelHubOpen = externalModelHubOpen !== undefined ? externalModelHubOpen : internalModelHubOpen;
   const setIsModelHubOpen = externalSetIsModelHubOpen || setInternalModelHubOpen;
 
-  // Plugin & Skills Hub Modal
-  const [isPluginHubOpen, setIsPluginHubOpen] = useState(false);
-
-  // Developer Modal (Internal only)
-  const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
+  // Plugin & Skills Hub Modal (Removed)
 
   const fetchMemoryFacts = async () => {
     try {
@@ -195,6 +190,27 @@ const Sidebar = ({
   };
 
   useEffect(() => { if (onExpandChange) onExpandChange(expanded); }, [expanded]);
+
+  useEffect(() => {
+    if (!mobileOpen) return undefined;
+
+    document.body.classList.add('sidebar-open');
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') setMobileOpen(false);
+    };
+    const desktopQuery = window.matchMedia('(min-width: 768px)');
+    const handleViewportChange = (event) => {
+      if (event.matches) setMobileOpen(false);
+    };
+    window.addEventListener('keydown', handleEscape);
+    desktopQuery.addEventListener('change', handleViewportChange);
+
+    return () => {
+      document.body.classList.remove('sidebar-open');
+      window.removeEventListener('keydown', handleEscape);
+      desktopQuery.removeEventListener('change', handleViewportChange);
+    };
+  }, [mobileOpen]);
 
   const handleStartEdit = (e, session) => { e.stopPropagation(); setEditingSessionId(session.id); setEditTitle(session.title); };
   const handleSave = (id) => { if (editTitle.trim()) onRenameSession(id, editTitle.trim()); setEditingSessionId(null); };
@@ -473,33 +489,43 @@ const Sidebar = ({
       <div className={`shrink-0 border-t border-zinc-300/60 dark:border-zinc-800/80 p-2 space-y-1 ${expanded ? '' : 'flex flex-col items-center'}`}>
         {expanded ? (
           <>
-            <button onClick={() => setIsPluginHubOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-amber-400 hover:bg-amber-500/10 btn-lightning-hover sidebar-item-highlight sidebar-item-glow transition-all duration-300">
-              <Sparkles className="w-4 h-4 shrink-0 text-amber-400 animate-pulse" /> Skills, Plugins & MCP Hub
-            </button>
-            <button onClick={() => setIsModelHubOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow transition-all duration-300">
+            <button onClick={() => setIsModelHubOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
               <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
             </button>
-            <button onClick={() => setIsMemoryOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow transition-all duration-300">
+            <button onClick={onOpenAnalytics} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-emerald-400 hover:bg-emerald-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
+              <Activity className="w-4 h-4 shrink-0 text-emerald-400" /> Analytics Dashboard
+            </button>
+            <button onClick={() => setIsMemoryOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
               <Brain className="w-4 h-4 shrink-0" /> Manage AI Memory
             </button>
-            <button onClick={() => setIsDeveloperOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow transition-all duration-300">
+            {onOpenAuth && (
+              <button onClick={onOpenAuth} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-rose-400 hover:bg-rose-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
+                <LogIn className="w-4 h-4 shrink-0 text-rose-400" /> Sign In / Register
+              </button>
+            )}
+            {onOpenPairing && (
+              <button onClick={onOpenPairing} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-sky-400 hover:bg-sky-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
+                <QrCode className="w-4 h-4 shrink-0 text-sky-400" /> Link Your Phone
+              </button>
+            )}
+            <button onClick={onOpenDeveloper} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
               <UserCheck className="w-4 h-4 shrink-0 text-cyan-400" /> About Developer
             </button>
 
             <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={() => onNavigate('settings')} className="flex items-center gap-2 px-3 py-2.5 border border-zinc-400 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:text-indigo-700 dark:hover:text-white hover:border-indigo-500 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow transition-all duration-300 shadow-sm"><Settings className="w-4 h-4" /><span>Settings</span></button>
-              {onClearHistory && <button onClick={onClearHistory} className="flex items-center gap-2 px-3 py-2.5 border border-orange-400 dark:border-rose-700 text-orange-700 dark:text-rose-300 hover:text-white hover:bg-orange-600 dark:hover:bg-rose-600 hover:border-orange-600 dark:hover:border-rose-500 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow transition-all duration-300 shadow-sm hover:shadow-[0_0_14px_rgba(244,63,94,0.25)]"><Trash2 className="w-4 h-4" /><span>Clear History</span></button>}
-              <button onClick={onLogout} className="flex items-center gap-2 px-3 py-2.5 border border-red-400 dark:border-rose-700 text-red-700 dark:text-rose-300 hover:text-white hover:bg-red-600 dark:hover:bg-rose-600 hover:border-red-600 dark:hover:border-rose-500 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow transition-all duration-300 shadow-sm hover:shadow-[0_0_14px_rgba(244,63,94,0.25)]"><LogOut className="w-4 h-4" /><span>Logout</span></button>
+              <button onClick={() => onNavigate('settings')} className="flex items-center gap-2 px-3 py-2.5 border border-zinc-400 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:text-indigo-700 dark:hover:text-white hover:border-indigo-500 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow hover-lift transition-all duration-300 shadow-sm"><Settings className="w-4 h-4" /><span>Settings</span></button>
+              {onClearHistory && <button onClick={onClearHistory} className="flex items-center gap-2 px-3 py-2.5 border border-orange-400 dark:border-rose-700 text-orange-700 dark:text-rose-300 hover:text-white hover:bg-orange-600 dark:hover:bg-rose-600 hover:border-orange-600 dark:hover:border-rose-500 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow hover-lift transition-all duration-300 shadow-sm hover:shadow-[0_0_14px_rgba(244,63,94,0.25)]"><Trash2 className="w-4 h-4" /><span>Clear History</span></button>}
             </div>
           </>
         ) : (
           <>
-            <RailBtn icon={<Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />} label="Skills, Plugins & MCP Hub" onClick={() => setIsPluginHubOpen(true)} active={isPluginHubOpen} />
             <RailBtn icon={<Boxes className="w-5 h-5" />} label="Model Catalog & Matrix" onClick={() => setIsModelHubOpen(true)} violet />
+            <RailBtn icon={<Activity className="w-5 h-5 text-emerald-400" />} label="Analytics Dashboard" onClick={onOpenAnalytics} />
             <RailBtn icon={<Brain className="w-5 h-5" />} label="Manage AI Memory" onClick={() => setIsMemoryOpen(true)} />
-            <RailBtn icon={<UserCheck className="w-5 h-5" />} label="About Developer" onClick={() => setIsDeveloperOpen(true)} />
+            {onOpenAuth && <RailBtn icon={<LogIn className="w-5 h-5 text-rose-400" />} label="Sign In / Register" onClick={onOpenAuth} />}
+            {onOpenPairing && <RailBtn icon={<QrCode className="w-5 h-5 text-sky-400" />} label="Link Your Phone" onClick={onOpenPairing} />}
+            <RailBtn icon={<UserCheck className="w-5 h-5" />} label="About Developer" onClick={onOpenDeveloper} />
             <RailBtn icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => onNavigate('settings')} />
-            <RailBtn icon={<LogOut className="w-5 h-5" />} label="Logout" onClick={onLogout} danger />
           </>
         )}
       </div>
@@ -509,7 +535,7 @@ const Sidebar = ({
   /* Mobile sidebar */
   const mobileSidebar = (
     <>
-      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-[#1a1b1e] border-b border-zinc-800 shrink-0 z-30">
+      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-[#1a1b1e] border-b border-zinc-800 shrink-0 z-30 mobile-px-4 mobile-py-3">
         <div className="flex items-center gap-2">
           <Logo3DMotion size="sm" />
           <span className="font-black text-sm tracking-wide select-none flex items-center ml-1">
@@ -517,15 +543,28 @@ const Sidebar = ({
             <span className="text-white ml-1 px-1 rounded bg-gradient-to-r from-indigo-600 to-purple-600 text-[10px]">.AI</span>
           </span>
         </div>
-        <button onClick={() => setMobileOpen(true)} className="text-zinc-400 hover:text-white p-1.5 rounded-xl bg-zinc-800 border border-zinc-700 cursor-pointer">
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="text-zinc-400 hover:text-white p-1.5 rounded-xl bg-zinc-800 border border-zinc-700 cursor-pointer"
+          aria-label="Open navigation menu"
+          aria-controls="smaran-mobile-navigation"
+          aria-expanded={mobileOpen}
+        >
           <Menu className="w-5 h-5" />
         </button>
       </div>
 
-      {mobileOpen && <div onClick={() => setMobileOpen(false)} className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-40" />}
+      {mobileOpen && <div onClick={() => setMobileOpen(false)} className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-40 mobile-full-width" aria-hidden="true" />}
 
-      <aside className={`md:hidden fixed top-0 bottom-0 left-0 w-[268px] bg-[#1a1b1e] border-r border-zinc-800 flex flex-col z-50 transition-transform duration-300 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-4 flex items-center justify-between border-b border-zinc-800">
+      <aside
+        id="smaran-mobile-navigation"
+        aria-label="SMARAN.AI navigation"
+        aria-hidden={!mobileOpen}
+        inert={!mobileOpen}
+        className={`md:hidden fixed top-0 bottom-0 left-0 w-[268px] max-w-full bg-[#1a1b1e] border-r border-zinc-800 flex flex-col z-50 transition-transform duration-300 sidebar-mobile-fix sidebar-mobile-scroll ${mobileOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'}`}
+      >
+        <div className="p-4 flex items-center justify-between border-b border-zinc-800 shrink-0">
           <div className="flex items-center gap-2.5">
             <Logo3DMotion size="sm" />
             <div>
@@ -535,7 +574,7 @@ const Sidebar = ({
               </div>
             </div>
           </div>
-          <button onClick={() => setMobileOpen(false)} className="text-zinc-500 hover:text-white cursor-pointer"><X className="w-5 h-5" /></button>
+          <button type="button" onClick={() => setMobileOpen(false)} className="text-zinc-500 hover:text-white cursor-pointer" aria-label="Close navigation menu"><X className="w-5 h-5" /></button>
         </div>
 
         <div className="p-3 shrink-0">
@@ -545,7 +584,7 @@ const Sidebar = ({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-3 py-1 space-y-1">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-1 space-y-1">
           <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest px-2 mb-2">Chat History</span>
           {sessions.length === 0 ? (
             <p className="text-xs text-zinc-600 italic px-2 py-1 font-bold">No conversations yet.</p>
@@ -564,17 +603,24 @@ const Sidebar = ({
           ))}
         </div>
 
-        <div className="p-3 border-t border-zinc-800 space-y-1.5 shrink-0">
-          <button onClick={() => { setIsPluginHubOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-amber-400 hover:bg-amber-500/10">
-            <Sparkles className="w-4 h-4 shrink-0 text-amber-400 animate-pulse" /> Skills, Plugins & MCP Hub
-          </button>
+        <div className="p-3 border-t border-zinc-800 space-y-1.5 shrink-0 max-h-[55dvh] overflow-y-auto overscroll-contain sidebar-mobile-footer">
           <button onClick={() => { setIsModelHubOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/8">
             <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
           </button>
+          {onOpenAnalytics && (
+            <button onClick={() => { onOpenAnalytics(); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-emerald-400 hover:bg-emerald-500/8">
+              <Activity className="w-4 h-4 shrink-0 text-emerald-400" /> Analytics Dashboard
+            </button>
+          )}
           <button onClick={() => { setIsMemoryOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8">
             <Brain className="w-4 h-4 shrink-0" /> Manage AI Memory
           </button>
-          <button onClick={() => { setIsDeveloperOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8">
+          {onOpenPairing && (
+            <button onClick={() => { onOpenPairing(); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-sky-400 hover:bg-sky-500/8">
+              <QrCode className="w-4 h-4 shrink-0 text-sky-400" /> Link Your Phone
+            </button>
+          )}
+          <button onClick={() => { onOpenDeveloper(); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8">
             <UserCheck className="w-4 h-4 shrink-0 text-cyan-400" /> About Developer
           </button>
           {onTogglePerformance && (
@@ -583,14 +629,13 @@ const Sidebar = ({
             </button>
           )}
 
-          <div className="flex items-center gap-2">
-            <button onClick={() => onNavigate('settings')} className="flex items-center gap-2 px-3 py-2.5 border border-zinc-800 text-zinc-300 hover:text-white rounded-xl cursor-pointer text-xs font-bold"><Settings className="w-4 h-4" /><span>Settings</span></button>
-            {onClearHistory && <button onClick={onClearHistory} className="flex items-center gap-2 px-3 py-2.5 border border-rose-800 text-rose-300 hover:text-white hover:border-rose-600 rounded-xl cursor-pointer text-xs font-bold"><Trash2 className="w-4 h-4" /><span>Clear History</span></button>}
-            <button onClick={onLogout} className="flex items-center gap-2 px-3 py-2.5 border border-rose-800 text-rose-300 hover:text-white hover:border-rose-600 rounded-xl cursor-pointer text-xs font-bold"><LogOut className="w-4 h-4" /><span>Logout</span></button>
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => { onNavigate('settings'); setMobileOpen(false); }} className="min-w-0 w-full flex items-center justify-center gap-1.5 px-2 py-2.5 border border-zinc-800 text-zinc-300 hover:text-white rounded-xl cursor-pointer text-[11px] font-bold"><Settings className="w-4 h-4 shrink-0" /><span className="break-words">Settings</span></button>
+            {onClearHistory && <button onClick={() => { onClearHistory(); setMobileOpen(false); }} className="min-w-0 w-full flex items-center justify-center gap-1.5 px-2 py-2.5 border border-rose-800 text-rose-300 hover:text-white hover:border-rose-600 rounded-xl cursor-pointer text-[11px] font-bold"><Trash2 className="w-4 h-4 shrink-0" /><span className="break-words">Clear History</span></button>}
           </div>
 
           <div 
-            onClick={() => setIsDeveloperOpen(true)}
+            onClick={() => { onOpenDeveloper(); setMobileOpen(false); }}
             className="pt-2 border-t border-zinc-800/60 text-center cursor-pointer hover:bg-zinc-800/40 py-1.5 rounded-xl transition-all"
             title="Click to view Developer Profile & Architecture"
           >
@@ -617,18 +662,10 @@ const Sidebar = ({
       {sidebarDesktop}
       {mobileSidebar}
       {memoryModal}
-      <PluginHubModal
-        isOpen={isPluginHubOpen}
-        onClose={() => setIsPluginHubOpen(false)}
-      />
       <ModelHubModal
         isOpen={isModelHubOpen}
         onClose={() => setIsModelHubOpen(false)}
         token={token}
-      />
-      <DeveloperModal
-        isOpen={isDeveloperOpen}
-        onClose={() => setIsDeveloperOpen(false)}
       />
     </>
   );

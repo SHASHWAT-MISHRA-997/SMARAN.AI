@@ -1,7 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, Cpu, Download, Trash2, CheckCircle2, BarChart2, Sparkles, Filter, ShieldCheck, Check, Layers, AlertCircle, RefreshCw, Key, ExternalLink, Zap, Cloud, Globe } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import ModelComparisonModal from './ModelComparisonModal';
+
+const finite = (value) => typeof value === "number" && Number.isFinite(value);
+const positive = (value) => finite(value) && value > 0;
+const safeToFixed = (value, digits = 0) => {
+  if (!finite(value)) return null;
+  try { return value.toFixed(digits); } catch { return null; }
+};
 
 const COMPANY_COLORS = {
   huggingface: 'from-yellow-500/20 to-amber-500/10 border-yellow-500/30 text-yellow-400',
@@ -31,247 +38,51 @@ const COMPANY_LABELS = {
   kimi: 'Moonshot AI',
 };
 
-const FREE_CLOUD_PROVIDERS = [
-  {
-    id: 'groq',
-    chatCompatible: true,
-    defaultChatModel: 'llama-3.3-70b-versatile',
-    category: 'recurring-free',
-    name: 'Groq',
-    badge: 'Ultra-Fast LPU',
-    tag: '⚡ 800 tok/s Free',
-    color: 'from-orange-500/20 via-amber-500/10 to-orange-950/40 border-orange-500/40 text-orange-400',
-    models: ['Llama 3.3 70B Versatile', 'DeepSeek R1 Distill 70B', 'Mixtral 8x7B', 'Gemma 2 9B'],
-    specs: 'Generous recurring free daily quota (14,400 requests/day). World-record inference speeds.',
-    description: 'Instant LPU acceleration powered by Groq chipsets. Perfect for real-time chat, coding, and heavy 70B models on low-spec hardware.',
-    getKeyUrl: 'https://console.groq.com/keys',
-    envKey: 'GROQ_API_KEY',
-    placeholder: 'gsk_...',
-  },
-  {
-    id: 'openrouter',
-    chatCompatible: true,
-    defaultChatModel: 'deepseek/deepseek-r1:free',
-    category: 'recurring-free',
-    name: 'OpenRouter',
-    badge: 'Universal Gateway',
-    tag: '🌐 100+ Free Models',
-    color: 'from-purple-500/20 via-indigo-500/10 to-purple-950/40 border-purple-500/40 text-purple-400',
-    models: ['DeepSeek R1 (Free)', 'Llama 3.3 70B (Free)', 'Qwen 2.5 72B (Free)', 'Mistral Small (Free)', 'Nemotron 3 Ultra 49B (Free)', 'Gemma 4 27B (Free)'],
-    specs: 'Single unified API key accessing 100+ AI models with dedicated zero-cost free-tier routes.',
-    description: 'The ultimate fallback gateway. Connect to top proprietary and open models with zero upfront setup.',
-    getKeyUrl: 'https://openrouter.ai/keys',
-    envKey: 'OPENROUTER_API_KEY',
-    placeholder: 'sk-or-v1-...',
-  },
-  {
-    id: 'gemini',
-    chatCompatible: true,
-    defaultChatModel: 'gemini-2.5-flash',
-    category: 'recurring-free',
-    name: 'Google AI Studio (Gemini)',
-    badge: '1.5M Context & Vision',
-    tag: '📜 1.5M Window Free',
-    color: 'from-blue-500/20 via-cyan-500/10 to-blue-950/40 border-cyan-500/40 text-cyan-400',
-    models: ['Gemini 2.0 Flash', 'Gemini 1.5 Pro', 'Gemini 1.5 Flash'],
-    specs: 'Free developer tier (15 requests/min, 1500 req/day). Industry-leading document context window.',
-    description: 'Google AI Studio provides powerful multimodal models for long PDF analysis, code parsing, and web search grounding.',
-    getKeyUrl: 'https://aistudio.google.com/app/apikey',
-    envKey: 'GEMINI_API_KEY',
-    placeholder: 'AIzaSy...',
-  },
-  {
-    id: 'openai',
-    chatCompatible: true,
-    defaultChatModel: 'gpt-4.1-mini',
-    category: 'direct-byok',
-    name: 'OpenAI API',
-    badge: 'Direct Official API',
-    tag: 'BYOK - Usage billed by OpenAI',
-    color: 'from-emerald-500/20 via-teal-500/10 to-zinc-950/40 border-emerald-500/40 text-emerald-400',
-    models: ['Models available to your OpenAI project'],
-    specs: 'Loads the real model list authorized for the supplied OpenAI project key.',
-    description: 'Connect directly to OpenAI. Availability, limits, and charges follow the user account and project.',
-    getKeyUrl: 'https://platform.openai.com/api-keys',
-    envKey: 'OPENAI_API_KEY',
-    placeholder: 'sk-...',
-  },
-  {
-    id: 'anthropic',
-    chatCompatible: true,
-    defaultChatModel: 'claude-sonnet-4-20250514',
-    category: 'direct-byok',
-    name: 'Anthropic Claude API',
-    badge: 'Direct Official API',
-    tag: 'BYOK - Usage billed by Anthropic',
-    color: 'from-orange-500/20 via-amber-500/10 to-zinc-950/40 border-orange-500/40 text-orange-300',
-    models: ['Claude models available to your Anthropic account'],
-    specs: 'Loads the real Claude model list authorized for the supplied Anthropic key.',
-    description: 'Connect directly to Anthropic Claude using the native Messages API.',
-    getKeyUrl: 'https://console.anthropic.com/settings/keys',
-    envKey: 'ANTHROPIC_API_KEY',
-    placeholder: 'sk-ant-...',
-  },
-  {
-    id: 'cerebras',
-    chatCompatible: true,
-    defaultChatModel: 'llama-3.3-70b',
-    category: 'recurring-free',
-    name: 'Cerebras Cloud',
-    badge: 'Wafer-Scale Chips',
-    tag: '🚀 1,800 tok/s Free',
-    color: 'from-emerald-500/20 via-teal-500/10 to-emerald-950/40 border-emerald-500/40 text-emerald-400',
-    models: ['Llama 3.3 70B', 'Llama 3.1 8B'],
-    specs: 'High-speed wafer-scale engine inference. Extremely fast responses for long documents.',
-    description: 'Blazing fast Llama models running on dedicated CS-3 wafer processors for instant response generation.',
-    getKeyUrl: 'https://cloud.cerebras.ai/',
-    envKey: 'CEREBRAS_API_KEY',
-    placeholder: 'csk-...',
-  },
-  {
-    id: 'sambanova',
-    chatCompatible: true,
-    defaultChatModel: 'Meta-Llama-3.3-70B-Instruct',
-    category: 'free-trial',
-    name: 'SambaNova Cloud',
-    badge: '405B Frontier AI',
-    tag: '🔥 Full 405B Free',
-    color: 'from-pink-500/20 via-rose-500/10 to-pink-950/40 border-pink-500/40 text-pink-400',
-    models: ['Llama 3.1 405B', 'Llama 3.3 70B', 'DeepSeek R1'],
-    specs: 'Run massive 405 billion parameter models for free on enterprise SN40-L chip clusters.',
-    description: 'Unlocks massive 405B model intelligence that normally requires multi-GPU server rigs.',
-    getKeyUrl: 'https://cloud.sambanova.ai/',
-    envKey: 'SAMBANOVA_API_KEY',
-    placeholder: 'sn_...',
-  },
-  {
-    id: 'together',
-    chatCompatible: true,
-    defaultChatModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
-    category: 'free-trial',
-    name: 'Together AI',
-    badge: 'Open Source Cloud',
-    tag: '🎁 $25 Free Credits',
-    color: 'from-blue-600/20 via-indigo-600/10 to-blue-950/40 border-blue-500/40 text-blue-400',
-    models: ['Llama 3.3 70B Turbo', 'Qwen 2.5 Coder 32B', 'DeepSeek V3'],
-    specs: 'Fast inference API supporting fine-tuned weights and open source models.',
-    description: 'High-performance cloud endpoints hosting popular open-weight foundation models.',
-    getKeyUrl: 'https://console.together.ai/settings/api-keys',
-    envKey: 'TOGETHER_API_KEY',
-    placeholder: 'tg_...',
-  },
-  {
-    id: 'deepseek',
-    chatCompatible: true,
-    defaultChatModel: 'deepseek-chat',
-    category: 'free-trial',
-    name: 'DeepSeek Official',
-    badge: 'Reasoning Leader',
-    tag: '🧠 Free Trial Tokens',
-    color: 'from-sky-500/20 via-blue-500/10 to-sky-950/40 border-sky-500/40 text-sky-400',
-    models: ['DeepSeek V3', 'DeepSeek R1 Reasoning'],
-    specs: 'Advanced chain-of-thought math, coding, and logical reasoning benchmarks.',
-    description: 'Direct official API endpoints for DeepSeek-R1 reasoning & V3 architecture.',
-    getKeyUrl: 'https://platform.deepseek.com/api_keys',
-    envKey: 'DEEPSEEK_API_KEY',
-    placeholder: 'sk-...',
-  },
-  {
-    id: 'cloudflare',
-    category: 'recurring-free',
-    name: 'Cloudflare Workers AI',
-    badge: 'Serverless Edge',
-    tag: '⚡ 10k Neurons/Day',
-    color: 'from-amber-500/20 via-yellow-500/10 to-amber-950/40 border-amber-500/40 text-amber-400',
-    models: ['Llama 3.1 8B', 'Mistral 7B Instruct', 'Whisper Speech-to-Text'],
-    specs: '10,000 free daily neuron executions across 300+ global edge datacenters.',
-    description: 'Ultra-low latency serverless model execution distributed worldwide.',
-    getKeyUrl: 'https://dash.cloudflare.com/',
-    envKey: 'CLOUDFLARE_API_KEY',
-    placeholder: 'cf_...',
-  },
-  {
-    id: 'huggingface',
-    category: 'open-source',
-    name: 'Hugging Face Hub',
-    badge: '100k+ Open Models',
-    tag: '🤗 Serverless API',
-    color: 'from-yellow-500/20 via-amber-500/10 to-yellow-950/40 border-yellow-500/40 text-yellow-400',
-    models: ['DeepSeek R1', 'Qwen 2.5', 'Phi-3.5', 'Gemma 2'],
-    specs: 'Free Serverless Inference API tokens for community open source models.',
-    description: 'Access the world’s largest open-source AI model hub directly via User Access Tokens.',
-    getKeyUrl: 'https://huggingface.co/settings/tokens',
-    envKey: 'HF_TOKEN',
-    placeholder: 'hf_...',
-  },
-  {
-    id: 'nvidia',
-    chatCompatible: true,
-    defaultChatModel: 'meta/llama-3.3-70b-instruct',
-    category: 'free-trial',
-    name: 'NVIDIA Build (NIM)',
-    badge: 'Free NIM Models',
-    tag: '💚 1,000 Free Credits + Free Models',
-    color: 'from-green-500/20 via-emerald-500/10 to-green-950/40 border-green-500/40 text-green-400',
-    models: [
-      'Nemotron-3-Ultra-49B-Instruct',
-      'Nemotron-3-8B-Instruct',
-      'Nemotron-3-Nano-Omni-30B-A3B',
-      'Llama 3.1 405B Instruct',
-      'Llama 3.3 70B Instruct',
-      'Phi-3.5 Vision Instruct',
-      'Mistral 7B Instruct',
-      'Mixtral 8x7B Instruct',
-      'Gemma 2 27B',
-      'Qwen 2.5 72B Instruct'
-    ],
-    specs: 'Free NVIDIA NIM microservices + 1000 trial credits. TensorRT-LLM accelerated inference on H100 clusters.',
-    description: 'Access NVIDIA\'s latest Nemotron 3 Ultra/Nano, Llama 3.1/3.3, Gemma 2, Qwen 2.5, and more. Free tier available for many models.',
-    getKeyUrl: 'https://build.nvidia.com/',
-    envKey: 'NVIDIA_API_KEY',
-    placeholder: 'nvapi-...',
-  },
-  {
-    id: 'mistral',
-    chatCompatible: true,
-    defaultChatModel: 'mistral-small-latest',
-    category: 'free-trial',
-    name: 'Mistral AI (La Plateforme)',
-    badge: 'European Frontier',
-    tag: '💻 Free Codestral Tier',
-    color: 'from-orange-600/20 via-amber-600/10 to-orange-950/40 border-orange-500/40 text-orange-400',
-    models: ['Mistral Small', 'Codestral 22B', 'Mistral NeMo'],
-    specs: 'Free access to Codestral for developers & competitive pricing on Mistral models.',
-    description: 'State-of-the-art European AI models engineered for efficiency, coding, and multilingual tasks.',
-    getKeyUrl: 'https://console.mistral.ai/api-keys/',
-    envKey: 'MISTRAL_API_KEY',
-    placeholder: 'mistral_...',
-  },
-  {
-    id: 'cohere',
-    category: 'free-trial',
-    name: 'Cohere',
-    badge: 'Enterprise Search & RAG',
-    tag: '📚 Free Trial Keys',
-    color: 'from-teal-500/20 via-emerald-500/10 to-teal-950/40 border-teal-500/40 text-teal-400',
-    models: ['Command R+', 'Command R', 'Embed English v3'],
-    specs: 'Free trial API key for non-commercial RAG, web search grounding & citation tasks.',
-    description: 'Industry standard for enterprise document retrieval, search embeddings, and grounded generation.',
-    getKeyUrl: 'https://dashboard.cohere.com/api-keys',
-    envKey: 'COHERE_API_KEY',
-    placeholder: 'coh_...',
-  }
+const cloudProvider = ({ id, name, color, getKeyUrl, placeholder }) => ({
+  id,
+  name,
+  color,
+getKeyUrl,
+  placeholder,
+  chatCompatible: true,
+  category: 'provider-api',
+  badge: 'Provider API',
+  tag: '',
+  models: [],
+  description: `Connect directly to ${name} with a user-supplied API key.`,
+  specs: 'Models are listed only after this key passes a live provider model-list request. Pricing, quota, regions, and rate limits remain provider-controlled.',
+});
+
+const CLOUD_PROVIDERS = [
+  cloudProvider({ id: 'groq', name: 'Groq', color: 'from-orange-500/20 via-amber-500/10 to-orange-950/40 border-orange-500/40 text-orange-400', getKeyUrl: 'https://console.groq.com/keys', placeholder: 'gsk_...' }),
+  cloudProvider({ id: 'openrouter', name: 'OpenRouter', color: 'from-purple-500/20 via-indigo-500/10 to-purple-950/40 border-purple-500/40 text-purple-400', getKeyUrl: 'https://openrouter.ai/keys', placeholder: 'sk-or-v1-...' }),
+  cloudProvider({ id: 'gemini', name: 'Google AI Studio (Gemini)', color: 'from-blue-500/20 via-cyan-500/10 to-blue-950/40 border-cyan-500/40 text-cyan-400', getKeyUrl: 'https://aistudio.google.com/app/apikey', placeholder: 'AIzaSy...' }),
+  cloudProvider({ id: 'openai', name: 'OpenAI API', color: 'from-emerald-500/20 via-teal-500/10 to-zinc-950/40 border-emerald-500/40 text-emerald-400', getKeyUrl: 'https://platform.openai.com/api-keys', placeholder: 'sk-...' }),
+  cloudProvider({ id: 'anthropic', name: 'Anthropic Claude API', color: 'from-orange-500/20 via-amber-500/10 to-zinc-950/40 border-orange-500/40 text-orange-300', getKeyUrl: 'https://console.anthropic.com/settings/keys', placeholder: 'sk-ant-...' }),
+  cloudProvider({ id: 'cerebras', name: 'Cerebras Cloud', color: 'from-emerald-500/20 via-teal-500/10 to-emerald-950/40 border-emerald-500/40 text-emerald-400', getKeyUrl: 'https://cloud.cerebras.ai/', placeholder: 'csk-...' }),
+  cloudProvider({ id: 'sambanova', name: 'SambaNova Cloud', color: 'from-pink-500/20 via-rose-500/10 to-pink-950/40 border-pink-500/40 text-pink-400', getKeyUrl: 'https://cloud.sambanova.ai/', placeholder: 'sn_...' }),
+  cloudProvider({ id: 'together', name: 'Together AI', color: 'from-blue-600/20 via-indigo-600/10 to-blue-950/40 border-blue-500/40 text-blue-400', getKeyUrl: 'https://console.together.ai/settings/api-keys', placeholder: 'tg_...' }),
+  cloudProvider({ id: 'deepseek', name: 'DeepSeek Official', color: 'from-sky-500/20 via-blue-500/10 to-sky-950/40 border-sky-500/40 text-sky-400', getKeyUrl: 'https://platform.deepseek.com/api_keys', placeholder: 'sk-...' }),
+  cloudProvider({ id: 'huggingface', name: 'Hugging Face Inference', color: 'from-yellow-500/20 via-amber-500/10 to-yellow-950/40 border-yellow-500/40 text-yellow-400', getKeyUrl: 'https://huggingface.co/settings/tokens', placeholder: 'hf_...' }),
+  cloudProvider({ id: 'nvidia', name: 'NVIDIA Build (NIM)', color: 'from-green-500/20 via-emerald-500/10 to-green-950/40 border-green-500/40 text-green-400', getKeyUrl: 'https://build.nvidia.com/', placeholder: 'nvapi-...' }),
+  cloudProvider({ id: 'mistral', name: 'Mistral AI', color: 'from-orange-600/20 via-amber-600/10 to-orange-950/40 border-orange-500/40 text-orange-400', getKeyUrl: 'https://console.mistral.ai/api-keys/', placeholder: 'mistral_...' }),
 ];
 
 const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
   const [activeTab, setActiveTab] = useState('local'); // 'local' | 'cloud'
   const [catalog, setCatalog] = useState([]);
-  const [userGpuVram, setUserGpuVram] = useState(6.0);
+  const [userGpuVram, setUserGpuVram] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCompany, setSelectedCompany] = useState('all');
   const [selectedCapability, setSelectedCapability] = useState('all');
   const [gpuTierFilter, setGpuTierFilter] = useState('all');
+  // Opening the hub on the installed-only view shows an empty screen until
+  // something has been downloaded, which reads as though the catalog is
+  // missing. Start on the catalog and switch to installed once there is
+  // actually something installed to look at.
+  const [showDiscoverModels, setShowDiscoverModels] = useState(true);
+  const pickedInitialView = useRef(false);
   const [downloadingMap, setDownloadingMap] = useState({});
 
   // Model comparison selection (up to 4 models)
@@ -289,7 +100,6 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
   });
 
   const [keySaveNotice, setKeySaveNotice] = useState(null);
-  const [cloudCategory, setCloudCategory] = useState('all');
   const [cloudModels, setCloudModels] = useState({});
   const [providerModels, setProviderModels] = useState({});
   const [providerLoading, setProviderLoading] = useState({});
@@ -298,11 +108,16 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
 
   const loadProviderModels = async (providerId, apiKey) => {
     const key = String(apiKey || '').trim();
-    if (!key) return;
+    if (!key) return false;
     setProviderLoading((prev) => ({ ...prev, [providerId]: true }));
     setProviderErrors((prev) => ({ ...prev, [providerId]: null }));
     try {
-      const res = await fetch(`${API_BASE}/api/cloud/models`, { method: 'POST', headers: { 'Content-Type': 'application/json',  }, body: JSON.stringify({ provider: providerId, api_key: key }) });
+      const res = await fetch(`${API_BASE}/api/cloud/models`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ provider: providerId, api_key: key }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || 'Could not load provider models.');
       const models = [...new Set((data.models || []).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -311,32 +126,66 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
       try { const cached = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}'); localStorage.setItem('sm_cloud_provider_models', JSON.stringify({ ...cached, [providerId]: models })); } catch (_) {}
       if (models.length) setCloudModels((prev) => ({ ...prev, [providerId]: prev[providerId] || models[0] }));
       else setProviderErrors((prev) => ({ ...prev, [providerId]: 'This key returned no selectable chat models.' }));
-    } catch (e) { setProviderErrors((prev) => ({ ...prev, [providerId]: e.message || 'Could not load provider models.' })); }
+      return models.length > 0;
+    } catch (e) { setProviderErrors((prev) => ({ ...prev, [providerId]: e.message || 'Could not load provider models.' })); return false; }
     finally { setProviderLoading((prev) => ({ ...prev, [providerId]: false })); }
   };
 
   const handleSaveApiKey = async (providerId, keyVal) => {
     const cleanKey = keyVal.trim();
-    const updated = { ...apiKeys, [providerId]: cleanKey };
-    setApiKeys(updated);
     try {
-      localStorage.setItem('sm_cloud_api_keys', JSON.stringify(updated));
-      setKeySaveNotice(`API Key for ${providerId.toUpperCase()} saved in this browser.`);
-      setTimeout(() => setKeySaveNotice(null), 3000);
-      await loadProviderModels(providerId, cleanKey);
-    } catch (e) { console.error('Failed to save API key', e); }
+      if (!cleanKey) {
+        const removeResponse = await fetch(`${API_BASE}/api/cloud/save-key`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ provider: providerId, api_key: '' }),
+        });
+        if (!removeResponse.ok) throw new Error('The backend did not confirm key removal.');
+        const updated = { ...apiKeys };
+        delete updated[providerId];
+        setApiKeys(updated);
+        localStorage.setItem('sm_cloud_api_keys', JSON.stringify(updated));
+        setProviderModels((prev) => { const next = { ...prev }; delete next[providerId]; return next; });
+        setKeySaveNotice(`${providerId.toUpperCase()} key removed.`);
+        return;
+      }
+      const verified = await loadProviderModels(providerId, cleanKey);
+      if (verified) {
+        const saveResponse = await fetch(`${API_BASE}/api/cloud/save-key`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ provider: providerId, api_key: cleanKey }),
+        });
+        const saveBody = await saveResponse.json().catch(() => ({}));
+        if (!saveResponse.ok || saveBody.verified !== true) throw new Error(saveBody.detail || 'The backend did not confirm this provider key.');
+        const updated = { ...apiKeys, [providerId]: cleanKey };
+        setApiKeys(updated);
+        localStorage.setItem('sm_cloud_api_keys', JSON.stringify(updated));
+        setKeySaveNotice(`${providerId.toUpperCase()} provider probe passed; the key is configured for this runtime.`);
+      } else {
+        setKeySaveNotice(`${providerId.toUpperCase()} key was not saved because verification failed.`);
+      }
+      setTimeout(() => setKeySaveNotice(null), 4000);
+    } catch (e) {
+      console.error('Failed to save API key', e);
+      setKeySaveNotice(e.message || 'Provider key was not configured.');
+      setTimeout(() => setKeySaveNotice(null), 4000);
+    }
   };
 
   const fetchCatalog = async () => {
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/api/models/catalog`, {
-        headers: {  },
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok) {
         const data = await res.json();
         setCatalog(data.catalog || []);
-        setUserGpuVram(data.user_gpu_vram_gb || 6.0);
+        setUserGpuVram(Number.isFinite(data.user_gpu_vram_gb) && data.user_gpu_vram_gb > 0 ? data.user_gpu_vram_gb : null);
       }
     } catch (e) {
       console.error('Failed to fetch catalog', e);
@@ -349,7 +198,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
     if (!isOpen) return;
     fetchCatalog();
     Object.entries(apiKeys).forEach(([providerId, apiKey]) => {
-      const provider = FREE_CLOUD_PROVIDERS.find((item) => item.id === providerId);
+      const provider = CLOUD_PROVIDERS.find((item) => item.id === providerId);
       if (provider?.chatCompatible && apiKey) loadProviderModels(providerId, apiKey);
     });
   }, [isOpen]);
@@ -457,11 +306,25 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
     }
   };
 
+  // If this machine already has models on disk, open on those instead;
+  // otherwise the catalog stays in front so the hub is never blank.
+  useEffect(() => {
+    if (pickedInitialView.current || !catalog.length) return;
+    pickedInitialView.current = true;
+    if (catalog.some((m) => m.is_downloaded)) setShowDiscoverModels(false);
+  }, [catalog]);
+
   if (!isOpen) return null;
 
-  const companies = ['all', 'huggingface', 'alibaba', 'deepseek', 'meta', 'google', 'microsoft', 'mistral', 'nvidia', 'ibm', 'glm', 'kimi'];
+  // Every publisher present in the catalog gets a chip. The audio and video
+  // models come from smaller labs, and without these they were reachable
+  // only under 'All Companies'.
+  const companies = ['all', 'huggingface', 'alibaba', 'deepseek', 'meta', 'google', 'microsoft',
+    'mistral', 'nvidia', 'ibm', 'glm', 'kimi', 'minimax', 'openai', 'opengvlab',
+    'lightricks', 'genmo', 'hexgrad'];
   const capabilitiesList = [
     { id: 'all', label: 'All Capabilities' },
+    { id: 'Text', label: 'Text' },
     { id: 'Vision', label: '👁️ Vision' },
     { id: 'Video', label: '📹 Video' },
     { id: 'Audio', label: '🎙️ Audio' },
@@ -472,10 +335,11 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
 
   const normalizedCompanyCode = (model) => {
     const raw = String(model.company_code || model.company || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-    const aliases = { hf: 'huggingface', huggingface: 'huggingface', qwen: 'alibaba', alibaba: 'alibaba', deepseek: 'deepseek', meta: 'meta', llama: 'meta', google: 'google', gemma: 'google', microsoft: 'microsoft', phi: 'microsoft', mistral: 'mistral', nvidia: 'nvidia', nemotron: 'nvidia', ibm: 'ibm', granite: 'ibm', zhipu: 'glm', glm: 'glm', moonshot: 'kimi', kimi: 'kimi' };
+    const aliases = { hf: 'huggingface', huggingface: 'huggingface', qwen: 'alibaba', alibaba: 'alibaba', deepseek: 'deepseek', meta: 'meta', llama: 'meta', google: 'google', gemma: 'google', microsoft: 'microsoft', phi: 'microsoft', mistral: 'mistral', nvidia: 'nvidia', nemotron: 'nvidia', ibm: 'ibm', granite: 'ibm', zhipu: 'glm', glm: 'glm', moonshot: 'kimi', kimi: 'kimi', minimax: 'minimax', openai: 'openai', opengvlab: 'opengvlab', lightricks: 'lightricks', genmo: 'genmo', hexgrad: 'hexgrad' };
     return aliases[raw] || raw;
   };
   const filteredCatalog = catalog.filter((m) => {
+    if (!showDiscoverModels && !m.is_downloaded && !downloadingMap[m.id]) return false;
     const matchesSearch =
       (m.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (m.company || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -512,28 +376,32 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-150">
-        <div className="w-full max-w-6xl max-h-[94vh] bg-zinc-950 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-150 text-left">
+        {/* dvh tracks the visible viewport as mobile browser bars show/hide, so
+            the modal never extends under them and strand its scrollable pane. */}
+        <div className="w-full max-w-6xl h-[94dvh] sm:h-auto sm:max-h-[94dvh] bg-zinc-950 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-150 text-left">
           
           {/* Main Modal Header */}
-          <div className="px-6 py-4 border-b border-zinc-800/80 bg-zinc-900/40 backdrop-blur-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
+          {/* Header stays a single row at every width: stacking it on mobile
+              pushed the close button onto its own line and left dead space. */}
+          <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-zinc-800/80 bg-zinc-900/40 backdrop-blur-sm flex flex-row items-start justify-between gap-2 sm:gap-3 shrink-0">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
                 <Cpu className="w-5 h-5 text-indigo-400" />
               </div>
-              <div>
-                <h2 className="text-lg font-black text-white tracking-wide flex items-center gap-1.5">
+              <div className="min-w-0">
+                <h2 className="text-sm sm:text-lg font-black text-white tracking-wide flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   <span className="bg-gradient-to-r from-amber-400 via-orange-500 to-indigo-400 bg-clip-text text-transparent font-extrabold">SMARAN</span>
-                  <span className="text-white font-extrabold px-1.5 py-0.5 rounded-md bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500 text-xs shadow-[0_0_10px_rgba(99,102,241,0.5)]">.AI</span>
-                  <span className="text-zinc-200 ml-1 font-bold">Model Hub & Cloud APIs</span>
+                  <span className="text-white font-extrabold px-1.5 py-0.5 rounded-md bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500 text-[10px] sm:text-xs shadow-[0_0_10px_rgba(99,102,241,0.5)]">.AI</span>
+                  <span className="text-zinc-200 sm:ml-1 font-bold">Model Hub & Cloud APIs</span>
                 </h2>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  Local offline models or free zero-cost cloud APIs for low VRAM systems.
+                <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5">
+                  Installed local models and provider-confirmed cloud model access.
                 </p>
               </div>
             </div>
 
             {/* Modal Action buttons */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {keySaveNotice && (
                 <span className="text-[11px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl animate-bounce">
                   {keySaveNotice}
@@ -572,9 +440,9 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
             >
               <Zap className="w-4 h-4 text-amber-400 animate-pulse" />
               <span className="flex items-center gap-1.5">
-                <span>Free Cloud API Keys & Providers</span>
+                <span>Cloud Provider Keys</span>
                 <span className="px-2 py-0.5 text-[9px] font-black rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-black uppercase tracking-wider shadow-sm">
-                  Low Spec Friendly
+                  Live model probe
                 </span>
               </span>
             </button>
@@ -582,9 +450,21 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
 
           {/* TAB 1: LOCAL HARDWARE MODELS */}
           {activeTab === 'local' && (
-            <>
+            /* On phones the filter block alone is taller than the viewport, so
+               the whole tab scrolls as one. From `sm` up the filters stay put
+               and only the model list scrolls. */
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain sm:overflow-hidden sm:flex sm:flex-col">
               {/* Filter & Search Bar */}
               <div className="p-5 border-b border-zinc-800/80 bg-zinc-900/20 space-y-4 shrink-0">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-black text-white">{showDiscoverModels ? 'Discover downloadable models' : 'Installed local models'}</p>
+                    <p className="text-[10px] text-zinc-500 mt-0.5">Only completed local downloads reported by the backend appear in Installed view.</p>
+                  </div>
+                  <button type="button" onClick={() => setShowDiscoverModels((value) => !value)} className="px-3 py-2 rounded-xl border border-indigo-500/35 bg-indigo-500/10 text-indigo-300 text-[11px] font-black cursor-pointer">
+                    {showDiscoverModels ? 'Show installed only' : 'Discover models'}
+                  </button>
+                </div>
                 <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
                   <div className="relative w-full md:w-96">
                     <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -616,12 +496,15 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                {/* Company filter — wraps onto multiple lines so every provider
+                    stays visible on phones and tablets instead of hiding behind
+                    a sideways scroll. */}
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pb-2">
                   {companies.map((c) => (
                     <button
                       key={c}
                       onClick={() => setSelectedCompany(c)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all whitespace-nowrap cursor-pointer ${
+                      className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold transition-all cursor-pointer ${
                         selectedCompany === c
                           ? 'bg-indigo-600 text-white shadow-md'
                           : 'bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200'
@@ -632,13 +515,13 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                   ))}
                 </div>
 
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none pt-1.5 border-t border-zinc-800/40">
-                  <span className="text-[10px] font-extrabold uppercase text-zinc-500 mr-1 shrink-0">Capability Filter:</span>
+                <div className="flex flex-wrap items-center gap-1.5 pb-2 pt-1.5 border-t border-zinc-800/40">
+                  <span className="w-full sm:w-auto text-[10px] font-extrabold uppercase text-zinc-500 sm:mr-1">Capability Filter:</span>
                   {capabilitiesList.map((cap) => (
                     <button
                       key={cap.id}
                       onClick={() => setSelectedCapability(cap.id)}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all whitespace-nowrap cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer ${
                         selectedCapability === cap.id
                           ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md border border-purple-400/30'
                           : 'bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800/80 text-zinc-400 hover:text-zinc-200'
@@ -650,15 +533,18 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                 </div>
               </div>
 
-              {/* Model Catalog Grid */}
-              <div className="p-6 overflow-y-auto max-h-[58vh] space-y-4">
+              {/* Model Catalog Grid — fills the space the header and filters
+                  leave over. A fixed vh cap overflowed the clipped modal on
+                  short screens, so the list could not be scrolled at all. */}
+              <div className="p-4 sm:p-6 sm:overflow-y-auto sm:overscroll-contain sm:flex-1 sm:min-h-0 space-y-4">
                 {loading ? (
                   <div className="py-20 text-center text-zinc-500 text-sm font-semibold flex items-center justify-center gap-2">
                     <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" /> Loading Enterprise Model Catalog...
                   </div>
                 ) : filteredCatalog.length === 0 ? (
-                  <div className="py-16 text-center text-zinc-500 text-sm font-semibold">
-                    No models matched your search or hardware filter.
+                  <div className="py-16 text-center text-zinc-500 text-sm font-semibold space-y-3">
+                    <p>{showDiscoverModels ? 'No models matched your search or hardware filter.' : 'No completed local model download was detected.'}</p>
+                    {!showDiscoverModels && <button type="button" onClick={() => setShowDiscoverModels(true)} className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black cursor-pointer">Browse downloadable models</button>}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -799,13 +685,13 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                                       📦 {(() => {
                                         const dl = progressMap[m.id]?.downloaded_mb || 0;
                                         const tot = progressMap[m.id]?.total_mb || 0;
-                                        const fmt = (mb) => mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`;
+                                        const fmt = (mb) => mb >= 1024 ? `${safeToFixed(mb / 1024, 2) || "0"} GB` : `${Math.round(mb)} MB`;
                                         return tot > 0 ? `${fmt(dl)} / ${fmt(tot)}` : `${fmt(dl)} downloaded`;
                                       })()}
                                     </span>
                                     <div className="flex items-center gap-3">
                                       {progressMap[m.id]?.speed_mbps > 0 && (
-                                        <span className="text-cyan-400">⚡ {progressMap[m.id].speed_mbps >= 1024 ? `${(progressMap[m.id].speed_mbps / 1024).toFixed(1)} GB/s` : `${progressMap[m.id].speed_mbps.toFixed(1)} MB/s`}</span>
+                                        <span className="text-cyan-400">⚡ {progressMap[m.id].speed_mbps >= 1024 ? `${safeToFixed(progressMap[m.id].speed_mbps / 1024, 1) || "0"} GB/s` : `${safeToFixed(progressMap[m.id].speed_mbps, 1) || "0"} MB/s`}</span>
                                       )}
                                       {progressMap[m.id]?.eta_secs > 0 && (
                                         <span className="text-amber-400">⏱ {progressMap[m.id].eta_secs > 60 ? `${Math.floor(progressMap[m.id].eta_secs / 60)}m ${progressMap[m.id].eta_secs % 60}s` : `${progressMap[m.id].eta_secs}s`}</span>
@@ -850,12 +736,12 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                   Compare Selected ({selectedForCompare.length}/4)
                 </button>
               </div>
-            </>
+            </div>
           )}
 
-          {/* TAB 2: FREE CLOUD API PROVIDERS (LOW VRAM / ZERO HARDWARE) */}
+          {/* TAB 2: CLOUD PROVIDER KEYS */}
           {activeTab === 'cloud' && (
-            <div className="p-6 overflow-y-auto max-h-[72vh] space-y-6">
+            <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain flex-1 min-h-0 space-y-6">
               
               {/* Informational Guidance Card */}
               <div className="p-5 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-950/30 via-zinc-900/80 to-purple-950/30 shadow-xl flex items-start gap-4">
@@ -864,32 +750,19 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                 </div>
                 <div className="space-y-1.5 text-xs">
                   <h3 className="text-sm font-black text-amber-300 flex items-center gap-2">
-                    <span>Low GPU VRAM or Low Hardware Specs? Run Heavy 70B / 405B Models Free via Cloud APIs</span>
+                    <span>Provider-confirmed cloud models</span>
                   </h3>
                   <p className="text-zinc-300 leading-relaxed font-semibold">
-                    If your laptop or PC cannot run heavy AI models locally, use the direct key link below. Providers set their own free-tier, trial, region, and rate-limit rules, so this screen clearly separates recurring-free access from trial-credit options.
+                    Add a provider key to query its live model-list endpoint. A model is shown only when that provider returns it for the key. Pricing, quota, regions, and rate limits are controlled by the provider account.
                   </p>
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-2.5" role="tablist" aria-label="Cloud provider categories">
-                {[
-                  ['all', 'All providers'],
-                  ['recurring-free', 'Recurring free tier'],
-                  ['free-trial', 'Free trial / credits'],
-                  ['open-source', 'Open-source access'],
-                  ['direct-byok', 'Direct BYOK APIs'],
-                ].map(([id, label]) => (
-                  <button key={id} type="button" role="tab" aria-selected={cloudCategory === id} onClick={() => setCloudCategory(id)}
-                    className={`rounded-xl px-3 py-2 text-[11px] font-black transition-all cursor-pointer ${cloudCategory === id ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-zinc-950 shadow-lg' : 'border border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-amber-500/50 hover:text-zinc-200'}`}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {/* Grid of Free Cloud Providers */}
+{/* Provider cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {FREE_CLOUD_PROVIDERS.filter((provider) => cloudCategory === 'all' || provider.category === cloudCategory).map((provider) => {
+                {CLOUD_PROVIDERS.map((provider) => {
                   const savedKey = apiKeys[provider.id] || '';
+                  const providerConfirmed = (providerModels[provider.id] || []).length > 0;
 
                   return (
                     <div
@@ -925,13 +798,15 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
 
                         {/* Available Models Chips */}
                         <div className="space-y-1">
-                          <span className="text-[10px] font-black uppercase text-zinc-400">Popular Free Models:</span>
+                          <span className="text-[10px] font-black uppercase text-zinc-400">Models returned for this key:</span>
                           <div className="flex flex-wrap gap-1.5">
-                            {provider.models.map((m) => (
+                            {(providerModels[provider.id] || []).slice(0, 12).map((m) => (
                               <span key={m} className="text-[10px] font-bold text-zinc-200 bg-zinc-900/90 border border-zinc-700 px-2 py-0.5 rounded-md">
                                 {m}
                               </span>
                             ))}
+                            {!savedKey && <span className="text-[10px] text-zinc-500">No API key saved; no models are claimed as available.</span>}
+                            {savedKey && !providerLoading[provider.id] && !(providerModels[provider.id] || []).length && <span className="text-[10px] text-amber-300">No provider-confirmed models yet. Refresh or check the key.</span>}
                           </div>
                         </div>
                       </div>
@@ -951,7 +826,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                             className="px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black text-[11px] font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer hover:scale-105"
                             title={`Click to open ${provider.name} direct API key creation dashboard`}
                           >
-                            <span>Get Free API Key</span>
+                            <span>Open provider console</span>
                             <ExternalLink className="w-3.5 h-3.5" />
                           </a>
                         </div>
@@ -992,8 +867,8 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                         )}
                         {savedKey && !provider.chatCompatible && <p className="text-[10px] font-bold text-zinc-400">Key saved. This provider is listed for direct access, but it is not connected to the chat engine yet.</p>}
                         {savedKey && (
-                          <div className="text-[10px] font-extrabold text-emerald-400 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> API key saved in this browser for {provider.name}
+                          <div className={`text-[10px] font-extrabold flex items-center gap-1 ${providerConfirmed ? 'text-emerald-400' : 'text-zinc-400'}`}>
+                            <CheckCircle2 className="w-3 h-3" /> {providerConfirmed ? `Provider probe passed for ${provider.name}` : `Key stored in this browser; ${provider.name} access is not confirmed`}
                           </div>
                         )}
                       </div>

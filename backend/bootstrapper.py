@@ -1,26 +1,10 @@
-"""
-SMARAN.AI — Intelligent Inference Engine Bootstrapper
-===========================================================
-Runs at container startup. Automatically:
-  1. Detects full device specs: CPU, system RAM, GPU name, VRAM
-  2. Selects THE BEST model from the 8 preferred models that fits ENTIRELY in VRAM
-  3. Cleanly deletes ALL previously-downloaded models not in the 8 preferred list
-  4. When hardware changes (e.g. RTX 2060 → RTX 5060 Ti), auto-deletes old models
-     that don't fit and downloads the new powerful models
-  5. Engine: Always uses Ollama (handles GGUF quantized models perfectly)
-  6. Auto-downloads chosen model via Ollama pull
-  7. Writes hardware_config.json — backend reads this at runtime
+"""SMARAN.AI local-runtime bootstrapper.
 
-System AUTOMATICALLY adapts when moved to different hardware. No manual config.
-
-MODEL SELECTION PHILOSOPHY:
-  - ONLY the 8 user-preferred models are ever used
-  - Only models that fit 100% in VRAM (no CPU offloading = smooth & fast)
-  - Prefer thinking/reasoning capable models (Mistral, Phi-4, Qwen)
-  - Prefer 128K+ context window models
-  - Latest generation — not old weak models
-  - Strong reasoning, genuine/truthful information, no false or hallucinated data
-  - Excellent for employee data analysis in any format
+At container startup this module records source-labelled hardware facts, chooses
+a capacity-compatible local model recommendation, and writes
+``hardware_config.json``.  A recommendation is not reported as installed or
+active; the API verifies Ollama/vLLM readiness separately.  User-installed
+models are preserved.
 """
 
 import os
@@ -41,62 +25,79 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bootstrapper")
 
-DATA_DIR    = "./data"
+DATA_DIR    = os.getenv("DATA_DIR", "./data")
 CONFIG_PATH = os.path.join(DATA_DIR, "hardware_config.json")
+HOST_STATS_PATH = os.getenv("HOST_STATS_PATH", os.path.join(DATA_DIR, "host_stats.json"))
+HF_HOME = os.getenv("HF_HOME", os.path.join(DATA_DIR, "models"))
+os.environ.setdefault("HF_HOME", HF_HOME)
+os.environ.setdefault("HUGGINGFACE_HUB_CACHE", os.path.join(HF_HOME, "hub"))
+
+# Legacy Nemotron GGUF support is optional and must be explicitly configured.
+# Defining these values prevents the background pull worker from crashing even
+# when the current preferred model is not Nemotron.
+NEMOTRON_OLLAMA_TAG = os.getenv("NEMOTRON_OLLAMA_TAG", "nemotron-nano-12b-v2")
+NEMOTRON_GGUF_URL = os.getenv("NEMOTRON_GGUF_URL", "").strip()
+NEMOTRON_GGUF_PATH = os.getenv(
+    "NEMOTRON_GGUF_PATH",
+    os.path.join(DATA_DIR, "models", "nemotron-nano-12b-v2.Q4_K_M.gguf"),
+)
+
+
+def _read_fresh_host_stats(max_age_seconds: float = 15.0) -> dict:
+    """Read the optional host bridge only when its source and timestamp are fresh."""
+    try:
+        with open(HOST_STATS_PATH, encoding="utf-8") as stats_file:
+            payload = json.load(stats_file)
+        source = str(payload.get("telemetry_source", ""))
+        timestamp = float(payload.get("timestamp", 0) or 0)
+        age = time.time() - timestamp
+        if not source.endswith("_host_bridge") or timestamp <= 0 or age < -5 or age > max_age_seconds:
+            return {}
+        return payload
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# THE 8 PREFERRED MODELS — Sorted by VRAM requirement (highest first).
+# Local model recommendations — sorted by VRAM requirement (highest first).
 # First match (fits in VRAM) wins.
 #
-# These are the ONLY models the system will ever use. All other Ollama models
-# are automatically deleted.
+# These entries guide automatic setup only. Existing user-installed Ollama
+# models are never removed by the bootstrapper.
 #
 # Columns:
-#   min_vram_gb  : Minimum VRAM needed for smooth zero-lag inference
+#   min_vram_gb  : Minimum capacity used for selection (not a speed guarantee)
 #   min_ram_gb   : Minimum system RAM (for CPU-only fallback)
 #   ollama_tag   : Exact Ollama pull tag
 #   display_name : Human-readable name for UI
 #   ctx_window   : Context window in tokens
 #   reasoning    : True = model has strong reasoning / thinking capabilities
 #   description  : Why this model was chosen
-# ─── ACTIVE MODEL: Qwen/Qwen2.5-VL-7B-Instruct-AWQ ──────────────────────────
-# Single vision + reasoning model for ALL GPU tiers (6GB VRAM and above).
-# AWQ 4-bit quantised — fits in 6GB VRAM, fast on RTX 2060 / 3060 / 4060 / 5060 Ti.
-# Free, open-source (Apache 2.0), multimodal: text + images + screenshots + PDFs.
-ACTIVE_VLLM_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
+# The universal installer provisions this small text model through the official
+# Ollama image. It is a starter, not a benchmark result or a promise that every
+# device will run it quickly.
+ACTIVE_LOCAL_MODEL = "qwen2.5:1.5b"
+ACTIVE_VLLM_MODEL = ACTIVE_LOCAL_MODEL  # Backward-compatible import alias.
 
 PREFERRED_MODELS = [
-    # ─── ALL TIERS: RTX 2060 (6GB) and above — use Qwen2.5-VL-7B-AWQ ─────────
-    {
-        "min_vram_gb":  5.5,
-        "min_ram_gb":   8.0,
-        "model_id":     ACTIVE_VLLM_MODEL,
-        "display_name": "Qwen 2.5 VL 7B AWQ (GPU Multimodal)",
-        "ctx_window":   2048,
-        "reasoning":    True,
-        "description":  "Qwen2.5-VL-7B-Instruct-AWQ — Vision+text, 4-bit AWQ, fits in 6GB VRAM. Free, fast, accurate."
-    },
-    # ─── CPU FALLBACK: No GPU / VRAM too small (< 5.5 GB) ───────────────────────
     {
         "min_vram_gb":  0.0,
-        "min_ram_gb":   8.0,
-        "model_id":     ACTIVE_VLLM_MODEL,
-        "display_name": "Qwen 2.5 VL 7B AWQ (CPU Mode — slow)",
-        "ctx_window":   1024,
-        "reasoning":    True,
-        "description":  "Qwen2.5-VL-7B-Instruct-AWQ in CPU-only mode. Slow but functional."
+        "min_ram_gb":   4.0,
+        "model_id":     ACTIVE_LOCAL_MODEL,
+        "ollama_tag":   ACTIVE_LOCAL_MODEL,
+        "display_name": "Qwen 2.5 1.5B (local starter)",
+        "ctx_window":   4096,
+        "reasoning":    False,
+        "description":  "Apache-2.0 text model used by the universal installer. Availability and latency are verified only after Ollama serves it."
     },
 ]
 
 
-# ── KEEP model — never delete these under any circumstances ──────────────────
-# nomic-embed-text is essential for RAG embeddings
+# Embedding model used by local RAG setup.
 KEEP_MODELS = {"nomic-embed-text"}
 
-# ── ALL models to DELETE — anything not in PREFERRED_MODELS or KEEP_MODELS
-# This list is auto-generated from PREFERRED_MODELS but we also explicitly list
-# common old models here to be thorough.
+# Legacy cleanup inventory retained for import compatibility. Both cleanup
+# functions below are disabled and never delete user-installed models.
 EXPLICIT_DELETE = [
     # Explicitly removed Qwen VL models
     "qwen2.5vl", "qwen2.5vl:latest",
@@ -167,7 +168,12 @@ EXPLICIT_DELETE = [
 
 # Build OLLAMA_DEPRECATED list: everything in EXPLICIT_DELETE that is NOT
 # a preferred model tag and NOT in KEEP_MODELS.
-PREFERRED_TAGS = {m["model_id"] for m in PREFERRED_MODELS}
+PREFERRED_TAGS = {
+    value
+    for model in PREFERRED_MODELS
+    for value in (model.get("model_id"), model.get("ollama_tag"))
+    if value
+}
 OLLAMA_DEPRECATED = [
     m for m in EXPLICIT_DELETE
     if m not in PREFERRED_TAGS and m not in KEEP_MODELS
@@ -178,6 +184,26 @@ OLLAMA_DEPRECATED = [
 # Hardware Detection
 # ─────────────────────────────────────────────────────────────────────────────
 def detect_cpu():
+    host_stats = _read_fresh_host_stats()
+    if host_stats:
+        logical = int(host_stats.get("cpu_threads") or 0)
+        physical = int(host_stats.get("cpu_cores") or 0)
+        name = str(host_stats.get("cpu_name") or "Unavailable")
+        if logical > 0:
+            logger.info(
+                "CPU (fresh host bridge): %s | Physical cores: %s | Logical processors: %s",
+                name,
+                physical or "unavailable",
+                logical,
+            )
+            return {
+                "cpu_name": name,
+                "cpu_cores_logical": logical,
+                "cpu_cores_physical": physical or None,
+                "cpu_max_ghz": None,
+                "source": host_stats.get("telemetry_source"),
+            }
+
     logical  = psutil.cpu_count(logical=True)  or 1
     physical = psutil.cpu_count(logical=False) or 1
     name = "Unknown CPU"
@@ -204,6 +230,19 @@ def detect_cpu():
 
 
 def detect_ram():
+    host_stats = _read_fresh_host_stats()
+    if host_stats:
+        try:
+            gb = float(host_stats.get("ram_total_gb") or 0)
+        except (TypeError, ValueError):
+            gb = 0.0
+        if gb > 0:
+            logger.info("RAM (fresh host bridge): %.2f GB total", gb)
+            return {
+                "ram_total_gb": round(gb, 2),
+                "source": host_stats.get("telemetry_source"),
+            }
+
     # On Windows host directly, try wmic first!
     try:
         res = subprocess.run(["wmic", "computersystem", "get", "TotalPhysicalMemory", "/format:value"],
@@ -243,6 +282,31 @@ def detect_ram():
 def detect_gpu():
     gpus = []
     driver = "N/A"
+
+    host_stats = _read_fresh_host_stats()
+    if host_stats:
+        for index, item in enumerate(host_stats.get("gpus") or []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            raw_vram = item.get("vram_total_gb")
+            try:
+                vram_gb = round(float(raw_vram), 2) if raw_vram is not None else 0.0
+            except (TypeError, ValueError):
+                vram_gb = 0.0
+            gpus.append({
+                "name": name,
+                "vram_gb": vram_gb,
+                "index": int(item.get("index", index) or index),
+                "vendor": str(item.get("vendor") or "unknown"),
+                "source": host_stats.get("telemetry_source"),
+                "vram_measured": raw_vram is not None,
+            })
+        if gpus:
+            logger.info("GPU (fresh host bridge): detected %d adapter(s)", len(gpus))
+            return gpus, str(host_stats.get("driver_version") or "N/A")
 
     # NVML — fastest, most accurate for NVIDIA
     try:
@@ -355,21 +419,23 @@ def resolve_ollama_base() -> str:
     return candidates[0]
 
 
-# Smart Model Selection — From the 8 Preferred Models
+# Capacity-aware local model selection
 # ─────────────────────────────────────────────────────────────────────────────
 def select_best_model(vram_gb: float, ram_gb: float, cpu_cores: int) -> dict:
     """
-    Select the most powerful model from the 8 preferred models that fits
-    ENTIRELY in VRAM. No CPU offloading = zero lag, smooth inference.
+    Select a configured local model whose declared memory requirement fits.
 
-    Engine: Always Ollama (all preferred models are Ollama-compatible).
+    This is a capacity check, not a benchmark or proof that the runtime is
+    installed. Runtime readiness is verified independently by the API.
     """
     logger.info(f"Selecting best model for VRAM={vram_gb}GB, RAM={ram_gb}GB, CPU={cpu_cores} cores")
 
     # ── Ollama path (all preferred models) ──────────────────────────────────
     for tier in PREFERRED_MODELS:
-        # For GPU tiers: check VRAM fit with 0.5GB overhead margin
-        if vram_gb > 0 and tier["min_vram_gb"] > 0:
+        # A missing GPU can never satisfy a positive VRAM tier.
+        if tier["min_vram_gb"] > 0:
+            if vram_gb <= 0:
+                continue
             effective = vram_gb - 0.5
             if effective < tier["min_vram_gb"]:
                 continue
@@ -377,16 +443,17 @@ def select_best_model(vram_gb: float, ram_gb: float, cpu_cores: int) -> dict:
         if tier["min_vram_gb"] == 0 and ram_gb < tier["min_ram_gb"]:
             continue
 
+        model_name = tier.get("ollama_tag") or tier.get("model_id") or ACTIVE_VLLM_MODEL
         logger.info(
             f"Engine: Ollama | "
-            f"Model: {tier['ollama_tag']} | "
+            f"Model: {model_name} | "
             f"Context: {tier['ctx_window']} tokens | "
             f"Reasoning: {tier['reasoning']} | "
             f"Reason: {tier['description']}"
         )
         return {
             "engine":       "ollama",
-            "model_id":     tier["ollama_tag"],
+            "model_id":     model_name,
             "display_name": tier["display_name"],
             "ctx_window":   tier["ctx_window"],
             "reasoning":    tier["reasoning"],
@@ -395,16 +462,17 @@ def select_best_model(vram_gb: float, ram_gb: float, cpu_cores: int) -> dict:
             "max_model_len": min(tier["ctx_window"], 32768),
         }
 
-    # Absolute fallback (should not happen as we have tiers down to 0 VRAM)
+    # Do not label an incompatible, uninstalled fallback model as active.
     return {
         "engine":       "ollama",
-        "model_id":     "llama3.1:8b",
-        "display_name": "Llama 3.1 8B (fallback)",
-        "ctx_window":   131072,
+        "model_id":     "",
+        "display_name": "No compatible local model selected",
+        "ctx_window":   0,
         "reasoning":    False,
-        "quantization": "Q4_K_M",
+        "quantization": "N/A",
         "api_url":      resolve_ollama_base(),
-        "max_model_len": 32768,
+        "max_model_len": 0,
+        "unavailable_reason": "No preferred local model fits the measured GPU VRAM and system RAM.",
     }
 
 
@@ -422,14 +490,13 @@ def _ollama_reachable(base=None, timeout=5) -> bool:
 
 
 def delete_models_not_in_preferred_list():
-    """
-    Aggressively delete EVERY model from Ollama that is NOT:
-    1. One of the 8 preferred models, OR
-    2. nomic-embed-text (needed for RAG embeddings)
+    """Deprecated compatibility hook; automatic deletion is intentionally disabled."""
+    logger.info("Automatic Ollama cleanup is disabled; preserving user-installed models.")
+    return
 
-    This ensures when you move hardware (RTX 2060 → RTX 5060 Ti or vice versa),
-    the old models are cleaned up and the new ones are pulled.
-    """
+    # Kept below for source compatibility with older deployments. It is
+    # unreachable by design and can only be restored through an explicit,
+    # user-approved maintenance workflow.
     base = resolve_ollama_base()
     if not _ollama_reachable(base):
         logger.info("Ollama not reachable — skipping model cleanup.")
@@ -498,11 +565,12 @@ def delete_models_not_in_preferred_list():
 
 
 def delete_deprecated_ollama_models():
-    """
-    Legacy delete function — deletes the explicit OLLAMA_DEPRECATED list.
-    The main cleanup is done by delete_models_not_in_preferred_list() which
-    is more thorough. This is kept as a secondary safety net.
-    """
+    """Deprecated compatibility hook; automatic deletion is intentionally disabled."""
+    logger.info("Deprecated-model cleanup is disabled; preserving user-installed models.")
+    return
+
+    # Legacy implementation retained below only to avoid breaking imports in
+    # third-party deployments. It is intentionally unreachable.
     base = resolve_ollama_base()
     if not _ollama_reachable(base):
         logger.info("Ollama not reachable — skipping deprecated model cleanup.")
@@ -579,6 +647,12 @@ def pull_nemotron_via_gguf():
     Only runs when 14GB+ VRAM is detected (RTX 5060 Ti, RTX 4080, etc.).
     GGUF is saved to /data/ (Docker volume) so it survives container restarts.
     """
+    if not NEMOTRON_GGUF_URL:
+        logger.error(
+            "Nemotron GGUF download was requested, but NEMOTRON_GGUF_URL is not configured."
+        )
+        return
+
     base = resolve_ollama_base()
 
     # Skip if already registered in Ollama
@@ -627,7 +701,7 @@ def pull_nemotron_via_gguf():
         logger.info(f"Nemotron GGUF already on disk and complete: {NEMOTRON_GGUF_PATH} — skipping download.")
 
     # Create Ollama Modelfile
-    modelfile_path = "/app/data/nemotron-nano-12b-v2.Modelfile"
+    modelfile_path = os.path.join(DATA_DIR, "nemotron-nano-12b-v2.Modelfile")
     modelfile_content = f"""FROM {NEMOTRON_GGUF_PATH}
 PARAMETER temperature 0.7
 PARAMETER num_ctx 32768
@@ -665,17 +739,24 @@ def main():
     import sys
     import subprocess
 
-    # If --pull-only is passed, run the clean and pull tasks synchronously in this background process
+    # If --pull-only is passed, pull only the selected recommendation.
     if len(sys.argv) > 1 and sys.argv[1] == "--pull-only":
         # Wait a few seconds to let the FastAPI server start up first
         time.sleep(3)
         logger.info("Background pull process started.")
-        logger.info("Phase 1 — Deleting non-preferred models for clean transition...")
-        delete_models_not_in_preferred_list()
+        logger.info("Phase 1 — Preserving user-installed models.")
 
-        logger.info("Phase 2 — Pulling preferred models...")
-        for pm in PREFERRED_MODELS:
-            pull_ollama_model(pm["model_id"])
+        logger.info("Phase 2 — Pulling only the compatible selected model...")
+        selected_model = ""
+        try:
+            with open(CONFIG_PATH, encoding="utf-8") as config_file:
+                selected_model = str(json.load(config_file).get("model_id", "")).strip()
+        except Exception as exc:
+            logger.warning(f"Could not read selected model configuration: {exc}")
+        if selected_model:
+            pull_ollama_model(selected_model)
+        else:
+            logger.warning("No compatible local model was selected; automatic model pull skipped.")
 
         logger.info("Phase 3 — Ensuring embedding model is present...")
         pull_ollama_model("nomic-embed-text")
@@ -684,8 +765,8 @@ def main():
 
     logger.info("=" * 70)
     logger.info("SMARAN.AI — Intelligent Model Selection Bootstrapper v3.0")
-    logger.info("8 Preferred Models | Auto-adapts to hardware changes")
-    logger.info(f"Host: {socket.gethostname()}")
+    logger.info("Capacity-aware recommendation | Runtime readiness verified separately")
+    logger.info(f"Runtime ID: {socket.gethostname()}")
     logger.info("=" * 70)
 
     # 1. Full hardware detection
@@ -694,12 +775,36 @@ def main():
     gpus, driver = detect_gpu()
     best_gpu = max(gpus, key=lambda g: g.get("vram_gb", 0)) if gpus else {"name": "No GPU", "vram_gb": 0.0, "index": 0, "vendor": "none"}
 
-    # 2. Select best possible model from the 8 preferred models
+    # 2. Select a capacity-compatible recommendation. An explicitly configured
+    # runtime always wins so the bootstrapper cannot replace the installer's
+    # verified starter (or a model selected by the user) with another download.
     profile = select_best_model(
         vram_gb   = best_gpu.get("vram_gb", 0.0),
         ram_gb    = ram["ram_total_gb"],
         cpu_cores = cpu["cpu_cores_logical"]
     )
+    configured_model = os.getenv("ACTIVE_MODEL", "").strip()
+    configured_engine = os.getenv("INFERENCE_ENGINE", "").strip().lower()
+    if configured_model:
+        if configured_engine not in {"ollama", "vllm"}:
+            configured_engine = "ollama" if os.getenv("OLLAMA_URL", "").strip() else profile.get("engine", "ollama")
+        configured_url = (
+            os.getenv("VLLM_URL", "http://127.0.0.1:8000/v1").strip()
+            if configured_engine == "vllm"
+            else os.getenv("OLLAMA_URL", resolve_ollama_base()).strip()
+        )
+        configured_context = int(os.getenv("MAX_MODEL_LEN", str(profile.get("max_model_len") or 4096)))
+        profile = {
+            **profile,
+            "engine": configured_engine,
+            "model_id": configured_model,
+            "display_name": configured_model,
+            "api_url": configured_url,
+            "ctx_window": configured_context,
+            "max_model_len": configured_context,
+            "reasoning": False,
+            "configured_source": "environment",
+        }
 
     # 3. Write config — backend + utils.py will both read this at runtime
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -734,24 +839,39 @@ def main():
 
     # 4. Print summary
     logger.info("")
-    logger.info("┌─ HARDWARE DETECTED ─────────────────────────────────────────┐")
+    logger.info("┌─ SOURCE-LABELLED HARDWARE DETECTED ─────────────────────────┐")
     logger.info(f"│  CPU   : {cpu['cpu_name']} ({cpu['cpu_cores_logical']} cores)")
     logger.info(f"│  RAM   : {ram['ram_total_gb']} GB system memory")
     for g in gpus:
         logger.info(f"│  GPU {g.get('index', 0)} : {g.get('name', 'Unknown')} | VRAM: {g.get('vram_gb', 0)} GB | Vendor: {g.get('vendor', 'unknown')}")
-    logger.info("├─ SELECTED MODEL ────────────────────────────────────────────┤")
+    logger.info("├─ RECOMMENDED LOCAL MODEL (NOT ACTIVE UNTIL SERVED) ─────────┤")
     logger.info(f"│  Engine: {profile['engine'].upper()}")
     logger.info(f"│  Model : {profile['model_id']}")
     logger.info(f"│  Name  : {profile['display_name']}")
     logger.info(f"│  CTX   : {profile['ctx_window']:,} tokens")
     logger.info(f"│  Think : {'✓ YES — Strong Reasoning' if profile['reasoning'] else '✗ Standard Instruct'}")
-    logger.info("├─ FITS IN VRAM? ─────────────────────────────────────────────┤")
-    logger.info(f"│  ✓ 100% in VRAM — zero CPU offloading — smooth inference    │")
+    logger.info("├─ COMPATIBILITY ─────────────────────────────────────────────┤")
+    if profile["model_id"]:
+        execution_mode = "GPU VRAM" if best_gpu.get("vram_gb", 0) > 0 else "CPU/system RAM"
+        logger.info(f"│  Compatible by measured capacity via {execution_mode}; runtime readiness is checked separately.")
+    else:
+        logger.info("│  No compatible preferred local model was selected.          │")
     logger.info("└─────────────────────────────────────────────────────────────┘")
     logger.info("")
 
-    # 5. Spawn background model downloader process
-    logger.info("Spawning background model downloader...")
+    # 5. Downloads are opt-in here. The interactive installers already pull and
+    # verify their starter model with visible progress. Silently downloading a
+    # second model at every container start is both surprising and expensive.
+    auto_pull = os.getenv("SMARAN_AUTO_PULL_MODEL", "").strip().lower() in {"1", "true", "yes"}
+    if not auto_pull:
+        logger.info("Automatic background model download is disabled. Set SMARAN_AUTO_PULL_MODEL=1 to opt in.")
+        logger.info("Bootstrap configuration complete. Handing over control to FastAPI server...")
+        return
+
+    logger.info("Preparing opt-in background model downloader...")
+    if not profile["model_id"]:
+        logger.warning("Downloader not started because no compatible local model was selected.")
+        return
     try:
         log_file_path = os.path.join(DATA_DIR, "downloader.log")
         # Open in append mode with buffering disabled (unbuffered) so lines write immediately

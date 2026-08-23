@@ -11,6 +11,8 @@ litellm_config.yaml
 backend/data/
 data/
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 chroma/
@@ -44,6 +46,10 @@ __pycache__/
 *.exe
 SMARAN_AI.spec
 
+# Personal / Non-Software Data
+GMRPL AI/
+Attendance_Report/
+
 # OS & Workspace Files
 .DS_Store
 Thumbs.db
@@ -59,3 +65,16 @@ Thumbs.db
 .system_generated/
 test-results/
 playwright-report/
+
+# Android release signing. The keystore identifies every build as coming
+# from the same source; anyone holding it could sign an APK that Android
+# accepts as an update to this app. It never belongs in the repository,
+# public or otherwise.
+frontend/android/keystore/
+*.jks
+*.keystore
+keystore.properties
+
+# Built installers. These are attached to GitHub Releases instead, which
+# is where large binaries belong.
+dist-release/

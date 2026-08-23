@@ -131,11 +131,34 @@ class UserMemory(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     fact = Column(Text, nullable=False)           # The extracted memory fact
+    # Which part of the person this fact describes, so the memory can be
+    # browsed by topic rather than as one long undifferentiated list.
+    category = Column(String, nullable=True, default="durable_record")
     source_session_id = Column(String, nullable=True)  # Which session it came from
     created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
     # Relationships
     user = relationship("User", back_populates="memories")
+
+class PairedDevice(Base):
+    """A phone or tablet linked to this desktop by scanning its QR code.
+
+    The token is the device's only credential: it is generated when the QR is
+    shown and handed over once, so it never travels except on the local
+    network during pairing.
+    """
+    __tablename__ = "paired_devices"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String, nullable=False)
+    kind = Column(String, default="phone", nullable=False)  # phone | tablet | desktop
+    token = Column(String, unique=True, index=True, nullable=False)
+    last_seen = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
+
+    user = relationship("User")
+
 
 class CustomPlugin(Base):
     """User-defined custom plugins, skills, and MCP connectors."""

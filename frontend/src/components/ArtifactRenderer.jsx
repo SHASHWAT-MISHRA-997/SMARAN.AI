@@ -6,6 +6,12 @@ import {
 } from 'recharts';
 import { BarChart3, LineChart as LineIcon, PieChart as PieIcon, Table, Download, Eye, EyeOff } from 'lucide-react';
 
+const finite = (value) => typeof value === "number" && Number.isFinite(value);
+const safeToFixed = (value, digits = 0) => {
+  if (!finite(value)) return "0";
+  try { return value.toFixed(digits); } catch { return "0"; }
+};
+
 // Premium Color Palettes (Harmonious tailwind-compatible HSL scales)
 const COLORS = [
   '#6366f1', // Indigo
@@ -207,7 +213,7 @@ export default function ArtifactRenderer({ data }) {
                   outerRadius={90}
                   paddingAngle={3}
                   dataKey="value"
-                  label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                  label={({ name, percent }) => `${name} (${safeToFixed(percent * 100, 0)}%)`}
                 >
                   {chartData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />

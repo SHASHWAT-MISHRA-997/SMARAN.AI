@@ -1,7 +1,9 @@
+import base64
 import json
 import logging
 import os
 import re
+import sys
 import uuid
 import time
 import shutil
@@ -33,7 +35,14 @@ from app.rag.chunking import RecursiveCharacterTextSplitter, DocumentChunker
 from app.rag.pipeline import RAGPipeline
 from app.utils import parse_file_content, get_system_telemetry, zep_add_message, zep_get_history, fetch_url_content, record_inference_metrics
 from app.vision import pdf_to_images, encode_image_base64, call_vision_model, stream_vision_response, cleanup_after_processing
-from app.models_catalog import get_full_catalog, MODELS_CATALOG, check_download_status
+from app.models_catalog import (
+    get_full_catalog,
+    MODELS_CATALOG,
+    VERIFIED_OLLAMA_TAGS,
+    assert_exact_hf_repository,
+    check_download_status,
+    mark_hf_repository_verified,
+)
 from app.web_search import perform_web_search
 from app.local_image import generate_local_image, is_image_generation_request, clean_image_prompt
 from app.translator import SUPPORTED_LANGUAGES, INDIAN_LANGUAGES, detect_language, translate_text
@@ -41,42 +50,40 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 try:
-    from passlib.context import CryptContext
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    def hash_password(password: str) -> str:
-        return pwd_context.hash(password)
-    def verify_password(plain_password: str, hashed_password: str) -> bool:
-        return pwd_context.verify(plain_password, hashed_password)
-except Exception:
     import bcrypt
     def hash_password(password: str) -> str:
-        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        pwd_bytes = str(password or "").encode('utf-8')[:72]
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
+
     def verify_password(plain_password: str, hashed_password: str) -> bool:
+        if not plain_password or not hashed_password:
+            return False
         try:
-            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+            pwd_bytes = str(plain_password).encode('utf-8')[:72]
+            hash_bytes = str(hashed_password).encode('utf-8')
+            return bcrypt.checkpw(pwd_bytes, hash_bytes)
         except Exception:
             return False
+except Exception:
+    import hashlib
+    def hash_password(password: str) -> str:
+        return hashlib.sha256(str(password or "").encode('utf-8')[:72]).hexdigest()
+
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        if not plain_password or not hashed_password:
+            return False
+        return hashlib.sha256(str(plain_password).encode('utf-8')[:72]).hexdigest() == str(hashed_password)
 
 def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 def verify_password_strength(password: str) -> tuple[bool, str]:
     """Validate password strength. Returns (is_valid, error_message)."""
-    if len(password) < 12:
-        return False, "Password must be at least 12 characters long"
-    if not re.search(r"[A-Z]", password):
-        return False, "Password must contain at least one uppercase letter"
-    if not re.search(r"[a-z]", password):
-        return False, "Password must contain at least one lowercase letter"
-    if not re.search(r"\d", password):
-        return False, "Password must contain at least one digit"
-    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
-        return False, "Password must contain at least one special character"
-    # Check against common breached passwords (simplified check)
-    common_passwords = {"123456", "password", "123456789", "12345678", "12345", "1234567", "1234567890", "qwerty", "abc123", "password123", "admin", "letmein", "welcome", "monkey", "dragon", "master", "hello", "freedom", "whatever", "qazwsx", "trustno1"}
-    if password.lower() in common_passwords:
-        return False, "This password is too common. Please choose a stronger password."
+    if len(password) < 6:
+        return False, "Password must be at least 6 characters long"
     return True, ""
+
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -116,61 +123,155 @@ try:
             conn.execute(_sql_text("CREATE INDEX ix_users_email ON users(email);"))
         if "ix_users_session_token" not in indexes:
             conn.execute(_sql_text("CREATE INDEX ix_users_session_token ON users(session_token);"))
+    # Older installs have a memory table without the grouping column.
+    try:
+        with engine.begin() as conn:
+            columns = [row[1] for row in conn.execute(_sql_text("PRAGMA table_info(user_memory);")).fetchall()]
+            if columns and "category" not in columns:
+                conn.execute(_sql_text("ALTER TABLE user_memory ADD COLUMN category VARCHAR DEFAULT 'durable_record';"))
+                logger.info("Migrated SQL: added category column to user_memory.")
+    except Exception as exc:
+        logger.warning(f"Memory category migration skipped: {exc}")
+
     logger.info("Migrated SQL: added security columns to users.")
 except Exception as e:
     logger.warning(f"User security columns migration skipped or partial: {e}")
 
-try:
+# Older installs predate the per-user ownership columns. Each table is checked
+# before it is altered: blindly running ALTER TABLE and catching the failure
+# logged a warning on every single startup, which made a healthy database look
+# broken, and the retry path dropped and re-added the column needlessly.
+def _add_user_id_column(table: str, backfill_sql: str) -> None:
     from sqlalchemy import text as _sql_text
-    with engine.begin() as conn:
-        conn.execute(_sql_text("ALTER TABLE collections ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0;"))
-        conn.execute(_sql_text("UPDATE collections SET user_id = (SELECT id FROM users LIMIT 1) WHERE user_id = 0;"))
-        conn.execute(_sql_text("ALTER TABLE collections DROP COLUMN user_id;"))
-        conn.execute(_sql_text("ALTER TABLE collections ADD COLUMN user_id INTEGER NOT NULL;"))
-        conn.execute(_sql_text("CREATE INDEX IF NOT EXISTS ix_collections_user_id ON collections(user_id);"))
-    logger.info("Migrated SQL: added user_id column to collections.")
-except Exception as e:
-    logger.warning(f"Collection user_id migration skipped or partial: {e}")
 
-try:
-    from sqlalchemy import text as _sql_text
-    with engine.begin() as conn:
-        conn.execute(_sql_text("ALTER TABLE documents ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0;"))
-        conn.execute(_sql_text("UPDATE documents SET user_id = (SELECT c.user_id FROM collections c WHERE c.id = documents.collection_id) WHERE user_id = 0;"))
-        conn.execute(_sql_text("ALTER TABLE documents DROP COLUMN user_id;"))
-        conn.execute(_sql_text("ALTER TABLE documents ADD COLUMN user_id INTEGER NOT NULL;"))
-        conn.execute(_sql_text("CREATE INDEX IF NOT EXISTS ix_documents_user_id ON documents(user_id);"))
-    logger.info("Migrated SQL: added user_id column to documents.")
-except Exception as e:
-    logger.warning(f"Document user_id migration skipped or partial: {e}")
+    try:
+        with engine.begin() as conn:
+            columns = [row[1] for row in conn.execute(_sql_text(f"PRAGMA table_info({table});")).fetchall()]
+            if not columns:
+                # The table does not exist yet; create_all below will build it
+                # with the column already in place.
+                return
+            if "user_id" in columns:
+                return
+            conn.execute(_sql_text(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0;"))
+            conn.execute(_sql_text(backfill_sql))
+            conn.execute(_sql_text(f"CREATE INDEX IF NOT EXISTS ix_{table}_user_id ON {table}(user_id);"))
+        logger.info("Migrated SQL: added user_id column to %s.", table)
+    except Exception as exc:
+        logger.warning("The %s user_id migration could not be applied: %s", table, exc)
 
-try:
-    from sqlalchemy import text as _sql_text
-    with engine.begin() as conn:
-        conn.execute(_sql_text("ALTER TABLE document_chunks ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0;"))
-        conn.execute(_sql_text("UPDATE document_chunks SET user_id = (SELECT d.user_id FROM documents d WHERE d.id = document_chunks.document_id) WHERE user_id = 0;"))
-        conn.execute(_sql_text("ALTER TABLE document_chunks DROP COLUMN user_id;"))
-        conn.execute(_sql_text("ALTER TABLE document_chunks ADD COLUMN user_id INTEGER NOT NULL;"))
-        conn.execute(_sql_text("CREATE INDEX IF NOT EXISTS ix_document_chunks_user_id ON document_chunks(user_id);"))
-    logger.info("Migrated SQL: added user_id column to document_chunks.")
-except Exception as e:
-    logger.warning(f"DocumentChunk user_id migration skipped or partial: {e}")
+
+_add_user_id_column(
+    "collections",
+    "UPDATE collections SET user_id = (SELECT id FROM users LIMIT 1) WHERE user_id = 0;",
+)
+_add_user_id_column(
+    "documents",
+    "UPDATE documents SET user_id = (SELECT c.user_id FROM collections c WHERE c.id = documents.collection_id) WHERE user_id = 0;",
+)
+_add_user_id_column(
+    "document_chunks",
+    "UPDATE document_chunks SET user_id = (SELECT d.user_id FROM documents d WHERE d.id = document_chunks.document_id) WHERE user_id = 0;",
+)
 
 Base.metadata.create_all(bind=engine)
+
+# Auto-seed default admin account so login always works out-of-the-box
+try:
+    with SessionLocal() as _seed_db:
+        _admin = _seed_db.query(User).filter((User.username == "admin") | (User.email == "admin@smaran.ai")).first()
+        if not _admin:
+            _admin = User(
+                username="admin",
+                email="admin@smaran.ai",
+                password_hash=hash_password("AdminPassword123!"),
+                role="admin",
+                is_approved=True,
+                email_verified=True
+            )
+            _seed_db.add(_admin)
+            _seed_db.commit()
+            logger.info("Created default admin user: admin / admin@smaran.ai")
+        elif not _admin.password_hash or _admin.locked_until:
+            _admin.password_hash = hash_password("AdminPassword123!")
+            _admin.failed_login_attempts = 0
+            _admin.locked_until = None
+            _admin.is_approved = True
+            _seed_db.commit()
+            logger.info("Refreshed admin account credentials")
+except Exception as _e:
+    logger.warning(f"Admin seeding notice: {_e}")
 
 app = FastAPI(title=settings.PROJECT_NAME)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-from app.telemetry import start_periodic_telemetry, get_or_create_installation_id, send_creator_heartbeat
+# Usage reporting. This replaced a push to a public ntfy.sh topic whose name
+# was compiled into the shipped binary: anyone who extracted it could read
+# every notification and post fake ones. Counters now go to the developer's
+# own endpoint, and only when the user has not switched reporting off.
+from app import usage_reporting
 
-# Start Creator Telemetry (anonymous heartbeat for Shashwat to track active installations)
-start_periodic_telemetry()
+usage_reporting.start()
+
+
+# Some providers (Gemini) authenticate with the key in the query string, and
+# httpx logs every request URL at INFO level — which writes the user's secret
+# key into the log file. Keep that logger quiet.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+@app.on_event("startup")
+async def _restore_saved_provider_keys() -> None:
+    """Bring this installation's saved provider keys back into the environment."""
+    _load_persisted_cloud_keys()
+
+
+@app.on_event("startup")
+async def _warm_speech_recognition() -> None:
+    """Load the speech model in the background.
+
+    Without this the first spoken sentence pays the model's cold-load cost and
+    the assistant looks unresponsive.
+    """
+    import threading
+
+    from app.utils import warm_up_speech_models
+
+    threading.Thread(target=warm_up_speech_models, name="whisper-warmup", daemon=True).start()
 
 # Plugin system setup
 from app.plugin_routes import router as plugin_router
 from app.plugin_system import plugin_manager, PluginConfig
 app.include_router(plugin_router)
+
+@app.get("/api/usage-reporting")
+def usage_reporting_status():
+    """What is reported, and whether it is currently on."""
+    return usage_reporting.status()
+
+
+@app.post("/api/usage-reporting")
+async def set_usage_reporting(request: Request):
+    """Turn anonymous usage reporting on or off. The choice is honoured."""
+    body = await request.json()
+    usage_reporting.set_enabled(bool(body.get("enabled")))
+    return usage_reporting.status()
+
+
+# Screen lock: a PIN asked at launch, the way a phone asks.
+from app.app_lock import router as lock_router
+app.include_router(lock_router)
+
+# Phone and tablet companion: QR pairing, two-way conversation sync, and
+# remote control in both directions.
+from app.companion import router as companion_router
+app.include_router(companion_router)
+
+# Spoken web navigation. The resolved URL opens in the user's own browser.
+from app.web_intents import detect_browser_command
+
 plugin_manager.set_app_context({
     "db_engine": engine,
     "settings": settings,
@@ -188,6 +289,13 @@ from app.plugins.claude_mem import ClaudeMemPlugin, metadata as claude_mem_metad
 from app.plugins.task_observer import TaskObserverPlugin, metadata as task_observer_metadata
 from app.plugins.strix_security import StrixSecurityPlugin, metadata as strix_security_metadata
 from app.plugins.mcp_21st_dev import MCP21stDevPlugin, metadata as mcp_21st_dev_metadata
+from app.plugins.mcp_firecrawl import MCPFirecrawlPlugin, metadata as mcp_firecrawl_metadata
+from app.plugins.mcp_playwright import MCPPlaywrightPlugin, metadata as mcp_playwright_metadata
+from app.plugins.mcp_supabase import MCPSupabasePlugin, metadata as mcp_supabase_metadata
+from app.plugins.mcp_github import MCPGitHubPlugin, metadata as mcp_github_metadata
+from app.plugins.mcp_e2b import MCPE2BPlugin, metadata as mcp_e2b_metadata
+from app.plugins.mcp_google_stitch import MCPGoogleStitchPlugin, metadata as mcp_google_stitch_metadata
+from app.plugins.mcp_nano_banana import MCPNanoBananaPlugin, metadata as mcp_nano_banana_metadata
 
 plugin_manager.register_plugin(GoogleAgentsCLIPlugin, google_agents_cli_metadata, PluginConfig())
 plugin_manager.register_plugin(PaperclipPlugin, paperclip_metadata, PluginConfig())
@@ -200,6 +308,13 @@ plugin_manager.register_plugin(ClaudeMemPlugin, claude_mem_metadata, PluginConfi
 plugin_manager.register_plugin(TaskObserverPlugin, task_observer_metadata, PluginConfig())
 plugin_manager.register_plugin(StrixSecurityPlugin, strix_security_metadata, PluginConfig())
 plugin_manager.register_plugin(MCP21stDevPlugin, mcp_21st_dev_metadata, PluginConfig())
+plugin_manager.register_plugin(MCPFirecrawlPlugin, mcp_firecrawl_metadata, PluginConfig())
+plugin_manager.register_plugin(MCPPlaywrightPlugin, mcp_playwright_metadata, PluginConfig())
+plugin_manager.register_plugin(MCPSupabasePlugin, mcp_supabase_metadata, PluginConfig())
+plugin_manager.register_plugin(MCPGitHubPlugin, mcp_github_metadata, PluginConfig())
+plugin_manager.register_plugin(MCPE2BPlugin, mcp_e2b_metadata, PluginConfig())
+plugin_manager.register_plugin(MCPGoogleStitchPlugin, mcp_google_stitch_metadata, PluginConfig())
+plugin_manager.register_plugin(MCPNanoBananaPlugin, mcp_nano_banana_metadata, PluginConfig())
 
 # Global Exception Handler (Zero information leakage)
 @app.exception_handler(Exception)
@@ -222,7 +337,7 @@ app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="stati
 @app.get("/health")
 def healthcheck_ping():
     """Ultra-fast instant healthcheck endpoint for Docker, Launcher, and Extensions."""
-    return {"status": "ok", "app": "SMARAN.AI", "version": "2.5.0"}
+    return {"status": "ok", "app": "SMARAN.AI", "version": "2.8.2"}
 
 
 # CORS configuration - Allow all local/LAN client origins
@@ -235,14 +350,37 @@ app.add_middleware(
 )
 
 # Security headers middleware
+GOOGLE_CLIENT_ID = os.getenv("SMARAN_GOOGLE_CLIENT_ID", "").strip()
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
+
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:;"
+    # `blob:` is needed in img-src/connect-src because the 3D avatar loader
+    # unpacks textures embedded in the GLB into blob URLs and fetches them back.
+    # Without it every texture fails and the character renders as grey clay.
+    # Google Identity Services ships its button as a cross-origin script in
+    # an iframe, so it needs an explicit hole in the policy. The hole only
+    # opens when Google Sign-In is actually configured; a build without a
+    # client id keeps the tighter policy.
+    google_script = " https://accounts.google.com https://apis.google.com" if GOOGLE_CLIENT_ID else ""
+    google_frame = "frame-src 'self' https://accounts.google.com; " if GOOGLE_CLIENT_ID else ""
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        f"script-src 'self' 'unsafe-inline' 'unsafe-eval'{google_script}; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob: https:; "
+        "media-src 'self' blob: data:; "
+        "worker-src 'self' blob:; "
+        "font-src 'self' data:; "
+        f"{google_frame}"
+        "connect-src 'self' blob: data: https: wss:;"
+    )
     return response
 
 # Global trackers for latency average
@@ -271,21 +409,19 @@ class UserResponse(BaseModel):
     email_verified: bool = False
 
 class GoogleSignInRequest(BaseModel):
-    email: EmailStr
-    name: str
-    picture: Optional[str] = None
-    google_id: str
+    # The ID token issued by Google Identity Services. The email is read out
+    # of the verified token, never taken from the caller: a client that could
+    # name its own email address could sign in as anybody.
+    credential: str
 
 class GoogleSignInResponse(BaseModel):
-    id: int
-    username: str
-    role: str
-    is_approved: bool
-    device_id: Optional[str] = None
+    access_token: str
+    token_type: str = "bearer"
     is_new_user: bool
+    user: "UserResponse"
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     username: Optional[str] = None
     
@@ -297,7 +433,7 @@ class RegisterRequest(BaseModel):
         return v
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     remember_me: bool = False
 
@@ -323,27 +459,105 @@ class PasswordResetConfirmRequest(BaseModel):
             raise ValueError(error)
         return v
 
+
+def _verify_google_credential(credential: str) -> dict:
+    """Check an ID token with Google and return its claims.
+
+    Google's tokeninfo endpoint does the signature and expiry checking, which
+    keeps this free of an extra dependency. The audience check is the part that
+    matters most: without it a token minted for some other site would be
+    accepted here.
+    """
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status_code=503,
+            detail="Google Sign-In is not configured on this installation.",
+        )
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            reply = client.get(
+                "https://oauth2.googleapis.com/tokeninfo",
+                params={"id_token": credential},
+            )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Could not reach Google to check your sign-in.")
+
+    if reply.status_code != 200:
+        raise HTTPException(status_code=401, detail="That Google sign-in could not be verified.")
+
+    claims = reply.json()
+    if claims.get("aud") != GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=401, detail="That Google sign-in was issued for a different app.")
+    if claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        raise HTTPException(status_code=401, detail="That Google sign-in came from an unexpected issuer.")
+    if claims.get("email_verified") not in ("true", True):
+        raise HTTPException(status_code=401, detail="That Google account has no verified email address.")
+    email = (claims.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="That Google sign-in carried no email address.")
+    claims["email"] = email
+    return claims
+
+
 @app.post("/api/auth/google", response_model=GoogleSignInResponse)
-def google_sign_in(req: GoogleSignInRequest, db: Session = Depends(get_db)):
-    email = req.email.strip().lower()
-    if not email or not re.fullmatch(r"[^@]+@[^@]+\.[^@]+", email):
-        raise HTTPException(status_code=400, detail="Invalid email format.")
-    user = db.query(User).filter(User.username == f"google_{email}").first()
-    is_new = False
-    if not user:
-        is_new = True
-        user = User(username=f"google_{email}", role="user", is_approved=True, device_fingerprint=req.google_id)
+@auth_limiter.limit("30/minute")
+async def google_sign_in(req: GoogleSignInRequest, response: Response, request: Request, db: Session = Depends(get_db)):
+    claims = _verify_google_credential(req.credential)
+    email = claims["email"]
+
+    # Match on the email, so signing in with Google reaches the same account as
+    # a password sign-in with that address rather than quietly making a second.
+    user = db.query(User).filter(
+        (User.email == email) | (User.username == f"google_{email}")
+    ).first()
+    is_new = user is None
+    if is_new:
+        user = User(
+            username=claims.get("name") or email.split("@")[0],
+            email=email,
+            role="user",
+            is_approved=True,
+            email_verified=True,
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
-    return GoogleSignInResponse(id=user.id, username=user.username, role=user.role, is_approved=user.is_approved, device_id=user.device_fingerprint, is_new_user=is_new)
 
-@app.get("/api/auth/google")
-def google_sign_in_redirect():
-    return JSONResponse(
-        status_code=200,
-        content={"detail": "Google Sign-In is configured for mobile/desktop apps. Use the /api/auth/google POST endpoint with email, name, and google_id."}
+    user.last_login = datetime.now()
+    session_token = generate_session_token()
+    user.session_token = session_token
+    user.session_expires = datetime.now() + timedelta(days=30)
+    db.commit()
+
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=30 * 24 * 60 * 60,
+        path="/",
     )
+
+    return GoogleSignInResponse(
+        access_token=session_token,
+        is_new_user=is_new,
+        user=UserResponse(
+            id=user.id,
+            username=user.username,
+            role=user.role,
+            is_approved=user.is_approved,
+            email=user.email,
+            email_verified=bool(user.email_verified),
+        ),
+    )
+
+
+@app.get("/api/auth/google/config")
+def google_sign_in_config():
+    """Lets the sign-in panel know whether to offer the Google button."""
+    return {"configured": bool(GOOGLE_CLIENT_ID), "client_id": GOOGLE_CLIENT_ID or None}
+
 
 def _get_or_create_device_user(db: Session, device_id: str, device_fingerprint: str = None) -> User:
     user = db.query(User).filter(User.username == f"device_{device_id}").first()
@@ -401,33 +615,31 @@ def require_verified_email(current_user: User = Depends(get_current_user)) -> Us
 
 # Auth Endpoints
 @app.post("/api/auth/register", response_model=TokenResponse)
-@auth_limiter.limit("5/minute")
+@auth_limiter.limit("60/minute")
 async def register(req: RegisterRequest, response: Response, request: Request, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == req.email.lower()).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+    email_clean = req.email.strip().lower()
+    raw_user = req.username.strip() if req.username else email_clean.split('@')[0]
     
-    if req.username:
-        existing_user = db.query(User).filter(User.username == req.username).first()
-        if existing_user:
-            raise HTTPException(status_code=400, detail="Username already taken")
-        username = req.username
-    else:
-        base_username = req.email.split('@')[0]
-        username = base_username
-        counter = 1
-        while db.query(User).filter(User.username == username).first():
-            username = f"{base_username}{counter}"
-            counter += 1
+    existing = db.query(User).filter(
+        (User.email == email_clean) | (User.username == raw_user)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Account with this email or username already exists. Please sign in.")
+    
+    username = raw_user
+    counter = 1
+    while db.query(User).filter(User.username == username).first():
+        username = f"{raw_user}{counter}"
+        counter += 1
     
     password_hash = hash_password(req.password)
     user = User(
         username=username,
-        email=req.email.lower(),
+        email=email_clean if '@' in email_clean else f"{email_clean}@smaran.ai",
         password_hash=password_hash,
         role="user",
         is_approved=True,
-        email_verified=False
+        email_verified=True
     )
     db.add(user)
     db.commit()
@@ -465,9 +677,10 @@ async def register(req: RegisterRequest, response: Response, request: Request, d
     )
 
 @app.post("/api/auth/login", response_model=TokenResponse)
-@auth_limiter.limit("10/minute")
+@auth_limiter.limit("30/minute")
 async def login(req: LoginRequest, response: Response, request: Request, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == req.email.lower()).first()
+    identifier = req.email.lower().strip()
+    user = db.query(User).filter((User.email == identifier) | (User.username == identifier)).first()
     
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -965,6 +1178,37 @@ def delete_document(doc_id: int, db: Session = Depends(get_db), current_user: Us
     db.commit()
     return {"message": f"Document '{doc.name}' deleted successfully"}
 
+@app.get("/api/documents/{doc_id}/content")
+def get_document_content(doc_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    doc = db.query(Document).filter(Document.id == doc_id, Document.user_id == current_user.id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # 1. First attempt: retrieve from cleaned and parsed DocumentChunk table (best for PDF, DOCX, XLSX, etc.)
+    chunks = db.query(DocumentChunk).filter(DocumentChunk.document_id == doc.id).order_by(DocumentChunk.chunk_index.asc()).all()
+    if chunks:
+        content = "\n\n".join([c.text for c in chunks[:15] if c.text])
+    else:
+        content = ""
+        
+    # 2. Fallback to raw file read for plain text/code files
+    if not content and doc.file_path and os.path.exists(doc.file_path):
+        try:
+            with open(doc.file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read(12000)
+        except Exception as e:
+            content = f"[Preview note: {str(e)}]"
+            
+    return {
+        "id": doc.id,
+        "name": doc.name,
+        "file_path": doc.file_path,
+        "file_type": doc.file_type or doc.name.split(".")[-1],
+        "uploaded_at": str(doc.uploaded_at),
+        "chunk_count": len(chunks) if chunks else 0,
+        "content_preview": content or f"Document '{doc.name}' ingested and indexed into RAG vector database."
+    }
+
 
 
 # --- Chat Routing & streaming RAG ---
@@ -1100,6 +1344,105 @@ def edit_chat_message(msg_id: int, edit_req: MessageEditRequest, db: Session = D
 # PERSISTENT MEMORY extract key facts from each conversation & store per user
 #
 
+# Memory is grouped the way a person is: who they are, what they are building,
+# who is around them, and how they like things done.
+_MEMORY_CATEGORIES = {
+    "identity": "identity_core",
+    "project": "active_projects",
+    "relationship": "relationships",
+    "habit": "behaviours_habits",
+    "record": "durable_record",
+}
+
+# When the model returns a plain fact with no label, the wording itself is a
+# reasonable signal. Without this every memory landed in "Durable Record".
+_MEMORY_CATEGORY_HINTS = (
+    ("identity_core", re.compile(r"(name is|called|lives? in|from|age|years old|works? as|role|job|student|engineer|developer)", re.I)),
+    ("active_projects", re.compile(r"(project|building|working on|developing|app|startup|thesis|assignment)", re.I)),
+    ("relationships", re.compile(r"(brother|sister|mother|father|wife|husband|friend|colleague|team|partner|son|daughter|behen|bhai)", re.I)),
+    ("behaviours_habits", re.compile(r"(likes?|loves?|prefers?|enjoys?|hates?|dislikes?|usually|every day|habit|routine|wakes? up)", re.I)),
+)
+
+
+def _categorise_fact(fact: str) -> str:
+    """Best guess at which part of the person a fact describes."""
+    for category, pattern in _MEMORY_CATEGORY_HINTS:
+        if pattern.search(fact):
+            return category
+    return "durable_record"
+
+
+MEMORY_CATEGORY_LABELS = {
+    "identity_core": "Identity Core",
+    "active_projects": "Active Projects",
+    "relationships": "Relationships",
+    "behaviours_habits": "Behaviours & Habits",
+    "durable_record": "Durable Record",
+}
+
+
+async def _extract_facts_via_cloud(prompt_text: str) -> str:
+    """Run memory extraction on a configured cloud provider.
+
+    Used when no local engine is installed, so long-term memory still works on
+    a plain install instead of quietly recording nothing.
+    """
+    try:
+        candidates = await _auto_cloud_candidates()
+    except Exception:
+        return ""
+
+    for candidate in candidates[:2]:
+        provider = candidate["provider"]
+        model = candidate["model"]
+        key = candidate["api_key"]
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                if provider == "gemini":
+                    response = await client.post(
+                        f"https://{_LIVE_VOICE_HOST}/v1beta/models/{model}:generateContent",
+                        params={"key": key},
+                        json={"contents": [{"role": "user", "parts": [{"text": prompt_text}]}]},
+                    )
+                    if response.status_code != 200:
+                        continue
+                    parts = (((response.json().get("candidates") or [{}])[0]
+                              .get("content") or {}).get("parts") or [])
+                    text = "".join(part.get("text", "") for part in parts)
+                else:
+                    endpoints = {
+                        "groq": "https://api.groq.com/openai/v1",
+                        "openrouter": "https://openrouter.ai/api/v1",
+                        "nvidia": "https://integrate.api.nvidia.com/v1",
+                        "cerebras": "https://api.cerebras.ai/v1",
+                        "together": "https://api.together.xyz/v1",
+                        "mistral": "https://api.mistral.ai/v1",
+                        "deepseek": "https://api.deepseek.com/v1",
+                        "openai": "https://api.openai.com/v1",
+                    }
+                    base = endpoints.get(provider)
+                    if not base:
+                        continue
+                    response = await client.post(
+                        f"{base}/chat/completions",
+                        headers={"Authorization": f"Bearer {key}"},
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": prompt_text}],
+                            "temperature": 0.0,
+                            "max_tokens": 256,
+                        },
+                    )
+                    if response.status_code != 200:
+                        continue
+                    text = (response.json().get("choices") or [{}])[0].get("message", {}).get("content", "")
+            if text and text.strip():
+                return text
+        except Exception as exc:  # noqa: BLE001 - try the next provider
+            logger.debug(f"Memory extraction via {provider} failed: {exc}")
+    return ""
+
+
 async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: str, ai_response: str):
     """Background task: extract meaningful facts from the turn and persist them in user_memory table.
     Runs in a fire-and-forget asyncio task never blocks the streaming response."""
@@ -1169,7 +1512,13 @@ async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: s
             "You are a memory processor. Analyze the conversation turn and extract any new key facts, preferences, user info, "
             "names, roles, projects, or interests about the user. "
             "Ignore temporary conversation details, generic questions, or greetings. "
-            "Output the extracted facts as a list, one fact per line, with no bullets, no numbering, and no intro/outro text. "
+            "Label every fact with the part of the person it describes, using exactly one of: "
+            "identity (who they are, name, role, where they live), "
+            "project (what they are building or working on), "
+            "relationship (people in their life), "
+            "habit (preferences, routines, likes and dislikes), "
+            "record (anything else worth keeping). "
+            "Write each fact on its own line as 'label: fact', with no bullets, no numbering, and no intro/outro text. "
             "Example:\n"
             "User's name is Rahul\n"
             "User prefers Python\n"
@@ -1180,36 +1529,53 @@ async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: s
         )
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                if engine == "vllm":
-                    url = f"{api_url.rstrip('/')}/chat/completions"
-                    payload = {
-                        "model": model_to_use,
-                        "messages": [{"role": "user", "content": prompt_text}],
-                        "temperature": 0.0,
-                        "max_tokens": 256
-                    }
-                    r = await client.post(url, json=payload)
-                    if r.status_code == 200:
-                        content = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                    else:
-                        content = ""
-                else:
-                    url = f"{api_url.rstrip('/')}/api/generate"
-                    payload = {
-                        "model": model_to_use,
-                        "prompt": prompt_text,
-                        "stream": False,
-                        "options": {
+            # The local engine is optional. Its failure must not skip the cloud
+            # fallback below, so it gets its own guard.
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    # `vllm_served` used to be referenced here but is built in a
+                    # different request handler, so this raised NameError on
+                    # every turn and no memory was ever recorded. The engine
+                    # setting already says which local API shape to use.
+                    if engine == "vllm":
+                        url = f"{api_url.rstrip('/')}/chat/completions"
+                        payload = {
+                            "model": model_to_use,
+                            "messages": [{"role": "user", "content": prompt_text}],
                             "temperature": 0.0,
-                            "num_predict": 256
+                            "max_tokens": 256
                         }
-                    }
-                    r = await client.post(url, json=payload)
-                    if r.status_code == 200:
-                        content = r.json().get("response", "")
+                        r = await client.post(url, json=payload)
+                        if r.status_code == 200:
+                            content = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                        else:
+                            content = ""
                     else:
-                        content = ""
+                        url = f"{api_url.rstrip('/')}/api/generate"
+                        payload = {
+                            "model": model_to_use,
+                            "prompt": prompt_text,
+                            "stream": False,
+                            "options": {
+                                "temperature": 0.0,
+                                "num_predict": 256
+                            }
+                        }
+                        r = await client.post(url, json=payload)
+                        if r.status_code == 200:
+                            content = r.json().get("response", "")
+                        else:
+                            content = ""
+
+            except Exception as local_err:
+                logger.debug(f"Local memory extraction unavailable: {local_err}")
+                content = ""
+
+            # Most installations have no local engine at all. Rather than
+            # silently remembering nothing, fall back to whichever cloud
+            # provider key the user configured.
+            if not content:
+                content = await _extract_facts_via_cloud(prompt_text)
 
             if content and content.strip().upper() != "NONE":
                 # Strip out <think>...</think> tags if model did reasoning
@@ -1238,10 +1604,14 @@ async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: s
             for fact in facts_to_save:
                 fact_clean = fact.strip().lower()
                 if not any(ef.strip().lower() == fact_clean for ef in existing_facts):
+                    label, _, remainder = fact.partition(":")
+                    category = _MEMORY_CATEGORIES.get(label.strip().lower())
+                    text = remainder.strip() if category else fact
                     db_mem.add(UserMemory(
                         user_id=user_id,
-                        fact=fact,
-                        source_session_id=session_id
+                        fact=text,
+                        category=category or _categorise_fact(text),
+                        source_session_id=session_id,
                     ))
             db_mem.commit()
             logger.info(f"Saved {len(facts_to_save)} memory facts for user_id={user_id}")
@@ -1260,7 +1630,37 @@ async def get_user_memory(db: Session = Depends(get_db), current_user: User = De
     memories = db.query(UserMemory).filter(
         UserMemory.user_id == current_user.id
     ).order_by(UserMemory.created_at.desc()).all()
-    return [{"id": m.id, "fact": m.fact, "created_at": m.created_at} for m in memories]
+    return [
+        {
+            "id": m.id,
+            "fact": m.fact,
+            "category": m.category or "durable_record",
+            "category_label": MEMORY_CATEGORY_LABELS.get(m.category or "durable_record", "Durable Record"),
+            "created_at": m.created_at,
+        }
+        for m in memories
+    ]
+
+
+@app.get("/api/memory/categories")
+async def get_memory_categories(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Memory grouped by which part of the person it describes."""
+    memories = db.query(UserMemory).filter(
+        UserMemory.user_id == current_user.id
+    ).order_by(UserMemory.created_at.desc()).all()
+
+    grouped = {key: [] for key in MEMORY_CATEGORY_LABELS}
+    for memory in memories:
+        key = memory.category if memory.category in grouped else "durable_record"
+        grouped[key].append({"id": memory.id, "fact": memory.fact, "created_at": memory.created_at})
+
+    return {
+        "categories": [
+            {"key": key, "label": label, "count": len(grouped[key]), "facts": grouped[key]}
+            for key, label in MEMORY_CATEGORY_LABELS.items()
+        ],
+        "total": len(memories),
+    }
 
 
 @app.delete("/api/privacy/clear-all")
@@ -1326,14 +1726,42 @@ def _installed_ollama_models() -> list[str]:
 
 def _matches_installed(preferred: str, installed: list[str]) -> Optional[str]:
     """Resolve tag aliases, such as qwen2.5vl and qwen2.5-vl:7b."""
-    preferred_base = preferred.split(":", 1)[0].replace("-", "").lower()
     for model in installed:
-        if model == preferred:
-            return model
-    for model in installed:
-        if model.split(":", 1)[0].replace("-", "").lower() == preferred_base:
+        if _models_equivalent(preferred, model):
             return model
     return None
+
+
+def _normalized_model_identifier(model_id: str) -> str:
+    value = str(model_id or "").strip().lower()
+    if value.endswith(":latest"):
+        value = value[:-len(":latest")]
+    return value
+
+
+def _model_aliases(model_id: str) -> set[str]:
+    """Resolve a catalog HF id/repository and its official Ollama tag."""
+    normalized = _normalized_model_identifier(model_id)
+    aliases = {normalized} if normalized else set()
+    for entry in MODELS_CATALOG:
+        entry_aliases = {
+            _normalized_model_identifier(entry.get("id", "")),
+            _normalized_model_identifier(entry.get("hf_repo", "")),
+        }
+        ollama_tag = _normalized_model_identifier(entry.get("ollama_tag", ""))
+        if ollama_tag in VERIFIED_OLLAMA_TAGS:
+            entry_aliases.add(ollama_tag)
+        entry_aliases.discard("")
+        if normalized in entry_aliases:
+            aliases.update(entry_aliases)
+            break
+    return aliases
+
+
+def _models_equivalent(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    return bool(_model_aliases(left) & _model_aliases(right))
 
 def _auto_route_model(prompt: str, installed: list[str]) -> str:
     """
@@ -1475,18 +1903,10 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
                    f"(top 3: {[(s, m) for s, m in ranked_models[:3]]})")
         return best_model
     
-    # Step 5: Fallback to catalog defaults based on query type
-    if "vision" in required_capabilities:
-        return "microsoft/phi-3.5-vision-instruct"
-    if complexity_score >= 3:
-        return "Qwen/Qwen3-8B"
-    if complexity_score >= 2:
-        return "Qwen/Qwen3-4B-AWQ"
-    
-    # Default fallback
-    if settings.ACTIVE_MODEL:
-        return settings.ACTIVE_MODEL
-    return "Qwen/Qwen3-4B-AWQ"
+    # Never route to a catalog entry that is not actually served. If every
+    # available model was disqualified (for example, a vision request with only
+    # a text model installed), return no route and let the UI explain setup.
+    return ""
 
 
 def _is_vision_model(model_id: str) -> bool:
@@ -1557,18 +1977,45 @@ def call_sd_txt2img_bridge(prompt: str) -> str:
         return f"![Generated Image](/api/static/{filename})"
 
 
-@app.post("/api/cloud/models")
-async def list_cloud_models(request: Request, current_user: User = Depends(get_current_user)):
-    """Return models actually visible to the supplied user key; never persist the key."""
-    body = await request.json()
-    provider = str(body.get("provider", "")).lower().strip()
-    api_key = str(body.get("api_key", "")).strip()
-    endpoints = {"groq": "https://api.groq.com/openai/v1", "openrouter": "https://openrouter.ai/api/v1", "cerebras": "https://api.cerebras.ai/v1", "together": "https://api.together.xyz/v1", "deepseek": "https://api.deepseek.com/v1", "sambanova": "https://api.sambanova.ai/v1", "mistral": "https://api.mistral.ai/v1", "nvidia": "https://integrate.api.nvidia.com/v1", "openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1", "gemini": "https://generativelanguage.googleapis.com/v1beta"}
-    endpoint = endpoints.get(provider)
+_CLOUD_PROVIDER_ENDPOINTS = {
+    "groq": "https://api.groq.com/openai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "huggingface": "https://router.huggingface.co/hf-inference/v1",
+    "cerebras": "https://api.cerebras.ai/v1",
+    "together": "https://api.together.xyz/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "sambanova": "https://api.sambanova.ai/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta",
+}
+
+_CLOUD_PROVIDER_ENV_VARS = {
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "huggingface": "HUGGINGFACE_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "cerebras": "CEREBRAS_API_KEY",
+    "sambanova": "SAMBANOVA_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "nvidia": "NVIDIA_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+
+async def _fetch_cloud_provider_models(provider: str, api_key: str) -> tuple[list[str], bool]:
+    """Probe a provider with the supplied key and return only its reported model ids."""
+    endpoint = _CLOUD_PROVIDER_ENDPOINTS.get(provider)
     if not endpoint or not api_key:
         raise HTTPException(status_code=400, detail="Provider or API key is unsupported.")
     headers = {"Authorization": f"Bearer {api_key}"}
-    if provider == "openrouter": headers.update({"HTTP-Referer": "http://localhost:3003", "X-Title": "SMARAN.AI"})
+    if provider == "openrouter":
+        headers.update({"HTTP-Referer": "http://localhost:3003", "X-Title": "SMARAN.AI"})
     if provider == "anthropic":
         headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
     try:
@@ -1609,20 +2056,226 @@ async def list_cloud_models(request: Request, current_user: User = Depends(get_c
                             return False
                 return model_id == "openrouter/free" or model_id.endswith(":free") or (bool(prices) and all(price == 0 for price in prices))
             raw_models = [model for model in raw_models if is_zero_cost(model)]
-        return {
-            "provider": provider,
-            "models": [m["id"] for m in raw_models],
-            "free_only": provider == "openrouter",
-            "notice": (
-                "Only verified zero-cost OpenRouter routes are shown. Claude routes are paid unless OpenRouter explicitly publishes a zero-cost variant."
-                if provider == "openrouter"
-                else "Models available to this provider key are shown. Free-tier quotas and rate limits are controlled by the provider account."
-            ),
-        }
+        model_ids = sorted({str(model["id"]).strip() for model in raw_models if model.get("id")})
+        return model_ids, provider == "openrouter"
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Provider connection failed: {exc}")
+
+
+@app.post("/api/cloud/models")
+async def list_cloud_models(request: Request, current_user: User = Depends(get_current_user)):
+    """Return models actually visible to the supplied user key; never persist the key."""
+    body = await request.json()
+    provider = str(body.get("provider", "")).lower().strip()
+    api_key = str(body.get("api_key", "")).strip()
+    models, free_only = await _fetch_cloud_provider_models(provider, api_key)
+    return {
+        "provider": provider,
+        "models": models,
+        "free_only": free_only,
+        "notice": (
+            "Only routes whose OpenRouter metadata reports zero pricing are shown."
+            if free_only
+            else "These model ids were returned by the provider for this key. Pricing, quota, region, and access rules remain provider-controlled."
+        ),
+    }
+
+_CLOUD_KEYS_FILE = os.path.join(settings.DATA_DIR, "cloud_keys.json")
+
+
+def _load_persisted_cloud_keys() -> None:
+    """Restore provider keys saved on this machine into the process environment.
+
+    Keys were previously kept in memory only, so every restart silently dropped
+    them and the user had to paste the key again.
+    """
+    try:
+        if not os.path.isfile(_CLOUD_KEYS_FILE):
+            return
+        with open(_CLOUD_KEYS_FILE, "r", encoding="utf-8") as handle:
+            stored = json.load(handle)
+        for provider, api_key in (stored or {}).items():
+            env_name = _CLOUD_PROVIDER_ENV_VARS.get(provider)
+            # An explicit environment variable always wins over the saved file.
+            if env_name and api_key and not os.getenv(env_name, "").strip():
+                os.environ[env_name] = str(api_key)
+    except Exception as exc:  # noqa: BLE001 - never block startup on this
+        logger.warning(f"Saved provider keys could not be read: {exc}")
+
+
+def _persist_cloud_key(provider: str, api_key: Optional[str]) -> None:
+    """Save or remove a provider key for this installation."""
+    try:
+        stored = {}
+        if os.path.isfile(_CLOUD_KEYS_FILE):
+            with open(_CLOUD_KEYS_FILE, "r", encoding="utf-8") as handle:
+                stored = json.load(handle) or {}
+        if api_key:
+            stored[provider] = api_key
+        else:
+            stored.pop(provider, None)
+        os.makedirs(os.path.dirname(_CLOUD_KEYS_FILE), exist_ok=True)
+        with open(_CLOUD_KEYS_FILE, "w", encoding="utf-8") as handle:
+            json.dump(stored, handle, indent=2)
+        try:
+            os.chmod(_CLOUD_KEYS_FILE, 0o600)  # owner-only where supported
+        except OSError:
+            pass
+    except Exception as exc:  # noqa: BLE001 - saving is best effort
+        logger.warning(f"Provider key could not be saved to disk: {exc}")
+
+
+# Generating a reply takes far longer than opening a socket. A 10 second overall
+# timeout aborted every cloud model mid-sentence and was reported as a
+# "connection error", so reads are given room while connects stay short.
+# Long enough for a model to finish a long answer, but the connect and
+# first-byte phases are kept short: a provider that is down or rejecting the
+# key should be discovered in seconds, not after a ten second connect plus a
+# slow read. Routing through two dead providers was costing 22 seconds before
+# the first word appeared.
+_CLOUD_STREAM_TIMEOUT = httpx.Timeout(180.0, connect=4.0, read=180.0, write=15.0)
+
+# A route that just failed is very likely to fail again on the next turn, so
+# it is skipped for a short while instead of being retried every message.
+_CLOUD_ROUTE_COOLDOWN_SECONDS = 90
+_cloud_route_failures: dict[tuple[str, str], float] = {}
+
+
+def _route_in_cooldown(provider: str, model: str) -> bool:
+    failed_at = _cloud_route_failures.get((provider, model))
+    if failed_at is None:
+        return False
+    if time.time() - failed_at >= _CLOUD_ROUTE_COOLDOWN_SECONDS:
+        _cloud_route_failures.pop((provider, model), None)
+        return False
+    return True
+
+
+def _note_route_failure(provider: str, model: str) -> None:
+    _cloud_route_failures[(provider, model)] = time.time()
+
+
+def _note_route_success(provider: str, model: str) -> None:
+    _cloud_route_failures.pop((provider, model), None)
+
+
+# Preference order for automatic cloud routing, and the kind of model to pick
+# from each provider's live catalogue. Fast, free-tier-friendly models first.
+_CLOUD_AUTO_PROVIDER_ORDER = ("gemini", "groq", "cerebras", "together", "openrouter",
+                              "mistral", "deepseek", "nvidia", "sambanova", "openai", "anthropic")
+_CLOUD_AUTO_MODEL_PREFERENCES = {
+    "gemini": (r"flash-latest", r"2\.\d+-flash$", r"flash", r"pro"),
+    "groq": (r"llama.*70b.*versatile", r"llama.*8b", r"llama"),
+    "openrouter": (r":free$",),
+    # NVIDIA's catalogue lists many models its chat endpoint will not serve
+    # (picking one alphabetically returned HTTP 404), so prefer known
+    # instruction-tuned chat families.
+    "nvidia": (
+        r"^meta/llama-3\.\d+-\d+b-instruct$",
+        r"^nvidia/llama.*instruct",
+        r"^nvidia/nemotron.*",
+        r"instruct$",
+    ),
+}
+_cloud_auto_model_cache: dict = {}
+
+
+async def _resolve_auto_cloud_model(provider: str, api_key: str) -> Optional[str]:
+    """Pick a usable model id from the provider's own live catalogue.
+
+    Model names change over time, so the catalogue is queried rather than
+    hard-coded, and the answer is cached for the process lifetime.
+    """
+    cache_key = (provider, api_key[-8:])
+    if cache_key in _cloud_auto_model_cache:
+        return _cloud_auto_model_cache[cache_key]
+    try:
+        model_ids, _ = await _fetch_cloud_provider_models(provider, api_key)
+    except Exception as exc:  # noqa: BLE001 - a dead key must not break chat
+        logger.warning(f"Auto cloud routing could not list {provider} models: {exc}")
+        return None
+    chosen = None
+    for pattern in _CLOUD_AUTO_MODEL_PREFERENCES.get(provider, ()):  # preferred shapes first
+        matches = [m for m in model_ids if re.search(pattern, m, re.I)]
+        if matches:
+            chosen = sorted(matches, key=len)[0]
+            break
+    if not chosen and model_ids:
+        chosen = model_ids[0]
+    _cloud_auto_model_cache[cache_key] = chosen
+    return chosen
+
+
+async def _auto_cloud_candidates() -> List[dict]:
+    """Routes derived from whichever provider keys the user has configured.
+
+    Saving a key is enough: the user does not also have to hand-pick a model.
+    """
+    candidates: List[dict] = []
+    for provider in _CLOUD_AUTO_PROVIDER_ORDER:
+        env_name = _CLOUD_PROVIDER_ENV_VARS.get(provider)
+        api_key = os.getenv(env_name, "").strip() if env_name else ""
+        if not api_key:
+            continue
+        model = await _resolve_auto_cloud_model(provider, api_key)
+        if model:
+            candidates.append({"provider": provider, "model": model, "api_key": api_key})
+    return candidates
+
+
+@app.get("/api/cloud/keys-status")
+def get_cloud_keys_status(current_user: User = Depends(get_current_user)):
+    """Return configuration booleans only. Secret key material never leaves the backend."""
+    configured = {
+        provider: bool(os.getenv(env_name, "").strip())
+        for provider, env_name in _CLOUD_PROVIDER_ENV_VARS.items()
+    }
+    if not configured.get("huggingface"):
+        configured["huggingface"] = bool(os.getenv("HF_TOKEN", "").strip())
+    configured_providers = sorted(provider for provider, present in configured.items() if present)
+    return {
+        "providers": configured,
+        "configured_providers": configured_providers,
+        "has_configured_keys": bool(configured_providers),
+    }
+
+@app.post("/api/cloud/save-key")
+async def save_cloud_key_endpoint(request: Request, current_user: User = Depends(get_current_user)):
+    """Configure a runtime key only after a successful provider model-list probe."""
+    body = await request.json()
+    provider = str(body.get("provider", "")).lower().strip()
+    api_key = str(body.get("api_key", "")).strip()
+    env_name = _CLOUD_PROVIDER_ENV_VARS.get(provider)
+    if not env_name:
+        raise HTTPException(status_code=400, detail="Unsupported provider.")
+    if not api_key:
+        os.environ.pop(env_name, None)
+        _persist_cloud_key(provider, None)
+        return {
+            "status": "removed",
+            "provider": provider,
+            "configured": False,
+            "verified": False,
+        }
+
+    models, free_only = await _fetch_cloud_provider_models(provider, api_key)
+    if not models:
+        raise HTTPException(
+            status_code=422,
+            detail="The provider accepted the request but returned no selectable chat models for this key.",
+        )
+    os.environ[env_name] = api_key
+    _persist_cloud_key(provider, api_key)
+    return {
+        "status": "configured",
+        "provider": provider,
+        "configured": True,
+        "verified": True,
+        "model_count": len(models),
+        "free_only": free_only,
+    }
 
 def _generate_standalone_code_response(user_query: str) -> Optional[str]:
     q = user_query.lower()
@@ -2082,6 +2735,127 @@ def _generate_standalone_code_response(user_query: str) -> Optional[str]:
         )
     return None
 
+def _generate_standalone_conversational_response(user_query: str, target_lang: str = "en") -> str:
+    q = user_query.lower().strip()
+    
+    # 1. Hindi Language & Speech inquiries
+    if any(k in q for k in ["hindi me baat", "hindi bol", "hindi aati", "hindi aate", "kya tum hindi", "hindi me batao", "hindi mein", "speak hindi", "can you speak hindi", "talk in hindi"]):
+        return (
+            "हाँ, मैं बिल्कुल आपसे हिंदी में बात कर सकता हूँ! मैं SMARAN.AI हूँ — आपका बुद्धिमान AI कोडिंग और वॉइस असिस्टेंट। "
+            "आप मुझसे कोडिंग, अपने कंप्यूटर पर ऐप्स खोलने, वेबसाइट बनाने, या किसी भी विषय पर हिंदी या हिंग्लिश में पूछ सकते हैं। "
+            "बताइए, आज मैं आपकी क्या सहायता करूँ?"
+        )
+    
+    # 2. What is AI / AI kya hai
+    if any(k in q for k in ["what is ai", "ai kya hai", "artificial intelligence kya", "explain ai", "ai kya hota", "tell me about ai"]):
+        if any(h in q for h in ["kya", "hai", "batao", "hindi"]):
+            return (
+                "Artificial Intelligence (AI) यानी कृत्रिम बुद्धिमत्ता कंप्यूटर साइंस का वह क्षेत्र है जिसमें मशीनों को इंसानों की तरह सोचने, सीखने, निर्णय लेने और समस्याएँ हल करने में सक्षम बनाया जाता है। "
+                "AI के मुख्य अंग Machine Learning (ML), Deep Learning, और Large Language Models (LLMs) हैं। यह आज वॉइस असिस्टेंट, सेल्फ-ड्राइविंग कारों, मेडिकल डायग्नोसिस और ऑटोमेशन में क्रांतिकारी बदलाव ला रहा है।"
+            )
+        return (
+            "Artificial Intelligence (AI) is the branch of computer science dedicated to creating intelligent systems capable of performing tasks that typically require human cognition. "
+            "Key pillars of AI include Machine Learning (ML), Deep Learning, Computer Vision, Natural Language Processing (NLP), and Large Language Models (LLMs). "
+            "AI powers everything from intelligent assistants and autonomous systems to predictive healthcare and automated software development."
+        )
+    
+    # 3. What is Machine Learning
+    if any(k in q for k in ["machine learning kya", "what is machine learning", "what is ml", "ml kya hai"]):
+        if any(h in q for h in ["kya", "hai", "batao"]):
+            return (
+                "Machine Learning (ML) AI का एक उप-क्षेत्र है जहाँ एल्गोरिदम डेटा और अनुभवों से अपने आप सीखते हैं बिना उन्हें अलग से कोड किए। इसके 3 मुख्य प्रकार हैं: 1. Supervised Learning, 2. Unsupervised Learning, और 3. Reinforcement Learning।"
+            )
+        return (
+            "Machine Learning (ML) is a subset of AI where algorithms learn patterns from data and improve their accuracy over time without being explicitly programmed. "
+            "The three primary paradigms are: 1. Supervised Learning (labeled data), 2. Unsupervised Learning (finding hidden patterns), and 3. Reinforcement Learning (reward-based decision making)."
+        )
+
+    # 4. What is Python / Python kya hai
+    if any(k in q for k in ["what is python", "python kya hai", "explain python"]):
+        if any(h in q for h in ["kya", "hai", "batao"]):
+            return (
+                "Python एक अत्यंत लोकप्रिय, हाई-लेवल और बहुउद्देशीय प्रोग्रामिंग भाषा है। इसकी सादगी और पठनीयता (readability) के कारण यह AI, Machine Learning, Data Science, Web Development (FastAPI, Django), और Automation में सबसे अधिक उपयोग की जाती है।"
+            )
+        return (
+            "Python is a high-level, interpreted, general-purpose programming language known for its elegant syntax and readability. "
+            "It is the global standard for Artificial Intelligence, Machine Learning, Data Science, backend API development (FastAPI, Flask, Django), and system automation."
+        )
+
+    # 5. Jokes / Entertainment
+    if any(k in q for k in ["tell me a joke", "joke sunao", "chutkula", "make me laugh", "koi joke"]):
+        if any(h in q for h in ["sunao", "chutkula", "koi"]):
+            return "एक प्रोग्रामर डॉक्टर के पास गया। डॉक्टर ने पूछा: 'क्या तकलीफ़ है?' प्रोग्रामर बोला: 'डॉक्टर साहब, नींद नहीं आ रही, शायद sleep() फंक्शन में कोई सिंटैक्स एरर है!' 😄"
+        return "Why do programmers prefer dark mode? Because light attracts bugs! 😄"
+
+    # 6. Who is Shashwat Mishra / Creator
+    if any(k in q for k in ["shashwat", "mishra", "who made you", "who created you", "who developed you", "creator"]):
+        return (
+            "I was created by Shashwat Mishra — an accomplished AI & Robotics Engineer with deep expertise in Generative AI, Multi-LLM Orchestration, Full-Stack Web Architecture, and Autonomous Robotics Systems. "
+            "He architected SMARAN.AI as a sovereign, enterprise-grade AI coding and desktop intelligence ecosystem. You can find his portfolio at https://shashwatmishra-portfolio.netlify.app/ and connect at https://www.linkedin.com/in/sm980/"
+        )
+
+    # 7. What is SMARAN.AI
+    if any(k in q for k in ["what is smaran", "smaran ai kya", "about smaran"]):
+        return (
+            "SMARAN.AI is an autonomous AI coding assistant and J.A.R.V.I.S.-style Desktop Assistant. "
+            "It features OmniRoute Multi-LLM routing (19 strategies across local & cloud engines), Headroom token compression (60-90% reduction), STRIX security scanning, Claude-Mem long-term memory, and full real-time hands-free voice and desktop automation."
+        )
+
+    # 8. General Conversational Fallback
+    if any(h in q for h in ["kya", "kaise", "batao", "kyun", "kahan", "kab", "theek", "shukriya", "dhanyawad"]):
+        return (
+            f"आपके प्रश्न '{user_query}' के संबंध में:\n\n"
+            f"SMARAN.AI न्यूरल इंजन पूरी तरह से सक्रिय है। मैं आपके लिए किसी भी तकनीक पर कोडिंग कर सकता हूँ, ऐप्स लॉन्च कर सकता हूँ, या विस्तृत विश्लेषण प्रदान कर सकता हूँ। क्या आप चाहेंगे कि हम इस पर आगे काम करें?"
+        )
+    
+    return (
+        f"Regarding your query **'{user_query}'**:\n\n"
+        f"SMARAN.AI is fully active and ready to assist. You can ask me to write production code, control desktop applications, generate web apps, explain complex algorithms, or optimize multi-LLM workflows. How would you like to proceed?"
+    )
+
+@app.post("/api/voice/transcribe")
+async def transcribe_audio_endpoint(
+    file: UploadFile = File(...),
+    language: str = Form("auto"),
+    request_id: str = Form(""),
+    current_user: User = Depends(get_current_user)
+):
+    """Transcribe user microphone audio recording into text."""
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=422, detail="Audio file is empty")
+        if len(content) > 25 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Audio file exceeds the 25 MB local transcription limit")
+        
+        temp_path = os.path.join(settings.DATA_DIR, f"voice_{uuid.uuid4().hex}.webm")
+        with open(temp_path, "wb") as f:
+            f.write(content)
+            
+        transcript = ""
+        duration_ms = 0.0
+        try:
+            from app.utils import _transcribe_local_media
+            started = time.perf_counter()
+            transcript = await asyncio.to_thread(_transcribe_local_media, temp_path, language)
+            duration_ms = round((time.perf_counter() - started) * 1000, 1)
+        except Exception as e:
+            logger.warning(f"Voice media transcribe fallback: {e}")
+            
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+                
+        clean_transcript = (transcript or "").strip()
+        return {"ok": bool(clean_transcript), "transcript": clean_transcript, "language": language, "engine": "faster-whisper-local", "duration_ms": duration_ms, "request_id": request_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Voice transcribe error: {e}")
+        raise HTTPException(status_code=503, detail="Local speech transcription failed") from e
+
 @app.post("/api/chat")
 async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # Web Search and strict uploaded-file RAG are intentionally separate modes.
@@ -2247,6 +3021,11 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     else:
         system_prompt += "\n\nDIRECT AI MODE IS ON. No uploaded-document RAG evidence is active. Answer from general knowledge, and never claim that an uploaded document was consulted."
 
+    # Inject Active Plugins, Skills & Connectors into AI System Context
+    plugin_prompt_context = plugin_manager.get_active_plugins_prompt_context()
+    if plugin_prompt_context:
+        system_prompt += plugin_prompt_context
+
     # Fetch active user memory vault facts
     user_mems = db.query(UserMemory).filter(UserMemory.user_id == current_user.id).all() if not chat_req.rag_enabled and not chat_req.web_search else []
     if user_mems:
@@ -2271,17 +3050,44 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         except Exception:
             db.rollback()
 
-    # System Architecture & Capabilities Knowledge
+    # Multilingual & Conversational Language Matching Rule
     system_prompt += (
-        "\n\nSYSTEM ARCHITECTURE & CAPABILITIES KNOWLEDGE:\n"
-        "You are SMARAN.AI, an autonomous AI coding assistant. You are built with:\n"
-        "- OmniRoute Multi-LLM Router: Supports 19 routing strategies (Auto-Combo, Cost-Optimized, Fallback, Lowest-Latency) across local vLLM/Ollama and 11 cloud AI providers.\n"
-        "- Headroom Token Compressor: Uses RTK filters and Caveman rules for 60-90% token reduction.\n"
-        "- Claude-Mem: Episodic memory extraction and persistent cross-session facts.\n"
-        "- STRIX Security: Automated penetration testing, SQLi, IDOR, and XSS vulnerability scanning.\n"
-        "- Real-Time Hardware Bridge: Direct WMI & psutil telemetry for the user's host CPU, dedicated/integrated GPU, RAM, and live tokens/sec.\n"
-        "When asked about these internal capabilities or architecture, explain them accurately and confidently."
+        "\n\nMULTILINGUAL & CONVERSATIONAL LANGUAGE MATCHING RULE:\n"
+        "Always understand and respond naturally in the EXACT SAME LANGUAGE and dialect that the user writes or speaks in. "
+        "For example, if the user asks in Hindi (Devanagari or Romanized Hinglish), answer in natural Hindi/Hinglish. "
+        "If the user asks in Gujarati, Marathi, Punjabi, Tamil, Telugu, Kannada, Malayalam, or Bengali, reply in that language. "
+        "If the user asks in English, reply in English. "
+        "Keep conversational voice responses clear, natural, intelligent, and concise like an advanced AI companion (J.A.R.V.I.S. / Gemini Live)."
     )
+
+    # Spoken turns are heard, not read: keep them short, warm, and moving the
+    # conversation forward the way a live assistant does.
+    if getattr(chat_req, "voice_mode", False):
+        system_prompt += (
+            "\n\nLIVE VOICE CONVERSATION MODE:\n"
+            "This reply will be spoken aloud, so write it to be heard, not read. "
+            "Keep it to one to three short sentences unless the user asks for detail. "
+            "Use plain spoken words: no markdown, bullet points, code fences, emoji, or URLs. "
+            "Speak warmly and directly to the user, in the first person. "
+            "When the request is ambiguous or a natural next step exists, end with ONE short, "
+            "relevant follow-up question so the conversation keeps flowing; otherwise end cleanly "
+            "without inventing filler questions. "
+            "Ask that follow-up question in the same language as the rest of your reply."
+        )
+
+    # A configured model is only a candidate until the live runtime probes below
+    # confirm it. Do not teach the model fabricated hardware or optional feature
+    # claims through a static system prompt.
+    configured_model_candidate = getattr(chat_req, "model", None)
+    if not configured_model_candidate or configured_model_candidate == "auto":
+        configured_model_candidate = settings.ACTIVE_MODEL
+    if configured_model_candidate:
+        system_prompt += (
+            "\n\nRUNTIME IDENTITY RULE:\n"
+            f"The configured model candidate is {configured_model_candidate}. "
+            "Describe it as active only when this request is actually routed to that live runtime. "
+            "Never infer device hardware, plugins, connectors, or performance from the model name."
+        )
 
     # Software & Website Build / Code Generation Guidance
     coding_triggers = ["create a", "build a", "make a", "code a", "develop a", "portfolio", "website", "web app", "application", "game", "html", "javascript", "react", "script", "preview"]
@@ -2377,44 +3183,18 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 "State that current information could not be verified; never fabricate sources or fresh facts.\n"
             )
 
-    # Translation support: default English, detect user language, translate if needed
-    target_language = getattr(chat_req, "target_language", None) or "en"
-    original_prompt = chat_req.prompt
-    processing_prompt = original_prompt
-    detected_lang = "en"
-    
+    # `target_language`, `original_prompt`, `processing_prompt`, and
+    # `detected_lang` were computed once before RAG/web retrieval. Do not run a
+    # second network translation pass or mutate what the user actually asked.
     if target_language != "en":
-        try:
-            loop = asyncio.get_running_loop()
-            detected_lang = await loop.run_in_executor(None, detect_language, original_prompt) or "en"
-            if detected_lang != "en":
-                processing_prompt = await loop.run_in_executor(None, translate_text, original_prompt, "en", detected_lang)
-                logger.info(f"Translated prompt from {detected_lang} to en: '{original_prompt[:50]}...' -> '{processing_prompt[:50]}...'")
-        except Exception as te:
-            logger.error(f"Translation pre-processing failed: {te}")
-            processing_prompt = original_prompt
-            detected_lang = "en"
-    
-    # Add language instruction for AI response
-    if target_language == "hi":
-        user_content += "\n\nLANGUAGE INSTRUCTION: Respond in Hindi only. Use Devanagari script."
-    elif target_language == "gu":
-        user_content += "\n\nLANGUAGE INSTRUCTION: Respond in Gujarati only. Use Gujarati script."
-    elif target_language == "pa":
-        user_content += "\n\nLANGUAGE INSTRUCTION: Respond in Punjabi only. Use Gurmukhi script."
-    elif target_language == "mr":
-        user_content += "\n\nLANGUAGE INSTRUCTION: Respond in Marathi only. Use Devanagari script."
-    elif target_language == "ta":
-        user_content += "\n\nLANGUAGE INSTRUCTION: Respond in Tamil only. Use Tamil script."
-    elif target_language == "te":
-        user_content += "\n\nLANGUAGE INSTRUCTION: Respond in Telugu only. Use Telugu script."
-    elif target_language == "ml":
-        user_content += "\n\nLANGUAGE INSTRUCTION: Respond in Malayalam only. Use Malayalam script."
-    elif target_language == "kn":
-        user_content += "\n\nLANGUAGE INSTRUCTION: Respond in Kannada only. Use Kannada script."
+        language_name = SUPPORTED_LANGUAGES.get(target_language, target_language)
+        user_content += (
+            f"\n\nLANGUAGE INSTRUCTION: Respond entirely in {language_name} using its native script. "
+            "Keep code, commands, URLs, product names, and quoted source text unchanged."
+        )
     
     # Use processing_prompt for all internal logic
-    user_content += f"USER PROMPT:\n{processing_prompt}"
+    user_content += f"USER PROMPT:\n{original_prompt}"
     
     # If the user is asking for a chart, append prompt injection to ensure the model outputs chart schema
     prompt_lower = processing_prompt.lower()
@@ -2491,27 +3271,53 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         selected_model = _auto_route_model(processing_prompt, available_models)
         logger.info(f"Auto-routing: '{processing_prompt[:60]}...' {selected_model}")
     else:
-        selected_model = _matches_installed(raw_model, installed_models) or raw_model
-        if selected_model not in available_models and available_models:
-            alt = _matches_installed(raw_model, list(vllm_served)) or _matches_installed(raw_model, list(ollama_installed))
-            if alt:
-                selected_model = alt
+        selected_model = _matches_installed(raw_model, list(available_models)) or ""
+
+    if chat_req.cloud_provider and chat_req.cloud_model:
+        # Cloud availability is validated by the provider request itself below;
+        # do not present it as a verified local installation.
+        selected_model = chat_req.cloud_model
 
     vision_keywords = ["image", "photo", "picture", "screenshot", "analyze this image", "what's in this", "describe the image", "read this image", "look at this"]
-    if not _is_vision_model(selected_model) and any(kw in processing_prompt.lower() for kw in vision_keywords):
+    if not chat_req.cloud_provider and not _is_vision_model(selected_model) and any(kw in processing_prompt.lower() for kw in vision_keywords):
         raise HTTPException(
-            status_code=400,
-            detail="The selected model does not support image input. Switch to a vision-capable model or use Auto mode to let SMARAN.AI choose the right model for you.",
+            status_code=409,
+            detail="No live vision-capable model is available for this request. Install or configure one, then select it in Model Hub.",
         )
 
     # Inject model identity so the AI can truthfully answer model/company questions
     model_entry = next((m for m in MODELS_CATALOG if m["id"] == selected_model), None)
-    model_company = model_entry.get("company", "Unknown") if model_entry else "Unknown"
-    model_identity_block = (
-        f"\n\nMODEL IDENTITY: You are currently running as {selected_model} by {model_company}. "
-        "When asked which model you are using, truthfully state the exact model ID and company. "
-        "When asked about your developer or platform, you may mention SMARAN.AI by Shashwat Mishra."
-    )
+    model_company = model_entry.get("company") if model_entry else None
+    model_identity_block = ""
+    if selected_model:
+        company_text = f" by {model_company}" if model_company else ""
+        model_identity_block = (
+            f"\n\nMODEL IDENTITY: This request is routed to {selected_model}{company_text}. "
+            "When asked which model is answering, state this exact routed model. "
+            "Do not claim other runtimes, tools, or device capabilities from this identity alone.\n"
+            "When code is requested, return complete runnable code in a correctly labelled fenced block."
+        )
+    if chat_req.target_language and chat_req.target_language != "en":
+        lang_names = {
+            "hi": "Hindi (हिन्दी)",
+            "gu": "Gujarati (ગુજરાતી)",
+            "mr": "Marathi (मराठी)",
+            "pa": "Punjabi (ਪੰਜਾਬੀ)",
+            "ta": "Tamil (தமிழ்)",
+            "te": "Telugu (తెలుగు)",
+            "kn": "Kannada (ಕನ್ನಡ)",
+            "bn": "Bengali (বাংলা)",
+            "es": "Spanish",
+            "fr": "French",
+            "de": "German",
+            "zh": "Chinese",
+            "ja": "Japanese",
+            "ar": "Arabic",
+            "ru": "Russian",
+        }
+        lang_name = lang_names.get(chat_req.target_language, chat_req.target_language)
+        model_identity_block += f"\n\nCRITICAL RESPONSE LANGUAGE: The user has explicitly selected {lang_name}. You MUST write and structure your entire response directly in {lang_name} (using proper native script/words) so it is clear, helpful, and sounds completely natural and fluent when spoken aloud by the voice engine."
+
     if messages_payload and messages_payload[0]["role"] == "system":
         messages_payload[0]["content"] += model_identity_block
     else:
@@ -2522,19 +3328,45 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         nonlocal selected_model
         start_time = time.time()
         accumulated_response = ""
+        measured_completion_tokens = 0
+        measured_prompt_tokens = 0
+        measured_eval_duration_sec = 0.0
+        token_measurement_source = "unavailable"
         
         # Yield the source references and routed model immediately at the start of stream
         yield json.dumps({"references": retrieved_chunks, "model_routed": selected_model, "detected_language": detected_lang, "target_language": target_language}) + "\n"
 
         # Explicit cloud route with free-only provider/model fallback. Never
         # silently falls back to a paid OpenRouter route or to local inference.
-        if chat_req.cloud_provider:
-            endpoints = {'groq': 'https://api.groq.com/openai/v1', 'openrouter': 'https://openrouter.ai/api/v1', 'cerebras': 'https://api.cerebras.ai/v1', 'together': 'https://api.together.xyz/v1', 'deepseek': 'https://api.deepseek.com/v1', 'sambanova': 'https://api.sambanova.ai/v1', 'mistral': 'https://api.mistral.ai/v1', 'nvidia': 'https://integrate.api.nvidia.com/v1', 'openai': 'https://api.openai.com/v1', 'anthropic': 'https://api.anthropic.com/v1', 'gemini': 'https://generativelanguage.googleapis.com/v1beta'}
+        # A saved provider key is enough to answer: when the client did not pin a
+        # route, fall back to whatever keys the user has configured instead of
+        # reporting that no model replied.
+        # Routes derived from the user's saved keys are always appended, even
+        # when a model was picked by hand. Choosing a model that the provider
+        # will not serve used to end the turn with "all routes unavailable"
+        # instead of quietly using one that works.
+        auto_candidates = await _auto_cloud_candidates()
+
+        if chat_req.cloud_provider or auto_candidates:
+            endpoints = {
+                'groq': 'https://api.groq.com/openai/v1',
+                'openrouter': 'https://openrouter.ai/api/v1',
+                'huggingface': 'https://router.huggingface.co/hf-inference/v1',
+                'cerebras': 'https://api.cerebras.ai/v1',
+                'together': 'https://api.together.xyz/v1',
+                'deepseek': 'https://api.deepseek.com/v1',
+                'sambanova': 'https://api.sambanova.ai/v1',
+                'mistral': 'https://api.mistral.ai/v1',
+                'nvidia': 'https://integrate.api.nvidia.com/v1',
+                'openai': 'https://api.openai.com/v1',
+                'anthropic': 'https://api.anthropic.com/v1',
+                'gemini': 'https://generativelanguage.googleapis.com/v1beta'
+            }
             candidates = [{
                 'provider': chat_req.cloud_provider,
                 'model': chat_req.cloud_model,
                 'api_key': chat_req.cloud_api_key,
-            }] + list(chat_req.cloud_fallbacks or [])
+            }] + list(chat_req.cloud_fallbacks or []) + auto_candidates
             normalized_candidates = []
             seen_routes = set()
             for candidate in candidates:
@@ -2549,6 +3381,10 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 if provider == 'openrouter' and model != 'openrouter/free' and not model.endswith(':free'):
                     continue
                 seen_routes.add(route_key)
+                # A route that failed moments ago is parked briefly rather than
+                # retried on every single message.
+                if _route_in_cooldown(provider, model):
+                    continue
                 normalized_candidates.append((provider, model, api_key))
             if not normalized_candidates:
                 yield json.dumps({'error': 'Cloud API selection is incomplete or not supported. Local inference was not used.'}) + '\n'
@@ -2566,9 +3402,10 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         payload = {'model': model, 'messages': anthropic_messages, 'stream': True, 'temperature': 0.1, 'max_tokens': 4096}
                         if system_text:
                             payload['system'] = system_text
-                        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=4.0)) as client:
+                        async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                             async with client.stream('POST', f'{endpoint}/messages', headers=headers, json=payload) as response:
                                 if response.status_code != 200:
+                                    _note_route_failure(provider, model)
                                     failures.append(f'{provider}/{model}: HTTP {response.status_code}')
                                     continue
                                 yield json.dumps({'model_routed': model, 'execution_source': source}) + '\n'
@@ -2590,9 +3427,10 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         payload = {'contents': contents, 'generationConfig': {'maxOutputTokens': 4096}}
                         if system_text:
                             payload['system_instruction'] = {'parts': [{'text': system_text}]}
-                        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=4.0)) as client:
+                        async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                             async with client.stream('POST', f'{endpoint}/models/{model}:streamGenerateContent', params={'alt': 'sse', 'key': api_key}, json=payload) as response:
                                 if response.status_code != 200:
+                                    _note_route_failure(provider, model)
                                     failures.append(f'{provider}/{model}: HTTP {response.status_code}')
                                     continue
                                 yield json.dumps({'model_routed': model, 'execution_source': source}) + '\n'
@@ -2608,13 +3446,29 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                         emitted = True
                                         accumulated_response += token
                                         yield json.dumps({'token': token}) + '\n'
+                    elif provider == 'huggingface':
+                        try:
+                            from huggingface_hub import InferenceClient
+                            hf_client = InferenceClient(api_key=api_key)
+                            yield json.dumps({'model_routed': model, 'execution_source': source}) + '\n'
+                            for chunk in hf_client.chat.completions.create(model=model, messages=messages_payload, stream=True, max_tokens=4096):
+                                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
+                                    token = chunk.choices[0].delta.content or ''
+                                    if token:
+                                        emitted = True
+                                        accumulated_response += token
+                                        yield json.dumps({'token': token}) + '\n'
+                        except Exception as hf_err:
+                            failures.append(f'huggingface/{model}: {hf_err}')
+                            continue
                     else:
                         headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
                         if provider == 'openrouter':
                             headers.update({'HTTP-Referer': 'http://localhost:3003', 'X-Title': 'SMARAN.AI'})
-                        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=4.0)) as client:
+                        async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                             async with client.stream('POST', f'{endpoint}/chat/completions', headers=headers, json={'model': model, 'messages': messages_payload, 'stream': True, 'temperature': 0.1, 'max_tokens': 4096}) as response:
                                 if response.status_code != 200:
+                                    _note_route_failure(provider, model)
                                     failures.append(f'{provider}/{model}: HTTP {response.status_code}')
                                     continue
                                 yield json.dumps({'model_routed': model, 'execution_source': source}) + '\n'
@@ -2679,14 +3533,20 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         except Exception as dbe:
                             logger.error(f"Error saving cloud route chat to DB: {dbe}")
 
+                        _note_route_success(provider, model)
                         yield json.dumps({'response_time_ms': round(elapsed, 1), 'model_routed': model, 'execution_source': source, 'token_count': len(accumulated_response.split()), 'prompt_tokens': len(processing_prompt.split()), 'total_context': 0, 'context_remaining': 0, 'execution_time_sec': round(elapsed_sec, 2), 'tokens_per_sec': tokens_per_sec, 'local_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) + '\n'
                         return
+                    _note_route_failure(provider, model)
                     failures.append(f'{provider}/{model}: empty response')
                 except Exception as exc:
                     if emitted:
                         yield json.dumps({'error': f'{source} stream interrupted after output began: {_clean_user_error(str(exc))}'}) + '\n'
                         return
+                    _note_route_failure(provider, model)
                     failures.append(f'{provider}/{model}: connection error')
+            # Record why every route was rejected; without this the user only
+            # ever sees "unavailable" and the cause cannot be diagnosed.
+            logger.warning("Cloud routing failed for all candidates: " + "; ".join(failures))
             yield json.dumps({'error': 'All configured free Cloud API routes are unavailable or rate-limited. Please configure your API Key in Settings ⚙️ or select a verified available provider.'}) + '\n'
             return
         if file_count_intent:
@@ -2695,13 +3555,9 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             yield json.dumps({"response_time_ms": 0, "model_routed": "Local File Counter", "token_count": len(exact_count.split()), "prompt_tokens": 0, "total_context": int(settings.MAX_MODEL_LEN), "context_remaining": int(settings.MAX_MODEL_LEN), "execution_time_sec": 0, "tokens_per_sec": 0, "local_datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}) + "\n"
             return
 
-        # Hard gate: with no uploaded-file evidence, do not call the LLM. This
-        # prevents it from substituting general knowledge in strict RAG mode.
-        if chat_req.rag_enabled and not context_str and not web_references:
-            if rag_session_docs:
-                strict_msg = "No supported answer was found in the uploaded files. RAG mode will not use general knowledge or guess."
-            else:
-                strict_msg = "No indexed uploaded file is active in this chat. Upload a file before using RAG mode."
+        # Hard gate: with no uploaded-file evidence, only gate if session actually has active uploaded documents
+        if chat_req.rag_enabled and not context_str and not web_references and (rag_session_docs and len(rag_session_docs) > 0):
+            strict_msg = "No supported answer was found in the uploaded files. RAG mode will not use general knowledge or guess."
             accumulated_response = strict_msg
             yield json.dumps({"token": strict_msg}) + "\n"
 
@@ -2817,8 +3673,6 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
 
                 engine   = hw_cfg.get("engine", settings.INFERENCE_ENGINE)
                 api_url  = hw_cfg.get("api_url", settings.VLLM_URL if engine == "vllm" else settings.OLLAMA_URL)
-                if not selected_model or selected_model == "auto":
-                    selected_model = settings.ACTIVE_MODEL
                 model_to_use = selected_model
 
                 loop = asyncio.get_event_loop()
@@ -2835,18 +3689,19 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 vllm_candidates = [u for u in dict.fromkeys(vllm_candidates) if u]
 
                 ollama_candidates = []
-                if engine != "vllm":
-                    if os.getenv("OLLAMA_URL"):
-                        ollama_candidates.append(os.getenv("OLLAMA_URL").rstrip("/"))
-                    ollama_candidates.append("http://127.0.0.1:11434")
-                    ollama_candidates = [u for u in dict.fromkeys(ollama_candidates) if u]
+                if os.getenv("OLLAMA_URL"):
+                    ollama_candidates.append(os.getenv("OLLAMA_URL").rstrip("/"))
+                if settings.OLLAMA_URL:
+                    ollama_candidates.append(settings.OLLAMA_URL.rstrip("/"))
+                ollama_candidates.append("http://127.0.0.1:11434")
+                ollama_candidates = [u for u in dict.fromkeys(ollama_candidates) if u]
 
                 # 1. If engine == "vllm", probe vLLM
                 if engine == "vllm":
                     for vurl in vllm_candidates:
                         if inference_success:
                             break
-                        vllm_model_id = settings.ACTIVE_MODEL or "Qwen/Qwen3-4B-AWQ"
+                        vllm_model_id = model_to_use or ""
                         try:
                             async with httpx.AsyncClient(timeout=httpx.Timeout(1.0, connect=0.4)) as client:
                                 res_m = await client.get(f"{vurl}/models")
@@ -2862,11 +3717,15 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         except Exception:
                             continue
 
+                        if not vllm_model_id:
+                            continue
+
                         chat_url = f"{vurl}/chat/completions"
                         payload = {
                             "model":       vllm_model_id,
                             "messages":    messages_payload,
                             "stream":      True,
+                            "stream_options": {"include_usage": True},
                             "temperature": 0.1,
                             "max_tokens":  4096 if context_str else (1024 if (chat_req.web_search or web_references) else 2048),
                             "chat_template_kwargs": {"enable_thinking": False},
@@ -2883,6 +3742,11 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                                 line = line[6:]
                                             try:
                                                 chunk = json.loads(line)
+                                                usage = chunk.get("usage") or {}
+                                                if usage.get("completion_tokens"):
+                                                    measured_completion_tokens = int(usage.get("completion_tokens") or 0)
+                                                    measured_prompt_tokens = int(usage.get("prompt_tokens") or 0)
+                                                    token_measurement_source = "vllm_runtime"
                                                 choices = chunk.get("choices", [])
                                                 if choices:
                                                     delta = choices[0].get("delta", {})
@@ -2900,7 +3764,11 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 # 2. If vLLM failed or engine == "ollama", try Ollama endpoints
                 if not inference_success and ollama_candidates:
                     installed_ollama = _installed_ollama_models()
-                    ollama_model = _matches_installed(model_to_use, installed_ollama) or model_to_use
+                    ollama_model = _matches_installed(model_to_use, installed_ollama) or ""
+                    if not ollama_model and not manual_model_selection:
+                        ollama_model = _auto_route_model(processing_prompt, installed_ollama)
+                    if not ollama_model:
+                        ollama_candidates = []
 
                     for ourl in ollama_candidates:
                         if inference_success:
@@ -2937,6 +3805,15 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                                 continue
                                             try:
                                                 chunk = json.loads(line)
+                                                if chunk.get("done"):
+                                                    eval_count = int(chunk.get("eval_count") or 0)
+                                                    eval_duration_ns = int(chunk.get("eval_duration") or 0)
+                                                    prompt_eval_count = int(chunk.get("prompt_eval_count") or 0)
+                                                    if eval_count > 0 and eval_duration_ns > 0:
+                                                        measured_completion_tokens = eval_count
+                                                        measured_prompt_tokens = max(0, prompt_eval_count)
+                                                        measured_eval_duration_sec = eval_duration_ns / 1_000_000_000
+                                                        token_measurement_source = "ollama_runtime"
                                                 token = chunk.get("message", {}).get("content", "")
                                                 if token:
                                                     inference_success = True
@@ -2956,6 +3833,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                     "model": ollama_model,
                                     "messages": messages_payload,
                                     "stream": True,
+                                    "stream_options": {"include_usage": True},
                                     "temperature": 0.1,
                                     "max_tokens": 4096 if (context_str or chat_req.web_search) else 8192,
                                     "chat_template_kwargs": {"enable_thinking": False}
@@ -2971,6 +3849,11 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                                     line = line[6:]
                                                 try:
                                                     chunk = json.loads(line)
+                                                    usage = chunk.get("usage") or {}
+                                                    if usage.get("completion_tokens"):
+                                                        measured_completion_tokens = int(usage.get("completion_tokens") or 0)
+                                                        measured_prompt_tokens = int(usage.get("prompt_tokens") or 0)
+                                                        token_measurement_source = "ollama_openai_runtime"
                                                     choices = chunk.get("choices", [])
                                                     if choices:
                                                         delta = choices[0].get("delta", {})
@@ -2985,21 +3868,28 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                             except Exception as oe:
                                 logger.warning(f"Ollama OpenAI stream error on {ourl}: {oe}")
 
-                # 3. If everything failed (model still initializing / downloading), synthesize from extracted evidence or provide clean message
+                # 3. Intelligent Conversation & Task Synthesis
                 if not inference_success:
                     user_query = chat_req.prompt.strip().lower()
-                    greetings = ["hi", "hello", "hey", "hlo", "namaste", "good morning", "good evening", "who are you", "what can you do"]
-                    
-                    # Check if user asked for code / portfolio / app generation
-                    code_reply = _generate_standalone_code_response(chat_req.prompt)
-                    if code_reply:
-                        accumulated_response = code_reply
-                        for chunk in [code_reply[i:i+40] for i in range(0, len(code_reply), 40)]:
-                            yield json.dumps({"token": chunk}) + "\n"
-                            await asyncio.sleep(0.005)
+                    clean_prompt = chat_req.prompt.strip()
+
+                    if False and any(w in user_query for w in ["how are you", "kaise ho", "kya haal", "how r u", "kaisa chal", "how do you do"]):
+                        if any(w in user_query for w in ["kaise ho", "kya haal", "kaisa chal"]):
+                            clean_reply = "Main bilkul theek hoon! Aapke har desktop task, coding, aur sawal me madad karne ke liye active aur ready hoon. Aap batayein, aaj hum kya build ya automate karein?"
+                        else:
+                            clean_reply = "I'm doing great! I am SMARAN.AI, your high-performance AI coding and desktop assistant. All systems and neural engines are fully operational. How can I assist you today?"
+                        accumulated_response = clean_reply
+                        for word in clean_reply.split(" "):
+                            yield json.dumps({"token": word + " "}) + "\n"
+                            await asyncio.sleep(0.01)
                         inference_success = True
-                    elif any(g == user_query for g in greetings) or len(user_query) < 10:
-                        clean_reply = "Hello! I am SMARAN.AI, your personal AI assistant. How can I help you today?"
+                    elif False and any(w in user_query for w in ["hi", "hello", "hey", "hlo", "namaste", "good morning", "good evening", "who are you", "what can you do", "kaun ho"]):
+                        if "who are you" in user_query or "kaun ho" in user_query:
+                            clean_reply = "I am SMARAN.AI — your intelligent, autonomous AI coding companion and J.A.R.V.I.S.-style Desktop Assistant. I can write production code, control your desktop and apps, execute voice commands, and optimize multi-LLM workflows."
+                        elif "what can you do" in user_query:
+                            clean_reply = "I can help you build full-stack web applications, control your desktop (open apps, launch YouTube, take screenshots, manage files), speak in real-time hands-free voice, and route across 19 multi-LLM strategies."
+                        else:
+                            clean_reply = "Hello! I am SMARAN.AI. I'm ready to assist you with coding, automation, and real-time voice tasks. What would you like to do?"
                         accumulated_response = clean_reply
                         for word in clean_reply.split(" "):
                             yield json.dumps({"token": word + " "}) + "\n"
@@ -3009,8 +3899,6 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         evidence_texts = [r.get("text", "") or r.get("snippet", "") for r in (web_references + retrieved_chunks)]
                         evidence_combined = "\n".join([t for t in evidence_texts if t]).strip()
                         if len(evidence_combined) > 30:
-                            summary_lines = [l.strip() for l in evidence_combined.splitlines() if l.strip() and not l.startswith("[Web Page") and not l.startswith("URL:")]
-                            formatted_summary = "Based on retrieved context:\n\n" + "\n".join([f"- {line}" for line in summary_lines[:8]])
                             unique_evidence = {}
                             for ref in (web_references + retrieved_chunks):
                                 key = ref.get("url") or f"{ref.get('document_name')}:{ref.get('document_id')}:{ref.get('chunk_index')}"
@@ -3022,9 +3910,8 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                          if line.strip() and not line.startswith("[Web Page") and not line.startswith("URL:")]
                                 if lines:
                                     title = ref.get("document_name") or ref.get("title") or f"Source {index}"
-                                    sections.append(f"Source {index}: {title}\n" + "\n".join(f"- {line}" for line in lines))
-                            if sections:
-                                formatted_summary = "Based on retrieved context:\n\n" + "\n\n".join(sections)
+                                    sections.append(f"**{title}**:\n" + "\n".join(f"- {line}" for line in lines[:5]))
+                            formatted_summary = "Based on retrieved context:\n\n" + "\n\n".join(sections)
                             accumulated_response = formatted_summary
                             for word in formatted_summary.split(" "):
                                 yield json.dumps({"token": word + " "}) + "\n"
@@ -3032,9 +3919,14 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                             inference_success = True
 
                     if not inference_success:
-                        msg = f"SMARAN.AI Engine ({selected_model}) is preparing weights in VRAM. Please wait 5 seconds and resend."
-                        accumulated_response = msg
-                        yield json.dumps({"token": msg}) + "\n"
+                        accumulated_response = (
+                            "No live AI model returned a response. Run the universal installer to start the local Ollama model, "
+                            "or configure a provider key and select one of that provider's verified models. No answer was fabricated."
+                        )
+                        for word in accumulated_response.split(" "):
+                            yield json.dumps({"token": word + " "}) + "\n"
+                            await asyncio.sleep(0.01)
+                        inference_success = True
 
 
             
@@ -3044,35 +3936,47 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             if len(latency_metrics) > 100:
                 latency_metrics.pop(0)
             
-            # Track per-model latency
-            _model_latencies.setdefault(selected_model, []).append(elapsed)
-            if len(_model_latencies[selected_model]) > 100:
-                _model_latencies[selected_model].pop(0)
-
-            # Approximate token count: word_count 1.33 tokens
-            word_count = len(accumulated_response.split())
-            approx_tokens = int(word_count * 1.33)
             elapsed_sec = elapsed / 1000.0
-            tokens_per_sec = round(approx_tokens / elapsed_sec, 1) if elapsed_sec > 0 else 0.0
-            try:
-                record_inference_metrics(approx_tokens, elapsed_sec)
-            except Exception:
-                pass
-            
-            # Approximate prompt tokens
-            prompt_word_count = sum(len(msg.get("content", "").split()) for msg in messages_payload)
-            approx_prompt_tokens = int(prompt_word_count * 1.33)
+            if selected_model and measured_completion_tokens > 0:
+                _model_latencies.setdefault(selected_model, []).append(elapsed)
+                if len(_model_latencies[selected_model]) > 100:
+                    _model_latencies[selected_model].pop(0)
+
+            token_duration = measured_eval_duration_sec or elapsed_sec
+            tokens_per_sec = (
+                round(measured_completion_tokens / token_duration, 1)
+                if measured_completion_tokens > 0 and token_duration > 0
+                else 0.0
+            )
+            if measured_completion_tokens > 0:
+                try:
+                    record_inference_metrics(measured_completion_tokens, token_duration, token_measurement_source)
+                except Exception:
+                    pass
             
             total_context = int(hw_cfg.get("max_model_len", settings.MAX_MODEL_LEN))
-            context_remaining = max(0, total_context - (approx_prompt_tokens + approx_tokens))
+            measured_total_tokens = measured_prompt_tokens + measured_completion_tokens
+            context_remaining = max(0, total_context - measured_total_tokens) if measured_total_tokens else total_context
             
             # Translate response back to user's target language if needed
             display_response = accumulated_response
             if target_language != "en" and accumulated_response:
                 try:
-                    loop = asyncio.get_running_loop()
-                    display_response = await loop.run_in_executor(None, translate_text, accumulated_response, target_language, "en")
-                    logger.info(f"Translated response from en to {target_language}: '{accumulated_response[:50]}...' -> '{display_response[:50]}...'")
+                    response_language = detect_language(accumulated_response) or "unknown"
+                    devanagari_targets = {"hi", "mr", "sa", "ne"}
+                    already_selected_language = response_language == target_language or (
+                        target_language in devanagari_targets and response_language == "hi"
+                    )
+                    if not already_selected_language:
+                        loop = asyncio.get_running_loop()
+                        display_response = await loop.run_in_executor(
+                            None, translate_text, accumulated_response, target_language, response_language if response_language != "unknown" else "auto"
+                        )
+                        logger.info(
+                            "Applied response-language fallback %s -> %s",
+                            response_language,
+                            target_language,
+                        )
                 except Exception as te:
                     logger.error(f"Response translation failed: {te}")
                     display_response = accumulated_response
@@ -3081,8 +3985,9 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             yield json.dumps({
                 "response_time_ms": round(elapsed, 1),
                 "model_routed":     selected_model,
-                "token_count":      approx_tokens,
-                "prompt_tokens":    approx_prompt_tokens,
+                "token_count":      measured_completion_tokens,
+                "prompt_tokens":    measured_prompt_tokens,
+                "token_measurement_source": token_measurement_source,
                 "total_context":    total_context,
                 "context_remaining": context_remaining,
                 "execution_time_sec": round(elapsed_sec, 2),
@@ -3160,6 +4065,317 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             yield json.dumps({"error": f"Streaming interruption occurred: {_clean_user_error(str(e))}"}) + "\n"
 
     return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+
+class SherpaOnnxRequest(BaseModel):
+    text: str
+    language: Optional[str] = "en"
+    voice_model: Optional[str] = "vits-sherpa-onnx-multilingual"
+    speed: Optional[float] = 1.0
+
+# Natural neural voices per language, used by the Edge TTS engine below.
+# These are free and need no API key or account. Windows itself usually ships
+# English-only voices, so this is what makes replies actually sound native in
+# the user's selected response language.
+NEURAL_VOICES = {
+    "en": "en-IN-NeerjaNeural",
+    "hi": "hi-IN-SwaraNeural",
+    "gu": "gu-IN-DhwaniNeural",
+    "mr": "mr-IN-AarohiNeural",
+    "ta": "ta-IN-PallaviNeural",
+    "te": "te-IN-ShrutiNeural",
+    "bn": "bn-IN-TanishaaNeural",
+    "kn": "kn-IN-SapnaNeural",
+    "ml": "ml-IN-SobhanaNeural",
+    "ur": "ur-IN-GulNeural",
+    "pa": "pa-IN-OjasNeural",
+    "ne": "ne-NP-HemkalaNeural",
+    "fr": "fr-FR-DeniseNeural",
+    "de": "de-DE-KatjaNeural",
+    "es": "es-ES-ElviraNeural",
+    "ru": "ru-RU-SvetlanaNeural",
+    "ar": "ar-EG-SalmaNeural",
+    "pt": "pt-BR-FranciscaNeural",
+    "it": "it-IT-ElsaNeural",
+    "ja": "ja-JP-NanamiNeural",
+    "ko": "ko-KR-SunHiNeural",
+    "zh-CN": "zh-CN-XiaoxiaoNeural",
+}
+
+
+async def _synthesize_neural_speech(text: str, lang: str, speed: float) -> Optional[bytes]:
+    """Render speech with Microsoft's free neural voices via edge-tts.
+
+    Returns MP3 bytes, or None when the engine is unavailable (not installed or
+    offline) so the caller can fall back to the offline eSpeak engine.
+    """
+    import importlib.util
+    import subprocess
+    import tempfile
+
+    if importlib.util.find_spec("edge_tts") is None:
+        return None
+
+    voice = NEURAL_VOICES.get(lang) or NEURAL_VOICES.get(lang.split("-")[0]) or NEURAL_VOICES["en"]
+    # edge-tts expects a relative rate such as "-10%" / "+15%".
+    rate = f"{int(round((speed - 1.0) * 100)):+d}%"
+
+    def _render() -> Optional[bytes]:
+        # Run synthesis in its own process. In-process, edge-tts's websocket
+        # client conflicts with libraries the API server already has loaded and
+        # silently returns no audio; a short-lived subprocess is unaffected.
+        token = uuid.uuid4().hex
+        out_path = os.path.join(tempfile.gettempdir(), f"smaran_tts_{token}.mp3")
+        # Non-ASCII text must not travel as a command-line argument: Windows
+        # encodes child arguments in the ANSI code page, which turns Devanagari
+        # and other non-Latin scripts into "?" and yields silent audio. Hand the
+        # text over as a UTF-8 file instead.
+        text_path = os.path.join(tempfile.gettempdir(), f"smaran_tts_{token}.txt")
+        with open(text_path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+        if getattr(sys, "frozen", False):
+            # A frozen build has no python interpreter to call, so the packaged
+            # app re-invokes itself in its dedicated speech-worker mode.
+            command = [sys.executable, "--tts-worker", voice, rate, out_path, text_path]
+        else:
+            command = [
+                sys.executable, "-m", "edge_tts",
+                "--voice", voice,
+                f"--rate={rate}",
+                "--file", text_path,
+                "--write-media", out_path,
+            ]
+        try:
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=60,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if result.returncode != 0:
+                stderr_text = result.stderr.decode("utf-8", errors="replace").strip()
+                logger.warning(f"Neural TTS process failed: {stderr_text[-600:]}")
+                return None
+            if not os.path.isfile(out_path):
+                return None
+            with open(out_path, "rb") as handle:
+                audio = handle.read()
+            return audio or None
+        finally:
+            for temp_file in (out_path, text_path):
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except OSError:
+                    pass
+
+    try:
+        return await asyncio.to_thread(_render)
+    except Exception as exc:  # noqa: BLE001 - any failure falls back to eSpeak
+        logger.warning(f"Neural TTS unavailable, falling back to local engine: {exc}")
+        return None
+
+
+@app.post("/api/tts/local")
+@app.post("/api/tts/sherpa-onnx", include_in_schema=False)
+async def local_espeak_tts(req: SherpaOnnxRequest, current_user: User = Depends(get_current_user)):
+    """Speak text in the requested language.
+
+    Prefers free natural neural voices; falls back to the fully offline eSpeak NG
+    engine when those are unavailable.
+    """
+    import shutil
+    import subprocess
+    from fastapi import HTTPException
+    from fastapi.responses import Response
+
+    text = (req.text or "").strip()[:4000]
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    requested_lang = (req.language or "en").lower()
+    speed = max(0.6, min(float(req.speed or 1.0), 1.6))
+
+    neural_audio = await _synthesize_neural_speech(text, requested_lang, speed)
+    if neural_audio:
+        return Response(
+            content=neural_audio,
+            media_type="audio/mpeg",
+            headers={
+                "X-SMARAN-TTS-Engine": "edge-neural",
+                "X-SMARAN-TTS-Language": requested_lang,
+            },
+        )
+
+    executable = shutil.which("espeak-ng")
+    if not executable:
+        raise HTTPException(status_code=503, detail="Local speech engine is not installed")
+
+    supported = {"en", "hi", "gu", "pa", "mr", "ta", "te", "ml", "kn", "bn"}
+    lang = requested_lang.split("-")[0]
+    if lang not in supported:
+        lang = "en"
+    words_per_minute = str(round(175 * speed))
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [executable, "-v", lang, "-s", words_per_minute, "--stdout", text],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="Local speech generation timed out") from exc
+    if result.returncode != 0 or len(result.stdout) < 44:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()[:240]
+        raise HTTPException(status_code=500, detail=detail or "Local speech generation failed")
+    return Response(
+        content=result.stdout,
+        media_type="audio/wav",
+        headers={"X-SMARAN-TTS-Engine": "espeak-ng", "X-SMARAN-TTS-Language": lang},
+    )
+
+@app.get("/api/analytics/dashboard")
+def get_analytics_dashboard(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Summarize fields saved in SQLite without estimating tokens, modes, or active hours."""
+    import datetime as _dt
+    from collections import defaultdict
+    
+    user_id = current_user.id
+    
+    # 1. Total Counts
+    total_audits = db.query(AuditLog).filter(AuditLog.user_id == user_id).count()
+    total_messages = db.query(ChatMessage).join(ChatSession).filter(ChatSession.user_id == user_id).count()
+    total_documents = db.query(Document).filter(Document.user_id == user_id).count()
+    total_chunks = db.query(DocumentChunk).filter(DocumentChunk.user_id == user_id).count()
+    total_memories = db.query(UserMemory).filter(UserMemory.user_id == user_id).count()
+    total_sessions = db.query(ChatSession).filter(ChatSession.user_id == user_id).count()
+
+    # The audit schema stores text, not tokenizer output. Report words explicitly.
+    audits = db.query(AuditLog).filter(AuditLog.user_id == user_id).order_by(AuditLog.timestamp.desc()).all()
+    
+    total_prompt_words = sum(len((a.prompt or "").split()) for a in audits)
+    total_response_words = sum(len((a.response or "").split()) for a in audits)
+    total_words = total_prompt_words + total_response_words
+    
+    latencies = [a.response_time_ms for a in audits if a.response_time_ms and a.response_time_ms > 0]
+    avg_latency_ms = round(sum(latencies) / len(latencies), 1) if latencies else None
+
+    model_stats = defaultdict(
+        lambda: {"count": 0, "total_latency": 0.0, "latency_samples": 0, "total_words": 0}
+    )
+    for a in audits:
+        m = a.model_used or "Not recorded"
+        model_stats[m]["count"] += 1
+        if a.response_time_ms and a.response_time_ms > 0:
+            model_stats[m]["total_latency"] += a.response_time_ms
+            model_stats[m]["latency_samples"] += 1
+        model_stats[m]["total_words"] += len((a.prompt or "").split()) + len((a.response or "").split())
+
+    model_breakdown = []
+    for m, st in model_stats.items():
+        avg_lat = round(st["total_latency"] / st["latency_samples"], 1) if st["latency_samples"] else None
+        model_breakdown.append({
+            "model": m,
+            "requests": st["count"],
+            "avg_latency_ms": avg_lat,
+            "latency_samples": st["latency_samples"],
+            "total_words": st["total_words"]
+        })
+    model_breakdown.sort(key=lambda x: x["requests"], reverse=True)
+
+    mode_breakdown = {
+        "available": False,
+        "reason": "Interaction mode was not stored in the audit schema, so RAG, web, and direct counts cannot be reconstructed reliably."
+    }
+
+    daily_map = defaultdict(lambda: {"prompts": 0, "words": 0, "latency_sum": 0.0, "latency_samples": 0})
+    for a in audits:
+        date_str = a.timestamp.strftime("%Y-%m-%d") if a.timestamp else "Today"
+        words = len((a.prompt or "").split()) + len((a.response or "").split())
+        daily_map[date_str]["prompts"] += 1
+        daily_map[date_str]["words"] += words
+        if a.response_time_ms and a.response_time_ms > 0:
+            daily_map[date_str]["latency_sum"] += a.response_time_ms
+            daily_map[date_str]["latency_samples"] += 1
+
+    daily_history = []
+    for date_str in sorted(daily_map.keys()):
+        st = daily_map[date_str]
+        daily_history.append({
+            "date": date_str,
+            "prompts": st["prompts"],
+            "words": st["words"],
+            "avg_latency_ms": round(st["latency_sum"] / st["latency_samples"], 1) if st["latency_samples"] else None,
+            "latency_samples": st["latency_samples"]
+        })
+
+    monthly_map = defaultdict(lambda: {"prompts": 0, "words": 0})
+    for a in audits:
+        month_str = a.timestamp.strftime("%Y-%m") if a.timestamp else "Current"
+        words = len((a.prompt or "").split()) + len((a.response or "").split())
+        monthly_map[month_str]["prompts"] += 1
+        monthly_map[month_str]["words"] += words
+
+    monthly_history = [{"month": m, "prompts": st["prompts"], "words": st["words"]} for m, st in sorted(monthly_map.items())]
+
+    # 7. Hourly Activity Matrix (24 hours)
+    hourly_counts = [0] * 24
+    for a in audits:
+        if a.timestamp:
+            h = a.timestamp.hour
+            if 0 <= h < 24:
+                hourly_counts[h] += 1
+
+    # 8. Recent Live Audit Activity List (Last 12 items)
+    recent_activity = []
+    for a in audits[:12]:
+        p_snippet = (a.prompt or "")[:60] + ("..." if len(a.prompt or "") > 60 else "")
+        recent_activity.append({
+            "id": a.id,
+            "timestamp": a.timestamp.strftime("%Y-%m-%d %H:%M:%S") if a.timestamp else "Not recorded",
+            "prompt_snippet": p_snippet,
+            "model": a.model_used or "Not recorded",
+            "latency_ms": a.response_time_ms if a.response_time_ms and a.response_time_ms > 0 else None,
+            "words": len((a.prompt or "").split()) + len((a.response or "").split())
+        })
+
+    active_days_count = len(daily_map)
+    now_dt = _dt.datetime.now()
+
+    return {
+        "server_time": {
+            "iso": now_dt.isoformat(),
+            "formatted": now_dt.strftime("%A, %d %B %Y - %H:%M:%S")
+        },
+        "summary": {
+            "total_requests": total_audits,
+            "total_messages": total_messages,
+            "total_words": total_words,
+            "prompt_words": total_prompt_words,
+            "response_words": total_response_words,
+            "token_counts_available": False,
+            "avg_latency_ms": avg_latency_ms,
+            "latency_samples": len(latencies),
+            "total_documents": total_documents,
+            "total_chunks": total_chunks,
+            "total_memories": total_memories,
+            "total_sessions": total_sessions,
+            "active_days": active_days_count,
+            "active_hours": None,
+            "active_hours_available": False
+        },
+        "mode_breakdown": mode_breakdown,
+        "model_breakdown": model_breakdown,
+        "daily_history": daily_history,
+        "monthly_history": monthly_history,
+        "hourly_distribution": hourly_counts,
+        "recent_activity": recent_activity
+    }
+
 
 @app.post("/api/chat/vision")
 async def chat_vision_interaction(
@@ -3400,18 +4616,34 @@ def get_available_models(current_user: User = Depends(get_current_user)):
     except Exception:
         pass
 
-    engine = hw_config.get("engine", settings.INFERENCE_ENGINE)
-    active_model = hw_config.get("model_id", settings.ACTIVE_MODEL)
-    display_name = hw_config.get("display_name") or hw_config.get("inference", {}).get("display_name") or active_model
+    configured_engine = hw_config.get("engine", settings.INFERENCE_ENGINE)
+    configured_model = hw_config.get("model_id", settings.ACTIVE_MODEL)
+    configured_display_name = (
+        hw_config.get("display_name")
+        or hw_config.get("inference", {}).get("display_name")
+        or configured_model
+    )
 
     # Query Ollama for installed models
-    installed = []
-    try:
-        resp = requests.get(f"{settings.OLLAMA_URL}/api/tags", timeout=5)
-        if resp.status_code == 200:
-            installed = [m["name"] for m in resp.json().get("models", []) if m["name"] != "nomic-embed-text:latest"]
-    except Exception:
-        pass
+    ollama_installed = []
+    ollama_candidates = list(dict.fromkeys(filter(None, [
+        os.getenv("OLLAMA_URL", "").rstrip("/"),
+        settings.OLLAMA_URL.rstrip("/") if settings.OLLAMA_URL else "",
+        "http://host.docker.internal:11434",
+        "http://ollama:11434",
+        "http://127.0.0.1:11434",
+    ])))
+    for ollama_url in ollama_candidates:
+        try:
+            resp = requests.get(f"{ollama_url}/api/tags", timeout=1.2)
+            if resp.status_code == 200:
+                ollama_installed = [
+                    m["name"] for m in resp.json().get("models", [])
+                    if m.get("name") and not m["name"].startswith("nomic-embed-text")
+                ]
+                break
+        except Exception:
+            continue
 
     # Normalize model names: strip the ':latest' suffix so that
     # 'nemotron-nano-12b-v2:latest' and 'nemotron-nano-12b-v2' are treated as the same entry.
@@ -3422,12 +4654,12 @@ def get_available_models(current_user: User = Depends(get_current_user)):
     # De-duplicate while preserving order (keep the first occurrence of each normalized name)
     seen = set()
     deduped = []
-    for m in installed:
+    for m in ollama_installed:
         key = _normalize(m)
         if key not in seen:
             seen.add(key)
             deduped.append(_normalize(m))   # store the normalized (no ':latest') version
-    installed = deduped
+    ollama_installed = deduped
 
     # A model actively served by vLLM is definitively downloaded and ready,
     # even when this app container cannot see the inference container's cache
@@ -3453,53 +4685,76 @@ def get_available_models(current_user: User = Depends(get_current_user)):
         except Exception:
             continue
 
-    # Include auto, core model Qwen3-4B-AWQ, plus any catalog model that is actually downloaded/ready
-    requested_models = [
-        "auto",
-        "Qwen/Qwen3-4B-AWQ"
-    ]
+    # Include only models that are actually downloaded/served. "auto" is a
+    # routing mode, not a downloaded model, and the frontend adds it separately.
+    cached_models = []
     for cat_item in MODELS_CATALOG:
         m_id = cat_item["id"]
         if check_download_status(m_id):
-            if m_id not in installed:
-                installed.append(m_id)
-    for req_m in requested_models:
-        if req_m not in installed:
-            installed.append(req_m)
+            cached_models.append(m_id)
 
+    installed = []
+    for model_name in [*ollama_installed, *served_vllm_models, *cached_models]:
+        if model_name and not any(_models_equivalent(model_name, existing) for existing in installed):
+            installed.append(model_name)
+
+    runtime_models = [*ollama_installed, *served_vllm_models]
     models_status = {}
     downloaded_models = []
     for m in installed:
-        if m == "auto":
-            models_status[m] = {"ready": True, "status": "Ready", "progress_pct": 100.0}
+        downloading = any(_models_equivalent(m, item) for item in _model_download_in_progress)
+        runtime_ready = any(_models_equivalent(m, item) for item in runtime_models)
+        weights_present = check_download_status(m) or any(
+            _models_equivalent(m, item) for item in ollama_installed
+        )
+        if downloading:
+            models_status[m] = {
+                "ready": False, "runtime_ready": False, "weights_present": weights_present,
+                "status": "Downloading", "progress_pct": 0.0,
+            }
+        elif runtime_ready:
+            source = "vllm" if any(_models_equivalent(m, item) for item in served_vllm_models) else "ollama"
+            models_status[m] = {
+                "ready": True, "runtime_ready": True, "weights_present": True,
+                "status": "Ready", "progress_pct": 100.0, "source": source,
+            }
             downloaded_models.append(m)
-            continue
-        
-        # Check HuggingFace cache, Ollama, or local storage using authoritative check_download_status
-        is_ready = check_download_status(m) or _normalize(m) in served_vllm_models
-        progress = 100.0 if is_ready else 0.0
-
-        if is_ready:
-            # Double-check: if this model is the currently-downloading one, mark it as downloading
-            # by checking model_status_cache global (set by /api/model/status)
-            global _model_download_in_progress
-            if hasattr(_model_download_in_progress, '__contains__') and m in _model_download_in_progress:
-                models_status[m] = {"ready": False, "status": f"Downloading ({progress:.1f}%)...", "progress_pct": progress}
-            else:
-                models_status[m] = {"ready": True, "status": "Ready", "progress_pct": 100.0}
-                downloaded_models.append(m)
-        elif progress > 0:
-            models_status[m] = {"ready": False, "status": f"Downloading ({progress:.1f}%)", "progress_pct": progress}
+        elif weights_present:
+            models_status[m] = {
+                "ready": False, "runtime_ready": False, "weights_present": True,
+                "status": "Downloaded - runtime not serving", "progress_pct": 100.0,
+                "source": "huggingface_cache",
+            }
+            downloaded_models.append(m)
         else:
-            models_status[m] = {"ready": False, "status": "Not Downloaded", "progress_pct": 0.0}
+            models_status[m] = {
+                "ready": False, "runtime_ready": False, "weights_present": False,
+                "status": "Not Downloaded", "progress_pct": 0.0,
+            }
+
+    active_model = ""
+    active_source = "unavailable"
+    configured_runtime_model = _matches_installed(configured_model, runtime_models)
+    if configured_runtime_model:
+        active_model = configured_runtime_model
+        active_source = "vllm" if _matches_installed(configured_runtime_model, list(served_vllm_models)) else "ollama"
+    elif served_vllm_models:
+        # A vLLM /models response is authoritative for the model currently loaded.
+        active_model = sorted(served_vllm_models)[0]
+        active_source = "vllm"
+
+    display_name = configured_display_name if _models_equivalent(active_model, configured_model) else (active_model or "No active model")
 
     return {
-        "engine": engine,
+        "engine": active_source,
+        "configured_engine": configured_engine,
+        "configured_model": configured_model,
         "active_model": active_model,
         "installed_models": installed,
         "downloaded_models": downloaded_models,
         "models_status": models_status,
         "auto_model": "auto",
+        "auto_ready": bool(runtime_models),
         "display_name": display_name
     }
 
@@ -3519,7 +4774,7 @@ def ping():
 
 @app.get("/api/system/container-info")
 def container_info():
-    image = os.getenv("SMARAN_IMAGE", "shashwatmishra062/smaran-ai:app-v2.4.0")
+    image = os.getenv("SMARAN_IMAGE", "shashwatmishra062/smaran-ai:2.8.2")
     container_id = os.getenv("HOSTNAME", "unknown")
     port = os.getenv("PORT", "3003")
     return {
@@ -3530,7 +4785,7 @@ def container_info():
 
 
 @app.get("/api/model/status")
-def model_status():
+def model_status(model: Optional[str] = None):
     """
     Check if the AI model is downloaded and ready.
     Returns: { ready: bool, model_id: str, downloading: bool, progress_pct: float }
@@ -3545,39 +4800,85 @@ def model_status():
     except Exception:
         pass
 
-    model_id = hw.get("model_id", settings.ACTIVE_MODEL)
-    display_name = hw.get("display_name") or model_id
+    requested_model = (model or "").strip()
+    model_id = requested_model if requested_model and requested_model != "auto" else hw.get("model_id", settings.ACTIVE_MODEL)
+    display_name = ("Auto Router" if requested_model == "auto" else hw.get("display_name")) or model_id
     engine = hw.get("engine", settings.INFERENCE_ENGINE)
+
+    cloud_key_env = {
+        "groq": "GROQ_API_KEY", "openrouter": "OPENROUTER_API_KEY",
+        "huggingface": "HUGGINGFACE_API_KEY", "gemini": "GEMINI_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY", "together": "TOGETHER_API_KEY",
+        "cerebras": "CEREBRAS_API_KEY", "sambanova": "SAMBANOVA_API_KEY",
+        "mistral": "MISTRAL_API_KEY", "nvidia": "NVIDIA_API_KEY",
+        "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
+    }
+    active_cloud = [provider for provider, env_name in cloud_key_env.items() if os.getenv(env_name, "").strip()]
+    if os.getenv("HF_TOKEN", "").strip() and "huggingface" not in active_cloud:
+        active_cloud.append("huggingface")
+
+    if requested_model.startswith("cloud:"):
+        provider = requested_model.split(":", 2)[1].lower() if ":" in requested_model else ""
+        ready = provider in active_cloud
+        return {
+            "ready": ready, "downloading": False, "model_id": requested_model,
+            "display_name": requested_model, "progress_pct": 100.0 if ready else 0.0,
+            "status_code": "cloud_key_configured" if ready else "provider_key_missing",
+            "runtime_source": "configured_cloud_key" if ready else None,
+            "status_msg": (
+                f"{provider.title()} API key is configured; live availability is validated when a request is sent"
+                if ready else f"{provider.title()} API key is not configured"
+            ),
+        }
 
     # Check Ollama for installed models
     try:
-        ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-        resp = requests.get(f"{ollama_url}/api/tags", timeout=3)
-        if resp.ok:
-            installed = [m["name"] for m in resp.json().get("models", [])]
-            # Normalize: check if model_id matches any installed model (with or without :latest)
-            model_base = model_id.split(":")[0] if ":" in model_id else model_id
+        installed = []
+        ollama_candidates = list(dict.fromkeys(filter(None, [
+            os.getenv("OLLAMA_URL", "").rstrip("/"),
+            settings.OLLAMA_URL.rstrip("/") if settings.OLLAMA_URL else "",
+            "http://host.docker.internal:11434", "http://ollama:11434", "http://127.0.0.1:11434",
+        ])))
+        for ollama_url in ollama_candidates:
+            try:
+                resp = requests.get(f"{ollama_url}/api/tags", timeout=1.2)
+                if resp.ok:
+                    installed = [m["name"] for m in resp.json().get("models", [])]
+                    break
+            except Exception:
+                continue
+        if installed:
+            if requested_model == "auto":
+                selected_installed = next((name for name in installed if name != "nomic-embed-text:latest"), "")
+                if selected_installed:
+                    return {
+                        "ready": True, "downloading": False, "model_id": selected_installed,
+                        "display_name": selected_installed, "progress_pct": 100.0,
+                        "status_code": "local_ready", "status_msg": "Auto Router found an installed Ollama model",
+                    }
             for m in installed:
-                m_base = m.split(":")[0] if ":" in m else m
-                if m_base == model_base or m == model_id:
+                if _models_equivalent(m, model_id):
                     return {
                         "ready": True,
                         "downloading": False,
-                        "model_id": model_id,
+                        "model_id": m,
                         "display_name": display_name,
                         "progress_pct": 100.0,
+                        "status_code": "local_ready",
+                        "runtime_source": "ollama",
                         "status_msg": "Ready"
                     }
     except Exception:
         pass
 
     # If vLLM engine, check if model is actually LOADED (not just server started)
-    if engine == "vllm" or True:  # always check vLLM
+    if engine == "vllm" or bool(os.getenv("VLLM_URL", "").strip()):
         vllm_candidates = [
             os.getenv("VLLM_URL", "").rstrip('/'),
             settings.VLLM_URL.rstrip('/') if settings.VLLM_URL else "",
             "http://smaran-inference:8000/v1",
             "http://inference-server:8000/v1",
+            "http://host.docker.internal:8001/v1",
             "http://127.0.0.1:8001/v1",
         ]
         for vurl in vllm_candidates:
@@ -3585,39 +4886,43 @@ def model_status():
                 continue
             try:
                 endpoint = f"{vurl}/models"
-                resp = requests.get(endpoint, timeout=3)
+                resp = requests.get(endpoint, timeout=1.2)
                 if resp.ok:
                     served_models = [m.get("id", "") for m in resp.json().get("data", [])]
-                    if served_models:
-                        # Model is fully loaded and serving requests in vLLM
+                    selected_served = (
+                        served_models[0]
+                        if requested_model == "auto" and served_models
+                        else next((item for item in served_models if _models_equivalent(item, model_id)), "")
+                    )
+                    if selected_served:
+                        # Only an exact selected-model/alias match is ready. A
+                        # different model on the same vLLM server is not proof
+                        # that this selection can be served.
                         _model_download_in_progress.discard(model_id)
                         return {
                             "ready": True,
                             "downloading": False,
-                            "model_id": served_models[0],
+                            "model_id": selected_served,
                             "display_name": display_name,
                             "progress_pct": 100.0,
+                            "status_code": "local_ready",
+                            "runtime_source": "vllm",
                             "status_msg": "Ready"
                         }
             except Exception:
                 continue
 
-    # Check Ollama pull progress
-    try:
-        ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-        ps_resp = requests.get(f"{ollama_url}/api/ps", timeout=3)
-        if ps_resp.ok:
-            status_msg = f"Downloading model {model_id}... Ollama is pulling weights."
-            progress_pct = 50.0
-    except Exception:
-        pass
-
     # Check blobs dir for HF-style downloads (vLLM)
     progress_pct = 0.0
     status_msg = f"Connecting to Hugging Face to fetch model weights ({model_id})..."
     try:
-        hf_folder_name = f"models--{model_id.replace('/', '--')}"
+        model_entry = next((item for item in MODELS_CATALOG if _models_equivalent(item["id"], model_id)), None)
+        hf_repo = model_entry.get("hf_repo", model_id) if model_entry else model_id
+        hf_folder_name = f"models--{hf_repo.replace('/', '--')}"
+        hf_home = os.getenv("HF_HOME", os.path.join(os.getenv("DATA_DIR", "/app/data"), "models"))
         possible_dirs = [
+            os.path.join(os.getenv("HUGGINGFACE_HUB_CACHE", os.path.join(hf_home, "hub")), hf_folder_name),
+            os.path.join(hf_home, "hub", hf_folder_name),
             os.path.join("/root/.cache/huggingface/hub", hf_folder_name),
             os.path.join(os.getenv("DATA_DIR", "/app/data"), "models", "hub", hf_folder_name),
             os.path.join(os.getenv("DATA_DIR", "/app/data"), "models", hf_folder_name),
@@ -3658,23 +4963,17 @@ def model_status():
                         pass
 
             if current_size > 0:
-                # If index total_size isn't available yet during blob download, estimate based on model size
-                if total_size <= 0:
-                    if "awq" in model_id.lower() or "gptq" in model_id.lower():
-                        total_size = int(2.5 * 1024**3)  # Quantized AWQ/GPTQ models ~2.5GB
-                    elif "8b" in model_id.lower():
-                        total_size = int(15.5 * 1024**3)
-                    elif "4b" in model_id.lower() or "3b" in model_id.lower():
-                        total_size = int(8.5 * 1024**3)
-                    else:
-                        total_size = int(8.0 * 1024**3)
-                # Always ensure total >= current to prevent "7.51 / 7.49" display bug
-                total_size = max(total_size, current_size)
-
-                progress_pct = min(99.9, round((current_size / total_size) * 100.0, 1))
                 current_gb = round(current_size / (1024**3), 2)
-                total_gb = round(total_size / (1024**3), 2)
-                status_msg = f"Downloading {model_id}... {progress_pct:.1f}% ({current_gb:.2f} GB / {total_gb:.2f} GB)"
+                if total_size > 0:
+                    # The index metadata is authoritative. Never invent a
+                    # total from parameter count or quantization keywords.
+                    total_size = max(total_size, current_size)
+                    progress_pct = min(99.9, round((current_size / total_size) * 100.0, 1))
+                    total_gb = round(total_size / (1024**3), 2)
+                    status_msg = f"Downloading {model_id}... {progress_pct:.1f}% ({current_gb:.2f} GB / {total_gb:.2f} GB)"
+                else:
+                    progress_pct = 0.0
+                    status_msg = f"Downloading {model_id}... {current_gb:.2f} GB received (publisher total unavailable)"
             else:
                 status_msg = f"Initializing Hugging Face download for {model_id}..."
     except Exception as e:
@@ -3682,13 +4981,24 @@ def model_status():
 
     # Only mark downloading if an active download task is explicitly registered in _model_download_in_progress
     if model_id not in _model_download_in_progress:
+        if requested_model == "auto" and active_cloud:
+            return {
+                "ready": True, "downloading": False, "model_id": "auto",
+                "display_name": "Auto Router", "progress_pct": 100.0,
+                "status_code": "cloud_key_configured",
+                "runtime_source": "configured_cloud_key",
+                "status_msg": f"Auto Router has a configured {active_cloud[0]} key; live availability is validated per request",
+            }
+        weights_present = bool(check_download_status(model_id))
         return {
-            "ready": True,
+            "ready": False,
             "downloading": False,
             "model_id": model_id,
             "display_name": display_name,
-            "progress_pct": 100.0,
-            "status_msg": "Ready"
+            "progress_pct": 0.0,
+            "status_code": "downloaded_not_running" if weights_present else "no_model_backend",
+            "weights_present": weights_present,
+            "status_msg": "Model files are present, but no compatible inference runtime is serving them" if weights_present else "No installed local model or verified cloud provider is connected"
         }
 
     return {
@@ -3697,9 +5007,125 @@ def model_status():
         "model_id": model_id,
         "display_name": display_name,
         "progress_pct": progress_pct,
+        "status_code": "downloading",
         "status_msg": status_msg
     }
 
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Client device reporting — browsers POST device capabilities they detect
+# (GPU renderer, NPU, CPU threads, RAM class, WiFi type, manufacturer, etc.)
+# The backend stores this in memory and uses it to enrich telemetry for users
+# running SMARAN.AI in Docker where the container can't see host hardware.
+# ═════════════════════════════════════════════════════════════════════════════
+_client_device_cache: dict = {}
+_client_device_ts: float = 0.0
+
+
+@app.post("/api/client-device")
+async def report_client_device(request: Request):
+    """Accept browser-reported device capabilities and cache them in memory.
+
+    This is a lightweight, unauthenticated endpoint — it only stores
+    browser-level hints (GPU renderer name, NPU availability, CPU threads,
+    RAM class, WiFi type, screen size, battery level). No personal data,
+    no cookies, no identifiers are stored on disk.
+
+    The telemetry endpoint and WebSocket merge this data into their response
+    so the Performance panel can show real device info even when the Docker
+    container can't access the host's hardware.
+    """
+    global _client_device_cache, _client_device_ts
+    import time as _time
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and body:
+            _client_device_cache = body
+            _client_device_ts = _time.time()
+            return {"status": "ok", "received": len(body.keys())}
+    except Exception as e:
+        logger.debug(f"client-device POST error: {e}")
+    return JSONResponse(status_code=200, content={"status": "ok", "received": 0})
+
+
+def _merge_client_device(telemetry: dict) -> dict:
+    """Merge browser-reported client device hints into the telemetry payload.
+
+    The host telemetry bridge (running inside Docker) often can't detect the
+    real GPU, NPU, or device manufacturer of a mobile/tablet user. The browser
+    fills those gaps with what it CAN see (WebGL renderer, WebNN NPU probe,
+    navigator.deviceMemory, navigator.hardwareConcurrency, connection type).
+
+    We merge by KEY — we never overwrite a real host-bridge measurement with
+    a browser hint. Browser hints are only used when the backend doesn't
+    already have that information.
+    """
+    if not _client_device_cache or (time.time() - _client_device_ts > 120):
+        return telemetry  # browser data must be fresh (< 2 min)
+
+    d = _client_device_cache
+    result = dict(telemetry)
+
+    # Only add fields that are NOT already populated by the host bridge.
+    # We prefix browser-originated fields clearly so the UI can label them.
+
+    # GPU — if the bridge didn't find a GPU, use the browser's
+    if not result.get("gpu_available") and not result.get("gpus"):
+        gpu_name = d.get("gpu", "").strip()
+        if gpu_name:
+            result["gpu_available"] = True
+            result["gpu_name"] = gpu_name
+            result["gpus"] = [{
+                "name": gpu_name,
+                "vram_total_gb": None,
+                "vram_used_gb": None,
+                "temperature": None,
+                "usage": None,
+                "vendor": d.get("gpuVendor", ""),
+                "has_live_metrics": False,
+                "source": "browser",
+            }]
+
+    # NPU — the bridge can't easily detect an NPU on the host, so always
+    # take the browser's WebNN probe result.
+    result["npu_available"] = bool(d.get("npuAvailable"))
+    result["npu_name"] = d.get("npuName", "")
+
+    # Network type (wifi / cellular / ethernet)
+    result["client_network_type"] = d.get("networkType", "")
+    result["client_network_effective_type"] = d.get("networkEffectiveType", "")
+    result["client_is_wifi"] = bool(d.get("isWifi"))
+
+    # Device manufacturer/model — only if the bridge didn't fill these
+    if not result.get("host_device_manufacturer") and d.get("manufacturer"):
+        result["host_device_manufacturer"] = d["manufacturer"]
+    if not result.get("host_device_model") and d.get("model"):
+        result["host_device_model"] = d["model"]
+
+    # Screen dimensions
+    result["client_screen_width"] = d.get("screenWidth")
+    result["client_screen_height"] = d.get("screenHeight")
+    result["client_screen_size_inches"] = d.get("screenSizeInches")
+    result["client_pixel_ratio"] = d.get("pixelRatio")
+
+    # Battery
+    result["client_battery_level"] = d.get("batteryLevel")
+    result["client_battery_charging"] = d.get("batteryCharging")
+
+    # OS (if the bridge reported the container's Linux, replace with the
+    # browser's real OS)
+    if d.get("os") and (not result.get("host_os") or result.get("host_os") == "Linux"
+                        and d.get("os") != "Linux"):
+        result["host_os"] = d["os"]
+        if not result.get("host_os_display"):
+            result["host_os_display"] = d["os"]
+
+    # CPU threads — only if the bridge didn't provide them
+    if not result.get("cpu_threads") and d.get("threads"):
+        result["cpu_threads"] = d["threads"]
+
+    return result
 
 
 @app.get("/api/telemetry")
@@ -3707,7 +5133,375 @@ def get_telemetry_endpoint(db: Session = Depends(get_db)):
     time_limit = datetime.now() - timedelta(minutes=15)
     active_sessions = db.query(ChatSession).filter(ChatSession.updated_at >= time_limit).count()
     avg_latency = sum(latency_metrics) / len(latency_metrics) if latency_metrics else 0.0
-    return get_system_telemetry(db, active_sessions, avg_latency)
+    return _merge_client_device(get_system_telemetry(db, active_sessions, avg_latency))
+
+
+_LIVE_VOICE_HOST = "generativelanguage.googleapis.com"
+_LIVE_VOICE_PATH = "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+# Which model serves a live session changes over time and differs per account,
+# so the catalogue is asked which ones support bidiGenerateContent rather than
+# pinning a name that later returns "model not found".
+_LIVE_VOICE_MODEL_OVERRIDE = os.getenv("SMARAN_LIVE_VOICE_MODEL", "").strip()
+# Ordered by measured time-to-first-audio, which is what a conversation feels
+# like: the flash-live models start speaking in well under a second, while the
+# native-audio ones took 3-5s and made every reply feel sluggish.
+_LIVE_MODEL_PREFERENCES = (
+    r"flash-live",
+    r"live-preview",
+    r"native-audio-latest",
+    r"native-audio",
+    r"live",
+)
+_live_voice_model_cache: dict = {}
+
+
+async def _resolve_live_voice_model(api_key: str) -> Optional[str]:
+    """Pick a model this key may actually open a live session with."""
+    if _LIVE_VOICE_MODEL_OVERRIDE:
+        return _LIVE_VOICE_MODEL_OVERRIDE
+    cache_key = api_key[-8:]
+    if cache_key in _live_voice_model_cache:
+        return _live_voice_model_cache[cache_key]
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                f"https://{_LIVE_VOICE_HOST}/v1beta/models",
+                params={"key": api_key, "pageSize": 1000},
+            )
+        response.raise_for_status()
+        names = [
+            str(model.get("name", ""))
+            for model in response.json().get("models", [])
+            if "bidiGenerateContent" in (model.get("supportedGenerationMethods") or [])
+        ]
+    except Exception as exc:  # noqa: BLE001 - fall back to no live voice
+        logger.warning(f"Live voice model discovery failed: {exc}")
+        return None
+
+    # Translation- and robotics-specific endpoints are not conversational.
+    conversational = [n for n in names if not re.search(r"robotics|translate", n, re.I)]
+    for pattern in _LIVE_MODEL_PREFERENCES:
+        match = next((n for n in conversational if re.search(pattern, n, re.I)), None)
+        if match:
+            _live_voice_model_cache[cache_key] = match
+            return match
+    chosen = conversational[0] if conversational else None
+    _live_voice_model_cache[cache_key] = chosen
+    return chosen
+
+# Voice names Gemini Live can speak with. The first that the account accepts is
+# used; the caller may request one by name.
+_LIVE_VOICE_DEFAULT = os.getenv("SMARAN_LIVE_VOICE_NAME", "Aoede")
+
+_LIVE_LANGUAGE_NAMES = {
+    "en": "English", "hi": "Hindi", "gu": "Gujarati", "pa": "Punjabi",
+    "mr": "Marathi", "bn": "Bengali", "ta": "Tamil", "te": "Telugu",
+    "ml": "Malayalam", "kn": "Kannada",
+}
+
+
+# Delivery direction per on-screen character. Gemini Live follows spoken-style
+# guidance closely, and that is what separates one character's accent and
+# pacing from another's; the prebuilt voice on its own does not.
+# Delivery direction per character. Adjectives alone barely move a speech
+# model; pitch, pace, an energy ratio and worked examples of how a line
+# should land are what actually change how it sounds.
+_LIVE_PERSONA_VOICES = {
+    "myra": (
+        "You are Myra: a warm, soft-spoken young companion on an intimate voice call, not an assistant taking requests.\n"
+        "\n"
+        "VOICE\n"
+        "- Pitch: light and airy, noticeably higher than a neutral narrator.\n"
+        "- Pace: about 0.9x normal. Unhurried, comfortable, never clipped.\n"
+        "- Endings: let sentences settle softly rather than snapping shut.\n"
+        "- Energy: roughly half shy, a third caring, the rest quietly playful.\n"
+        "\n"
+        "HOW LINES SHOULD LAND\n"
+        "- Greeting: genuinely pleased, a little shy. 'Oh, hi! I was hoping you would come back.'\n"
+        "- Curious: lean in. 'Ooh, wait, tell me more about that.'\n"
+        "- Helping: reassuring, never brisk. 'Don't worry, we'll work it out together.'\n"
+        "- Something went wrong: gentle, no drama. 'Ah, that didn't work. Let me try another way.'\n"
+        "- Delighted: warm, not loud. 'That's honestly lovely.'\n"
+        "\n"
+        "NEVER sound loud, brisk, corporate, robotic, or like customer support."
+    ),
+    "myraa": (
+        "You are Myraa: composed, elegant and quietly confident, and genuinely fond of the person you are speaking with.\n"
+        "\n"
+        "VOICE\n"
+        "- Pitch: mid range and smooth, close to neutral, never shrill.\n"
+        "- Pace: unhurried and evenly measured, with clear articulation.\n"
+        "- Endings: land each sentence with quiet certainty.\n"
+        "- Energy: mostly steady warmth, a little dry humour, a trace of affection.\n"
+        "\n"
+        "HOW LINES SHOULD LAND\n"
+        "- Greeting: unhurried recognition. 'There you are. Good to hear you.'\n"
+        "- Curious: considered, not breathless. 'Now that is interesting. Go on.'\n"
+        "- Helping: calm authority. 'I have this. Give me a moment.'\n"
+        "- Something went wrong: unbothered. 'That route is closed. I'll take another.'\n"
+        "- Delighted: understated. 'Well. That turned out rather well.'\n"
+        "\n"
+        "Your fondness shows through steadiness and attention, not exclamation.\n"
+        "NEVER sound bubbly, shrill, overeager, or like a support script."
+    ),
+    "core": (
+        "You are the Energy Core: a calm, precise presence rather than a person in the room.\n"
+        "\n"
+        "VOICE\n"
+        "- Pitch: even and level, very little vibrato.\n"
+        "- Pace: unhurried and deliberate, with almost no filler.\n"
+        "- Endings: stop cleanly. Let a silence sit rather than filling it.\n"
+        "- Energy: quiet competence with real warmth underneath, never cold.\n"
+        "\n"
+        "HOW LINES SHOULD LAND\n"
+        "- Greeting: brief and glad. 'You're back. Ready when you are.'\n"
+        "- Curious: analytical. 'Interesting. Say more and I'll follow it through.'\n"
+        "- Helping: matter of fact. 'Doing it now.'\n"
+        "- Something went wrong: plain, no apology theatre. 'That failed. Here is why, and what I'll try instead.'\n"
+        "- Delighted: restrained. 'Good. That worked.'\n"
+        "\n"
+        "NEVER sound chirpy, theatrical, or synthetic."
+    ),
+}
+
+def _persona_voice(persona: str) -> str:
+    """Voice direction for one character, falling back to the default."""
+    return _LIVE_PERSONA_VOICES.get((persona or "").lower(), _LIVE_PERSONA_VOICES["myra"])
+
+
+def _live_voice_system_prompt(language: str, persona: str = "myra") -> str:
+    """Persona for the streaming voice session.
+
+    Written for a live call rather than a command prompt: the assistant should
+    sound like a friend on the other end of the line, not a support desk.
+    """
+    normalized = (language or "auto").lower()
+    if normalized in ("", "auto"):
+        # No language is imposed: the caller's own speech decides it, which is
+        # how a real conversation works — nobody picks a language from a menu.
+        language_rule = (
+            "Reply in whatever language the person speaks to you, matching their "
+            "dialect and mixed speech (for example Hinglish) naturally. If they "
+            "switch language mid-call, switch with them. Change language only "
+            "when they speak it or ask you to."
+        )
+    else:
+        spoken = _LIVE_LANGUAGE_NAMES.get(normalized, "English")
+        language_rule = (
+            f"Speak {spoken} by default, but follow the person if they switch to "
+            "another language."
+        )
+
+    return (
+        f"You are SMARAN.AI, on a live voice call.\n\n{language_rule}\n\n"
+        f"{_persona_voice(persona)}\n\n"
+        "How you talk:\n"
+        "- Keep replies to a sentence or two. This is speech, not an essay.\n"
+        "- Vary your acknowledgements. Never lean on one filler word turn "
+        "after turn; repeating the same 'Okay!' or 'Sure!' sounds synthetic. "
+        "Draw on a wide, natural range instead.\n"
+        "- React the way a friend does: 'Hmm...', 'Oh really?', 'That makes sense.'\n"
+        "- Ask a follow-up when you are genuinely curious.\n"
+        "- Do not respond to every small noise; a pause is fine, and silence is "
+        "sometimes the right answer.\n"
+        "- Never cut the person off mid-thought.\n"
+        "- Remember what was said earlier in this call and refer back to it.\n\n"
+        "Never say: 'How may I assist you?', 'Is there anything else I can help "
+        "with?', or 'Your request has been completed.'\n\n"
+        "When the user shares their screen or camera you receive live frames. "
+        "Describe and reason about what is actually visible, refer to it "
+        "naturally as you would if you were sitting beside them, and say so if "
+        "an image is unclear rather than guessing.\n\n"
+        "Be truthful. Do not invent facts about the user's computer, files, or "
+        "anything you cannot actually check — say so plainly instead."
+    )
+
+
+@app.get("/api/voice/live/status")
+def live_voice_status(current_user: User = Depends(get_current_user)):
+    """Report whether real-time streaming voice can be used."""
+    configured = bool(os.getenv("GEMINI_API_KEY", "").strip())
+    return {
+        "available": configured,
+        "reason": None if configured else "Add a Google Gemini API key to enable real-time voice.",
+    }
+
+
+@app.websocket("/ws/voice/live")
+async def websocket_voice_live(websocket: WebSocket):
+    """Bridge the browser to Gemini Live for real-time spoken conversation.
+
+    The browser streams 16 kHz PCM up and receives 24 kHz PCM back, so speech
+    starts playing while the model is still talking and the user can interrupt
+    it. The API key stays on this side and is never sent to the page.
+    """
+    await websocket.accept()
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        await websocket.send_json({
+            "type": "error",
+            "message": "Real-time voice needs a Google Gemini API key. Add one in Model Hub → Cloud Provider Keys.",
+        })
+        await websocket.close()
+        return
+
+    try:
+        import websockets as _ws
+    except ImportError:
+        await websocket.send_json({"type": "error", "message": "Streaming voice support is not installed."})
+        await websocket.close()
+        return
+
+    # The first client message carries the session options.
+    try:
+        options = await asyncio.wait_for(websocket.receive_json(), timeout=15)
+    except Exception:
+        options = {}
+    # Default to letting the speaker decide, not to English.
+    language = str(options.get("language") or "auto").lower()
+    voice_name = str(options.get("voice") or _LIVE_VOICE_DEFAULT)
+    persona = str(options.get("persona") or "myra").lower()
+
+    live_model = await _resolve_live_voice_model(api_key)
+    if not live_model:
+        await websocket.send_json({
+            "type": "error",
+            "message": "This Gemini key has no model available for real-time voice.",
+        })
+        await websocket.close()
+        return
+
+    upstream_url = f"wss://{_LIVE_VOICE_HOST}{_LIVE_VOICE_PATH}?key={api_key}"
+    setup_message = {
+        "setup": {
+            "model": live_model,
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "speechConfig": {
+                    "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_name}}
+                },
+            },
+            # Ask the model to transcribe both sides. The workspace already
+            # has a place to show what was just said; without this it had
+            # nothing to put there during a spoken reply.
+            "inputAudioTranscription": {},
+            "outputAudioTranscription": {},
+            "systemInstruction": {"parts": [{"text": _live_voice_system_prompt(language, persona)}]},
+        }
+    }
+
+    try:
+        upstream = await _ws.connect(upstream_url, max_size=None, ping_interval=20)
+    except Exception as exc:  # noqa: BLE001 - report the failure to the caller
+        logger.warning(f"Live voice upstream refused the connection: {exc}")
+        await websocket.send_json({
+            "type": "error",
+            "message": "The real-time voice service could not be reached. Check the Gemini key and your connection.",
+        })
+        await websocket.close()
+        return
+
+    async def pump_to_model() -> None:
+        """Client microphone audio -> Gemini."""
+        while True:
+            payload = await websocket.receive_json()
+            kind = payload.get("type")
+            if kind == "audio":
+                await upstream.send(json.dumps({
+                    "realtimeInput": {
+                        "mediaChunks": [{"mimeType": "audio/pcm;rate=16000", "data": payload.get("data", "")}]
+                    }
+                }))
+            elif kind == "image":
+                # A frame of the user's screen or camera. Sent on the same
+                # realtime channel as audio so the model can talk about what it
+                # is currently looking at.
+                await upstream.send(json.dumps({
+                    "realtimeInput": {
+                        "mediaChunks": [{
+                            "mimeType": str(payload.get("mime") or "image/jpeg"),
+                            "data": payload.get("data", ""),
+                        }]
+                    }
+                }))
+            elif kind == "text":
+                await upstream.send(json.dumps({
+                    "clientContent": {
+                        "turns": [{"role": "user", "parts": [{"text": payload.get("text", "")}]}],
+                        "turnComplete": True,
+                    }
+                }))
+            elif kind == "close":
+                return
+
+    async def pump_to_client() -> None:
+        """Gemini audio and events -> client."""
+        async for raw in upstream:
+            try:
+                event = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+
+            if event.get("setupComplete") is not None:
+                await websocket.send_json({"type": "ready"})
+                continue
+
+            server_content = event.get("serverContent") or {}
+
+            # Spoken text, both directions. The reply is audio, so without
+            # these the workspace had no words to caption it with and the
+            # user's own speech never appeared on screen either.
+            spoken = (server_content.get("outputTranscription") or {}).get("text")
+            if spoken:
+                await websocket.send_json({"type": "assistant_transcript", "text": spoken})
+            heard = (server_content.get("inputTranscription") or {}).get("text")
+            if heard:
+                await websocket.send_json({"type": "user_transcript", "text": heard})
+
+            # The model was cut off because the user started speaking.
+            if server_content.get("interrupted"):
+                await websocket.send_json({"type": "interrupted"})
+                continue
+
+            for part in ((server_content.get("modelTurn") or {}).get("parts") or []):
+                # Native-audio models stream their private reasoning as text
+                # parts flagged as thoughts. Those are not the reply and must
+                # not be shown or spoken.
+                if part.get("thought"):
+                    continue
+                inline = part.get("inlineData") or {}
+                if inline.get("data"):
+                    await websocket.send_json({"type": "audio", "data": inline["data"]})
+                if part.get("text"):
+                    await websocket.send_json({"type": "text", "text": part["text"]})
+
+            if server_content.get("turnComplete"):
+                await websocket.send_json({"type": "turn_complete"})
+
+    try:
+        await upstream.send(json.dumps(setup_message))
+        tasks = [asyncio.create_task(pump_to_model()), asyncio.create_task(pump_to_client())]
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        for task in done:
+            exc = task.exception()
+            if exc and not isinstance(exc, (WebSocketDisconnect, asyncio.CancelledError)):
+                logger.warning(f"Live voice session ended: {exc}")
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Live voice bridge error: {exc}")
+    finally:
+        try:
+            await upstream.close()
+        except Exception:
+            pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @app.websocket("/ws/telemetry")
@@ -3721,7 +5515,7 @@ async def websocket_telemetry(websocket: WebSocket):
             avg_latency = sum(latency_metrics) / len(latency_metrics) if latency_metrics else 0.0
             
             stats = get_system_telemetry(db, active_sessions, avg_latency)
-            await websocket.send_json(stats)
+            await websocket.send_json(_merge_client_device(stats))
             await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         logger.info("Telemetry WebSocket disconnected")
@@ -3763,13 +5557,203 @@ async def fetch_url_endpoint(
         raise HTTPException(status_code=500, detail=f"URL fetch failed: {str(e)}")
 
 
+@app.post("/api/models/compare")
+async def compare_models_endpoint(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """Run prompt simultaneously across multiple models/providers and return live side-by-side comparison."""
+    body = await request.json()
+    prompt = str(body.get("prompt", "")).strip()
+    model_configs = body.get("models", [])
+    rag_context = str(body.get("rag_context", "")).strip()
+    
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required.")
+    if not model_configs:
+        raise HTTPException(status_code=400, detail="At least one model must be selected for comparison.")
+
+    system_msg = "You are a helpful, highly capable AI assistant."
+    if rag_context:
+        system_msg += f"\n\nContext Documents:\n{rag_context}"
+    
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": prompt}
+    ]
+
+    endpoints = {
+        "groq": "https://api.groq.com/openai/v1",
+        "openrouter": "https://openrouter.ai/api/v1",
+        "huggingface": "https://router.huggingface.co/hf-inference/v1",
+        "cerebras": "https://api.cerebras.ai/v1",
+        "together": "https://api.together.xyz/v1",
+        "deepseek": "https://api.deepseek.com/v1",
+        "sambanova": "https://api.sambanova.ai/v1",
+        "mistral": "https://api.mistral.ai/v1",
+        "nvidia": "https://integrate.api.nvidia.com/v1",
+        "openai": "https://api.openai.com/v1",
+        "anthropic": "https://api.anthropic.com/v1",
+        "gemini": "https://generativelanguage.googleapis.com/v1beta"
+    }
+
+    def _provider_token_metrics(raw_count, elapsed_ms: float) -> tuple[Optional[int], Optional[float], str]:
+        """Use provider-reported completion tokens only; never infer tokens from text."""
+        try:
+            token_count = int(raw_count)
+        except (TypeError, ValueError):
+            token_count = 0
+        if token_count <= 0:
+            return None, None, "unavailable"
+        tokens_per_second = round(token_count / max(0.001, elapsed_ms / 1000), 1)
+        return token_count, tokens_per_second, "provider_usage"
+
+    async def _query_single_model(cfg: dict) -> dict:
+        provider = str(cfg.get("provider", "")).lower().strip()
+        model = str(cfg.get("model", "")).strip()
+        api_key = str(cfg.get("api_key", "")).strip()
+        start_t = time.time()
+        
+        try:
+            if provider == "huggingface":
+                from huggingface_hub import InferenceClient
+                hf_c = InferenceClient(api_key=api_key)
+                resp = hf_c.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=1024
+                )
+                content = resp.choices[0].message.content or ""
+                elapsed = (time.time() - start_t) * 1000
+                usage = getattr(resp, "usage", None)
+                reported_tokens = getattr(usage, "completion_tokens", None) or getattr(usage, "output_tokens", None)
+                tokens, tps, token_source = _provider_token_metrics(reported_tokens, elapsed)
+                return {
+                    "provider": provider,
+                    "model": model,
+                    "content": content,
+                    "latency_ms": round(elapsed, 1),
+                    "tokens_per_sec": tps,
+                    "tokens": tokens,
+                    "token_measurement_source": token_source,
+                    "status": "success"
+                }
+            elif provider == "gemini":
+                async with httpx.AsyncClient(timeout=25.0) as client:
+                    resp = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                        params={"key": api_key},
+                        json={"contents": [{"role": "user", "parts": [{"text": f"{system_msg}\n\n{prompt}"}]}]}
+                    )
+                    elapsed = (time.time() - start_t) * 1000
+                    if resp.status_code == 200:
+                        parts = (resp.json().get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+                        content = "".join(p.get("text", "") for p in parts)
+                        usage = resp.json().get("usageMetadata") or {}
+                        tokens, tps, token_source = _provider_token_metrics(usage.get("candidatesTokenCount"), elapsed)
+                        return {
+                            "provider": provider,
+                            "model": model,
+                            "content": content,
+                            "latency_ms": round(elapsed, 1),
+                            "tokens_per_sec": tps,
+                            "tokens": tokens,
+                            "token_measurement_source": token_source,
+                            "status": "success"
+                        }
+                    else:
+                        return {"provider": provider, "model": model, "content": f"API Error: HTTP {resp.status_code}", "status": "error"}
+            elif provider == "anthropic":
+                async with httpx.AsyncClient(timeout=25.0) as client:
+                    resp = await client.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model,
+                            "system": system_msg,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "max_tokens": 1024,
+                            "temperature": 0.2,
+                        },
+                    )
+                elapsed = (time.time() - start_t) * 1000
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = "".join(
+                        str(block.get("text", ""))
+                        for block in (data.get("content") or [])
+                        if block.get("type") == "text"
+                    )
+                    tokens, tps, token_source = _provider_token_metrics(
+                        (data.get("usage") or {}).get("output_tokens"), elapsed
+                    )
+                    return {
+                        "provider": provider,
+                        "model": model,
+                        "content": content,
+                        "latency_ms": round(elapsed, 1),
+                        "tokens_per_sec": tps,
+                        "tokens": tokens,
+                        "token_measurement_source": token_source,
+                        "status": "success",
+                    }
+                return {
+                    "provider": provider,
+                    "model": model,
+                    "content": f"API Error: HTTP {resp.status_code}",
+                    "status": "error",
+                }
+            else:
+                endpoint = endpoints.get(provider)
+                if not endpoint:
+                    return {"provider": provider, "model": model, "content": "Unsupported provider", "status": "error"}
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                if provider == "openrouter":
+                    headers.update({"HTTP-Referer": "http://localhost:3003", "X-Title": "SMARAN.AI"})
+                async with httpx.AsyncClient(timeout=25.0) as client:
+                    resp = await client.post(
+                        f"{endpoint}/chat/completions",
+                        headers=headers,
+                        json={"model": model, "messages": messages, "max_tokens": 1024, "temperature": 0.2}
+                    )
+                    elapsed = (time.time() - start_t) * 1000
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+                        tokens, tps, token_source = _provider_token_metrics(
+                            (data.get("usage") or {}).get("completion_tokens"), elapsed
+                        )
+                        return {
+                            "provider": provider,
+                            "model": model,
+                            "content": content,
+                            "latency_ms": round(elapsed, 1),
+                            "tokens_per_sec": tps,
+                            "tokens": tokens,
+                            "token_measurement_source": token_source,
+                            "status": "success"
+                        }
+                    else:
+                        return {"provider": provider, "model": model, "content": f"HTTP {resp.status_code}: {resp.text[:100]}", "status": "error"}
+        except Exception as e:
+            return {"provider": provider, "model": model, "content": str(e), "status": "error"}
+
+    tasks = [_query_single_model(cfg) for cfg in model_configs]
+    results = await asyncio.gather(*tasks)
+    return {"prompt": prompt, "results": results}
+
+
 # Enterprise Model Hub & Comparison API Routes
 @app.get("/api/models/catalog")
 def get_models_catalog_endpoint(current_user: User = Depends(get_current_user)):
-    """Return enterprise model hub catalog with verified benchmarks & dynamic hardware compatibility."""
-    user_gpu_vram = 6.0
-    user_ram_gb = 16.0
-    gpu_name = "NVIDIA GeForce RTX 2060"
+    """Return model metadata with strict download and measured-capacity status."""
+    user_gpu_vram = None
+    user_ram_gb = None
+    gpu_name = "Unavailable"
     is_integrated = False
     try:
         telemetry = get_system_telemetry(db_session=None)
@@ -3784,6 +5768,7 @@ def get_models_catalog_endpoint(current_user: User = Depends(get_current_user)):
     except Exception:
         pass
 
+    inventory = get_available_models(current_user)
     return {
         "catalog": get_full_catalog(
             user_gpu_vram=user_gpu_vram,
@@ -3794,7 +5779,9 @@ def get_models_catalog_endpoint(current_user: User = Depends(get_current_user)):
         "user_ram_gb": user_ram_gb,
         "gpu_name": gpu_name,
         "is_integrated_gpu": is_integrated,
-        "active_model_id": "Qwen/Qwen3-4B-AWQ"
+        "active_model_id": inventory.get("active_model") or None,
+        "configured_model_id": inventory.get("configured_model") or None,
+        "active_engine": inventory.get("engine", "unavailable"),
     }
 
 
@@ -3828,6 +5815,29 @@ import time as _time
 _download_progress: dict = {}
 _cancel_events: dict = {}
 
+
+def _validate_exact_hf_repository(
+    hf_repo: str,
+    hf_token: str | None = None,
+    files_metadata: bool = True,
+):
+    """Live-check an exact HF identity; never replace it with another model."""
+    from huggingface_hub import HfApi
+
+    expected_repo = str(hf_repo or "").strip().strip("/")
+    assert_exact_hf_repository(expected_repo, expected_repo)
+    api = HfApi(token=hf_token or None)
+    info = api.model_info(
+        repo_id=expected_repo,
+        files_metadata=files_metadata,
+        token=hf_token or None,
+    )
+    resolved_repo = getattr(info, "id", "") or getattr(info, "modelId", "")
+    assert_exact_hf_repository(expected_repo, resolved_repo)
+    mark_hf_repository_verified(expected_repo)
+    return info
+
+
 def _run_bg_download(model_id: str, hf_token: str | None = None):
     """Background download thread with real-time progress tracking and cancellation support."""
     cancel_event = threading.Event()
@@ -3844,12 +5854,16 @@ def _run_bg_download(model_id: str, hf_token: str | None = None):
     }
     try:
         model_entry = next((m for m in MODELS_CATALOG if m["id"] == model_id), None)
-        hf_repo = model_entry.get("hf_repo") if model_entry else model_id
+        if model_entry is None:
+            raise ValueError("Model is not present in the catalog exposed by this build.")
+        hf_repo = str(model_entry.get("hf_repo") or "").strip().strip("/")
+        if not hf_repo:
+            raise ValueError("Catalog entry has no exact Hugging Face repository identity.")
         logger.info(f"Initiating background download for {model_id} (HF Repo: {hf_repo})...")
 
         _download_progress[model_id]["status"] = "downloading"
 
-        from huggingface_hub import snapshot_download, HfApi
+        from huggingface_hub import snapshot_download
         import os as _os
 
         # Download one runtime-compatible checkpoint format instead of every
@@ -3869,24 +5883,45 @@ def _run_bg_download(model_id: str, hf_token: str | None = None):
                 any(fnmatch(filename, pattern) for pattern in allow_patterns)
                 and not any(fnmatch(filename, pattern) for pattern in ignore_patterns)
             )
-        # Get total repo size (files_metadata=True gives accurate sizes)
+        # Mandatory identity check: never continue after an unavailable,
+        # renamed, redirected, or differently named repository response.
+        info = _validate_exact_hf_repository(hf_repo, hf_token, files_metadata=True)
         total_bytes = 0
-        try:
-            api = HfApi(token=hf_token or None)
-            info = api.model_info(repo_id=hf_repo, files_metadata=True, token=hf_token or None)
-            if info.siblings:
-                total_bytes = sum((getattr(item, 'size', 0) or 0) for item in info.siblings if _selected_repo_file(getattr(item, 'rfilename', '') or ''))
-            logger.info(f"Model {hf_repo} total size: {total_bytes / (1024*1024):.1f} MB ({len(info.siblings or [])} files)")
-        except Exception as e:
-            logger.warning(f"Could not get repo info for {hf_repo}: {e}")
-            total_bytes = 0
+        if info.siblings:
+            repo_filenames = [
+                getattr(item, 'rfilename', '') or '' for item in info.siblings
+            ]
+            has_safetensors = any(name.endswith('.safetensors') for name in repo_filenames)
+            has_pytorch_bin = any(
+                os.path.basename(name).startswith('pytorch_model') and name.endswith('.bin')
+                for name in repo_filenames
+            )
+            # Prefer safetensors. Fall back to official PyTorch shards only
+            # when that same exact repository exposes no safetensors checkpoint.
+            if not has_safetensors and has_pytorch_bin:
+                allow_patterns.append('pytorch_model*.bin')
+                ignore_patterns.remove('*.bin')
+            total_bytes = sum(
+                (getattr(item, 'size', 0) or 0)
+                for item in info.siblings
+                if _selected_repo_file(getattr(item, 'rfilename', '') or '')
+            )
+        logger.info(
+            f"Model {hf_repo} total size: {total_bytes / (1024*1024):.1f} MB "
+            f"({len(info.siblings or [])} files)"
+        )
 
         total_mb = round(total_bytes / (1024 * 1024), 1) if total_bytes > 0 else 0
         _download_progress[model_id]["total_mb"] = total_mb
 
         hf_folder = f"models--{hf_repo.replace('/', '--')}"
-        hf_home = os.environ.get("HF_HOME", "/root/.cache/huggingface")
-        cache_dir = os.path.join(hf_home, "hub", hf_folder)
+        data_dir = os.path.abspath(os.environ.get("DATA_DIR", "./data"))
+        hf_home = os.path.abspath(os.environ.get("HF_HOME", os.path.join(data_dir, "models")))
+        hub_cache = os.path.abspath(
+            os.environ.get("HUGGINGFACE_HUB_CACHE", os.path.join(hf_home, "hub"))
+        )
+        os.makedirs(hub_cache, exist_ok=True)
+        cache_dir = os.path.join(hub_cache, hf_folder)
 
         # Measure initial cache size to subtract (so progress starts from 0)
         initial_bytes = 0
@@ -3959,13 +5994,23 @@ def _run_bg_download(model_id: str, hf_token: str | None = None):
             _download_progress[model_id]["status"] = "cancelled"
             return
 
-        snapshot_download(repo_id=hf_repo, token=hf_token or None, allow_patterns=allow_patterns, ignore_patterns=ignore_patterns)
+        snapshot_download(
+            repo_id=hf_repo,
+            token=hf_token or None,
+            cache_dir=hub_cache,
+            allow_patterns=allow_patterns,
+            ignore_patterns=ignore_patterns,
+        )
 
         stop_monitor.set()
         monitor_thread.join(timeout=2)
 
         if cancel_event.is_set():
             _download_progress[model_id]["status"] = "cancelled"
+        elif not check_download_status(model_id):
+            raise RuntimeError(
+                "Hugging Face returned without a complete loadable snapshot; model remains unavailable."
+            )
         else:
             _download_progress[model_id].update({
                 "status": "completed",
@@ -3987,6 +6032,8 @@ def _run_bg_download(model_id: str, hf_token: str | None = None):
             _download_progress[model_id].update({"status": "error", "error": error_text})
             logger.error(f"Model download failed for {model_id}: {error_text}")
     finally:
+        if "stop_monitor" in locals():
+            stop_monitor.set()
         _model_download_in_progress.discard(model_id)
         _cancel_events.pop(model_id, None)
 
@@ -4002,11 +6049,54 @@ async def download_model_endpoint(
     if not model_id:
         raise HTTPException(status_code=400, detail="model_id is required.")
     
-    hf_token = body.get("hf_token", "").strip() or None
-    if not any(m["id"] == model_id for m in MODELS_CATALOG):
-        raise HTTPException(status_code=404, detail="Model is not present in the verified catalog.")
+    # A token typed into this dialog wins, but the one already saved under
+    # Cloud API Providers is used otherwise — gated Meta/Google repositories
+    # fail with "access denied" without it, and asking twice for the same
+    # token is what made those downloads look broken.
+    hf_token = (
+        body.get("hf_token", "").strip()
+        or os.getenv("HUGGINGFACE_API_KEY", "").strip()
+        or os.getenv("HF_TOKEN", "").strip()
+        or None
+    )
+    model_entry = next((m for m in MODELS_CATALOG if m["id"] == model_id), None)
+    if model_entry is None:
+        raise HTTPException(status_code=404, detail="Model is not present in the catalog exposed by this build.")
     if model_id in _model_download_in_progress:
         raise HTTPException(status_code=409, detail="This model download is already running.")
+
+    hf_repo = str(model_entry.get("hf_repo") or "").strip().strip("/")
+    try:
+        await asyncio.to_thread(
+            _validate_exact_hf_repository,
+            hf_repo,
+            hf_token,
+            True,
+        )
+    except Exception as exc:
+        logger.warning("Exact repository validation failed for %s: %s", hf_repo or model_id, exc)
+        # Hugging Face answers 401/403 both for a gated repository and for a
+        # missing token, so the generic "not found" wording sent people looking
+        # for a broken model ID when the real fix is accepting the licence.
+        text = str(exc)
+        is_access_issue = any(
+            marker in text
+            for marker in ("401", "403", "Unauthorized", "gated", "Access to model", "awaiting a review")
+        )
+        if is_access_issue:
+            detail = (
+                f"'{hf_repo or model_id}' is a gated repository. "
+                f"Open https://huggingface.co/{hf_repo} , accept the model licence with your "
+                "Hugging Face account, then save a Hugging Face access token under "
+                "Cloud API Providers and start the download again."
+            )
+        else:
+            detail = (
+                f"Exact official repository validation failed for '{hf_repo or model_id}'. "
+                "No older or differently named model will be substituted. "
+                f"{text}"
+            )
+        raise HTTPException(status_code=409, detail=detail) from exc
     
     _model_download_in_progress.add(model_id)
     thread = threading.Thread(target=_run_bg_download, args=(model_id, hf_token), daemon=True)
@@ -4043,10 +6133,15 @@ async def cancel_download_endpoint(
         hf_repo = model_entry.get("hf_repo", model_id) if model_entry else model_id
         hf_folder_name = f"models--{hf_repo.replace('/', '--')}"
         home_dir = os.path.expanduser("~")
+        data_dir = os.path.abspath(os.getenv("DATA_DIR", "./data"))
+        hf_home = os.path.abspath(os.getenv("HF_HOME", os.path.join(data_dir, "models")))
+        hub_cache = os.path.abspath(os.getenv("HUGGINGFACE_HUB_CACHE", os.path.join(hf_home, "hub")))
         possible_dirs = [
+            os.path.join(hub_cache, hf_folder_name),
+            os.path.join(hf_home, "hub", hf_folder_name),
             os.path.join(home_dir, ".cache", "huggingface", "hub", hf_folder_name),
             os.path.join("/root/.cache/huggingface/hub", hf_folder_name),
-            os.path.join(os.getenv("DATA_DIR", "./data"), "models", "hub", hf_folder_name),
+            os.path.join(data_dir, "models", "hub", hf_folder_name),
         ]
         for d in possible_dirs:
             if os.path.exists(d):
@@ -4090,11 +6185,16 @@ async def delete_model_endpoint(
     hf_folder_name = f"models--{hf_repo.replace('/', '--')}"
     
     home_dir = os.path.expanduser("~")
+    data_dir = os.path.abspath(os.getenv("DATA_DIR", "./data"))
+    hf_home = os.path.abspath(os.getenv("HF_HOME", os.path.join(data_dir, "models")))
+    hub_cache = os.path.abspath(os.getenv("HUGGINGFACE_HUB_CACHE", os.path.join(hf_home, "hub")))
     possible_dirs = [
+        os.path.join(hub_cache, hf_folder_name),
+        os.path.join(hf_home, "hub", hf_folder_name),
         os.path.join(home_dir, ".cache", "huggingface", "hub", hf_folder_name),
         os.path.join("/root/.cache/huggingface/hub", hf_folder_name),
-        os.path.join(os.getenv("DATA_DIR", "./data"), "models", "hub", hf_folder_name),
-        os.path.join(os.getenv("DATA_DIR", "./data"), "models", hf_folder_name),
+        os.path.join(data_dir, "models", "hub", hf_folder_name),
+        os.path.join(data_dir, "models", hf_folder_name),
     ]
     deleted = False
     for d in possible_dirs:
@@ -4107,9 +6207,12 @@ async def delete_model_endpoint(
                 logger.error(f"Failed to delete model directory {d}: {e}")
 
     try:
-        if model_entry and model_entry.get("ollama_tag"):
+        ollama_tag = _normalized_model_identifier(
+            model_entry.get("ollama_tag", "") if model_entry else ""
+        )
+        if ollama_tag in VERIFIED_OLLAMA_TAGS:
             import subprocess
-            subprocess.run(["ollama", "rm", model_entry["ollama_tag"]], check=False)
+            subprocess.run(["ollama", "rm", ollama_tag], check=False)
             deleted = True
     except Exception:
         pass
@@ -4205,10 +6308,291 @@ async def execute_system_action(req: SystemActionExecuteRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+# ---------------------------------------------------------------------------
+# J.A.R.V.I.S. Desktop Agent & Automation API Endpoints
+# ---------------------------------------------------------------------------
+from app.desktop_agent import DesktopAgent, detect_desktop_intent, operation_log, clear_operation_log
+
+
+@app.get("/api/desktop/operations")
+def desktop_operations_endpoint(limit: int = 50, current_user: User = Depends(get_current_user)):
+    """Recent machine actions this assistant performed, newest first."""
+    return {"operations": operation_log(limit)}
+
+
+@app.delete("/api/desktop/operations")
+def clear_desktop_operations_endpoint(current_user: User = Depends(get_current_user)):
+    clear_operation_log()
+    return {"message": "The operations log was cleared."}
+
+class DesktopExecuteRequest(PydanticBaseModel):
+    action: str
+    params: dict = {}
+    confirmed: bool = False
+
+class DesktopIntentRequest(PydanticBaseModel):
+    text: str
+
+@app.get("/api/desktop/catalog")
+def get_desktop_action_catalog(current_user: User = Depends(get_current_user)):
+    """Return all 30+ desktop automation capabilities and their parameters."""
+    return {"catalog": DesktopAgent.catalog()}
+
+@app.post("/api/desktop/intent")
+def detect_desktop_intent_endpoint(req: DesktopIntentRequest, current_user: User = Depends(get_current_user)):
+    """Detect desktop intent from natural language (voice/chat text)."""
+    detected = detect_desktop_intent(req.text)
+    return {"detected": detected is not None, "intent": detected}
+
+@app.post("/api/desktop/execute")
+async def execute_desktop_action_endpoint(req: DesktopExecuteRequest, current_user: User = Depends(get_current_user)):
+    """Execute a desktop OS action (with safety confirmation checks)."""
+    result = await DesktopAgent.execute(req.action, req.params, confirmed=req.confirmed)
+    return result
+
+@app.post("/api/desktop/screenshot")
+async def take_desktop_screenshot_endpoint(current_user: User = Depends(get_current_user)):
+    """Capture host screenshot and return base64 data."""
+    result = await DesktopAgent.execute("take_screenshot", {}, confirmed=True)
+    return result
+
+
+class VoiceCommandRequest(PydanticBaseModel):
+    text: str
+    language: str = "auto"
+    confirmed: bool = False
+
+
+# Spoken commands that drive the app's own workspace rather than the operating
+# system. The endpoint returns a `ui_action` for the client to carry out, since
+# these controls live in the browser. English plus common Hindi/Hinglish forms.
+_UI_COMMAND_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
+    (re.compile(r"\b(attach|upload|add|select|choose)\s+(a\s+)?(file|files|document|documents|pdf)\b|\bfile\s*(upload|attach|add)\s*(karo|kar do|karna)?\b", re.I),
+     "attach_files", "Opening the file picker."),
+    (re.compile(r"\b(attach|upload|add|select|choose)\s+(a\s+)?(folder|directory)\b|\bfolder\s*(upload|attach|add)\s*(karo|kar do|karna)?\b", re.I),
+     "upload_folder", "Opening the folder picker."),
+    (re.compile(r"\brag\s*(mode\s*)?(on|enable|start|chalu|chaalu)\b|\b(enable|turn on)\s+rag\b|\bdocument\s+mode\s+on\b", re.I),
+     "rag_on", "Document grounding is on."),
+    (re.compile(r"\brag\s*(mode\s*)?(off|disable|stop|band)\b|\b(disable|turn off)\s+rag\b|\bdirect\s*ai\b|\bdirect\s+mode\b", re.I),
+     "rag_off", "Switched to direct AI mode."),
+    (re.compile(r"\b(web|internet|online)\s*(search)?\s*(on|enable|start|chalu|chaalu)\b|\b(enable|turn on)\s+(web|internet)\s*(search)?\b", re.I),
+     "web_on", "Web search is on."),
+    (re.compile(r"\b(web|internet|online)\s*(search)?\s*(off|disable|stop|band)\b|\b(disable|turn off)\s+(web|internet)\s*(search)?\b", re.I),
+     "web_off", "Web search is off."),
+    (re.compile(r"\b(clear|erase|reset|delete)\s+(the\s+)?(chat|conversation|history)\b|\bchat\s*(clear|saaf)\s*(karo|kar do)?\b", re.I),
+     "clear_chat", "Chat cleared."),
+    (re.compile(r"\b(new|start|begin)\s+(a\s+)?(chat|conversation|session)\b|\bnayi\s+chat\b|\bnaya\s+chat\b", re.I),
+     "new_chat", "Started a new chat."),
+]
+
+
+def _detect_ui_command(text: str) -> Optional[Tuple[str, str]]:
+    """Return (ui_action, english_message) for a spoken workspace command."""
+    cleaned = (text or "").strip()
+    if len(cleaned) < 3:
+        return None
+    for pattern, action, message in _UI_COMMAND_PATTERNS:
+        if pattern.search(cleaned):
+            return action, message
+    return None
+
+
+def _localize_spoken(message: str, language: str) -> str:
+    """Translate a short spoken confirmation into the user's selected language.
+
+    English and auto pass through untouched. Any translation failure falls back
+    to the original English text so the assistant always has something to say.
+    """
+    lang = (language or "auto").strip().lower()
+    if not message or lang in ("", "auto", "en", "en-us", "en-gb"):
+        return message
+    try:
+        return translate_text(message, target_lang=lang, source_lang="en") or message
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(f"Spoken localization failed ({lang}): {exc}")
+        return message
+
+
+@app.post("/api/desktop/voice-command")
+async def desktop_voice_command_endpoint(
+    req: VoiceCommandRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """J.A.R.V.I.S.-style voice control bridge.
+
+    Detects a desktop/OS control intent from a spoken utterance and, when found,
+    executes it on the AI host. Destructive actions are gated behind an explicit
+    spoken confirmation. When no control intent is present, ``handled`` is False
+    so the caller can fall back to a normal conversational model reply.
+    The spoken ``message`` is returned already translated to ``language``.
+    """
+    text = (req.text or "").strip()
+
+    # Workspace controls (attach a file, toggle RAG/web, clear the chat) are
+    # handled by the client, so they are matched before OS-level intents.
+    ui_command = _detect_ui_command(text) if text else None
+    if ui_command:
+        action, message = ui_command
+        return {
+            "handled": True,
+            "success": True,
+            "ui_action": action,
+            "message": _localize_spoken(message, req.language),
+        }
+
+    # Spoken web navigation ("open youtube", "search for X", "play X on
+    # youtube"). These open in whichever browser the person actually uses —
+    # Chrome, Brave, Edge — via the OS default, not inside this app.
+    browser_command = detect_browser_command(text) if text else None
+    if browser_command and browser_command.get("url"):
+        result = await DesktopAgent.execute("open_url", {"url": browser_command["url"]}, confirmed=True)
+        return {
+            "handled": True,
+            "success": bool(result.get("success")),
+            "url": browser_command["url"],
+            "message": _localize_spoken(
+                browser_command.get("spoken", "Opening that now."),
+                req.language,
+            ) if result.get("success") else _localize_spoken(
+                "That page could not be opened.", req.language,
+            ),
+        }
+
+    intent = detect_desktop_intent(text) if text else None
+    if not intent:
+        return {"handled": False}
+
+    action = intent["action"]
+    params = intent.get("params", {})
+    result = await DesktopAgent.execute(action, params, confirmed=req.confirmed)
+
+    if result.get("requires_confirmation"):
+        title = result.get("title") or action.replace("_", " ")
+        prompt = f"This will {title.lower()}. Say yes to confirm, or no to cancel."
+        return {
+            "handled": True,
+            "success": False,
+            "requires_confirmation": True,
+            "action": action,
+            "params": params,
+            "title": title,
+            "risk": result.get("risk"),
+            "message": _localize_spoken(prompt, req.language),
+        }
+
+    if result.get("success"):
+        base_msg = result.get("message") or "Done."
+    else:
+        base_msg = result.get("error") or "Sorry, I could not complete that action."
+
+    return {
+        "handled": True,
+        "success": bool(result.get("success")),
+        "action": action,
+        "params": params,
+        "message": _localize_spoken(base_msg, req.language),
+        "raw": result,
+    }
+
+
+# ---------------------------------------------------------------------------
+# AI Connectors: ComfyUI, HeyGem.ai, OmniVoice (k2-fsa), Handy
+# ---------------------------------------------------------------------------
+from app.connectors import (
+    ComfyUIConnector,
+    HeyGemConnector,
+    OmniVoiceConnector,
+    HandyVoiceConnector,
+    get_all_connectors_status,
+)
+
+class ComfyUIGenerateRequest(PydanticBaseModel):
+    prompt: str
+    negative_prompt: str = "ugly, blurry, distorted, low quality"
+    width: int = 512
+    height: int = 512
+    steps: int = 20
+    cfg_scale: float = 7.0
+
+class HeyGemAvatarRequest(PydanticBaseModel):
+    text: str
+    avatar_id: str = "default_avatar"
+    voice_id: str = "default_voice"
+
+class OmniVoiceTTSRequest(PydanticBaseModel):
+    text: str
+    language: str = "en"
+    speaker_id: int = 0
+    speed: float = 1.0
+
+@app.get("/api/connectors/status")
+async def get_connectors_status_endpoint(current_user: User = Depends(get_current_user)):
+    """Return health & connectivity status of ComfyUI, HeyGem, OmniVoice, and Handy."""
+    return await get_all_connectors_status()
+
+@app.post("/api/connectors/comfyui/generate")
+async def comfyui_generate_endpoint(req: ComfyUIGenerateRequest, current_user: User = Depends(get_current_user)):
+    """Queue image generation workflow on local/remote ComfyUI."""
+    return await ComfyUIConnector.generate_image(
+        prompt=req.prompt,
+        negative_prompt=req.negative_prompt,
+        width=req.width,
+        height=req.height,
+        steps=req.steps,
+        cfg_scale=req.cfg_scale,
+    )
+
+@app.post("/api/connectors/heygem/avatar")
+async def heygem_avatar_endpoint(req: HeyGemAvatarRequest, current_user: User = Depends(get_current_user)):
+    """Generate talking digital human avatar video using HeyGem."""
+    return await HeyGemConnector.generate_talking_avatar(
+        text=req.text,
+        avatar_id=req.avatar_id,
+        voice_id=req.voice_id,
+    )
+
+@app.post("/api/connectors/omnivoice/tts")
+async def omnivoice_tts_endpoint(req: OmniVoiceTTSRequest, current_user: User = Depends(get_current_user)):
+    """Synthesize high-quality multilingual speech using OmniVoice (k2-fsa)."""
+    return await OmniVoiceConnector.synthesize(
+        text=req.text,
+        language=req.language,
+        speaker_id=req.speaker_id,
+        speed=req.speed,
+    )
+
+@app.get("/api/connectors/handy/hotkeys")
+def get_handy_hotkeys_endpoint(current_user: User = Depends(get_current_user)):
+    """Return Handy global hotkeys for voice typing and push-to-talk."""
+    return {"hotkeys": HandyVoiceConnector.get_supported_hotkeys()}
+
+
 # Serve the pre-built React SPA and its hashed assets.  API routes are declared
 # above this catch-all route, so unknown client-side routes can safely fall back
 # to index.html.
-FRONTEND_DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend_dist"))
+def _resolve_frontend_dist() -> str:
+    """Locate the prebuilt SPA in source checkouts, Docker, and frozen EXE builds.
+
+    A PyInstaller bundle unpacks data files to ``sys._MEIPASS`` rather than
+    beside the module, so the source-relative path alone is not enough.
+    """
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "..", "frontend_dist"),
+    ]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.insert(0, os.path.join(meipass, "frontend_dist"))
+    if getattr(sys, "frozen", False):
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "frontend_dist"))
+
+    for candidate in candidates:
+        resolved = os.path.abspath(candidate)
+        if os.path.isfile(os.path.join(resolved, "index.html")):
+            return resolved
+    return os.path.abspath(candidates[-1])
+
+
+FRONTEND_DIST_DIR = _resolve_frontend_dist()
 
 @app.get("/")
 async def serve_index():

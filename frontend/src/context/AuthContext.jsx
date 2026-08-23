@@ -110,13 +110,23 @@ export async function loginUser(email, password, rememberMe) {
 export async function logoutUser() {
   localStorage.setItem('sm_auth_logged_out', 'true');
   try {
+    // Get session token from cookie
+    const sessionToken = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1];
+    
+    const headers = {
+      'X-Device-ID': getDeviceId(),
+      'X-Device-Fingerprint': getDeviceFingerprint(),
+    };
+    
+    // Add Authorization header if we have a session token
+    if (sessionToken) {
+      headers['Authorization'] = `Bearer ${sessionToken}`;
+    }
+    
     const res = await fetch(`${API_BASE}/api/auth/logout`, {
       method: 'POST',
       credentials: 'include',
-      headers: {
-        'X-Device-ID': getDeviceId(),
-        'X-Device-Fingerprint': getDeviceFingerprint(),
-      }
+      headers,
     });
     return await res.json();
   } catch (e) {

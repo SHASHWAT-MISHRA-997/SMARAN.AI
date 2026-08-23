@@ -1,6 +1,13 @@
 import React from 'react';
 import { X, Cpu, Check, BarChart2, Sparkles, FileText, Eye, Mic, Video, Code, Brain, Trophy, Award, Target, Flame } from 'lucide-react';
 
+const finite = (value) => typeof value === "number" && Number.isFinite(value);
+const positive = (value) => finite(value) && value > 0;
+const safeToFixed = (value, digits = 0) => {
+  if (!finite(value)) return null;
+  try { return value.toFixed(digits); } catch { return null; }
+};
+
 const CAPABILITY_ICONS = {
   Text: <FileText className="w-3.5 h-3.5 text-blue-400" />,
   Vision: <Eye className="w-3.5 h-3.5 text-emerald-400" />,
@@ -29,7 +36,7 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
   const modelsWithAccuracy = models.map((m) => {
     const bm = m.benchmarks || {};
     const scores = [bm.mmlu, bm.humaneval, bm.gsm8k, bm.math, bm.gpqa, bm.ifeval].filter((s) => typeof s === 'number');
-    const avgScore = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 0;
+    const avgScore = scores.length > 0 ? parseFloat(safeToFixed(scores.reduce((a, b) => a + b, 0) / scores.length, 1) || "0") : 0;
     return { ...m, overallAccuracy: parseFloat(avgScore) };
   });
 

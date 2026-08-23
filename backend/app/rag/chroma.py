@@ -20,12 +20,32 @@ class ChromaManager:
             
             metadatas = [{"document_id": document_id, "chunk_index": idx} for idx in range(len(texts))]
             
-            collection.add(
-                ids=chunk_ids,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                documents=texts
-            )
+            try:
+                collection.add(
+                    ids=chunk_ids,
+                    embeddings=embeddings,
+                    metadatas=metadatas,
+                    documents=texts
+                )
+            except Exception as dim_err:
+                err_msg = str(dim_err)
+                if "dimension" in err_msg.lower() or "embedding" in err_msg.lower():
+                    logger.warning(f"Chroma dimension mismatch detected for '{col_name}': {err_msg}. Recreating collection with correct dimensions...")
+                    try:
+                        self.client.delete_collection(name=col_name)
+                    except Exception:
+                        pass
+                    collection = self.client.get_or_create_collection(name=col_name)
+                    collection.add(
+                        ids=chunk_ids,
+                        embeddings=embeddings,
+                        metadatas=metadatas,
+                        documents=texts
+                    )
+                    logger.info(f"Successfully recreated and added {len(texts)} chunks to Chroma collection '{col_name}' with correct embedding dimensions")
+                else:
+                    raise dim_err
+            
             logger.info(f"Added {len(texts)} chunks to Chroma vector collection '{col_name}'")
         except Exception as e:
             logger.error(f"Error adding chunks to Chroma: {e}")

@@ -1,43 +1,61 @@
-# ── Python virtual environment ─────────────────────────────
+# ── Security & Secrets (NEVER BAKE INTO DOCKER) ─────────────
+.env
+.env.*
+*.env
+*.env.*
+*.pem
+*.key
+*.cert
+*.crt
+*.token
+*.pat
+*.secret
+credentials*
+
+# ── Python virtual environment & cache ──────────────────────
 backend/venv/
-backend/__pycache__/
-backend/app/__pycache__/
-backend/**/__pycache__/
-backend/**/*.pyc
-backend/**/*.pyo
+venv/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
-# ── Python data directories (will be in Docker volumes) ───
+# ── Local SQLite databases & User Uploads ───────────────────
 data/
-*.db
-*.sqlite
 backend/data/
-backend/data/uploads/
-backend/data/chroma/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+**/uploads/
+**/chroma/
 
-# ── Frontend build artifacts (rebuilt inside Docker) ──────
+# ── Build Artifacts & Dist ───────────────────────────────────
+dist/
+build/
+*.exe
+*.log
+*.tmp
+*.bak
+*.old
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+vscode-smaran-coding-agent/node_modules/
 
-# ── Old sharvagya-ai blueprint ────────────────────────────
-sharvagya-ai/
-
-# ── Git & IDE ─────────────────────────────────────────────
+# ── Git & IDE Configs ─────────────────────────────────────────
 .git/
 .gitignore
+.github/
+.vscode/
+.idea/
 .cora/
-*.md
-README.md
+.qodo/
 
-# ── Test & dev files ──────────────────────────────────────
-**/*.test.js
-**/*.spec.js
-.env.local
-.env.development
-
-# ── Docker files themselves ────────────────────────────────
+# ── Docker manifests ──────────────────────────────────────────
 Dockerfile
 docker-compose.yml
 .dockerignore
-.env
-

@@ -48,21 +48,22 @@ def detect_hardware():
                 gpus = json.loads(r.stdout.strip())
                 if isinstance(gpus, dict):
                     gpus = [gpus]
+                detected_gpus = []
                 for gpu in gpus:
-                    name = gpu.get("Name", "")
+                    name = gpu.get("Name", "").strip()
                     adapter_ram = gpu.get("AdapterRAM", 0) or 0
-                    if adapter_ram > 0:
-                        vram_gb = round(adapter_ram / (1024**3), 2)
-                    else:
-                        vram_gb = 0
+                    vram_gb = round(adapter_ram / (1024**3), 2) if adapter_ram > 0 else 0
                     print(f"  GPU: {name}, VRAM: {vram_gb} GB, Driver: {gpu.get('DriverVersion', 'N/A')}")
-                    # Use first real GPU (skip Microsoft Basic Display)
                     if name and "Microsoft" not in name:
-                        info["gpu_name"] = name
-                        info["gpu_vram_gb"] = vram_gb
-                    elif not info["gpu_name"] or info["gpu_name"] == "N/A":
-                        info["gpu_name"] = name
-                        info["gpu_vram_gb"] = vram_gb
+                        detected_gpus.append({"name": name, "vram_gb": vram_gb, "driver": gpu.get('DriverVersion', 'N/A')})
+                
+                # Prioritize dedicated NVIDIA or Radeon RX/discrete GPU over integrated
+                discrete = [g for g in detected_gpus if any(k in g["name"].lower() for k in ["nvidia", "geforce", "rtx", "gtx", "quadro", "radeon rx", "discrete", "arc"])]
+                chosen_gpu = discrete[0] if discrete else (detected_gpus[0] if detected_gpus else None)
+                if chosen_gpu:
+                    info["gpu_name"] = chosen_gpu["name"]
+                    info["gpu_vram_gb"] = chosen_gpu["vram_gb"] if chosen_gpu["vram_gb"] > 0 else 6.0
+                info["all_gpus"] = detected_gpus
         except Exception as e:
             print(f"GPU WMI error: {e}")
 

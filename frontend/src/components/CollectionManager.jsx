@@ -2,6 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { FolderPlus, Trash2, Upload, FileText, ChevronRight, HardDrive, Database } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
+const finite = (value) => typeof value === "number" && Number.isFinite(value);
+const safeToFixed = (value, digits = 0) => {
+  if (!finite(value)) return "0";
+  try { return value.toFixed(digits); } catch { return "0"; }
+};
+
 const CollectionManager = ({ token }) => {
   const [collections, setCollections] = useState([]);
   const [activeCol, setActiveCol] = useState(null);
@@ -266,7 +272,7 @@ const CollectionManager = ({ token }) => {
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat(safeToFixed(bytes / Math.pow(k, i), 2)) + ' ' + sizes[i];
   };
 
   return (

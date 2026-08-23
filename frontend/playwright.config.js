@@ -26,7 +26,10 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npx vite --port 5173 --host 127.0.0.1',
+    command: 'node ./node_modules/vite/bin/vite.js --port 5173 --host 127.0.0.1',
+    env: {
+      VITE_API_TARGET: process.env.VITE_API_TARGET || 'http://127.0.0.1:3003',
+    },
     url: 'http://127.0.0.1:5173',
     reuseExistingServer: false,
     timeout: 30 * 1000,

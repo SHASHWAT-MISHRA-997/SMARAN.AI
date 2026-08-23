@@ -1,0 +1,5 @@
+# The ingest secret and the collected data never belong in version control.
+ingest-key.txt
+analytics.db
+analytics.db-*
+__pycache__/

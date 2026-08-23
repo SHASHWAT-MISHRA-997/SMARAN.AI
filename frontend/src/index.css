@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* Inter, served from the bundle. Loading it from Google Fonts was blocked
+   by the app's own content-security-policy, and the desktop build has to
+   render correctly with no network at all. */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/inter/800.css";
+@import "@fontsource/inter/900.css";
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
@@ -78,6 +88,16 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.25);
+}
+
+/* Hide scrollbar but keep scroll functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari, Opera */
 }
 
 /* Glassmorphism Styles */
@@ -259,9 +279,36 @@ pre {
   box-shadow: 0 8px 25px -5px rgba(99, 102, 241, 0.35), 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
+/* Touch targets.
+   Keyed on the pointing device rather than the window width: a tablet in
+   landscape is wider than 640px but is still driven by a fingertip, and the
+   composer's RAG/Web chips were only 19px tall there. A mouse keeps the
+   compact sizing. */
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  select,
+  summary {
+    min-height: 44px;
+  }
+  /* Icon-only controls need width too; anything with a text label can stay
+     as wide as its content. */
+  button:not(:has(span)):not(:has(> *:nth-child(2))),
+  [role="button"]:not(:has(span)) {
+    min-width: 44px;
+  }
+  /* Give the composer chips room to grow into that height. */
+  .composer-desktop-left button,
+  .composer-desktop-right button,
+  .composer-compact-tools button {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+}
+
 /* Mobile-friendly touch targets */
 @media (max-width: 640px) {
-  button, .cursor-pointer {
+  button, [role="button"] {
     min-height: 44px;
     min-width: 44px;
   }
@@ -284,6 +331,33 @@ pre {
   flex-direction: column;
   height: 100%;
   width: 100%;
+}
+
+/* Composer responds to its actual workspace width, including split-screen and
+   docked panels, instead of assuming the browser viewport equals usable space. */
+.chat-workspace { container-name: chat-workspace; container-type: inline-size; }
+@container chat-workspace (max-width: 820px) {
+  .composer-shell { flex-direction:column !important; align-items:stretch !important; gap:.4rem !important; border-radius:1rem !important; }
+  .composer-desktop-left, .composer-desktop-right { display:none !important; }
+  .composer-compact-tools { display:flex !important; }
+  .composer-compact-send { display:flex !important; }
+  .composer-input { order:-1 !important; }
+}
+@container chat-workspace (min-width: 821px) {
+  /* Two rows, not one: the toolbar had grown enough buttons that the text
+     being typed was squeezed into a sliver. The field now owns a full row and
+     the controls sit underneath it. */
+  .composer-shell {
+    flex-direction:row !important;
+    flex-wrap:wrap !important;
+    align-items:center !important;
+    row-gap:.35rem !important;
+  }
+  .composer-input { flex:1 0 100% !important; order:-1 !important; }
+  .composer-desktop-left { order:1; }
+  .composer-desktop-right { order:2; flex:1 1 auto; justify-content:flex-end; }
+  .composer-desktop-left, .composer-desktop-right { display:flex !important; }
+  .composer-compact-tools, .composer-compact-send { display:none !important; }
 }
 
 /* Input container auto-adjust */
@@ -315,6 +389,10 @@ pre {
   .mobile-px-3 {
     padding-left: 12px !important;
     padding-right: 12px !important;
+  }
+  .mobile-px-4 {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
   }
   .mobile-py-2 {
     padding-top: 8px !important;
@@ -380,9 +458,6 @@ pre {
   .mobile-text-xs {
     font-size: 0.75rem !important;
   }
-  .mobile-text-[10px] {
-    font-size: 0.625rem !important;
-  }
   /* Ensure chat input stays visible above keyboard */
   .chat-input-mobile-fix {
     position: fixed !important;
@@ -394,9 +469,146 @@ pre {
     padding: 8px 12px !important;
     padding-bottom: max(8px, env(safe-area-inset-bottom)) !important;
   }
-  /* Prevent body scroll when sidebar open */
-  body.sidebar-open {
-    overflow: hidden;
+  /* Modal fixes for mobile */
+  .mobile-modal-full {
+    max-width: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+    height: 100% !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+  .mobile-modal-scroll {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+  /* Grid adjustments for mobile */
+  .mobile-grid-1 {
+    grid-template-columns: 1fr !important;
+  }
+  .mobile-grid-2 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  /* Hide unwanted elements on mobile */
+  .mobile-hide-core-temp,
+  .mobile-hide-hud-rotation,
+  .mobile-hide-audio-mic {
+    display: none !important;
+  }
+  /* Ensure modals don't get cut off */
+  .fixed.inset-0 > div {
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+  }
+  /* Fix select dropdowns on mobile */
+  select {
+    font-size: 16px !important; /* Prevents zoom on iOS */
+  }
+  /* Fix input fields on mobile */
+  input, textarea {
+    font-size: 16px !important; /* Prevents zoom on iOS */
+  }
+  /* Ensure proper touch targets */
+  button, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Fix sidebar on mobile */
+  .sidebar-mobile-fix {
+    width: 100% !important;
+    max-width: 320px !important;
+  }
+  /* Fix model hub grid on mobile */
+  .model-hub-mobile-grid {
+    grid-template-columns: 1fr !important;
+  }
+  /* Fix right panel on mobile */
+  .right-panel-mobile {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .tablet-p-4 {
+    padding: 16px !important;
+  }
+  .tablet-px-5 {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  .tablet-py-3 {
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+  }
+  .tablet-text-sm {
+    font-size: 0.875rem !important;
+  }
+  .tablet-rounded-2xl {
+    border-radius: 16px !important;
+  }
+  .tablet-grid-2 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .tablet-grid-3 {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+  /* Hide unwanted elements on tablet */
+  .tablet-hide-core-temp,
+  .tablet-hide-hud-rotation,
+  .tablet-hide-audio-mic {
+    display: none !important;
+  }
+  /* Tablet performance panel — increase text sizes for readability */
+  .performance-copy { font-size:11px !important; }
+  .performance-panel h2 { font-size:13px !important; }
+  .performance-glass-card span[style*="font-size: 8px"],
+  .performance-glass-card span[style*="font-size: 9px"],
+  .performance-glass-card span[style*="font-size: 10px"] { font-size:11px !important; }
+  .performance-glass-card .text-\[8px\],
+  .performance-glass-card .text-\[9px\],
+  .performance-glass-card .text-\[10px\] { font-size:11px !important; }
+  .performance-glass-card { padding:0.65rem !important; }
+  .performance-metric-card { padding:0.55rem !important; }
+}
+
+/* Desktop - hide unwanted elements */
+@media (min-width: 1025px) {
+  .desktop-hide-core-temp,
+  .desktop-hide-hud-rotation,
+  .desktop-hide-audio-mic {
+    display: none !important;
+  }
+}
+
+/* Universal hide for core temp, hud rotation, audio mic */
+.hide-core-temp,
+.hide-hud-rotation,
+.hide-audio-mic {
+  display: none !important;
+}
+
+/* Ensure all modals have proper max-height and scrolling */
+.modal-content {
+  max-height: 90vh;
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+
+/* Fix for safe area insets */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-area-left {
+    padding-left: env(safe-area-inset-left);
+  }
+  .safe-area-right {
+    padding-right: env(safe-area-inset-right);
   }
 }
 
@@ -703,3 +915,834 @@ input:-webkit-autofill:active {
 .highlight-card-enter:nth-child(6) { animation-delay: 0.40s; }
 .highlight-card-enter:nth-child(7) { animation-delay: 0.48s; }
 .highlight-card-enter:nth-child(8) { animation-delay: 0.56s; }
+
+/* Verified runtime inventory + compact performance effects */
+.developer-modal-scroll, .performance-scroll { scrollbar-color: rgba(129, 92, 246, .9) rgba(24, 24, 27, .35); }
+.developer-modal-scroll { mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%); }
+.runtime-inventory-state { display:flex; align-items:center; gap:.5rem; padding:.85rem; border:1px solid rgba(113,113,122,.35); border-radius:.8rem; background:rgba(24,24,27,.62); color:#a1a1aa; font-size:.72rem; }
+.runtime-count-card { padding:.7rem; border-radius:.8rem; border:1px solid rgba(99,102,241,.26); background:linear-gradient(145deg,rgba(99,102,241,.13),rgba(24,24,27,.62)); backdrop-filter:blur(16px); transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease; }
+.runtime-count-card:hover { transform:translateY(-3px); border-color:rgba(34,211,238,.62); box-shadow:0 0 22px rgba(34,211,238,.16); }
+.runtime-count-card span { display:block; color:#e0e7ff; font-weight:900; font-size:1rem; }
+.runtime-count-card small { color:#a1a1aa; font-size:.58rem; text-transform:uppercase; letter-spacing:.08em; }
+.runtime-extension-card { position:relative; overflow:hidden; padding:.8rem; border-radius:.8rem; border:1px solid rgba(82,82,91,.65); background:linear-gradient(135deg,rgba(39,39,42,.72),rgba(9,9,11,.55)); backdrop-filter:blur(18px); transition:transform .28s ease,border-color .28s ease,box-shadow .28s ease; }
+.runtime-extension-card::after,.performance-metric-card::after { content:""; position:absolute; inset:-70% auto -70% -35%; width:22%; transform:rotate(18deg); background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent); transition:left .55s ease; pointer-events:none; }
+.runtime-extension-card:hover::after,.performance-metric-card:hover::after { left:120%; }
+.runtime-extension-card:hover { transform:translateY(-3px); border-color:rgba(168,85,247,.65); box-shadow:0 0 24px rgba(168,85,247,.18),inset 0 0 18px rgba(99,102,241,.06); }
+.runtime-active-badge { display:flex;align-items:center;gap:.2rem;flex:none;color:#34d399;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:999px;padding:.15rem .35rem;font-size:.5rem;font-weight:900;letter-spacing:.06em; }
+/* ──────────────────────────────────────────────────────────────────────────
+   PERFORMANCE PANEL — Responsive breakpoints + mobile/tablet fixes
+   Desktop (≥1280px): fixed-width sidebar column
+   Tablet  (768-1279px): slide-in overlay with proper scroll
+   Mobile  (<768px): bottom sheet with large touch targets & readable text
+   ────────────────────────────────────────────────────────────────────────── */
+.performance-panel { display:none; min-width:0; flex-direction:column; overflow:hidden; overflow-wrap:anywhere; user-select:none; flex-shrink:0; position:fixed; z-index:50; transition:transform .3s ease,width .3s ease,height .3s ease; box-shadow:-18px 0 45px rgba(79,70,229,.10),inset 1px 0 rgba(129,140,248,.14); }
+.performance-panel-open { display:flex; }
+.performance-panel-right { right:0; }
+.performance-panel-left { left:0; }
+
+/* Desktop — inline column */
+@media (min-width:1280px) {
+  .performance-panel { position:relative; z-index:auto; width:clamp(340px,22vw,390px); height:100%; max-height:none; border-radius:0; box-shadow:none; }
+  .performance-panel-right { right:auto; border-left:1px solid rgba(82,82,91,.45); }
+  .performance-panel-left { left:auto; border-right:1px solid rgba(82,82,91,.45); }
+}
+
+/* Tablet (768-1279px) — side drawer with full-height scroll */
+@media (min-width:768px) and (max-width:1279px) {
+  .performance-panel { top:0; bottom:0; width:min(390px,92vw); height:auto; max-height:100dvh; }
+  .performance-panel-right { border-left:1px solid rgba(82,82,91,.55); }
+  .performance-panel-left { border-right:1px solid rgba(82,82,91,.55); }
+  /* Ensure the scrollable content fills the drawer height */
+  .performance-scroll { flex:1 1 0; min-height:0; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+}
+
+/* Mobile (<768px) — bottom sheet with readable text + proper scrolling */
+@media (max-width:767px) {
+  .performance-panel {
+    left:0; right:0; bottom:0; top:auto;
+    width:100%;
+    height:min(85dvh,800px);
+    max-height:calc(100dvh - env(safe-area-inset-top));
+    border-radius:1.25rem 1.25rem 0 0;
+    border-top:2px solid rgba(99,102,241,.42);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .performance-panel-left, .performance-panel-right { left:0; right:0; }
+    /* On mobile, increase text sizes for readability (was 8-9px, now 11-12px minimum) */
+    .performance-copy { font-size:11px !important; }
+    .performance-panel h2 { font-size:13px !important; }
+    /* Scrollable content must be able to scroll on touch devices */
+    .performance-scroll {
+      flex:1 1 0;
+      min-height:0;
+      -webkit-overflow-scrolling:touch;
+      overscroll-behavior:contain;
+      padding:0.75rem !important;
+    }
+    /* Cards get more padding on mobile for touch comfort */
+    .performance-glass-card { padding:0.75rem !important; }
+    .performance-metric-card { padding:0.625rem !important; min-height:44px; }
+    /* StatCard text needs to be larger - target by element type */
+    .performance-glass-card span[style*="font-size: 8px"],
+    .performance-glass-card span[style*="font-size: 9px"],
+    .performance-glass-card span[style*="font-size: 10px"] { font-size:11px !important; }
+    /* Also target small text elements inside glass cards */
+    .performance-glass-card .text-\[8px\],
+    .performance-glass-card .text-\[9px\],
+    .performance-glass-card .text-\[10px\] { font-size:11px !important; }
+  }
+
+/* Very small phones (<359px) — hide mini charts, tighten layout */
+@media (max-width:359px) {
+  .performance-mini-chart { display:none; }
+  .performance-metric-card { gap:.375rem; }
+  .performance-scroll { padding:.5rem; }
+}
+
+/* Ensure the scroll area is always scrollable on touch devices */
+.performance-scroll {
+  scroll-behavior:smooth;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+}
+.performance-scroll::-webkit-scrollbar { width:7px; }
+.performance-scroll::-webkit-scrollbar-thumb { background:linear-gradient(#22d3ee,#8b5cf6,#ec4899);box-shadow:0 0 10px rgba(139,92,246,.7); }
+.performance-glass-card,.performance-metric-card { backdrop-filter:blur(18px) saturate(135%); }
+.performance-glass-card { box-shadow:inset 0 1px rgba(255,255,255,.05),0 9px 26px rgba(0,0,0,.12); }
+.performance-metric-card:hover { transform:translateX(-4px) scale(1.01);box-shadow:0 0 22px rgba(99,102,241,.22),inset 0 0 16px rgba(34,211,238,.05); }
+.performance-copy { min-width:0; overflow-wrap:anywhere; word-break:break-word; }
+
+.sidebar-mobile-scroll { overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; overflow-wrap:anywhere; }
+.sidebar-mobile-footer { scrollbar-gutter:stable; -webkit-overflow-scrolling:touch; }
+body.sidebar-open { overflow:hidden; overscroll-behavior:none; }
+@media (max-width:359px) {
+  .performance-mini-chart { display:none; }
+  .performance-metric-card { gap:.375rem; }
+  .performance-scroll { padding:.5rem; }
+}
+@keyframes performance-ambient { from{filter:hue-rotate(0deg);opacity:.7} to{filter:hue-rotate(28deg);opacity:1} }
+@media (prefers-reduced-motion: reduce) { .performance-panel::before{animation:none}.runtime-extension-card,.performance-metric-card,.runtime-count-card{transition:none}.runtime-extension-card::after,.performance-metric-card::after{display:none} }
+
+/* Settings uses one scroll owner. This prevents the mobile footer from
+   expanding to 100dvh and covering every setting. */
+.settings-modal-card { max-height:min(90dvh,760px); }
+.settings-modal-body { scrollbar-gutter:stable; scroll-behavior:smooth; }
+.settings-modal-body::-webkit-scrollbar { width:7px; }
+.settings-modal-body::-webkit-scrollbar-thumb { border-radius:999px; background:linear-gradient(#22d3ee,#8b5cf6,#ec4899); }
+@media (max-width:640px) {
+  .settings-modal-overlay { align-items:stretch; padding:0; }
+  .settings-modal-card { width:100%; height:100dvh; max-height:100dvh; max-width:none; border-radius:0 !important; }
+  .settings-modal-body { max-height:none !important; padding:1rem !important; }
+  .settings-modal-footer { padding:max(.65rem,env(safe-area-inset-bottom)) 1rem .65rem !important; }
+}
+@media (max-width:900px) and (orientation:landscape) {
+  .settings-modal-overlay { align-items:stretch; padding:0; }
+  .settings-modal-card { height:100dvh; max-height:100dvh; border-radius:0 !important; }
+  .settings-modal-body { max-height:none !important; padding:.85rem 1rem !important; }
+  .settings-modal-footer { padding:.5rem 1rem max(.5rem,env(safe-area-inset-bottom)) !important; }
+}
+
+/* Developer highlights: glass, RGB neon, a moving lightning sheen, and
+   hover/focus transitions without introducing horizontal overflow. */
+.developer-modal-card { max-height:min(92dvh,900px); }
+.developer-highlight-heading { text-shadow:0 0 12px rgba(99,102,241,.65),0 0 20px rgba(34,211,238,.22); }
+.developer-highlight-card {
+  isolation:isolate;
+  background:
+    radial-gradient(circle at 10% 0,rgba(34,211,238,.10),transparent 36%),
+    radial-gradient(circle at 100% 100%,rgba(236,72,153,.09),transparent 38%),
+    linear-gradient(135deg,rgba(39,39,42,.78),rgba(9,9,11,.72));
+  box-shadow:inset 0 1px rgba(255,255,255,.05),0 7px 24px rgba(0,0,0,.22);
+}
+.developer-highlight-card::before {
+  content:"";
+  position:absolute;
+  inset:-1px;
+  z-index:-1;
+  border-radius:inherit;
+  padding:1px;
+  background:linear-gradient(var(--angle),#22d3ee,#6366f1,#ec4899,#f59e0b,#22d3ee);
+  opacity:.38;
+  pointer-events:none;
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;
+  mask-composite:exclude;
+  animation:developer-neon-rotate 6s linear infinite;
+}
+.developer-highlight-card:hover,.developer-highlight-card:focus-within {
+  transform:translateY(-4px) scale(1.012);
+  border-color:rgba(34,211,238,.7);
+  box-shadow:0 0 16px rgba(34,211,238,.18),0 0 30px rgba(168,85,247,.18),inset 0 0 18px rgba(99,102,241,.08);
+}
+@keyframes developer-neon-rotate { to { --angle:360deg; } }
+@media (max-width:640px) {
+  .developer-modal-overlay { align-items:stretch; padding:0; }
+  .developer-modal-card { height:100dvh; max-height:100dvh; max-width:none; border-radius:0; }
+  .developer-modal-card header { padding:1rem; }
+  .developer-modal-scroll { max-height:none !important; min-height:0; flex:1; padding:1rem; mask-image:none; }
+  .developer-modal-card footer { padding:.75rem 1rem max(.75rem,env(safe-area-inset-bottom)); }
+  .developer-highlight-card { overflow-wrap:anywhere; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .developer-highlight-card::before { animation:none; }
+  .developer-highlight-card:hover,.developer-highlight-card:focus-within { transform:none; }
+}
+
+/* ==========================================================================
+   Neon / cyberpunk finish layer
+   Adds the shared motion, glow and glassmorphism vocabulary used across the
+   sidebar, performance panel, headings and cards. Everything here is additive:
+   it reuses the keyframes already defined above rather than redefining them.
+   All motion is disabled under prefers-reduced-motion at the end of the file.
+   ========================================================================== */
+
+/* Deep glassmorphism surface — frosted, lit from the top edge. */
+.glass-deep {
+  background: linear-gradient(135deg, rgba(39, 39, 42, 0.55), rgba(9, 9, 11, 0.62));
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 10px 30px rgba(0, 0, 0, 0.28);
+}
+:root:not(.dark) .glass-deep {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(244, 244, 245, 0.68));
+  border-color: rgba(0, 0, 0, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+/* Animated neon gradient text for headings and key phrases. */
+@keyframes cyber-text-flow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.cyber-text {
+  background: linear-gradient(90deg, #22d3ee, #6366f1, #a855f7, #ec4899, #22d3ee);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: cyber-text-flow 6s ease-in-out infinite;
+}
+
+/* Text that lights up on hover — for links and interactive labels. */
+.neon-hover {
+  transition: color 0.25s ease, text-shadow 0.25s ease, transform 0.25s ease;
+}
+.neon-hover:hover {
+  color: #a5b4fc;
+  text-shadow: 0 0 10px rgba(129, 140, 248, 0.65), 0 0 22px rgba(168, 85, 247, 0.35);
+}
+
+/* Cards and rows that rise toward the pointer. */
+.hover-lift {
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.28s ease,
+              border-color 0.28s ease;
+  will-change: transform;
+}
+.hover-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(99, 102, 241, 0.22), 0 0 20px rgba(168, 85, 247, 0.16);
+  border-color: rgba(139, 92, 246, 0.45);
+}
+
+/* A sweep of light that crosses a surface on hover. */
+.sheen {
+  position: relative;
+  overflow: hidden;
+}
+.sheen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.16) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+.sheen:hover::after { transform: translateX(120%); }
+
+/* Faint scanlines for the cyberpunk panel treatment. */
+.scanlines::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.028) 0px,
+    rgba(255, 255, 255, 0.028) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* Pulsing status dot used next to live values. */
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+}
+.live-dot { animation: live-pulse 2s ease-in-out infinite; }
+
+/* Sidebar rows: neon rail that fills in from the left on hover. */
+.nav-neon {
+  position: relative;
+  transition: color 0.25s ease, background-color 0.25s ease, transform 0.25s ease;
+}
+.nav-neon::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 12%; bottom: 12%;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #22d3ee, #a855f7);
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.6);
+}
+.nav-neon:hover::before { transform: scaleY(1); }
+.nav-neon:hover { transform: translateX(2px); }
+
+/* In-app browser toolbar buttons. */
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  background: rgba(0, 0, 0, 0.35);
+  color: #7dd3fc;
+  font-size: 0.85rem;
+  line-height: 1;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+.nav-btn:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.16);
+  color: #cffafe;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.25);
+  transform: translateY(-1px);
+}
+.nav-btn:disabled { opacity: 0.32; cursor: default; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cyber-text, .live-dot { animation: none; }
+  .nav-btn:hover:not(:disabled) { transform: none; }
+  .hover-lift:hover, .nav-neon:hover { transform: none; }
+  .sheen::after { transition: none; }
+}
+
+/* ============================================================
+   3D hero: animated logo mark and dimensional wordmark.
+   Everything below composites on the GPU (transform / opacity /
+   filter only), so it stays smooth on a phone.
+   ============================================================ */
+
+.hero3d-stage {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Bloom that breathes under the mark. */
+.hero3d-bloom {
+  background: radial-gradient(circle at 50% 50%,
+    rgba(239, 68, 68, 0.30) 0%,
+    rgba(185, 28, 28, 0.18) 38%,
+    rgba(127, 29, 29, 0.10) 60%,
+    transparent 72%);
+  filter: blur(30px);
+  animation: hero3d-breathe 5.5s ease-in-out infinite;
+  transform: translateZ(-60px);
+}
+@keyframes hero3d-breathe {
+  0%, 100% { opacity: 0.65; transform: translateZ(-60px) scale(0.94); }
+  50%      { opacity: 1;    transform: translateZ(-60px) scale(1.08); }
+}
+
+/* Rings, each tilted onto its own plane so they genuinely orbit. */
+.hero3d-ring {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(#0000, #0000) padding-box,
+    conic-gradient(from 0deg,
+      rgba(239, 68, 68, 0) 0deg,
+      rgba(248, 113, 113, 0.95) 70deg,
+      rgba(220, 38, 38, 0.85) 150deg,
+      rgba(153, 27, 27, 0.75) 240deg,
+      rgba(239, 68, 68, 0) 360deg) border-box;
+}
+.hero3d-ring-a {
+  transform: translateZ(-46px) rotateX(72deg) rotateZ(0deg);
+  animation: hero3d-spin-a 7s linear infinite;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.45);
+}
+.hero3d-ring-b {
+  transform: translateZ(-46px) rotateY(74deg);
+  animation: hero3d-spin-b 9.5s linear infinite reverse;
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.35);
+}
+.hero3d-ring-c {
+  transform: translateZ(-46px) rotateX(30deg) rotateY(38deg);
+  animation: hero3d-spin-c 13s linear infinite;
+  opacity: 0.75;
+}
+@keyframes hero3d-spin-a { to { transform: translateZ(-46px) rotateX(72deg) rotateZ(360deg); } }
+@keyframes hero3d-spin-b { to { transform: translateZ(-46px) rotateY(74deg) rotateZ(360deg); } }
+@keyframes hero3d-spin-c { to { transform: translateZ(-46px) rotateX(30deg) rotateY(38deg) rotateZ(360deg); } }
+
+/* The glass core tumbles slowly on two axes. */
+.hero3d-core {
+  animation: hero3d-tumble 14s ease-in-out infinite;
+  transform-style: preserve-3d;
+}
+@keyframes hero3d-tumble {
+  0%, 100% { transform: translateZ(30px) rotateY(-12deg) rotateX(5deg); }
+  50%      { transform: translateZ(30px) rotateY(12deg)  rotateX(-5deg); }
+}
+
+.hero3d-core-face {
+  backface-visibility: hidden;
+  background: linear-gradient(145deg, rgba(24, 6, 8, 0.82), rgba(6, 3, 4, 0.92));
+  border: 1px solid rgba(248, 113, 113, 0.42);
+  box-shadow:
+    0 0 26px rgba(239, 68, 68, 0.38),
+    inset 0 1px 0 rgba(255, 200, 200, 0.28),
+    inset 0 -14px 26px rgba(69, 10, 10, 0.5);
+  overflow: hidden;
+}
+/* A moving specular highlight, so the glass reads as a surface. */
+.hero3d-core-face::after {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  background: linear-gradient(115deg, transparent 40%, rgba(255,255,255,0.30) 50%, transparent 60%);
+  animation: hero3d-sheen 4.5s ease-in-out infinite;
+}
+@keyframes hero3d-sheen {
+  0%, 65%, 100% { transform: translateX(-120%); }
+  85%           { transform: translateX(120%); }
+}
+
+.hero3d-core-back {
+  transform: translateZ(-16px);
+  background: linear-gradient(145deg, rgba(69, 10, 10, 0.7), rgba(4, 2, 3, 0.94));
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  filter: blur(0.5px);
+}
+
+.hero3d-eye { animation: hero3d-blink 4.2s ease-in-out infinite; transform-origin: center; }
+.hero3d-eye-late { animation-delay: 0.09s; }
+@keyframes hero3d-blink {
+  0%, 92%, 100% { opacity: 1; }
+  95%           { opacity: 0.15; }
+}
+
+/* Lightning: normally invisible, snapped on for a fraction of a second. */
+.hero3d-arcs { opacity: 0; transition: opacity 90ms linear; }
+.hero3d-arcs.is-struck { opacity: 1; }
+.hero3d-arc {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 58%;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255, 140, 140, 0.8), transparent);
+  box-shadow: 0 0 12px rgba(255, 120, 120, 0.95), 0 0 26px rgba(220, 38, 38, 0.65);
+  transform-origin: top center;
+}
+.hero3d-arc-1 { transform: translate(-50%, -6%) rotate(24deg)  skewX(-14deg); }
+.hero3d-arc-2 { transform: translate(-50%, -6%) rotate(148deg) skewX(10deg); animation: hero3d-flicker 260ms steps(3) 1; }
+.hero3d-arc-3 { transform: translate(-50%, -6%) rotate(268deg) skewX(-8deg); }
+@keyframes hero3d-flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+.hero3d-mark {
+  filter:
+    drop-shadow(0 0 12px rgba(239, 68, 68, 0.8))
+    drop-shadow(0 0 26px rgba(185, 28, 28, 0.55));
+  animation: hero3d-mark-glow 4.5s ease-in-out infinite;
+}
+@keyframes hero3d-mark-glow {
+  0%, 100% { filter: drop-shadow(0 0 8px rgba(239,68,68,.6)) drop-shadow(0 0 18px rgba(185,28,28,.45)); }
+  50%      { filter: drop-shadow(0 0 18px rgba(252,165,165,.95)) drop-shadow(0 0 34px rgba(239,68,68,.7)); }
+}
+
+/* ── Wordmark ──
+   The glyphs stay sharp. An earlier pass put drop-shadow() and a deep
+   text-shadow stack directly on gradient-clipped text, which blurs the letter
+   itself and reads as out of focus rather than three-dimensional. The glow now
+   lives on a blurred copy behind the text, and the extrude is a short, tight
+   stack of hard offsets. */
+.hero3d-word {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  line-height: 1.05;
+}
+
+.hero3d-letter {
+  position: relative;
+  display: inline-block;
+  white-space: pre;
+  transform-origin: 50% 100%;
+  animation: hero3d-letter-in 0.85s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  /* A short hard extrude only: enough to catch an edge, never a smear. */
+  /* Just enough edge to read as raised; any deeper and the glyph goes dull. */
+  text-shadow:
+    0 1px 0 rgba(20, 12, 48, 0.45),
+    0 2px 4px rgba(10, 6, 30, 0.35);
+}
+
+/* The glow: a blurred duplicate sitting behind, so the crisp glyph on top is
+   untouched by the blur. */
+.hero3d-letter::before {
+  content: attr(data-char);
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: inherit;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  filter: blur(15px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.hero3d-letter-warm {
+  background-image: linear-gradient(170deg, #fff1f2 0%, #fca5a5 20%, #ef4444 58%, #b91c1c 100%);
+}
+.hero3d-letter-cool {
+  background-image: linear-gradient(170deg, #ffffff 0%, #e7e5e4 30%, #a8a29e 70%, #78716c 100%);
+}
+.hero3d-letter-space { width: 0.3em; }
+.hero3d-letter-space::before { content: none; }
+
+/* Light mode needs its own treatment: the same dark extrude turned the
+   wordmark into unreadable mud on a pale background. */
+:root:not(.dark) .hero3d-letter {
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.85),
+    0 2px 3px rgba(80, 40, 10, 0.22);
+}
+:root:not(.dark) .hero3d-letter::before { opacity: 0.4; filter: blur(9px); }
+:root:not(.dark) .hero3d-letter-warm {
+  background-image: linear-gradient(170deg, #dc2626 0%, #b91c1c 55%, #7f1d1d 100%);
+}
+:root:not(.dark) .hero3d-letter-cool {
+  background-image: linear-gradient(170deg, #3f3f46 0%, #27272a 60%, #18181b 100%);
+}
+
+@keyframes hero3d-letter-in {
+  0%   { opacity: 0; transform: translateY(26px) rotateX(-78deg) scale(0.86); }
+  60%  { opacity: 1; transform: translateY(-3px) rotateX(10deg)  scale(1.02); }
+  100% { opacity: 1; transform: translateY(0)    rotateX(0)      scale(1); }
+}
+
+.hero3d-tagword {
+  display: inline-block;
+  animation: hero3d-tag-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+@keyframes hero3d-tag-in {
+  0%   { opacity: 0; transform: translateZ(-40px) translateY(8px); }
+  100% { opacity: 1; transform: translateZ(0)     translateY(0); }
+}
+
+/* Motion is decoration here; when it is unwelcome the hero simply sits still. */
+@media (prefers-reduced-motion: reduce) {
+  .hero3d-bloom,
+  .hero3d-ring-a, .hero3d-ring-b, .hero3d-ring-c,
+  .hero3d-core, .hero3d-core-face::after, .hero3d-eye,
+  .hero3d-letter, .hero3d-tagword {
+    animation: none !important;
+  }
+  .hero3d-arcs { display: none; }
+  .hero3d-stage, .hero3d-word { transition: none; }
+}
+
+/* The monogram's specular streak sweeps once every few seconds. */
+.hero3d-mark-spec {
+  stroke-dasharray: 60 200;
+  animation: hero3d-spec-sweep 5s ease-in-out infinite;
+}
+@keyframes hero3d-spec-sweep {
+  0%, 70%, 100% { stroke-dashoffset: 140; opacity: 0; }
+  80%           { stroke-dashoffset: 0;   opacity: 0.75; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero3d-mark-spec { animation: none; opacity: 0.4; stroke-dashoffset: 0; }
+}
+
+/* ── Wordmark effects: glass plate, sweeping sheen, electric arcs ──
+   The name was flat coloured text; these are the layers that give it the
+   glow, glass and motion the rest of the interface has. */
+
+.hero3d-wordwrap { isolation: isolate; }
+
+/* Aura: an edgeless bloom that follows the shape of the text. No border and
+   no fill boundary, so nothing reads as a box. */
+.hero3d-aura {
+  position: absolute;
+  inset: -30% -18%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(58% 62% at 32% 50%, rgba(239, 68, 68, 0.30), transparent 70%),
+    radial-gradient(46% 58% at 74% 50%, rgba(248, 113, 113, 0.20), transparent 72%);
+  filter: blur(22px);
+  animation: hero3d-aura-pulse 5s ease-in-out infinite;
+}
+@keyframes hero3d-aura-pulse {
+  0%, 100% { opacity: 0.65; transform: scale(0.97); }
+  50%      { opacity: 1;    transform: scale(1.05); }
+}
+
+/* Sheen: a bright band that travels across the letters every few seconds. */
+.hero3d-sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 42%,
+    rgba(255, 235, 235, 0.55) 50%,
+    transparent 58%);
+  mix-blend-mode: screen;
+  animation: hero3d-sheen-sweep 4.5s ease-in-out infinite;
+  transform: translateX(-120%);
+}
+@keyframes hero3d-sheen-sweep {
+  0%, 62%, 100% { transform: translateX(-120%); opacity: 0; }
+  72%           { opacity: 1; }
+  86%           { transform: translateX(120%);  opacity: 0; }
+}
+
+/* Arcs that snap across the name when the mark is struck. */
+.hero3d-bolts {
+  position: absolute;
+  inset: -10% -6%;
+  z-index: 3;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 80ms linear;
+}
+.hero3d-bolts.is-struck { opacity: 1; }
+.hero3d-bolt {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg,
+    transparent, rgba(255,255,255,0.95) 22%, rgba(255,140,140,0.9) 50%,
+    rgba(255,255,255,0.95) 78%, transparent);
+  box-shadow: 0 0 10px rgba(255,120,120,.95), 0 0 24px rgba(220,38,38,.7);
+}
+.hero3d-bolt-1 { top: 32%; transform: skewY(-2.2deg); }
+.hero3d-bolt-2 { top: 66%; transform: skewY(1.6deg); animation: hero3d-bolt-flicker 260ms steps(3) 1; }
+@keyframes hero3d-bolt-flicker { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+/* A stronger, breathing halo behind each glyph. */
+.hero3d-letter::before { animation: hero3d-letter-glow 3.6s ease-in-out infinite; }
+@keyframes hero3d-letter-glow {
+  0%, 100% { opacity: 0.45; filter: blur(14px); }
+  50%      { opacity: 0.85; filter: blur(20px); }
+}
+
+/* Hovering the name lifts it and brightens the plate. */
+.hero3d-wordwrap:hover .hero3d-aura { opacity: 1; filter: blur(26px); }
+.hero3d-word { transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), filter 0.35s ease; }
+.hero3d-wordwrap:hover .hero3d-word { filter: brightness(1.14); }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero3d-aura, .hero3d-sheen, .hero3d-letter::before, .hero3d-bolt { animation: none !important; }
+  .hero3d-sheen { opacity: 0; }
+  .hero3d-bolts { display: none; }
+}
+
+/* ── About Developer: LinkedIn and Portfolio links ──
+   Glass surface, a lit rim that brightens on hover, a sheen that travels
+   across the button, and a lift. */
+.dev-link {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 900;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  transition:
+    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.3s ease,
+    border-color 0.3s ease,
+    filter 0.3s ease;
+}
+.dev-link:hover { transform: translateY(-2px) scale(1.02); filter: brightness(1.08); }
+.dev-link:active { transform: translateY(0) scale(0.99); }
+
+.dev-link-linkedin {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.85), rgba(29, 78, 216, 0.55));
+  box-shadow: 0 0 18px rgba(37, 99, 235, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.dev-link-linkedin:hover {
+  border-color: rgba(147, 197, 253, 0.6);
+  box-shadow: 0 0 34px rgba(59, 130, 246, 0.6), 0 0 70px rgba(37, 99, 235, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.dev-link-portfolio {
+  background: linear-gradient(135deg, rgba(147, 51, 234, 0.85), rgba(109, 40, 217, 0.55));
+  box-shadow: 0 0 18px rgba(147, 51, 234, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.dev-link-portfolio:hover {
+  border-color: rgba(216, 180, 254, 0.6);
+  box-shadow: 0 0 34px rgba(168, 85, 247, 0.6), 0 0 70px rgba(147, 51, 234, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* The travelling highlight. Behind the label, so the text stays crisp. */
+.dev-link-sheen {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 38%, rgba(255, 255, 255, 0.45) 50%, transparent 62%);
+  transform: translateX(-130%);
+  transition: transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dev-link:hover .dev-link-sheen { transform: translateX(130%); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dev-link, .dev-link-sheen { transition: none; }
+  .dev-link:hover { transform: none; }
+  .dev-link:hover .dev-link-sheen { transform: translateX(-130%); }
+}
+
+/* ── Voice workspace atmosphere ──
+   A receding grid, a slow scan sweep and faint scanlines. Composited on the
+   GPU (transform / opacity only) so it costs nothing beside the 3D character. */
+
+.cyberfx-grid {
+  background-image:
+    linear-gradient(var(--fx-glow) 1px, transparent 1px),
+    linear-gradient(90deg, var(--fx-glow) 1px, transparent 1px);
+  background-size: 58px 58px;
+  /* Laying the plane down in perspective is what turns a repeating gradient
+     into a floor receding toward a horizon. */
+  transform: perspective(340px) rotateX(70deg);
+  transform-origin: bottom center;
+  mask-image: linear-gradient(to top, #000 5%, transparent 92%);
+  -webkit-mask-image: linear-gradient(to top, #000 5%, transparent 92%);
+  animation: cyberfx-floor 7s linear infinite;
+  transition: opacity 0.8s ease;
+}
+@keyframes cyberfx-floor {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 0 62px, 0 0; }
+}
+
+.cyberfx-scan {
+  background: linear-gradient(to bottom, transparent, var(--fx-glow), transparent);
+  animation: cyberfx-sweep 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes cyberfx-sweep {
+  0%   { transform: translateY(-45%); opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { transform: translateY(255%); opacity: 0; }
+}
+
+.cyberfx-lines {
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.028) 0px,
+    rgba(255, 255, 255, 0.028) 1px,
+    transparent 1px,
+    transparent 3px);
+  mix-blend-mode: overlay;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cyberfx-grid, .cyberfx-scan { animation: none; }
+  .cyberfx-scan { opacity: 0; }
+}
+
+/* ---- Sign in / register panel -------------------------------------- */
+/* The panel's own light: a conic sweep behind a 1.5px inset, so the edge
+   reads as lit rather than merely coloured. */
+@keyframes auth-halo-spin { to { --auth-angle: 360deg; } }
+@property --auth-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+.auth-halo {
+  background: conic-gradient(from var(--auth-angle),
+    rgba(239,68,68,0) 0deg, rgba(239,68,68,.85) 60deg, rgba(255,140,90,.5) 120deg,
+    rgba(239,68,68,0) 190deg, rgba(239,68,68,0) 300deg, rgba(239,68,68,.7) 360deg);
+  animation: auth-halo-spin 6s linear infinite;
+  filter: blur(1px);
+}
+
+@keyframes auth-panel-in {
+  from { opacity: 0; transform: translateY(14px) scale(.965); filter: blur(6px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.auth-panel-in { animation: auth-panel-in .5s cubic-bezier(.16,1,.3,1) both; }
+
+@keyframes auth-row-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.auth-row-in { animation: auth-row-in .32s ease-out both; }
+
+/* A scan line that crosses the field only while it has focus. */
+@keyframes auth-field-scan { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.auth-field-scan {
+  background: linear-gradient(90deg, transparent, rgba(239,68,68,.9), transparent);
+  opacity: 0;
+}
+.group:focus-within > .relative > .auth-field-scan,
+.group:focus-within .auth-field-scan { opacity: 1; animation: auth-field-scan 1.6s linear infinite; }
+
+@keyframes auth-sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+.auth-sweep {
+  background: linear-gradient(90deg, transparent, rgba(239,68,68,.85), transparent);
+  animation: auth-sweep 3.4s ease-in-out infinite;
+}
+
+@keyframes auth-crest-glow {
+  0%, 100% { box-shadow: 0 0 12px rgba(239,68,68,.35), inset 0 0 10px rgba(239,68,68,.18); }
+  50%      { box-shadow: 0 0 26px rgba(239,68,68,.65), inset 0 0 16px rgba(239,68,68,.3); }
+}
+.auth-crest { animation: auth-crest-glow 2.8s ease-in-out infinite; }
+
+@keyframes auth-dot { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.auth-dot { animation: auth-dot 1.4s ease-in-out infinite; box-shadow: 0 0 8px rgba(239,68,68,.9); }
+
+/* Motion is decoration here; anyone who has asked for less of it gets a
+   still panel rather than a broken one. */
+@media (prefers-reduced-motion: reduce) {
+  .auth-halo, .auth-panel-in, .auth-row-in, .auth-field-scan,
+  .auth-sweep, .auth-crest, .auth-dot { animation: none; }
+}
+
+/* The shared .cyber-text sweep runs cyan; this panel is red and black. */
+@keyframes auth-title-flow { to { background-position: 220% center; } }
+.auth-title {
+  background: linear-gradient(90deg, #fff 0%, #fca5a5 25%, #ef4444 50%, #fca5a5 75%, #fff 100%);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: auth-title-flow 5s linear infinite;
+  filter: drop-shadow(0 0 10px rgba(239,68,68,.35));
+}
+@media (prefers-reduced-motion: reduce) { .auth-title { animation: none; } }

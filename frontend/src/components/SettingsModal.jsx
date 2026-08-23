@@ -4,8 +4,6 @@ import {
   Cpu,
   Monitor,
   Sparkles,
-  Smartphone,
-  Lock,
 } from "lucide-react";
 import { API_BASE } from "../context/AuthContext";
 
@@ -15,6 +13,10 @@ const cleanText = (value) => {
   if (typeof value !== "string") return "";
   const text = value.trim();
   return text && !/^(n\/?a|unknown|not detected|none|null)$/i.test(text) ? text : "";
+};
+const safeToFixed = (value, digits = 0) => {
+  if (!finite(value)) return null;
+  try { return value.toFixed(digits); } catch { return null; }
 };
 const settingsTelemetryUrl = () => {
   const base = new URL(API_BASE || window.location.origin, window.location.origin);
@@ -27,8 +29,36 @@ const settingsBrowserCapabilities = async () => {
   } catch {
     storage = null;
   }
+  const ua = navigator.userAgent || "";
+  const uaPlatform = navigator.userAgentData?.platform || navigator.platform || "";
+  let clientOs = cleanText(uaPlatform);
+  let clientDevice = "";
+  let clientType = "This device";
+  if (/Android/i.test(ua)) {
+    clientOs = "Android";
+    const modelMatch = ua.match(/Android\s+[^;)]*;\s*([^;)]+?)(?:\s+Build\/[^;)]*)?[;)]/i);
+    clientDevice = cleanText(modelMatch?.[1] || "");
+    clientType = /Mobile/i.test(ua) ? "Phone" : "Tablet";
+  } else if (/iPhone/i.test(ua)) {
+    clientOs = "iOS";
+    clientDevice = "iPhone";
+    clientType = "Phone";
+  } else if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) {
+    clientOs = "iPadOS";
+    clientDevice = "iPad";
+    clientType = "Tablet";
+  } else if (/Windows/i.test(ua)) {
+    clientOs = "Windows";
+  } else if (/Macintosh|Mac OS X/i.test(ua)) {
+    clientOs = "macOS";
+  } else if (/Linux/i.test(ua)) {
+    clientOs = "Linux";
+  }
   return {
     source: "browser",
+    client_os: clientOs || null,
+    client_device: clientDevice || null,
+    client_type: clientType,
     logical_processors: positive(navigator.hardwareConcurrency)
       ? navigator.hardwareConcurrency
       : null,
@@ -39,6 +69,91 @@ const settingsBrowserCapabilities = async () => {
       ? storage.quota / 1024 ** 3
       : null,
   };
+};
+
+/**
+ * Anonymous usage reporting: what it sends, and the switch to stop it.
+ *
+ * Deliberately states the full list rather than a vague 'we collect some
+ * diagnostics'. Someone who reads this should be able to decide.
+ */
+const PrivacyReporting = () => {
+  const [info, setInfo] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch(`${API_BASE}/api/usage-reporting`)
+      .then((r) => r.json())
+      .then(setInfo)
+      .catch(() => setInfo(null));
+  }, []);
+
+  if (!info) return null;
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/usage-reporting`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !info.enabled }),
+      });
+      setInfo(await response.json());
+    } catch { /* leave the switch as it was */ }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <span className="block text-xs font-black text-zinc-900 dark:text-white">
+            Anonymous usage reporting
+          </span>
+          <span className="mt-0.5 block text-[10px] leading-relaxed text-zinc-500">
+            {info.configured
+              ? 'Counts installations and launches so the app can be improved. Nothing you type is ever included.'
+              : 'This build does not report anything.'}
+          </span>
+        </div>
+        {info.configured && (
+          <button
+            type="button"
+            onClick={toggle}
+            disabled={busy}
+            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+              info.enabled ? 'bg-emerald-500' : 'bg-zinc-400 dark:bg-zinc-700'
+            }`}
+            aria-pressed={info.enabled}
+            aria-label="Toggle anonymous usage reporting"
+          >
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                info.enabled ? 'translate-x-[22px]' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        )}
+      </div>
+
+      {info.configured && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <p className="text-[9px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Sent</p>
+            <ul className="mt-1 space-y-0.5 text-[10px] leading-relaxed text-zinc-500">
+              {info.collected.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+          <div>
+            <p className="text-[9px] font-black uppercase tracking-wider text-rose-500">Never sent</p>
+            <ul className="mt-1 space-y-0.5 text-[10px] leading-relaxed text-zinc-500">
+              {info.never_collected.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const SettingsModal = ({
@@ -57,10 +172,10 @@ const SettingsModal = ({
     engine: "vllm",
     display_name: "",
   });
+  const [catalogModels, setCatalogModels] = useState([]);
   const [deviceSpecs, setDeviceSpecs] = useState(null);
+  const [clientSpecs, setClientSpecs] = useState(null);
   const [telemetryState, setTelemetryState] = useState("connecting");
-  // Real-time download status from /api/model/status (separate from /api/system/models)
-  const [downloadStatus, setDownloadStatus] = useState(null);
   const [appearance, setAppearance] = useState(
     () => localStorage.getItem("sm_appearance") || "system",
   );
@@ -78,7 +193,7 @@ const SettingsModal = ({
     document.documentElement.classList.toggle("dark", Boolean(dark));
   };
 
-  useEffect(() => {
+useEffect(() => {
     if (!isOpen) return;
 
     const fetchModels = async () => {
@@ -97,25 +212,28 @@ const SettingsModal = ({
       }
     };
 
-    // Also fetch real-time download status for accuracy
-    const fetchDownloadStatus = async () => {
+    const fetchCatalog = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/model/status`, {
+        const res = await fetch(`${API_BASE}/api/models/catalog`, {
           headers: {  },
         });
         if (res.ok) {
           const data = await res.json();
-          setDownloadStatus(data);
+          if (data.catalog && data.catalog.length > 0) {
+            setCatalogModels(data.catalog);
+          }
         }
-      } catch {}
+      } catch (e) {
+        console.error("Failed to fetch catalog", e);
+      }
     };
 
     fetchModels();
-    fetchDownloadStatus();
+    fetchCatalog();
 
     const interval = setInterval(() => {
-      fetchDownloadStatus();
       fetchModels();
+      fetchCatalog();
     }, 4000);
     return () => clearInterval(interval);
   }, [isOpen]);
@@ -145,9 +263,12 @@ const SettingsModal = ({
     };
     const showBrowserFallback = async () => {
       const capabilities = await settingsBrowserCapabilities();
-      if (disposed || receivedTelemetry) return;
-      setDeviceSpecs(capabilities);
-      setTelemetryState("browser");
+      if (disposed) return;
+      setClientSpecs(capabilities);
+      if (!receivedTelemetry) {
+        setDeviceSpecs(null);
+        setTelemetryState("browser");
+      }
     };
     const connect = () => {
       if (disposed) return;
@@ -180,6 +301,7 @@ const SettingsModal = ({
       socket.onerror = () => socket?.close();
     };
 
+    showBrowserFallback();
     fetchInitialTelemetry();
     fallbackTimer = window.setTimeout(showBrowserFallback, 2500);
     connect();
@@ -203,56 +325,40 @@ const SettingsModal = ({
   ).filter((m) => !m.startsWith("nomic-embed-text"));
 
   // Only expose models that the local service actually reports.
-  let savedCloudSelection = null;
-  try {
-    savedCloudSelection = JSON.parse(
-      localStorage.getItem("sm_cloud_selected_models") || "null",
-    );
-  } catch {}
-  const cloudModelValue =
-    savedCloudSelection?.provider && savedCloudSelection?.model
-      ? `cloud:${savedCloudSelection.provider}:${savedCloudSelection.model}`
-      : "";
-
   let cachedCloudModels = {};
   try {
     cachedCloudModels = JSON.parse(
       localStorage.getItem("sm_cloud_provider_models") || "{}",
     );
   } catch {}
-  const cloudOptions = Object.entries(cachedCloudModels).flatMap(
-    ([provider, modelList]) =>
-      (Array.isArray(modelList) ? modelList : [])
-        .filter(
-          (model) =>
-            provider !== "openrouter" ||
-            model === "openrouter/free" ||
-            model.endsWith(":free"),
-        )
-      .map((model) => ({
-        value: `cloud:${provider}:${model}`,
-        label: `Cloud API - ${provider.toUpperCase()} - ${model} - ${provider === "openai" || provider === "anthropic" ? "BYOK / METERED" : provider === "gemini" ? "ACCOUNT TIER" : "FREE TIER"}`,
-      })),
+
+  const cloudOptions = Object.entries(cachedCloudModels || {}).flatMap(([provider, modelIds]) =>
+    (Array.isArray(modelIds) ? modelIds : []).filter(Boolean).map((modelId) => ({
+      value: `cloud:${provider}:${modelId}`,
+      label: `Provider-confirmed - ${provider} - ${modelId}`,
+    })),
   );
 
-  const selectableModels = rawSelectable.filter((m) => {
-    if (m === "auto") return true;
-    let st = (models.models_status || {})[m] || {};
-    const isActiveDownload =
-      downloadStatus && !downloadStatus.ready && downloadStatus.model_id === m;
-    const isServedReady =
-      downloadStatus?.ready === true && downloadStatus?.model_id === m;
-    const isReady =
-      st.ready === true ||
-      isServedReady ||
-      (models.installed_models || []).includes(m) ||
-      (models.downloaded_models || []).includes(m);
-    return isReady || isActiveDownload;
-  });
+  const downloadedList = Array.from(new Set([
+    ...(models.installed_models || []),
+    ...(models.downloaded_models || []),
+    ...(catalogModels
+      .filter((m) => m.is_downloaded)
+      .map((m) => m.id)
+    ),
+  ])).filter((m) => m && !m.startsWith("nomic-embed-text") && m !== "auto");
+
+  const allLocalOptions = [
+    { id: "auto", label: "Local - Auto (available runtime only)" },
+    ...downloadedList.map((m) => ({
+      id: m,
+      label: `Installed local model - ${m}`,
+    })),
+  ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-left">
+    <div className="settings-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150 safe-area-bottom safe-area-top">
+      <div className="settings-modal-card w-full max-w-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl mobile-rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-left flex min-h-0 flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 dark:border-zinc-800">
           <h3 className="text-base font-black text-zinc-950 dark:text-white flex items-center gap-2">
@@ -268,7 +374,7 @@ const SettingsModal = ({
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+        <div className="settings-modal-body p-6 space-y-6 min-h-0 flex-1 overflow-y-auto overscroll-contain mobile-modal-scroll mobile-p-4">
           {/* Model Selection */}
           <div className="space-y-3">
             <label className="block text-xs font-black text-zinc-950 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
@@ -279,12 +385,12 @@ const SettingsModal = ({
               <select
                 value={selectedModel}
                 onChange={(e) => onModelChange?.(e.target.value)}
-                className="w-full rounded-xl border-2 border-indigo-500/50 bg-white dark:bg-zinc-950 px-3 py-3 text-sm font-black text-zinc-900 dark:text-white outline-none"
+                className="w-full rounded-xl border-2 border-indigo-500/50 bg-white dark:bg-zinc-950 px-3 py-3 text-sm font-black text-zinc-900 dark:text-white outline-none cursor-pointer"
               >
                 <optgroup label="Local models">
-                  {selectableModels.map((m) => (
-                    <option key={m} value={m}>
-                      {m === "auto" ? "Local - Auto Router" : m}
+                  {allLocalOptions.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
                     </option>
                   ))}
                 </optgroup>
@@ -297,17 +403,6 @@ const SettingsModal = ({
                     ))}
                   </optgroup>
                 )}
-                {cloudModelValue &&
-                  !cloudOptions.some(
-                    (option) => option.value === cloudModelValue,
-                  ) && (
-                    <optgroup label="Cloud API model">
-                      <option value={cloudModelValue}>
-                        Cloud API - {savedCloudSelection.provider} -{" "}
-                        {savedCloudSelection.model}
-                      </option>
-                    </optgroup>
-                  )}
               </select>
               <p className="text-[10px] font-semibold text-zinc-500">
                 Cloud model appears here after choosing it in Model Hub. The
@@ -363,6 +458,11 @@ const SettingsModal = ({
                 <option value="light">Light</option>
               </select>
             </div>
+            {/* Usage reporting. Shown plainly and switchable, because
+                collecting anything without saying so is both wrong and, under
+                the DPDP Act and the GDPR, unlawful. */}
+            <PrivacyReporting />
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
                 <span className="block text-xs font-black text-zinc-900 dark:text-white">
@@ -401,14 +501,14 @@ const SettingsModal = ({
               </label>
             </div>
           </div>
-          <DeviceSummary specs={deviceSpecs} state={telemetryState} />
+          <DeviceSummary specs={deviceSpecs} clientSpecs={clientSpecs} state={telemetryState} />
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-zinc-50 dark:bg-zinc-950 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-end">
+        <div className="settings-modal-footer px-6 py-4 bg-zinc-50 dark:bg-zinc-950 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-end mobile-px-4 mobile-py-3 shrink-0">
           <button
             onClick={onClose}
-            className="w-full sm:w-auto px-6 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/20 transition-all cursor-pointer"
+            className="w-full sm:w-auto px-6 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/20 transition-all cursor-pointer mobile-full-width mobile-py-3 mobile-text-sm"
           >
             Close Settings
           </button>
@@ -429,7 +529,22 @@ const SpecRow = ({ label, value }) => (
   </div>
 );
 
-const DeviceSummary = ({ specs, state }) => {
+const ClientSummary = ({ specs }) => (
+  <div className="space-y-3">
+    <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-200">
+      <Monitor className="w-3.5 h-3.5 text-indigo-500" /> This device
+    </div>
+    {/* Only the two facts the browser reports reliably. Capacity "classes"
+        (memory class, storage quota, logical processors) were coarse browser
+        approximations that read as wrong hardware, so they are not shown; the
+        real numbers come from host telemetry below. */}
+    <div className="space-y-2 rounded-xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-900 dark:bg-zinc-950">
+      <SpecRow label="Operating system" value={cleanText(specs?.client_os) || "Not reported"} />
+    </div>
+  </div>
+);
+
+const DeviceSummary = ({ specs, clientSpecs, state }) => {
   const isTelemetry = specs?.source === "telemetry";
   const status = state === "telemetry"
     ? "Live local telemetry"
@@ -440,32 +555,15 @@ const DeviceSummary = ({ specs, state }) => {
         : "Connecting to local telemetry";
 
   if (!specs) return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-200">
-        <Monitor className="w-3.5 h-3.5 text-indigo-500" /> Device information
-      </div>
+    <div className="space-y-6">
+      <ClientSummary specs={clientSpecs} />
       <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-500 dark:border-zinc-900 dark:bg-zinc-950">
-        {status}
+        Host runtime telemetry: {status}. No server hardware values are being presented as this browser device.
       </div>
     </div>
   );
 
-  if (!isTelemetry) return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-200">
-        <Monitor className="w-3.5 h-3.5 text-indigo-500" /> Browser capabilities
-      </div>
-      <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-[10px] leading-relaxed text-amber-800 dark:text-amber-200">
-        Live hardware telemetry is unavailable. These browser hints are not Task Manager measurements.
-      </div>
-      <div className="space-y-2 rounded-xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-900 dark:bg-zinc-950">
-        <SpecRow label="Logical processors" value={positive(specs.logical_processors) ? specs.logical_processors + " reported by browser" : "Unavailable"} />
-        <SpecRow label="Memory class" value={positive(specs.memory_class_gb) ? "Approximately " + specs.memory_class_gb + " GB (not installed RAM)" : "Unavailable"} />
-        <SpecRow label="Browser storage quota" value={positive(specs.storage_quota_gb) ? specs.storage_quota_gb.toFixed(1) + " GB" : "Unavailable"} />
-        <SpecRow label="GPU / VRAM / live usage" value="Unavailable to the browser" />
-      </div>
-    </div>
-  );
+  if (!isTelemetry) return <ClientSummary specs={clientSpecs || specs} />;
 
   const gpuName = specs.gpu_available ? cleanText(specs.gpu_name) : "";
   const cpuName = cleanText(specs.cpu_name);
@@ -475,24 +573,27 @@ const DeviceSummary = ({ specs, state }) => {
     positive(specs.cpu_threads) ? specs.cpu_threads + " logical threads" : "logical threads unavailable",
   ].join(" / ");
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
+      <ClientSummary specs={clientSpecs} />
+      <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-zinc-200">
-          <Monitor className="w-3.5 h-3.5 text-indigo-500" /> Local runtime telemetry
+          <Monitor className="w-3.5 h-3.5 text-indigo-500" /> Host runtime telemetry
         </div>
         <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">{status}</span>
       </div>
       <p className="text-[10px] leading-relaxed text-zinc-500">
-        Values are reported by the local SMARAN service. Host-level readings appear when the host telemetry bridge or GPU runtime is available.
+        These values describe the computer running the SMARAN service, not necessarily the phone or browser viewing this page. The source is reported by the runtime.
       </p>
       <div className="space-y-2 rounded-xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-900 dark:bg-zinc-950">
         <SpecRow label="GPU" value={gpuName || "Unavailable"} />
-        <SpecRow label="VRAM" value={gpuName && positive(specs.gpu_vram_total) ? specs.gpu_vram_total.toFixed(1) + " GB" : "Unavailable"} />
-        <SpecRow label="GPU utilization" value={gpuName && finite(specs.gpu_usage) ? specs.gpu_usage.toFixed(0) + "%" : "Unavailable"} />
-        <SpecRow label="RAM" value={positive(specs.memory_total_gb) ? specs.memory_total_gb.toFixed(1) + " GB" : "Unavailable"} />
-        <SpecRow label="Memory utilization" value={finite(specs.memory_usage) ? specs.memory_usage.toFixed(0) + "%" : "Unavailable"} />
+        <SpecRow label="VRAM" value={gpuName && positive(specs.gpu_vram_total) ? `${safeToFixed(specs.gpu_vram_total, 1)} GB` : "Unavailable"} />
+        <SpecRow label="GPU utilization" value={gpuName && finite(specs.gpu_usage) ? `${safeToFixed(specs.gpu_usage, 0)}%` : "Unavailable"} />
+        <SpecRow label="RAM" value={positive(specs.memory_total_gb) ? `${safeToFixed(specs.memory_total_gb, 1)} GB` : "Unavailable"} />
+        <SpecRow label="Memory utilization" value={finite(specs.memory_usage) ? `${safeToFixed(specs.memory_usage, 0)}%` : "Unavailable"} />
         <SpecRow label="CPU" value={cpuDetails} />
-        <SpecRow label="CPU utilization" value={finite(specs.cpu_usage) ? specs.cpu_usage.toFixed(0) + "%" : "Unavailable"} />
+        <SpecRow label="CPU utilization" value={finite(specs.cpu_usage) ? `${safeToFixed(specs.cpu_usage, 0)}%` : "Unavailable"} />
+      </div>
       </div>
     </div>
   );

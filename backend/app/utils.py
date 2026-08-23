@@ -7,6 +7,7 @@ import platform
 import psutil
 import ipaddress
 import socket
+import threading
 from urllib.parse import urljoin, urlparse
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 _whisper_model = None
+_whisper_model_lock = threading.Lock()
+_whisper_inference_lock = threading.Lock()
 
 
 def _validate_public_url(url: str) -> None:
@@ -48,37 +51,87 @@ def _safe_public_get(url: str, headers: dict, timeout: int = 15):
     raise ValueError("The website redirected too many times.")
 
 
-def _transcribe_local_media(file_path: str) -> str:
+# Speech recognition quality is very uneven across Whisper sizes: `base` is fast
+# and accurate enough for English, but it renders Indic speech as nonsense
+# romanisation ("बैटरी कितनी है" -> "Bachelor is so much."). Those languages need
+# `small`, which costs a few extra seconds but actually returns their script.
+_WHISPER_ENGLISH_MODEL = os.getenv("UPLOAD_WHISPER_MODEL", "base")
+_WHISPER_MULTILINGUAL_MODEL = os.getenv("UPLOAD_WHISPER_MODEL_MULTILINGUAL", "small")
+_whisper_models: dict = {}
+
+
+def _whisper_model_name_for(language: str) -> str:
+    normalized = (language or "auto").lower().split("-")[0]
+    if normalized in {"en", ""}:
+        return _WHISPER_ENGLISH_MODEL
+    # "auto" may well be a non-English utterance, so use the accurate model.
+    return _WHISPER_MULTILINGUAL_MODEL
+
+
+def _get_whisper_model(model_name: str):
+    """Load and cache a Whisper model by size."""
     global _whisper_model
-    try:
-        import requests
-        service_url = os.getenv("LOCAL_IMAGE_SERVICE_URL", "http://media-generator:8002")
-        response = requests.post(
-            f"{service_url}/transcribe",
-            json={"filename": os.path.basename(file_path)},
-            timeout=600,
-        )
-        if response.ok:
-            return response.json().get("transcript", "")
-    except Exception:
-        logger.exception("CUDA media transcription service failed; using local fallback")
+
+    cached = _whisper_models.get(model_name)
+    if cached is not None:
+        return cached
+
     from faster_whisper import WhisperModel
-    if _whisper_model is None:
-        device = os.getenv("UPLOAD_WHISPER_DEVICE", "cuda")
-        compute_type = "float16" if device == "cuda" else "int8"
+
+    with _whisper_model_lock:
+        cached = _whisper_models.get(model_name)
+        if cached is not None:
+            return cached
+        download_root = os.path.join(settings.DATA_DIR, "models", "faster-whisper")
+        os.makedirs(download_root, exist_ok=True)
+        model = WhisperModel(
+            model_name,
+            device=os.getenv("UPLOAD_WHISPER_DEVICE", "cpu"),
+            compute_type="int8",
+            download_root=download_root,
+        )
+        _whisper_models[model_name] = model
+        # Keep the historical single-model global pointing at something valid.
+        _whisper_model = model
+        return model
+
+
+def warm_up_speech_models() -> None:
+    """Load the speech models ahead of first use.
+
+    Called in the background at startup so the first spoken sentence is not
+    delayed by a cold model load, which otherwise takes tens of seconds. The
+    fast English model is loaded first, then the multilingual one.
+    """
+    for model_name in dict.fromkeys((_WHISPER_ENGLISH_MODEL, _WHISPER_MULTILINGUAL_MODEL)):
         try:
-            _whisper_model = WhisperModel(os.getenv("UPLOAD_WHISPER_MODEL", "tiny"), device=device, compute_type=compute_type)
-        except Exception:
-            logger.exception("GPU Whisper initialization failed; falling back to CPU INT8")
-            _whisper_model = WhisperModel(os.getenv("UPLOAD_WHISPER_MODEL", "tiny"), device="cpu", compute_type="int8")
+            _get_whisper_model(model_name)
+            logger.info(f"Speech recognition model '{model_name}' is warm.")
+        except Exception as exc:  # noqa: BLE001 - warm-up is best effort
+            logger.warning(f"Speech model '{model_name}' warm-up skipped: {exc}")
+
+
+def _transcribe_local_media(file_path: str, language: str = "auto") -> str:
+    # Local-first and private by default. No hosted speech API is called here.
     try:
-        segments, _ = _whisper_model.transcribe(file_path, beam_size=2, vad_filter=True)
-        return " ".join(segment.text.strip() for segment in segments if segment.text.strip())
-    except Exception:
-        logger.exception("GPU media transcription failed; retrying on CPU INT8")
-        _whisper_model = WhisperModel(os.getenv("UPLOAD_WHISPER_MODEL", "tiny"), device="cpu", compute_type="int8")
-        segments, _ = _whisper_model.transcribe(file_path, beam_size=2, vad_filter=True)
-        return " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+        model = _get_whisper_model(_whisper_model_name_for(language))
+        selected_language = (language or "auto").lower().split("-")[0]
+        whisper_language = None if selected_language in {"", "auto"} else selected_language
+        with _whisper_inference_lock:
+            segments, _ = model.transcribe(
+                file_path,
+                language=whisper_language,
+                task="transcribe",
+                beam_size=2,
+                vad_filter=True,
+                condition_on_previous_text=False,
+            )
+        res = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+        if res:
+            return res
+    except Exception as whisper_err:
+        logger.warning(f"Local faster-whisper transcription note: {whisper_err}")
+    return ""
 
 # --- Ingestion File Parsers ---
 def parse_file_content(file_path: str, file_type: str) -> str:
@@ -402,11 +455,26 @@ def fetch_url_content(url: str) -> str:
         raise ValueError(f"Could not fetch URL content from '{url}': {str(e)}")
 
 
+# Helper processes (nvidia-smi, wmic, espeak, ...) are polled frequently. On
+# Windows each one would otherwise flash a console window on screen, which in a
+# windowed desktop build looks like terminals opening and closing by themselves.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _run_hidden(command, **kwargs):
+    """Run a helper process without ever showing a console window."""
+    kwargs.setdefault("capture_output", True)
+    kwargs.setdefault("text", True)
+    if _NO_WINDOW:
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | _NO_WINDOW
+    return subprocess.run(command, **kwargs)
+
+
 def _detect_cpu_name_windows() -> str:
     """Best-effort CPU name detection on Windows using WMIC or PowerShell."""
     name = ""
     try:
-        res = subprocess.run(
+        res = _run_hidden(
             ["wmic", "cpu", "get", "name"],
             capture_output=True, text=True, timeout=5
         )
@@ -418,7 +486,7 @@ def _detect_cpu_name_windows() -> str:
         pass
     if not name:
         try:
-            res = subprocess.run(
+            res = _run_hidden(
                 ["powershell", "-Command", "Get-WmiObject Win32_Processor | Select-Object -ExpandProperty Name"],
                 capture_output=True, text=True, timeout=5
             )
@@ -433,7 +501,7 @@ def _detect_gpu_name_windows() -> str:
     """Best-effort GPU name detection on Windows using WMIC or PowerShell."""
     name = ""
     try:
-        res = subprocess.run(
+        res = _run_hidden(
             ["wmic", "path", "win32_VideoController", "get", "name"],
             capture_output=True, text=True, timeout=5
         )
@@ -445,7 +513,7 @@ def _detect_gpu_name_windows() -> str:
         pass
     if not name:
         try:
-            res = subprocess.run(
+            res = _run_hidden(
                 ["powershell", "-Command", "Get-WmiObject Win32_VideoController | Select-Object -ExpandProperty Name"],
                 capture_output=True, text=True, timeout=5
             )
@@ -499,7 +567,7 @@ def _detect_real_cpu():
     if is_windows:
         # WMI gives the exact retail CPU name, e.g. "AMD Ryzen 9 4900H with Radeon Graphics"
         try:
-            r = subprocess.run(
+            r = _run_hidden(
                 ["powershell", "-NoProfile", "-Command",
                  "Get-CimInstance -ClassName Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | ConvertTo-Json"],
                 capture_output=True, text=True, timeout=10
@@ -516,7 +584,7 @@ def _detect_real_cpu():
 
         # Also grab system manufacturer/model
         try:
-            r = subprocess.run(
+            r = _run_hidden(
                 ["powershell", "-NoProfile", "-Command",
                  "Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object Manufacturer, Model, TotalPhysicalMemory | ConvertTo-Json"],
                 capture_output=True, text=True, timeout=10
@@ -566,7 +634,7 @@ def _detect_wmi_gpus():
     if platform.system() != "Windows":
         return _cached_wmi_gpus
     try:
-        r = subprocess.run(
+        r = _run_hidden(
             ["powershell", "-NoProfile", "-Command",
              "Get-CimInstance -ClassName Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | ConvertTo-Json"],
             capture_output=True, text=True, timeout=10
@@ -616,10 +684,11 @@ _inference_stats = {
     "last_response_time_ms": 0.0,
     "avg_tokens_per_sec": 0.0,
     "avg_response_time_ms": 0.0,
+    "token_measurement_source": "unavailable",
 }
 
-def record_inference_metrics(tokens_generated: int, elapsed_sec: float):
-    """Called after each inference to track token/sec and response time."""
+def record_inference_metrics(tokens_generated: int, elapsed_sec: float, source: str = "runtime_reported"):
+    """Track only token counts reported by a live inference runtime."""
     global _inference_stats
     if elapsed_sec > 0 and tokens_generated > 0:
         tps = tokens_generated / elapsed_sec
@@ -628,6 +697,7 @@ def record_inference_metrics(tokens_generated: int, elapsed_sec: float):
         _inference_stats["total_tokens"] += tokens_generated
         _inference_stats["total_requests"] += 1
         _inference_stats["total_time_sec"] += elapsed_sec
+        _inference_stats["token_measurement_source"] = source or "runtime_reported"
         if _inference_stats["total_time_sec"] > 0:
             _inference_stats["avg_tokens_per_sec"] = round(
                 _inference_stats["total_tokens"] / _inference_stats["total_time_sec"], 1
@@ -637,18 +707,29 @@ def record_inference_metrics(tokens_generated: int, elapsed_sec: float):
                 (_inference_stats["total_time_sec"] * 1000) / _inference_stats["total_requests"], 0
             )
 
+# How long a GPU reading may be reused. When nvidia-smi supplies live
+# utilisation, a long cache freezes the number (it looked stuck at one value and
+# drew a flat graph), so live sources are re-read almost every poll. Static
+# identity-only results can be cached for much longer.
+_GPU_LIVE_CACHE_SECONDS = 2
+_GPU_STATIC_CACHE_SECONDS = 60
+
+
 def _get_static_gpus():
     global _cached_gpu_info, _last_gpu_check
     now = time.time()
-    if _cached_gpu_info is not None and (now - _last_gpu_check < 60):
-        return _cached_gpu_info
-    
+    if _cached_gpu_info is not None:
+        has_live = any(gpu.get("has_live_metrics") for gpu in _cached_gpu_info)
+        ttl = _GPU_LIVE_CACHE_SECONDS if has_live else _GPU_STATIC_CACHE_SECONDS
+        if now - _last_gpu_check < ttl:
+            return _cached_gpu_info
+
     gpus = []
     _last_gpu_check = now
 
     # Try nvidia-smi first (gives live metrics)
     try:
-        res = subprocess.run(
+        res = _run_hidden(
             ["nvidia-smi", "--query-gpu=index,name,memory.total,memory.used,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=2
         )
@@ -669,21 +750,102 @@ def _get_static_gpus():
     except Exception:
         pass
 
-    # If nvidia-smi found nothing, fall back to WMI (Windows integrated GPUs)
+    # If nvidia-smi found nothing, check WMI / lspci / Torch / dynamic detection
     if not gpus:
-        wmi_gpus = _detect_wmi_gpus()
-        for idx, wg in enumerate(wmi_gpus):
-            if wg["name"] and "Microsoft" not in wg["name"]:
-                gpus.append({
-                    "index": idx,
-                    "name": wg["name"],
-                    "vram_total_gb": wg["vram_total_gb"],
-                    "vram_used_gb": 0,
-                    "temperature": 0,
-                    "usage": 0,
-                    "vendor": "amd" if "amd" in wg["name"].lower() or "radeon" in wg["name"].lower() else "intel" if "intel" in wg["name"].lower() else "unknown",
-                    "has_live_metrics": False
-                })
+        # Check PyTorch CUDA availability
+        try:
+            import torch
+            if torch.cuda.is_available():
+                for idx in range(torch.cuda.device_count()):
+                    props = torch.cuda.get_device_properties(idx)
+                    vram_gb = round(props.total_memory / (1024**3), 2)
+                    gpus.append({
+                        "index": idx,
+                        "name": props.name,
+                        "vram_total_gb": vram_gb,
+                        "vram_used_gb": round(torch.cuda.memory_allocated(idx) / (1024**3), 2),
+                        "temperature": 0.0,
+                        "usage": 0.0,
+                        "vendor": "nvidia" if "nvidia" in props.name.lower() else "amd",
+                        "has_live_metrics": True
+                    })
+        except Exception:
+            pass
+
+        # Check WMI GPUs (Windows native or host)
+        if not gpus and platform.system() == "Windows":
+            wmi_gpus = _detect_wmi_gpus()
+            for idx, wg in enumerate(wmi_gpus):
+                if wg["name"] and "Microsoft Basic" not in wg["name"]:
+                    gpus.append({
+                        "index": idx,
+                        "name": wg["name"],
+                        "vram_total_gb": wg["vram_total_gb"],
+                        "vram_used_gb": 0.0,
+                        "temperature": 0.0,
+                        "usage": 0.0,
+                        "vendor": "amd" if "amd" in wg["name"].lower() or "radeon" in wg["name"].lower() else "intel" if "intel" in wg["name"].lower() else "nvidia" if "nvidia" in wg["name"].lower() else "unknown",
+                        "has_live_metrics": False
+                    })
+
+        # Check hardware_config.json if written by host bridge
+        if not gpus:
+            candidate_paths = [
+                os.path.join(os.getenv("DATA_DIR", "/app/data"), "hardware_config.json"),
+                os.path.join("/app", "hardware_config.json"),
+                os.path.join(os.path.dirname(__file__), "..", "hardware_config.json"),
+            ]
+            for hw_file in candidate_paths:
+                if os.path.exists(hw_file):
+                    try:
+                        with open(hw_file, "r") as f:
+                            hw_data = json.load(f)
+                            gpu_list = hw_data.get("gpus") or hw_data.get("host_gpus")
+                            if gpu_list and isinstance(gpu_list, list) and len(gpu_list) > 0:
+                                for idx, g in enumerate(gpu_list):
+                                    g_name = g.get("name") or "Graphics Adapter"
+                                    g_vram = float(g.get("vram_gb") or g.get("vram_total_gb") or 0.0)
+                                    gpus.append({
+                                        "index": idx,
+                                        "name": g_name,
+                                        "vram_total_gb": g_vram,
+                                        "vram_used_gb": 0.0,
+                                        "temperature": 0.0,
+                                        "usage": 0.0,
+                                        "vendor": "nvidia" if "nvidia" in g_name.lower() else ("amd" if "amd" in g_name.lower() or "radeon" in g_name.lower() else "intel"),
+                                        "has_live_metrics": True
+                                    })
+                                break
+                            elif hw_data.get("gpu_name") and hw_data["gpu_name"] not in ["N/A", "No GPU", ""]:
+                                g_name = hw_data["gpu_name"]
+                                g_vram = float(hw_data.get("gpu_vram_gb", 0.0) or 0.0)
+                                gpus.append({
+                                    "index": 0,
+                                    "name": g_name,
+                                    "vram_total_gb": g_vram,
+                                    "vram_used_gb": 0.0,
+                                    "temperature": 0.0,
+                                    "usage": 0.0,
+                                    "vendor": "nvidia" if "nvidia" in g_name.lower() else ("amd" if "amd" in g_name.lower() or "radeon" in g_name.lower() else "intel"),
+                                    "has_live_metrics": True
+                                })
+                                break
+                            elif hw_data.get("host_gpu_name") and hw_data["host_gpu_name"] not in ["N/A", "No GPU", ""]:
+                                g_name = hw_data["host_gpu_name"]
+                                g_vram = float(hw_data.get("host_gpu_vram_gb", 0.0) or 0.0)
+                                gpus.append({
+                                    "index": 0,
+                                    "name": g_name,
+                                    "vram_total_gb": g_vram,
+                                    "vram_used_gb": 0.0,
+                                    "temperature": 0.0,
+                                    "usage": 0.0,
+                                    "vendor": "nvidia" if "nvidia" in g_name.lower() else ("amd" if "amd" in g_name.lower() or "radeon" in g_name.lower() else "intel"),
+                                    "has_live_metrics": True
+                                })
+                                break
+                    except Exception:
+                        pass
     # If we got nvidia GPUs but also have integrated, merge them
     elif platform.system() == "Windows":
         wmi_gpus = _detect_wmi_gpus()
@@ -711,8 +873,8 @@ def get_system_telemetry(db: Session = None, active_sessions: int = 0, latency_m
     """Calculate system-wide resource metrics using auto-detected host hardware specs.
     
     Priority:
-       1. host_stats.json - written every second by host_stats_bridge.py on the Windows host.
-                            This gives 100% accurate real Task Manager figures.
+       1. host_stats.json - written every second by the optional Windows/macOS/Linux
+                            host bridge. Values are source-labelled measurements.
        2. hardware_config.json - written by bootstrapper.py at container startup.
        3. /host/proc/* - host procfs mounted into container (Docker --privileged or volume mount).
        4. Environment variables - SMARAN_HOST_CPU_NAME, SMARAN_HOST_RAM_GB, SMARAN_HOST_GPU_NAME, etc.
@@ -785,13 +947,14 @@ def get_system_telemetry(db: Session = None, active_sessions: int = 0, latency_m
             mem_pct = mem_used_gb = mem_total_gb = 0.0
 
     # 3. GPU
-    gpus = _get_static_gpus()
+    gpus = _hs.get("gpus", []) if _hs and isinstance(_hs.get("gpus"), list) else _get_static_gpus()
     gpu_available = bool(gpus)
-    gpu_name = gpus[0]["name"] if gpus else "N/A"
-    gpu_vram_total = gpus[0]["vram_total_gb"] if gpus else 0.0
-    gpu_vram_used = gpus[0]["vram_used_gb"] if gpus else 0.0
-    gpu_temperature = gpus[0]["temperature"] if gpus else 0.0
-    gpu_usage = gpus[0]["usage"] if gpus else 0.0
+    primary_gpu = next((gpu for gpu in gpus if gpu.get("has_live_metrics")), gpus[0] if gpus else {})
+    gpu_name = primary_gpu.get("name", "N/A")
+    gpu_vram_total = primary_gpu.get("vram_total_gb")
+    gpu_vram_used = primary_gpu.get("vram_used_gb")
+    gpu_temperature = primary_gpu.get("temperature")
+    gpu_usage = primary_gpu.get("usage")
 
     # 4. Disk
     if _hs:
@@ -838,6 +1001,27 @@ def get_system_telemetry(db: Session = None, active_sessions: int = 0, latency_m
     reasoning_model    = bool(_hw.get("reasoning_model", False))
     selected_model_id  = str(_hw.get("model_id", ""))
 
+    # Battery. Read fresh on every poll rather than cached: the browser's
+    # Battery Status API is missing in the packaged desktop window and, where
+    # it does exist, only reports at page load unless events are wired up —
+    # which is why the charge level and the plugged-in symbol went stale.
+    battery_percent = None
+    battery_charging = None
+    battery_minutes_left = None
+    battery_present = False
+    try:
+        battery = psutil.sensors_battery()
+    except Exception:
+        battery = None
+    if battery is not None:
+        battery_present = True
+        battery_percent = round(float(battery.percent), 1)
+        battery_charging = bool(battery.power_plugged)
+        seconds_left = getattr(battery, "secsleft", None)
+        # psutil reports POWER_TIME_UNLIMITED/UNKNOWN as negative sentinels.
+        if isinstance(seconds_left, int) and seconds_left >= 0:
+            battery_minutes_left = seconds_left // 60
+
     return {
         "cpu_usage":          cpu_usage,
         "cpu_cores":          cpu_cores,
@@ -870,11 +1054,26 @@ def get_system_telemetry(db: Session = None, active_sessions: int = 0, latency_m
         "response_time_ms":   _inference_stats.get("last_response_time_ms", round(latency_ms, 1)),
         "avg_response_time_ms": _inference_stats.get("avg_response_time_ms", 0.0),
         "total_tokens":       _inference_stats.get("total_tokens", 0),
+        "token_measurement_source": _inference_stats.get("token_measurement_source", "unavailable"),
         "model_display_name": model_display_name,
         "model_id":           selected_model_id,
         "ctx_window":         ctx_window,
         "reasoning_model":    reasoning_model,
-        "telemetry_source":   "windows_host_bridge" if _hs else "native_runtime",
+        "telemetry_source":   str(_hs.get("telemetry_source") or "host_bridge") if _hs else "native_runtime",
+        "host_os":            str(_hs.get("host_os") or "") if _hs else "",
+        "host_os_display":    str(_hs.get("host_os_display") or "") if _hs else "",
+        "host_os_version":    str(_hs.get("host_os_version") or "") if _hs else "",
+        "host_os_build":      str(_hs.get("host_os_build") or "") if _hs else "",
+        "host_arch":          str(_hs.get("host_arch") or "") if _hs else "",
+        "host_device_manufacturer": str(_hs.get("host_device_manufacturer") or "") if _hs else "",
+        "host_device_model":  str(_hs.get("host_device_model") or "") if _hs else "",
+        "npu_available":      bool(_hs.get("npu_available", False)) if _hs else False,
+        "npu_name":           str(_hs.get("npu_name") or "") if _hs else "",
+        "npu_vendor":         str(_hs.get("npu_vendor") or "") if _hs else "",
+        "battery_present":    battery_present,
+        "battery_percent":    battery_percent,
+        "battery_charging":   battery_charging,
+        "battery_minutes_left": battery_minutes_left,
     }
 
 import httpx
