@@ -1827,13 +1827,19 @@ html.motion-calm .meet-stage { transform: none; }
   position: absolute;
   right: 4%;
   top: -18px;
-  width: clamp(74px, 9vw, 120px);
+  width: clamp(84px, 10vw, 132px);
   pointer-events: none;
   z-index: 4;
-  animation: mascot-float 6.5s ease-in-out infinite;
   filter: drop-shadow(0 12px 26px rgba(239, 68, 68, .45));
+  /* She leans towards the pointer. Set from script; the idle float lives on
+     the svg inside, because an animation's transform would overwrite this. */
+  transform: translate(var(--lean-x, 0px), var(--lean-y, 0px));
+  transition: transform .45s cubic-bezier(.22, 1, .36, 1);
 }
-.mascot svg { width: 100%; height: auto; overflow: visible; }
+.mascot svg {
+  width: 100%; height: auto; overflow: visible;
+  animation: mascot-float 6.5s ease-in-out infinite;
+}
 
 @keyframes mascot-float {
   0%, 100% { transform: translateY(0) rotate(-2deg); }
@@ -1902,11 +1908,11 @@ html.motion-calm .meet-stage { transform: none; }
   .mascot { width: 64px; right: 0; top: -26px; }
 }
 
-html.motion-calm .mascot,
+html.motion-calm .mascot svg,
 html.motion-calm .mascot-body,
 html.motion-calm .mascot-eyes .eye { animation: none; }
 @media (prefers-reduced-motion: reduce) {
-  html:not(.motion-full) .mascot,
+  html:not(.motion-full) .mascot svg,
   html:not(.motion-full) .mascot-body,
   html:not(.motion-full) .mascot-eyes .eye { animation: none; }
 }

@@ -60,6 +60,7 @@ HIDDEN_IMPORTS = [
     "app.app_lock",
     "app.web_intents",
     "app.analytics_config",
+    "app.password_policy",
     "app.desktop_agent",
     # QR rendering. The import sits inside the endpoint so the module loads
     # without it, which also meant PyInstaller's static scan never saw it and

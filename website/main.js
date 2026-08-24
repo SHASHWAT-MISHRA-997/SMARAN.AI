@@ -661,6 +661,13 @@
           const reach = Math.min(dist / 260, 1);
           eyes.style.setProperty('--eye-x', `${(dx / dist * 5 * reach).toFixed(2)}px`);
           eyes.style.setProperty('--eye-y', `${(dy / dist * 4 * reach).toFixed(2)}px`);
+
+          // The whole of her leans too, further than the eyes travel but on a
+          // slower easing, so the body follows the look rather than racing it.
+          const lean = Math.min(dist / 520, 1);
+          const host = $('#mascot');
+          host.style.setProperty('--lean-x', `${(dx / dist * 22 * lean).toFixed(1)}px`);
+          host.style.setProperty('--lean-y', `${(dy / dist * 16 * lean).toFixed(1)}px`);
         });
       }, { passive: true });
 
@@ -668,6 +675,9 @@
       window.addEventListener('pointerleave', () => {
         eyes.style.setProperty('--eye-x', '0px');
         eyes.style.setProperty('--eye-y', '0px');
+        const host = $('#mascot');
+        host.style.setProperty('--lean-x', '0px');
+        host.style.setProperty('--lean-y', '0px');
       });
     }
 

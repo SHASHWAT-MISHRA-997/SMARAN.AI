@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('C:\\Users\\shash\\Desktop\\SMARAN.AI\\backend\\frontend_dist', 'frontend_dist')]
 binaries = []
-hiddenimports = ['app.main', 'app.companion', 'app.app_lock', 'app.web_intents', 'app.analytics_config', 'app.desktop_agent', 'segno', 'uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan.on', 'webview', 'webview.platforms.winforms', 'edge_tts', 'passlib.handlers.bcrypt', 'sqlalchemy.dialects.sqlite', 'email_validator']
+hiddenimports = ['app.main', 'app.companion', 'app.app_lock', 'app.web_intents', 'app.analytics_config', 'app.password_policy', 'app.desktop_agent', 'segno', 'uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan.on', 'webview', 'webview.platforms.winforms', 'edge_tts', 'passlib.handlers.bcrypt', 'sqlalchemy.dialects.sqlite', 'email_validator']
 tmp_ret = collect_all('chromadb')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('faster_whisper')
