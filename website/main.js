@@ -382,10 +382,12 @@
     });
     $('#fbStars').addEventListener('mouseleave', () => paint(rating));
 
+    // The rating is not a form field, so it rides along in a hidden input.
+    const ratingField = $('#fbRatingField');
+
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const data = new FormData(form);
-      const message = String(data.get('message') || '').trim();
+      const message = String(new FormData(form).get('message') || '').trim();
 
       if (message.length < 10) {
         note.className = 'fb-note bad';
@@ -398,33 +400,35 @@
       note.className = 'fb-note';
       note.textContent = 'Sending…';
 
-      /* Netlify Forms would need a build-time form definition, and there is no
-         build step here. Opening a prefilled email keeps the message going
-         straight to a person, with nothing collected in between. */
-      const body = [
-        `Rating: ${rating ? `${rating}/5` : 'not given'}`,
-        `Name: ${String(data.get('name') || '').trim() || '(not given)'}`,
-        `Reply to: ${String(data.get('email') || '').trim() || '(anonymous)'}`,
-        '',
-        message,
-        '',
-        `— sent from ${location.href}`,
-      ].join(String.fromCharCode(10));
+      if (ratingField) ratingField.value = rating ? String(rating) : '';
 
-      const href = 'mailto:shashwatmishra062@gmail.com'
-        + '?subject=' + encodeURIComponent(`SMARAN.AI feedback${rating ? ` (${rating}/5)` : ''}`)
-        + '&body=' + encodeURIComponent(body);
+      /* Posted to Netlify Forms, which is what actually delivers it. The
+         previous version opened a mailto: link, which looked like it had sent
+         something and had not - nothing reached anyone unless the visitor
+         happened to have a desktop mail client set up and then pressed send
+         themselves. */
+      try {
+        const response = await fetch('/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(new FormData(form)).toString(),
+        });
+        if (!response.ok) throw new Error(String(response.status));
 
-      window.location.href = href;
-
-      setTimeout(() => {
-        submit.disabled = false;
+        form.reset();
+        rating = 0;
+        paint(0);
+        scoreLabel.textContent = 'not rated';
         note.className = 'fb-note ok';
-        note.textContent = 'Your mail app should have opened with it ready to send.';
-      }, 900);
+        note.textContent = 'Sent. Thank you — it went straight to the developer.';
+      } catch (err) {
+        note.className = 'fb-note bad';
+        note.textContent = 'That did not send. Please try again in a moment.';
+      } finally {
+        submit.disabled = false;
+      }
     });
   }
-
 
   /* ------------------------------------------------- living mock screens */
 

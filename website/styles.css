@@ -1938,3 +1938,75 @@ html.motion-calm #codeRain { display: none; }
 @media (prefers-reduced-motion: reduce) {
   html:not(.motion-full) #codeRain { display: none; }
 }
+
+
+/* ---------------------------------------------------------------------
+   Editor extension
+   --------------------------------------------------------------------- */
+
+.ide-grid { display: grid; grid-template-columns: minmax(0, 620px); justify-content: center; }
+
+.ide-card {
+  position: relative; overflow: hidden;
+  padding: 30px;
+  border: 1px solid var(--line); border-radius: 20px;
+  background: var(--panel);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  transition: transform .4s var(--ease), box-shadow .4s;
+}
+.ide-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 70px rgba(0,0,0,.5), 0 0 50px rgba(239, 68, 68, .12);
+}
+.ide-halo {
+  position: absolute; inset: -1px; border-radius: 20px; pointer-events: none;
+  background: conic-gradient(from var(--a, 0deg),
+    transparent 0deg, rgba(239,68,68,.5) 70deg, transparent 150deg,
+    transparent 250deg, rgba(255,138,92,.4) 320deg, transparent 360deg);
+  opacity: 0; transition: opacity .4s;
+  animation: halo 7s linear infinite;
+  filter: blur(1px);
+}
+.ide-card:hover .ide-halo { opacity: .8; }
+.ide-card > *:not(.ide-halo) { position: relative; z-index: 1; }
+
+.ide-top { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; color: var(--red); }
+.ide-top h3 { margin: 0; font-size: 1.3rem; font-weight: 900; color: var(--text); letter-spacing: -.02em; }
+.ide-meta { margin: 3px 0 0; font-size: .82rem; color: var(--dim); }
+
+.ide-list { margin: 0 0 22px; padding: 0; list-style: none; }
+.ide-list li {
+  position: relative; padding: 8px 0 8px 24px;
+  font-size: .9rem; color: var(--muted);
+  border-bottom: 1px solid var(--line-soft);
+}
+.ide-list li:last-child { border: 0; }
+.ide-list li::before {
+  content: ''; position: absolute; left: 4px; top: 16px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--red); box-shadow: 0 0 8px var(--red);
+}
+
+.ide-note {
+  margin: 16px 0 0;
+  font-size: .82rem; line-height: 1.7; color: var(--dim);
+}
+.ide-note code {
+  padding: 2px 7px; border-radius: 6px;
+  background: rgba(0,0,0,.5); border: 1px solid var(--line-soft);
+  font-family: var(--mono); font-size: .78rem; color: #fca5a5;
+}
+.ide-note b { color: var(--muted); }
+
+/* The honeypot must be reachable by a bot and invisible to a person. */
+.fb-trap {
+  position: absolute !important;
+  left: -9999px;
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 620px) {
+  .ide-card { padding: 22px 18px; }
+}
