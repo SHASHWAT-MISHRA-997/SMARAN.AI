@@ -39,9 +39,24 @@ from typing import Optional
 
 logger = logging.getLogger("usage_reporting")
 
-# Baked in at build time. With no endpoint the whole module is inert.
-ENDPOINT = os.getenv("SMARAN_ANALYTICS_URL", "").strip()
-INGEST_KEY = os.getenv("SMARAN_ANALYTICS_KEY", "").strip()
+# Where the counters go. An environment variable wins, so a developer can
+# point a local build somewhere else without rebuilding. Otherwise the
+# values come from analytics_config, which the build step generates.
+#
+# Environment variables cannot carry this on their own: PyInstaller reads
+# them at build time and the frozen app reads them at run time, so a value
+# set while building simply is not there when the app starts.
+#
+# The ingest key ships inside the binary and must be assumed extractable.
+# That is why it only permits writing counters, and why the dashboard has
+# a separate key that is never distributed.
+try:
+    from app import analytics_config as _baked
+except ImportError:  # a source checkout has no generated config
+    _baked = None
+
+ENDPOINT = (os.getenv("SMARAN_ANALYTICS_URL") or getattr(_baked, "ENDPOINT", "") or "").strip()
+INGEST_KEY = (os.getenv("SMARAN_ANALYTICS_KEY") or getattr(_baked, "INGEST_KEY", "") or "").strip()
 
 APP_VERSION = os.getenv("SMARAN_APP_VERSION", "2.8.2")
 HEARTBEAT_HOURS = 12

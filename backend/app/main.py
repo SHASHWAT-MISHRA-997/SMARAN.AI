@@ -2175,7 +2175,11 @@ def _note_route_success(provider: str, model: str) -> None:
 _CLOUD_AUTO_PROVIDER_ORDER = ("gemini", "groq", "cerebras", "together", "openrouter",
                               "mistral", "deepseek", "nvidia", "sambanova", "openai", "anthropic")
 _CLOUD_AUTO_MODEL_PREFERENCES = {
-    "gemini": (r"flash-latest", r"2\.\d+-flash$", r"flash", r"pro"),
+    # Concrete versions before the "-latest" aliases. The aliases have been
+    # answering 503 while the versioned models they stand for reply in about
+    # two seconds, and 2.x is retired - Google returns 404 and points at 3.x.
+    "gemini": (r"^gemini-\d+\.\d+-flash$", r"^gemini-\d+\.\d+-flash-lite$",
+               r"^gemini-\d+-flash", r"flash-latest$", r"flash", r"pro"),
     "groq": (r"llama.*70b.*versatile", r"llama.*8b", r"llama"),
     "openrouter": (r":free$",),
     # NVIDIA's catalogue lists many models its chat endpoint will not serve
@@ -2191,31 +2195,42 @@ _CLOUD_AUTO_MODEL_PREFERENCES = {
 _cloud_auto_model_cache: dict = {}
 
 
-async def _resolve_auto_cloud_model(provider: str, api_key: str) -> Optional[str]:
-    """Pick a usable model id from the provider's own live catalogue.
+async def _resolve_auto_cloud_models(provider: str, api_key: str, limit: int = 3) -> List[str]:
+    """Rank usable model ids from the provider's own live catalogue.
 
     Model names change over time, so the catalogue is queried rather than
-    hard-coded, and the answer is cached for the process lifetime.
+    hard-coded. Several are returned, not one: a provider whose first choice
+    is broken still has somewhere to go, which is the difference between a
+    slow reply and no reply at all.
+
+    The catalogue is cached, but the ranking is applied fresh every time so
+    a model in cooldown drops down the list instead of being chosen again.
     """
     cache_key = (provider, api_key[-8:])
-    if cache_key in _cloud_auto_model_cache:
-        return _cloud_auto_model_cache[cache_key]
-    try:
-        model_ids, _ = await _fetch_cloud_provider_models(provider, api_key)
-    except Exception as exc:  # noqa: BLE001 - a dead key must not break chat
-        logger.warning(f"Auto cloud routing could not list {provider} models: {exc}")
-        return None
-    chosen = None
-    for pattern in _CLOUD_AUTO_MODEL_PREFERENCES.get(provider, ()):  # preferred shapes first
-        matches = [m for m in model_ids if re.search(pattern, m, re.I)]
-        if matches:
-            chosen = sorted(matches, key=len)[0]
-            break
-    if not chosen and model_ids:
-        chosen = model_ids[0]
-    _cloud_auto_model_cache[cache_key] = chosen
-    return chosen
+    model_ids = _cloud_auto_model_cache.get(cache_key)
+    if model_ids is None:
+        try:
+            model_ids, _ = await _fetch_cloud_provider_models(provider, api_key)
+        except Exception as exc:  # noqa: BLE001 - a dead key must not break chat
+            logger.warning(f"Auto cloud routing could not list {provider} models: {exc}")
+            return []
+        _cloud_auto_model_cache[cache_key] = model_ids
 
+    ranked: List[str] = []
+    for pattern in _CLOUD_AUTO_MODEL_PREFERENCES.get(provider, ()):  # preferred shapes first
+        matches = sorted((m for m in model_ids if re.search(pattern, m, re.I)), key=len)
+        for match in matches:
+            if match not in ranked:
+                ranked.append(match)
+    for model in model_ids:  # anything the patterns missed, as a last resort
+        if model not in ranked:
+            ranked.append(model)
+
+    # A route that just failed goes to the back rather than being dropped:
+    # if every model is in cooldown, a stale one still beats no reply.
+    fresh = [m for m in ranked if not _route_in_cooldown(provider, m)]
+    tired = [m for m in ranked if _route_in_cooldown(provider, m)]
+    return (fresh + tired)[:limit]
 
 async def _auto_cloud_candidates() -> List[dict]:
     """Routes derived from whichever provider keys the user has configured.
@@ -2228,8 +2243,7 @@ async def _auto_cloud_candidates() -> List[dict]:
         api_key = os.getenv(env_name, "").strip() if env_name else ""
         if not api_key:
             continue
-        model = await _resolve_auto_cloud_model(provider, api_key)
-        if model:
+        for model in await _resolve_auto_cloud_models(provider, api_key):
             candidates.append({"provider": provider, "model": model, "api_key": api_key})
     return candidates
 

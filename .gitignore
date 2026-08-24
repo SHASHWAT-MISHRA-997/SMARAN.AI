@@ -78,3 +78,6 @@ keystore.properties
 # Built installers. These are attached to GitHub Releases instead, which
 # is where large binaries belong.
 dist-release/
+
+# Generated at build time; carries the analytics ingest key.
+backend/app/analytics_config.py
