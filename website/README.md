@@ -18,36 +18,32 @@ python -m http.server 8899
 
 Then open <http://127.0.0.1:8899>.
 
-## Before it goes live — the download links
+## Where the downloads come from
 
-The two download buttons point at GitHub Releases:
+The source repository is **private**. Release assets are only publicly
+downloadable from a public repository, so the builds live in a separate one
+that holds nothing else:
 
 ```
-https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI-Setup.exe
-https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk
+https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads
 ```
 
-**These 404 right now.** The `SMARAN.AI` repository is not public, so there is
-no release for them to resolve to. Two things have to be true before the
-buttons work:
-
-1. The repository is public.
-2. A release exists whose attached files are named exactly
-   `SMARAN.AI-Setup.exe` and `SMARAN.AI.apk`.
-
-To publish a release with the current builds:
+Publishing a new build:
 
 ```bash
-gh release create v2.8.2 dist-release/SMARAN.AI-Setup.exe dist-release/SMARAN.AI.apk --title "SMARAN.AI 2.8.2" --notes "Windows installer and Android APK."
+gh release create vX.Y.Z dist-release/SMARAN.AI-Setup.exe dist-release/SMARAN.AI.apk   --repo SHASHWAT-MISHRA-997/SMARAN.AI-downloads --title "SMARAN.AI X.Y.Z"
 ```
 
-GitHub Releases is the right home for these files: it accepts up to 2 GB per
-file and serves them free, which neither Netlify nor Vercel will do for a
-233 MB installer on a free plan.
+The file names matter: the page links to `releases/latest/download/<name>`, so
+they have to stay `SMARAN.AI-Setup.exe` and `SMARAN.AI.apk`.
 
-If you would rather not make the repository public, put the two files on any
-host that serves a direct link and change the two `href`s in `index.html` —
-search for `releases/latest/download`.
+GitHub Releases is the right home for these: it accepts up to 2 GB per file
+and serves them free, which neither Netlify nor Vercel will do for a 233 MB
+installer on a free plan.
+
+**Order matters when changing visibility.** Confirm the downloads repo is
+serving before locking anything else down — a private repository's release
+assets 404 for everyone, which silently breaks every download button.
 
 ## Deploying
 
@@ -71,14 +67,20 @@ so the security headers will not apply there.
 
 - **Nothing is fingerprinted**, so `netlify.toml` caches CSS and JS for an hour
   rather than a year. Raise it once you stop changing them daily.
+- **The mock screens are CSS, not screenshots**, and they animate: the hub
+  cycles its filters, the chat answers, the call changes state. Each loop only
+  runs while its screen is on the viewport.
 - **The "screens" in the showcase are CSS, not screenshots.** They stay in
   scale on every viewport, weigh nothing, and never show a stale build of the
   interface. If you swap in real screenshots, remember they need retaking every
   time the UI moves.
-- **Every animation is decorative.** `prefers-reduced-motion` switches all of
-  it off, and the page still reads correctly — keep it that way.
-- **The version number appears twice**: the hero pill and the footer. Search
-  for `2.8.2`.
+- **Motion is always on**, by the owner's decision. The stylesheet still
+  carries `prefers-reduced-motion` rules for anyone who loads the page without
+  the script, but `main.js` asserts `motion-full` on the document.
+- **No version number is shown on the page**, by the owner's decision. The
+  release tag still carries one; the site deliberately does not, so it cannot
+  go stale between builds.
+
 ## Every number on the page, and where it comes from
 
 Nothing here is estimated. If you change any of these in the app, change them
@@ -89,6 +91,7 @@ here too — a landing page that overstates is worse than one that says less.
 | 63 models | `len(MODELS_CATALOG)` in `backend/app/models_catalog.py` |
 | 9 screen sizes tested | the viewport list in `frontend/tests/visual/responsive.spec.js` |
 | 3 platforms shipped | Windows installer, Android APK, VS Code extension |
+| No version shown | Deliberate: the release tag carries it, the page does not |
 | 233 MB / 31 MB | `dist-release/SMARAN.AI-Setup.exe` and `SMARAN.AI.apk` |
 | Android 7.0+ | `minSdkVersion = 24` in `frontend/android/variables.gradle` |
 | 64-bit Windows | `ArchitecturesAllowed=x64compatible` in `installer/*.iss` |
