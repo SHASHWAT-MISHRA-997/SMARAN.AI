@@ -213,6 +213,29 @@ from app import usage_reporting
 usage_reporting.start()
 
 
+@app.on_event("startup")
+async def _load_enabled_plugins() -> None:
+    """Bring up whatever the user has switched on.
+
+    The manager could always do this; nothing called it, so plugins were
+    registered definitions that never became running code. Failures are
+    logged rather than raised: one plugin missing a key must not stop the
+    app from starting.
+    """
+    try:
+        from app.plugin_system import plugin_manager
+
+        results = await plugin_manager.load_all()
+        running = sorted(name for name, ok in results.items() if ok)
+        if running:
+            logger.info(f"Plugins running: {', '.join(running)}")
+        idle = sorted(name for name, ok in results.items() if not ok)
+        if idle:
+            logger.info(f"Plugins registered but not started: {', '.join(idle)}")
+    except Exception as exc:  # noqa: BLE001 - never block startup
+        logger.warning(f"Plugin load pass failed: {exc}")
+
+
 # Some providers (Gemini) authenticate with the key in the query string, and
 # httpx logs every request URL at INFO level — which writes the user's secret
 # key into the log file. Keep that logger quiet.

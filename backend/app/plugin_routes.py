@@ -130,16 +130,30 @@ def install_plugin_from_repo(request: PluginInstallRequest, background_tasks: Ba
     )
 
 @router.post("/{plugin_name}/enable")
-def enable_plugin(plugin_name: str):
-    """Enable a registered definition without claiming runtime readiness."""
+async def enable_plugin(plugin_name: str):
+    """Enable a plugin and load it, reporting what actually happened.
+
+    This used to set a flag and return, so a plugin stayed at
+    setup_required however many times it was switched on. It now attempts
+    the load and reports the real outcome, including the reason when a
+    plugin cannot start - which is usually a missing key rather than a
+    fault, and is worth saying plainly.
+    """
     if plugin_name not in plugin_manager.configs:
         raise HTTPException(status_code=404, detail=f"Plugin {plugin_name} not found")
     
     plugin_manager.configs[plugin_name].enabled = True
+    loaded = await plugin_manager.load_plugin(plugin_name)
+    status = plugin_manager.get_status().get(plugin_name, {})
     return {
-        "message": f"Plugin {plugin_name} enabled in configuration; runtime setup is still required.",
+        "message": (
+            f"Plugin {plugin_name} is running."
+            if loaded
+            else f"Plugin {plugin_name} is enabled but could not start: "
+                 f"{status.get('status_detail', 'no detail available')}"
+        ),
         "enabled": True,
-        "loaded": plugin_manager.is_plugin_active(plugin_name),
+        "loaded": loaded,
         "runtime_status": "active" if plugin_manager.is_plugin_active(plugin_name) else "setup_required",
     }
 
