@@ -11,6 +11,16 @@ import {
  * a year-long window about as cheap as a week.
  */
 
+/**
+ * Reads use strong consistency.
+ *
+ * The default is eventual, and the lag is tens of seconds: a dashboard would
+ * show numbers that quietly lag reality, and worse, an erasure request would
+ * list a stale set of events and leave some behind while reporting success.
+ * Correctness matters more here than the small latency cost.
+ */
+const readStore = (name) => getStore({ name, consistency: 'strong' });
+
 const listDays = async (store, days) => {
   const batches = await Promise.all(
     days.map(async (day) => {
@@ -37,8 +47,8 @@ const summary = async (url) => {
     end: url.searchParams.get('end'),
   });
 
-  const events = getStore('app-events');
-  const installs = getStore('installs');
+  const events = readStore('events-v2');
+  const installs = readStore('installs');
 
   const windowDays = daysBetween(from, to);
   const priorFrom = shiftDay(from, -span);
@@ -100,7 +110,7 @@ const summary = async (url) => {
 
 const installsRoute = async (url) => {
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 100, 1), 1000);
-  const store = getStore('installs');
+  const store = readStore('installs');
   const { blobs } = await store.list();
   const rows = (await Promise.all(blobs.map((b) => store.get(b.key, { type: 'json' }))))
     .filter(Boolean)
@@ -111,7 +121,7 @@ const installsRoute = async (url) => {
 
 const recentRoute = async (url) => {
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 120, 1), 1000);
-  const store = getStore('app-events');
+  const store = readStore('events-v2');
   // Walk back a day at a time and stop as soon as there is enough, rather
   // than listing the whole history to show the newest hundred.
   const rows = [];
@@ -144,8 +154,13 @@ const eraseRoute = async (url) => {
   const installId = url.searchParams.get('install_id');
   if (!installId) return json({ detail: 'install_id is required.' }, 400);
 
-  const events = getStore('app-events');
-  const installs = getStore('installs');
+  // List through the strongly consistent view so nothing recent is missed,
+  // but delete through a plain handle: deletes issued against the strong
+  // handle reported success and removed nothing.
+  const events = readStore('events-v2');
+  const installs = readStore('installs');
+  const eventWrites = getStore('events-v2');
+  const installWrites = getStore('installs');
 
   // Only the days this installation could have written to. Walking a fixed
   // ten years would be thousands of listings and would time out long before
@@ -158,12 +173,12 @@ const eraseRoute = async (url) => {
     span.map(async (day) => {
       const { blobs } = await events.list({ prefix: `${day}/` });
       const mine = blobs.filter((b) => decodeEventKey(b.key).install_id === installId);
-      await Promise.all(mine.map((b) => events.delete(b.key)));
+      await Promise.all(mine.map((b) => eventWrites.delete(b.key)));
       return mine.length;
     }),
   );
 
-  await installs.delete(installId);
+  await installWrites.delete(installId);
   return json({
     erased: installId,
     events_removed: removals.reduce((a, b) => a + b, 0),

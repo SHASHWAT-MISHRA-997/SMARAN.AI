@@ -49,7 +49,7 @@ export default async (req) => {
   const osVersion = body.os_version ? String(body.os_version).slice(0, 64) : '';
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, '+00:00');
 
-  const events = getStore('app-events');
+  const events = getStore('events-v2');
   const installs = getStore('installs');
 
   // A body, not an empty string. Blobs written empty show up in list() but

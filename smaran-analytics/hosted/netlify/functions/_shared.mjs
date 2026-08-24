@@ -51,19 +51,27 @@ export const json = (body, status = 200) =>
 export const dayOf = (iso) => iso.slice(0, 10);
 
 /* An event's whole record lives in its key, so a range can be aggregated by
-   listing prefixes without fetching a single blob body. Each field is encoded
-   because versions and platforms are free text and could contain the
-   separator. */
-const SEP = '~';
+   listing prefixes without fetching a single blob body.
+
+   The record is base64url-encoded rather than percent-encoded and joined.
+   Percent-encoding put characters like %3A and %2B in the key; listing
+   returned them decoded, so delete() was called with a key that had never
+   been written and silently removed nothing - which meant an erasure request
+   reported success and left the data in place. base64url has no character
+   that any layer will rewrite. */
+
+const b64url = (text) =>
+  Buffer.from(text, 'utf8').toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+const unb64url = (text) =>
+  Buffer.from(text.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
 
 export const encodeEventKey = ({ ts, event, platform, appVersion, installId }) =>
-  [ts, event, platform, appVersion, installId, Math.random().toString(36).slice(2, 8)]
-    .map(encodeURIComponent)
-    .join(SEP);
+  b64url(JSON.stringify([ts, event, platform, appVersion, installId, Math.random().toString(36).slice(2, 8)]));
 
 export const decodeEventKey = (key) => {
-  const [ts, event, platform, appVersion, installId] =
-    key.split('/').pop().split(SEP).map(decodeURIComponent);
+  const [ts, event, platform, appVersion, installId] = JSON.parse(unb64url(key.split('/').pop()));
   return { ts, event, platform, app_version: appVersion, install_id: installId };
 };
 
