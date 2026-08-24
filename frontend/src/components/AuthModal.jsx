@@ -175,11 +175,11 @@ const AuthModal = ({ isOpen, onClose, onSignedIn }) => {
   const strength = useMemo(() => {
     if (!password) return null;
     let score = 0;
-    if (password.length >= 6) score += 1;
     if (password.length >= 12) score += 1;
+    if (password.length >= 16) score += 1;
+    if (new Set(password).size >= 8) score += 1;
     if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score += 1;
-    if (/\d/.test(password)) score += 1;
-    if (/[^A-Za-z0-9]/.test(password)) score += 1;
+    if (/\d/.test(password) || /[^A-Za-z0-9]/.test(password)) score += 1;
     const labels = ['Too short', 'Weak', 'Fair', 'Good', 'Strong', 'Excellent'];
     const colours = ['#f43f5e', '#f97316', '#f59e0b', '#84cc16', '#22c55e', '#14b8a6'];
     return { score, label: labels[score], colour: colours[score], pct: (score / 5) * 100 };
@@ -286,7 +286,7 @@ const AuthModal = ({ isOpen, onClose, onSignedIn }) => {
               icon={Lock}
               type={showPassword ? 'text' : 'password'}
               required
-              minLength={6}
+              minLength={12}
               autoComplete={registering ? 'new-password' : 'current-password'}
               placeholder="Password"
               value={password}
@@ -317,7 +317,7 @@ const AuthModal = ({ isOpen, onClose, onSignedIn }) => {
                 </div>
                 <p className="text-[10px] text-zinc-500">
                   <span style={{ color: strength.colour }} className="font-bold">{strength.label}</span>
-                  {' · at least 6 characters required'}
+                  {' · 12 characters minimum, and not one from a known breach'}
                 </p>
               </div>
             )}

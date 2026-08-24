@@ -78,11 +78,9 @@ except Exception:
 def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
 
-def verify_password_strength(password: str) -> tuple[bool, str]:
-    """Validate password strength. Returns (is_valid, error_message)."""
-    if len(password) < 6:
-        return False, "Password must be at least 6 characters long"
-    return True, ""
+# Length and a breach check now live in app/password_policy.py. The rule
+# here used to be six characters and nothing else, so "123456" passed.
+from app.password_policy import verify_password_strength  # noqa: E402
 
 
 # Setup Logging
@@ -340,10 +338,30 @@ def healthcheck_ping():
     return {"status": "ok", "app": "SMARAN.AI", "version": "2.8.2"}
 
 
-# CORS configuration - Allow all local/LAN client origins
+# CORS: local and private-network clients only.
+#
+# This was allow_origins=["*"] with allow_credentials=True. Starlette
+# answers that pair by echoing back whichever Origin asked, so any website
+# the user happened to visit could call this API with their session cookie
+# attached and read the reply - conversations, uploaded files, and the
+# desktop action endpoints included.
+#
+# The frontend is served from this same origin, so it needs no CORS at all.
+# The regex exists for the paired phone, which reaches the machine over the
+# local network, and for the Android build whose WebView origin is
+# https://localhost.
+_LOCAL_ORIGIN_PATTERN = (
+    r"^https?://("
+    r"localhost|127\.\d+\.\d+\.\d+|\[::1\]|"
+    r"10\.\d+\.\d+\.\d+|"
+    r"192\.168\.\d+\.\d+|"
+    r"172\.(1[6-9]|2\d|3[01])\.\d+\.\d+"
+    r")(:\d+)?$"
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=_LOCAL_ORIGIN_PATTERN,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -745,8 +763,11 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         email_verified=current_user.email_verified
     )
 
+# Verification tokens are guessable if the endpoint is unlimited, so this
+# gets the same treatment as the other credential-bearing routes.
 @app.post("/api/auth/verify-email", response_model=dict)
-async def verify_email(req: EmailVerificationRequest, db: Session = Depends(get_db)):
+@auth_limiter.limit("20/hour")
+async def verify_email(req: EmailVerificationRequest, request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.verification_token == req.token).first()
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired verification token")
@@ -6310,6 +6331,9 @@ class SystemActionExecuteRequest(PydanticBaseModel):
     confirmation_expires_at: int = 0
     confirmed: bool = False
 
+# These four ran unauthenticated while every sibling route required a user.
+# The execute one performs machine operations, so reaching it without a
+# session was the gap that mattered.
 @app.get("/api/system-agent/status")
 def get_system_agent_status():
     return {
@@ -6325,7 +6349,7 @@ def get_system_agent_status():
 
 
 @app.post("/api/system-agent/diagnose")
-async def diagnose_system_problem(req: SystemDiagnoseRequest):
+async def diagnose_system_problem(req: SystemDiagnoseRequest, current_user: User = Depends(get_current_user)):
     return await SystemAgentService.diagnose(
         req.input,
         model=req.model,
@@ -6336,7 +6360,7 @@ async def diagnose_system_problem(req: SystemDiagnoseRequest):
 
 
 @app.post("/api/system-agent/actions/preview")
-async def preview_system_action(req: SystemActionPreviewRequest):
+async def preview_system_action(req: SystemActionPreviewRequest, current_user: User = Depends(get_current_user)):
     try:
         return await SystemAgentService.preview(req.operation, req.params)
     except Exception as exc:
@@ -6344,7 +6368,7 @@ async def preview_system_action(req: SystemActionPreviewRequest):
 
 
 @app.post("/api/system-agent/actions/execute")
-async def execute_system_action(req: SystemActionExecuteRequest):
+async def execute_system_action(req: SystemActionExecuteRequest, current_user: User = Depends(get_current_user)):
     try:
         return await SystemAgentService.execute(
             req.operation,
