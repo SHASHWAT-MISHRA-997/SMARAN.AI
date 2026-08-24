@@ -29,6 +29,7 @@
 <canvas id="field" aria-hidden="true"></canvas>
 <div class="grid-floor" aria-hidden="true"></div>
 <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+<canvas id="codeRain" aria-hidden="true"></canvas>
 <div class="rain" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
 <div class="scanlines" aria-hidden="true"></div>
 <div class="noise" aria-hidden="true"></div>
@@ -49,19 +50,14 @@
       <a href="#showcase">In action</a>
       <a href="#how">How it works</a>
       <a href="#download">Download</a>
+      <a href="#feedback">Feedback</a>
       <a href="#privacy">Privacy</a>
       <a href="#faq">FAQ</a>
+      <a href="#developer">Developer</a>
     </nav>
 
     <div class="nav-cta">
-      <a class="btn btn-ghost sm" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI" target="_blank" rel="noopener">
-        <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-        GitHub
-      </a>
-      <button type="button" class="motion-toggle" id="motionToggle" aria-pressed="false"
-              title="Turn page animation on or off">
-        <span class="mt-dot" aria-hidden="true"></span><span id="motionLabel">Motion</span>
-      </button>
+      
       <a class="btn btn-primary sm magnetic" href="#download">Get it free</a>
     </div>
 
@@ -76,12 +72,11 @@
     <a href="#showcase">In action</a>
     <a href="#how">How it works</a>
     <a href="#download">Download</a>
+    <a href="#feedback">Feedback</a>
     <a href="#privacy">Privacy</a>
     <a href="#faq">FAQ</a>
+    <a href="#developer">Developer</a>
     <a class="btn btn-primary" href="#download">Get it free</a>
-    <button type="button" class="motion-toggle" id="motionToggleMobile" aria-pressed="false">
-      <span class="mt-dot" aria-hidden="true"></span><span>Motion</span>
-    </button>
   </div>
 </header>
 
@@ -96,6 +91,61 @@
         <span class="pill-dot"></span>
         Version 2.8.2 · Windows &amp; Android · Free
       </span>
+
+      <!-- The mascot: an ember with a face, drifting over the hero. Drawn
+           rather than fetched, so it costs nothing and scales cleanly. -->
+      <div class="mascot" id="mascot" aria-hidden="true">
+        <svg viewBox="0 0 120 132" width="120" height="132">
+          <defs>
+            <radialGradient id="emberFill" cx="50%" cy="34%" r="70%">
+              <stop offset="0%"   stop-color="#ffe0d2" />
+              <stop offset="30%"  stop-color="#ff9a6c" />
+              <stop offset="70%"  stop-color="#ef4444" />
+              <stop offset="100%" stop-color="#7d1010" />
+            </radialGradient>
+            <filter id="emberGlow" x="-70%" y="-70%" width="240%" height="240%">
+              <feGaussianBlur stdDeviation="6" result="b" />
+              <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+          </defs>
+
+          <path class="mascot-body" filter="url(#emberGlow)" fill="url(#emberFill)"
+                d="M60 6c26 0 44 20 44 46v52c0 5-5 8-9 5l-9-7-9 7c-3 2-6 2-9 0l-8-6-8 6c-3 2-6 2-9 0l-9-7-9 7c-4 3-9 0-9-5V52C16 26 34 6 60 6Z" />
+
+          <!-- The face is a group per expression; script shows one at a time,
+               so each is a real drawing rather than a tweened blob. -->
+          <g class="mascot-face" data-face="calm">
+            <g class="face face-calm">
+              <ellipse class="eye" cx="43" cy="54" rx="9.5" ry="11.5" />
+              <ellipse class="eye" cx="77" cy="54" rx="9.5" ry="11.5" />
+              <circle class="glint" cx="46.5" cy="49" r="3.1" />
+              <circle class="glint" cx="80.5" cy="49" r="3.1" />
+            </g>
+
+            <g class="face face-happy">
+              <path class="line" d="M34 56q9-11 18 0" />
+              <path class="line" d="M68 56q9-11 18 0" />
+              <path class="line" d="M50 74q10 9 20 0" />
+            </g>
+
+            <g class="face face-think">
+              <ellipse class="eye" cx="43" cy="54" rx="9.5" ry="11.5" />
+              <ellipse class="eye" cx="77" cy="54" rx="9.5" ry="11.5" />
+              <circle class="glint" cx="39" cy="49" r="3.1" />
+              <circle class="glint" cx="73" cy="49" r="3.1" />
+              <path class="line" d="M52 76h16" />
+            </g>
+
+            <g class="face face-wow">
+              <ellipse class="eye" cx="43" cy="52" rx="10.5" ry="13" />
+              <ellipse class="eye" cx="77" cy="52" rx="10.5" ry="13" />
+              <circle class="glint" cx="46.5" cy="46" r="3.4" />
+              <circle class="glint" cx="80.5" cy="46" r="3.4" />
+              <ellipse class="mouth-o" cx="60" cy="78" rx="6" ry="7.5" />
+            </g>
+          </g>
+        </svg>
+      </div>
 
       <h1 class="reveal" data-delay="1">
         <span class="glitch" data-text="Your AI.">Your AI.</span><br />
@@ -115,11 +165,11 @@
       </p>
 
       <div class="hero-cta reveal" data-delay="4">
-        <a class="btn btn-primary lg magnetic" href="#download" data-dl="windows">
+        <a class="btn btn-primary lg no-lift" href="#download" data-dl="windows">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10 4.6v6.9H3V5.5Zm0 13 7 .9v-6.8H3v5.9Zm8 1 10 1.3V12.5H11v7Zm0-15.9v7h10V3.2L11 4.6Z"/></svg>
           <span>Download for Windows<em>233 MB · .exe installer</em></span>
         </a>
-        <a class="btn btn-primary lg magnetic" href="#download" data-dl="android">
+        <a class="btn btn-primary lg no-lift" href="#download" data-dl="android">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M17.6 9.5H6.4v8.2c0 .6.5 1.1 1.1 1.1h1.1v3a1.2 1.2 0 0 0 2.4 0v-3h2v3a1.2 1.2 0 0 0 2.4 0v-3h1.1c.6 0 1.1-.5 1.1-1.1V9.5ZM4.2 9.3A1.2 1.2 0 0 0 3 10.5v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2Zm15.6 0a1.2 1.2 0 0 0-1.2 1.2v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2ZM15.1 3l1-1.5a.3.3 0 0 0-.5-.3l-1 1.5a6.3 6.3 0 0 0-5.2 0l-1-1.5a.3.3 0 0 0-.5.3l1 1.5A5.3 5.3 0 0 0 6.4 8.3h11.2a5.3 5.3 0 0 0-2.5-5.3ZM9.5 6.2a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Zm5 0a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Z"/></svg>
           <span>Download APK<em>31 MB · Android 7.0+</em></span>
         </a>
@@ -192,7 +242,8 @@
           class="stage-video"
           src="assets/character-idle.mp4"
           autoplay muted loop playsinline
-          preload="metadata"
+          poster="assets/character-poster.jpg"
+          preload="auto"
           aria-label="The SMARAN.AI assistant character, idling"
         ></video>
         <span class="stage-scan" aria-hidden="true"></span>
@@ -374,15 +425,34 @@
         <div class="show-art" aria-hidden="true">
           <div class="screen">
             <div class="screen-body handui">
-              <svg viewBox="0 0 200 160" class="hand">
+              <svg viewBox="0 0 200 190" class="hand">
                 <g class="hand-lines">
-                  <path d="M100 140 L100 96 M100 96 L72 62 M100 96 L88 50 M100 96 L104 44 M100 96 L120 52 M100 96 L134 70" />
+                  <!-- palm -->
+                  <path d="M100 170 L66 118 M100 170 L88 108 M100 170 L106 104 M100 170 L124 110 M100 170 L142 128" />
+                  <path class="webbing" d="M66 118 L88 108 L106 104 L124 110 L142 128" />
+                  <!-- thumb -->
+                  <path d="M66 118 L48 96 L38 78" />
+                  <!-- index -->
+                  <path d="M88 108 L82 74 L79 52 L77 36" />
+                  <!-- middle -->
+                  <path d="M106 104 L106 68 L106 44 L106 28" />
+                  <!-- ring -->
+                  <path d="M124 110 L130 76 L134 54 L136 38" />
+                  <!-- little -->
+                  <path d="M142 128 L154 102 L160 84 L164 70" />
                 </g>
                 <g class="hand-dots">
-                  <circle cx="100" cy="140" r="5"/><circle cx="100" cy="96" r="4"/>
-                  <circle cx="72" cy="62" r="3.5"/><circle cx="88" cy="50" r="3.5"/>
-                  <circle cx="104" cy="44" r="3.5"/><circle cx="120" cy="52" r="3.5"/>
-                  <circle cx="134" cy="70" r="3.5"/>
+                  <circle cx="100" cy="170" r="5.5"/>
+                  <circle cx="66" cy="118" r="3.6"/><circle cx="48" cy="96" r="3.4"/><circle cx="38" cy="78" r="3.8"/>
+                  <circle cx="88" cy="108" r="3.6"/><circle cx="82" cy="74" r="3.4"/><circle cx="79" cy="52" r="3.2"/><circle cx="77" cy="36" r="3.8"/>
+                  <circle cx="106" cy="104" r="3.6"/><circle cx="106" cy="68" r="3.4"/><circle cx="106" cy="44" r="3.2"/><circle cx="106" cy="28" r="3.8"/>
+                  <circle cx="124" cy="110" r="3.6"/><circle cx="130" cy="76" r="3.4"/><circle cx="134" cy="54" r="3.2"/><circle cx="136" cy="38" r="3.8"/>
+                  <circle cx="142" cy="128" r="3.6"/><circle cx="154" cy="102" r="3.4"/><circle cx="160" cy="84" r="3.2"/><circle cx="164" cy="70" r="3.6"/>
+                </g>
+                <!-- the pinch it is currently reading -->
+                <g class="hand-pinch">
+                  <line x1="38" y1="78" x2="77" y2="36" />
+                  <circle cx="57.5" cy="57" r="7" />
                 </g>
               </svg>
               <span class="hand-tag">PINCH</span>
@@ -523,8 +593,8 @@
             <p class="dl-meta">10 &amp; 11 · 64-bit · 233 MB</p>
           </div>
         </div>
-        <a class="btn btn-primary block magnetic" id="dlWin"
-           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI-Setup.exe">
+        <a class="btn btn-primary block no-lift" id="dlWin"
+           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI-Setup.exe">
           Download installer
         </a>
         <ul class="dl-list">
@@ -550,8 +620,8 @@
             <p class="dl-meta">7.0 and newer · 31 MB</p>
           </div>
         </div>
-        <a class="btn btn-primary block magnetic" id="dlApk"
-           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk">
+        <a class="btn btn-primary block no-lift" id="dlApk"
+           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI.apk">
           Download APK
         </a>
         <ul class="dl-list">
@@ -569,26 +639,16 @@
 
     <div class="eco reveal">
       <h3 class="eco-h">The rest of the family</h3>
-      <div class="eco-row">
-        <a class="eco-card" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/tree/main/vscode-smaran-coding-agent" target="_blank" rel="noopener">
-          <span class="eco-ico">&lt;/&gt;</span>
-          <b>VS Code extension</b>
-          <em>Coding help inside your editor</em>
-        </a>
-        <a class="eco-card" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI" target="_blank" rel="noopener">
-          <span class="eco-ico">{ }</span>
-          <b>Source code</b>
-          <em>Read it, build it yourself</em>
-        </a>
-        <a class="eco-card" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases" target="_blank" rel="noopener">
+      <div class="eco-row eco-row-single">
+        <a class="eco-card" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases" target="_blank" rel="noopener">
           <span class="eco-ico">&darr;</span>
           <b>All releases</b>
-          <em>Older versions and changelogs</em>
+          <em>Older versions and release notes</em>
         </a>
       </div>
+
+
     </div>
-
-
   </div>
 </section>
 
@@ -759,7 +819,7 @@
         Questions and bug reports are welcome.
       </p>
 
-      <div class="dev-links">
+      <div class="dev-links dev-links-single">
         <a class="dev-link linkedin" href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener">
           <span class="dev-ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
@@ -773,16 +833,7 @@
           <span class="dev-arrow" aria-hidden="true">&#8599;</span>
         </a>
 
-        <a class="dev-link github" href="https://github.com/SHASHWAT-MISHRA-997" target="_blank" rel="noopener">
-          <span class="dev-ico" aria-hidden="true">
-            <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-          </span>
-          <span class="dev-text">
-            <b>GitHub</b>
-            <em>Every line of this, readable</em>
-          </span>
-          <span class="dev-arrow" aria-hidden="true">&#8599;</span>
-        </a>
+        
       </div>
     </article>
   </div>
@@ -795,12 +846,7 @@
     <h2>Stop renting your assistant.</h2>
     <p>Install it once. It is yours after that.</p>
     <div class="hero-cta center">
-      <a class="btn btn-primary lg magnetic" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI-Setup.exe">
-        <span>Windows installer<em>233 MB</em></span>
-      </a>
-      <a class="btn btn-primary lg magnetic" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk">
-        <span>Android APK<em>31 MB</em></span>
-      </a>
+      <a class="btn btn-primary lg no-lift" href="#download">Take me to the downloads</a>
     </div>
   </div>
 </section>
@@ -821,7 +867,6 @@
       <a href="#download">Download</a>
       <a href="#privacy">Privacy</a>
       <a href="#faq">FAQ</a>
-      <a href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI" target="_blank" rel="noopener">GitHub</a>
       <a href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener">LinkedIn</a>
     </nav>
   </div>

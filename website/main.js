@@ -12,36 +12,16 @@
      "render nothing" left those visitors looking at a dead page. The particle
      field stays, drifting more slowly; only the things that chase the cursor
      or retype themselves are dropped. */
-  /* Motion, and who decides it.
-     The system preference is the default, because someone who set it for
-     motion sickness means it. But plenty of machines report it simply because
-     Windows ships with animations off, and those visitors were getting a page
-     that looked broken rather than calm. So an explicit choice wins over the
-     system, and is remembered. */
-  const MOTION_KEY = 'smaran-motion';
-  const systemCalm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const stored = localStorage.getItem(MOTION_KEY);
-  let full = stored ? stored === 'full' : !systemCalm;
-
-  const applyMotion = () => {
-    document.documentElement.classList.toggle('motion-full', full);
-    document.documentElement.classList.toggle('motion-calm', !full);
-    document.querySelectorAll('.motion-toggle').forEach((b) => {
-      b.setAttribute('aria-pressed', String(full));
-      const label = b.querySelector('span:last-child');
-      if (label) label.textContent = full ? 'Motion on' : 'Motion off';
-    });
-    window.dispatchEvent(new CustomEvent('smaran:motion', { detail: full }));
-  };
-  applyMotion();
-
-  document.querySelectorAll('.motion-toggle').forEach((b) => b.addEventListener('click', () => {
-    full = !full;
-    localStorage.setItem(MOTION_KEY, full ? 'full' : 'calm');
-    applyMotion();
-  }));
-
-  const calm = !full;
+  /* Motion is always on, by the owner's decision.
+     The system's reduced-motion preference is deliberately not consulted:
+     this page is a shop window for software whose whole pitch is that it
+     feels alive, and a still version of it misrepresents the product. The
+     stylesheet keeps its reduced-motion rules for anyone who loads the page
+     without this script. */
+  document.documentElement.classList.add('motion-full');
+  document.documentElement.classList.remove('motion-calm');
+  const full = true;
+  const calm = false;
   const $  = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -158,7 +138,7 @@
     if (calm) {
       typer.textContent = lines[0];
     } else {
-      let li = 0, ci = 0, erasing = false;
+      let li = 0, ci = 0, erasing = false, wasErasing = null;
       const tick = () => {
         const line = lines[li];
         ci += erasing ? -1 : 1;
@@ -167,9 +147,12 @@
         let wait = erasing ? 28 : 52;
         if (!erasing && ci === line.length) { erasing = true; wait = 1900; }
         else if (erasing && ci === 0) { erasing = false; li = (li + 1) % lines.length; wait = 320; }
-        // The character listens to this, so she talks while a line is being
-        // typed and returns to idle in the pause afterwards.
-        window.dispatchEvent(new CustomEvent('smaran:typing', { detail: !erasing }));
+        // Only announce the change, not every keystroke: listeners were being
+        // re-triggered twenty times a second and could never move on.
+        if (erasing !== wasErasing) {
+          wasErasing = erasing;
+          window.dispatchEvent(new CustomEvent('smaran:typing', { detail: !erasing }));
+        }
         setTimeout(tick, wait);
       };
       setTimeout(tick, 700);
@@ -348,6 +331,16 @@
   /* She switches to the talking clip while the line above is being typed,
      so the two read as one thing rather than two loops running side by side. */
   const charVideo = $('#charVideo');
+  if (charVideo) {
+    /* Brave and Safari refuse autoplay by default even for a muted clip, and
+       a refused video paints its poster and stops. Ask once on load, then
+       again after the first interaction, which browsers do accept. */
+    const nudge = () => charVideo.play().catch(() => {});
+    nudge();
+    ['pointerdown', 'keydown', 'touchstart'].forEach((evt) =>
+      window.addEventListener(evt, nudge, { once: true, passive: true }));
+  }
+
   if (charVideo && !calm) {
     let talking = false;
     const setClip = (name) => {
@@ -504,9 +497,7 @@
       return () => clearInterval(id);
     });
   };
-  if (full) liveScreens();
-  // Turning motion on after load has to start them too.
-  window.addEventListener('smaran:motion', (e) => { if (e.detail) liveScreens(); });
+  liveScreens();
 
   /* --------------------------------------------------- scroll parallax */
 
@@ -536,6 +527,134 @@
       window.addEventListener('scroll', onMove, { passive: true });
       window.addEventListener('resize', onMove);
     }
+  }
+
+
+  /* ----------------------------------------------------------- code rain */
+
+  /* Columns of falling glyphs. Characters are drawn from the alphabet the app
+     is actually written in - braces, arrows, hex - rather than the katakana
+     of the film, because this is a programming tool and not a homage.
+
+     Each column keeps its own head position and speed, and the canvas is
+     painted with a translucent black each frame so older glyphs fade instead
+     of being cleared, which is what gives the trail. */
+  const rainCanvas = $('#codeRain');
+  if (rainCanvas) {
+    const ctx = rainCanvas.getContext('2d', { alpha: true });
+    const GLYPHS = '01{}[]()<>/\|=+-*&^%$#@!?;:.,_~abcdefABCDEF0123456789';
+    const FONT_SIZE = 15;
+    let columns = [];
+    let raf = 0;
+    let running = false;
+
+    const build = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      rainCanvas.width = innerWidth * dpr;
+      rainCanvas.height = innerHeight * dpr;
+      rainCanvas.style.width = innerWidth + 'px';
+      rainCanvas.style.height = innerHeight + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.font = `${FONT_SIZE}px "JetBrains Mono", ui-monospace, monospace`;
+      ctx.textBaseline = 'top';
+
+      const count = Math.ceil(innerWidth / (FONT_SIZE + 6));
+      columns = Array.from({ length: count }, () => ({
+        y: Math.random() * -innerHeight,
+        speed: 0.9 + Math.random() * 2.2,
+        // A few columns run bright, so the field has some depth to it.
+        hot: Math.random() < 0.16,
+      }));
+    };
+
+    const frame = () => {
+      // Fade rather than clear: this is what leaves the tail behind each head.
+      ctx.fillStyle = 'rgba(7, 7, 10, 0.09)';
+      ctx.fillRect(0, 0, innerWidth, innerHeight);
+
+      const step = FONT_SIZE + 6;
+      columns.forEach((col, i) => {
+        const x = i * step;
+        const glyph = GLYPHS[(Math.random() * GLYPHS.length) | 0];
+
+        // The head is brightest; everything it has already passed is dimmer.
+        ctx.fillStyle = col.hot ? 'rgba(255, 150, 120, .95)' : 'rgba(239, 68, 68, .72)';
+        ctx.fillText(glyph, x, col.y);
+
+        col.y += col.speed * (FONT_SIZE * 0.22);
+        if (col.y > innerHeight + 40) {
+          col.y = -Math.random() * 300;
+          col.speed = 0.9 + Math.random() * 2.2;
+          col.hot = Math.random() < 0.16;
+        }
+      });
+
+      raf = requestAnimationFrame(frame);
+    };
+
+    const start = () => {
+      if (running) return;
+      running = true;
+      build();
+      frame();
+    };
+    const stop = () => {
+      running = false;
+      cancelAnimationFrame(raf);
+      raf = 0;
+      ctx.clearRect(0, 0, innerWidth, innerHeight);
+    };
+
+    start();
+
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { if (running) build(); }, 180);
+    });
+
+    // A hidden tab should not keep drawing.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && running) { cancelAnimationFrame(raf); raf = 0; }
+      else if (!document.hidden && running && !raf) frame();
+    });
+  }
+
+
+  /* ------------------------------------------------------- mascot moods */
+
+  /* She cycles through expressions, lingers on calm, and reacts to the page:
+     thinking while the hero line types itself, delighted when someone hovers
+     a download. A face that only loops looks like a screensaver; one that
+     answers what you are doing looks like it is paying attention. */
+  const face = $('.mascot-face');
+  if (face) {
+    const MOODS = ['calm', 'happy', 'calm', 'think', 'calm', 'wow'];
+    let i = 0;
+    let hold = 0;
+
+    const show = (mood) => face.setAttribute('data-face', mood);
+
+    const drift = setInterval(() => {
+      if (hold > 0) { hold -= 1; return; }
+      i = (i + 1) % MOODS.length;
+      show(MOODS[i]);
+    }, 2600);
+
+    // Reacting beats looping, so these override the cycle for a few beats.
+    window.addEventListener('smaran:typing', (e) => {
+      if (!e.detail) return;
+      show('think');
+      hold = 1;
+    });
+
+    $$('.btn.no-lift').forEach((btn) => {
+      btn.addEventListener('pointerenter', () => { show('happy'); hold = 2; });
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) clearInterval(drift);
+    });
   }
 
 })();

@@ -44,7 +44,7 @@ body {
   font-family: var(--sans);
   font-size: 16px;
   line-height: 1.65;
-  overflow-x: hidden;
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -1102,7 +1102,10 @@ html.motion-calm .reveal { opacity: 1; transform: none; transition: none; }
 .ui-side .ui-row { height: 6px; }
 .ui-main { display: flex; flex-direction: column; gap: 9px; }
 
-.bub { padding: 10px 12px; border-radius: 12px; max-width: 88%; }
+.bub { padding: 10px 12px; border-radius: 12px; }
+.bub.ai { width: 88%; }
+.bub.user { width: 66%; }
+.bub.typing { width: auto; }
 .bub .ui-row { margin: 5px 0; }
 .bub.user {
   align-self: flex-end;
@@ -1294,8 +1297,12 @@ html.motion-calm .reveal { opacity: 1; transform: none; transition: none; }
 
 /* --- 05 pairing ------------------------------------------------------- */
 
-.pairart { display: flex; align-items: center; gap: 18px; }
-.screen.mini { max-width: 150px; padding: 16px; }
+/* The children inherit .screen's width:100%, and in a flex row that let them
+   shrink to almost nothing - the QR became a dot and the phone a bar. Fixed
+   widths with no shrink keep the two devices readable. */
+.pairart { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.pairart > * { flex: none; }
+.screen.mini { width: 150px; max-width: 150px; padding: 16px; }
 .qr {
   aspect-ratio: 1; border-radius: 8px;
   /* A QR-ish texture, not a scannable code — a real one pointing nowhere
@@ -1318,7 +1325,7 @@ html.motion-calm .reveal { opacity: 1; transform: none; transition: none; }
 .pairflow span:nth-child(3) { animation-delay: .4s; }
 @keyframes hop { 0%,100%{opacity:.25;transform:translateX(-4px)} 50%{opacity:1;transform:translateX(4px)} }
 
-.screen.phone.tiny { max-width: 120px; border-width: 5px; border-radius: 20px; }
+.screen.phone.tiny { width: 120px; max-width: 120px; border-width: 5px; border-radius: 20px; }
 .tiny-body { padding: 14px 11px; min-height: 190px; }
 
 /* --- 06 documents ----------------------------------------------------- */
@@ -1430,7 +1437,8 @@ html.motion-calm .reveal { opacity: 1; transform: none; transition: none; }
   .screen { max-width: 100%; }
   .ui-chat { grid-template-columns: 60px 1fr; gap: 10px; }
   .pairart { gap: 12px; }
-  .screen.mini { max-width: 118px; padding: 12px; }
+  .screen.mini { width: 118px; max-width: 118px; padding: 12px; }
+  .screen.phone.tiny { width: 96px; max-width: 96px; }
   .shows { gap: 56px; }
 }
 
@@ -1779,37 +1787,6 @@ html.motion-calm .reveal { opacity: 1; transform: none; transition: none; }
 }
 
 
-/* ---------------------------------------------------------------------
-   Motion switch
-   --------------------------------------------------------------------- */
-
-.motion-toggle {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 13px; border-radius: 11px;
-  border: 1px solid var(--line-soft);
-  background: rgba(255,255,255,.04);
-  color: var(--muted); cursor: pointer;
-  font: inherit; font-size: .78rem; font-weight: 700;
-  white-space: nowrap;
-  transition: color .3s, border-color .3s, background .3s, box-shadow .3s;
-}
-.motion-toggle:hover {
-  color: var(--text);
-  border-color: rgba(239, 68, 68, .45);
-  background: rgba(239, 68, 68, .1);
-  box-shadow: 0 0 20px rgba(239, 68, 68, .18);
-}
-.motion-toggle .mt-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--dim); transition: background .3s, box-shadow .3s;
-}
-.motion-toggle[aria-pressed="true"] { color: #fca5a5; border-color: rgba(239,68,68,.4); }
-.motion-toggle[aria-pressed="true"] .mt-dot {
-  background: var(--red); box-shadow: 0 0 10px var(--red);
-  animation: blip 1.6s ease-in-out infinite;
-}
-@media (max-width: 1000px) { .motion-toggle { display: none; } }
-.mobile-menu .motion-toggle { display: inline-flex; width: 100%; justify-content: center; margin-top: 10px; }
 
 
 /* Parallax drift, set from script. The variable defaults to zero, so a
@@ -1824,3 +1801,112 @@ html.motion-calm .meet-stage { transform: none; }
 .hub-tabs span { transition: background .4s, color .4s, border-color .4s; }
 .hub-dot { transition: background .4s, box-shadow .4s; }
 .call-status { transition: color .4s; }
+
+
+/* The owner asked for these two to sit still: they are the thing people came
+   for, and a button that lifts and sweeps under the cursor reads as decorative
+   rather than as the download. Colour still responds, so it is clearly live. */
+.btn.no-lift:hover,
+.btn.no-lift:active { transform: none; }
+.btn.no-lift::before { content: none; }
+.btn.no-lift.btn-primary:hover {
+  box-shadow: 0 6px 26px rgba(239, 68, 68, .32), inset 0 1px 0 rgba(255,255,255,.22);
+  filter: brightness(1.06);
+}
+
+
+/* ---------------------------------------------------------------------
+   Mascot
+   An ember with a face, drifting over the hero. She sits above the text and
+   is deliberately not interactive: pointer-events off, so she never gets in
+   the way of a link, and aria-hidden, so a screen reader is not told about a
+   decoration.
+   --------------------------------------------------------------------- */
+
+.mascot {
+  position: absolute;
+  right: 4%;
+  top: -18px;
+  width: clamp(74px, 9vw, 120px);
+  pointer-events: none;
+  z-index: 4;
+  animation: mascot-float 6.5s ease-in-out infinite;
+  filter: drop-shadow(0 12px 26px rgba(239, 68, 68, .45));
+}
+.mascot svg { width: 100%; height: auto; overflow: visible; }
+
+@keyframes mascot-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-16px) rotate(2deg); }
+}
+
+/* The hem ripples, so she reads as floating rather than pasted on. */
+.mascot-body { animation: mascot-breathe 3.4s ease-in-out infinite; transform-origin: 50% 40%; }
+@keyframes mascot-breathe {
+  0%, 100% { transform: scaleX(1) scaleY(1); }
+  50%      { transform: scaleX(1.035) scaleY(.975); }
+}
+
+.mascot .eye { fill: #1a0505; }
+.mascot .glint { fill: #fff; opacity: .95; }
+.mascot .line {
+  fill: none; stroke: #1a0505; stroke-width: 4; stroke-linecap: round;
+}
+.mascot .mouth-o { fill: #1a0505; }
+
+/* One expression is shown at a time; script swaps which. Each is a real
+   drawing, so the face changes shape rather than just squashing. */
+.mascot .face { opacity: 0; transition: opacity .28s ease; }
+.mascot-face[data-face="calm"]  .face-calm,
+.mascot-face[data-face="happy"] .face-happy,
+.mascot-face[data-face="think"] .face-think,
+.mascot-face[data-face="wow"]   .face-wow { opacity: 1; }
+
+/* A blink on top of whichever expression is showing. */
+.mascot-face .eye { animation: mascot-blink 5.6s ease-in-out infinite; transform-origin: center; }
+@keyframes mascot-blink {
+  0%, 93%, 100% { transform: scaleY(1); }
+  96%           { transform: scaleY(.08); }
+}
+
+/* The hero needs to be the positioning context, and the copy needs room so
+   she does not land on the first line of the headline. */
+.hero-copy { position: relative; }
+
+@media (max-width: 1024px) {
+  .mascot { right: 2%; top: -34px; }
+}
+@media (max-width: 620px) {
+  .mascot { width: 64px; right: 0; top: -26px; }
+}
+
+html.motion-calm .mascot,
+html.motion-calm .mascot-body,
+html.motion-calm .mascot-face .eye { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  html:not(.motion-full) .mascot,
+  html:not(.motion-full) .mascot-body,
+  html:not(.motion-full) .mascot-face .eye { animation: none; }
+}
+
+/* Single-item rows, now that the source links are gone. */
+.eco-row-single { grid-template-columns: minmax(0, 340px); justify-content: center; }
+.dev-links-single { grid-template-columns: minmax(0, 340px); }
+
+
+/* ---------------------------------------------------------------------
+   Code rain
+   Columns of falling glyphs behind everything, kept dim so it reads as
+   texture rather than as something you are meant to look at.
+   --------------------------------------------------------------------- */
+#codeRain {
+  position: fixed; inset: 0; z-index: 0;
+  pointer-events: none;
+  opacity: .3;
+  mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 92%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 92%);
+}
+html.motion-calm #codeRain { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  html:not(.motion-full) #codeRain { display: none; }
+}
