@@ -12,7 +12,36 @@
      "render nothing" left those visitors looking at a dead page. The particle
      field stays, drifting more slowly; only the things that chase the cursor
      or retype themselves are dropped. */
-  const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /* Motion, and who decides it.
+     The system preference is the default, because someone who set it for
+     motion sickness means it. But plenty of machines report it simply because
+     Windows ships with animations off, and those visitors were getting a page
+     that looked broken rather than calm. So an explicit choice wins over the
+     system, and is remembered. */
+  const MOTION_KEY = 'smaran-motion';
+  const systemCalm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const stored = localStorage.getItem(MOTION_KEY);
+  let full = stored ? stored === 'full' : !systemCalm;
+
+  const applyMotion = () => {
+    document.documentElement.classList.toggle('motion-full', full);
+    document.documentElement.classList.toggle('motion-calm', !full);
+    document.querySelectorAll('.motion-toggle').forEach((b) => {
+      b.setAttribute('aria-pressed', String(full));
+      const label = b.querySelector('span:last-child');
+      if (label) label.textContent = full ? 'Motion on' : 'Motion off';
+    });
+    window.dispatchEvent(new CustomEvent('smaran:motion', { detail: full }));
+  };
+  applyMotion();
+
+  document.querySelectorAll('.motion-toggle').forEach((b) => b.addEventListener('click', () => {
+    full = !full;
+    localStorage.setItem(MOTION_KEY, full ? 'full' : 'calm');
+    applyMotion();
+  }));
+
+  const calm = !full;
   const $  = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -401,6 +430,112 @@
         note.textContent = 'Your mail app should have opened with it ready to send.';
       }, 900);
     });
+  }
+
+
+  /* ------------------------------------------------- living mock screens */
+
+  /* The mock screens were pictures of an interface. They now behave like one:
+     the hub cycles its filters and re-sorts, the chat answers and waits, the
+     call rings. Each loop only runs while its screen is actually on the
+     viewport, so nothing burns a phone battery below the fold. */
+  let liveStarted = false;
+  const liveScreens = () => {
+    if (liveStarted) return;
+    liveStarted = true;
+
+    const whileVisible = (el, start) => {
+      if (!el || !('IntersectionObserver' in window)) return;
+      let stop = null;
+      const io = new IntersectionObserver(([entry]) => {
+        if (entry.isIntersecting && !stop) stop = start();
+        else if (!entry.isIntersecting && stop) { stop(); stop = null; }
+      }, { threshold: 0.25 });
+      io.observe(el);
+    };
+
+    /* Model Hub: the filter moves along, and the rows answer it. */
+    const hub = $('.hubui');
+    whileVisible(hub, () => {
+      const tabs = $$('.hub-tabs span', hub);
+      const rows = $$('.hub-row', hub);
+      let i = 0;
+      const tick = () => {
+        i = (i + 1) % tabs.length;
+        tabs.forEach((t, n) => t.classList.toggle('on', n === i));
+        // Re-light a different pair of rows, so the list reads as filtered.
+        rows.forEach((r, n) => {
+          const dot = r.querySelector('.hub-dot');
+          if (dot) dot.classList.toggle('on', (n + i) % 2 === 0);
+        });
+      };
+      const id = setInterval(tick, 1700);
+      return () => clearInterval(id);
+    });
+
+    /* Workspace: the assistant finishes a reply, then thinks about the next. */
+    const chat = $('.ui-chat');
+    whileVisible(chat, () => {
+      const typing = chat.querySelector('.bub.typing');
+      const answer = chat.querySelector('.bub.ai:not(.typing)');
+      if (!typing || !answer) return () => {};
+      let showing = true;
+      const tick = () => {
+        showing = !showing;
+        typing.style.opacity = showing ? '1' : '0.25';
+        answer.style.opacity = showing ? '1' : '0.65';
+      };
+      const id = setInterval(tick, 1400);
+      return () => clearInterval(id);
+    });
+
+    /* Speak: the status cycles the way a real call does. */
+    const call = $('.callui');
+    whileVisible(call, () => {
+      const status = call.querySelector('.call-status');
+      if (!status) return () => {};
+      const states = ['listening', 'thinking', 'speaking', 'listening'];
+      let i = 0;
+      const tick = () => {
+        i = (i + 1) % states.length;
+        status.firstChild.textContent = states[i];
+      };
+      const id = setInterval(tick, 2200);
+      return () => clearInterval(id);
+    });
+  };
+  if (full) liveScreens();
+  // Turning motion on after load has to start them too.
+  window.addEventListener('smaran:motion', (e) => { if (e.detail) liveScreens(); });
+
+  /* --------------------------------------------------- scroll parallax */
+
+  /* Section art drifts a little slower than the page. Small numbers on
+     purpose: enough to feel like depth, not enough to notice as an effect. */
+  if (!calm && window.matchMedia('(pointer: fine)').matches) {
+    const layers = [
+      { el: $('.orb'), rate: 0.06 },
+      { el: $('.meet-stage'), rate: 0.05 },
+    ].filter((l) => l.el);
+
+    if (layers.length) {
+      let ticking = false;
+      const onMove = () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          layers.forEach(({ el, rate }) => {
+            const r = el.getBoundingClientRect();
+            const fromCentre = (r.top + r.height / 2) - window.innerHeight / 2;
+            el.style.setProperty('--drift', `${(-fromCentre * rate).toFixed(1)}px`);
+          });
+          ticking = false;
+        });
+      };
+      onMove();
+      window.addEventListener('scroll', onMove, { passive: true });
+      window.addEventListener('resize', onMove);
+    }
   }
 
 })();

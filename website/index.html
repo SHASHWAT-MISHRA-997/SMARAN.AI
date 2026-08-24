@@ -58,6 +58,10 @@
         <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
         GitHub
       </a>
+      <button type="button" class="motion-toggle" id="motionToggle" aria-pressed="false"
+              title="Turn page animation on or off">
+        <span class="mt-dot" aria-hidden="true"></span><span id="motionLabel">Motion</span>
+      </button>
       <a class="btn btn-primary sm magnetic" href="#download">Get it free</a>
     </div>
 
@@ -75,6 +79,9 @@
     <a href="#privacy">Privacy</a>
     <a href="#faq">FAQ</a>
     <a class="btn btn-primary" href="#download">Get it free</a>
+    <button type="button" class="motion-toggle" id="motionToggleMobile" aria-pressed="false">
+      <span class="mt-dot" aria-hidden="true"></span><span>Motion</span>
+    </button>
   </div>
 </header>
 
@@ -112,7 +119,7 @@
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10 4.6v6.9H3V5.5Zm0 13 7 .9v-6.8H3v5.9Zm8 1 10 1.3V12.5H11v7Zm0-15.9v7h10V3.2L11 4.6Z"/></svg>
           <span>Download for Windows<em>233 MB · .exe installer</em></span>
         </a>
-        <a class="btn btn-ghost lg magnetic" href="#download" data-dl="android">
+        <a class="btn btn-primary lg magnetic" href="#download" data-dl="android">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M17.6 9.5H6.4v8.2c0 .6.5 1.1 1.1 1.1h1.1v3a1.2 1.2 0 0 0 2.4 0v-3h2v3a1.2 1.2 0 0 0 2.4 0v-3h1.1c.6 0 1.1-.5 1.1-1.1V9.5ZM4.2 9.3A1.2 1.2 0 0 0 3 10.5v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2Zm15.6 0a1.2 1.2 0 0 0-1.2 1.2v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2ZM15.1 3l1-1.5a.3.3 0 0 0-.5-.3l-1 1.5a6.3 6.3 0 0 0-5.2 0l-1-1.5a.3.3 0 0 0-.5.3l1 1.5A5.3 5.3 0 0 0 6.4 8.3h11.2a5.3 5.3 0 0 0-2.5-5.3ZM9.5 6.2a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Zm5 0a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Z"/></svg>
           <span>Download APK<em>31 MB · Android 7.0+</em></span>
         </a>
@@ -543,7 +550,7 @@
             <p class="dl-meta">7.0 and newer · 31 MB</p>
           </div>
         </div>
-        <a class="btn btn-ghost block magnetic" id="dlApk"
+        <a class="btn btn-primary block magnetic" id="dlApk"
            href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk">
           Download APK
         </a>
@@ -589,9 +596,9 @@
 <section class="section alt" id="feedback">
   <div class="wrap narrow">
     <header class="head reveal">
-      <span class="eyebrow">Your turn</span>
-      <h2>Tell me what <span class="grad">is wrong with it.</span></h2>
-      <p>Bugs, missing features, things that annoyed you. It goes straight to the developer.</p>
+      <span class="eyebrow">Feedback</span>
+      <h2>Send a <span class="grad">review or a bug report.</span></h2>
+      <p>Rate it, tell us what is missing, or report something that went wrong.</p>
     </header>
 
     <form class="fb reveal" id="feedbackForm" novalidate>
@@ -621,18 +628,18 @@
       </div>
 
       <label class="fb-field">
-        <span>What happened? <em>required</em></span>
+        <span>Your message <em>required</em></span>
         <textarea name="message" rows="5" required
-                  placeholder="The more specific, the more fixable. What did you do, what did you expect, what happened instead?"></textarea>
+                  placeholder="What you liked, what is missing, or what went wrong. The more specific, the more useful."></textarea>
       </label>
 
       <p class="fb-note" id="fbNote" role="status" aria-live="polite"></p>
 
-      <button type="submit" class="btn btn-primary block magnetic" id="fbSubmit">Send it</button>
+      <button type="submit" class="btn btn-primary block magnetic" id="fbSubmit">Send feedback</button>
 
       <p class="fb-small">
-        Nothing is collected beyond what you type here. Leave the email blank and
-        it stays anonymous.
+        Nothing is collected beyond what you type here. Leave the email blank
+        and it stays anonymous.
       </p>
     </form>
   </div>
@@ -728,7 +735,7 @@
   <div class="wrap narrow">
     <header class="head reveal">
       <span class="eyebrow">Who built it</span>
-      <h2>One person, <span class="grad">and a lot of evenings.</span></h2>
+      <h2>Built by <span class="grad">one developer.</span></h2>
     </header>
 
     <article class="dev reveal">
@@ -747,9 +754,9 @@
       </div>
 
       <p class="dev-bio">
-        SMARAN.AI is not a company product. It is one developer deciding that an
-        assistant should run on your own machine, and then writing the thing.
-        If it helped, or broke, I would like to hear about it.
+        SMARAN.AI is not a company product. It is built and maintained by one
+        person, on the idea that an assistant should run on your own machine.
+        Questions and bug reports are welcome.
       </p>
 
       <div class="dev-links">
@@ -791,7 +798,7 @@
       <a class="btn btn-primary lg magnetic" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI-Setup.exe">
         <span>Windows installer<em>233 MB</em></span>
       </a>
-      <a class="btn btn-ghost lg magnetic" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk">
+      <a class="btn btn-primary lg magnetic" href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk">
         <span>Android APK<em>31 MB</em></span>
       </a>
     </div>

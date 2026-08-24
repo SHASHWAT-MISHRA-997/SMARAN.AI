@@ -968,18 +968,21 @@ main, .nav, .foot { position: relative; z-index: 3; }
   html { scroll-behavior: auto; }
 
   /* Movement across the screen: gone. */
-  .rain, .marquee-track, .grid-floor, .aurora span,
-  .glitch::before, .glitch::after,
-  .auth-field-scan, .hand-scan, .doc-beam, .call-ring span,
-  .spark, .ring { animation: none !important; }
-  .rain, .noise { display: none; }
+  html:not(.motion-full) .rain, html:not(.motion-full) .marquee-track, .grid-floor, .aurora span,
+  html:not(.motion-full) .glitch::before, html:not(.motion-full) .glitch::after,
+  html:not(.motion-full) .auth-field-scan, html:not(.motion-full) .hand-scan,
+  html:not(.motion-full) .doc-beam, html:not(.motion-full) .call-ring span,
+  html:not(.motion-full) .spark, html:not(.motion-full) .ring { animation: none !important; }
+  html:not(.motion-full) .rain, html:not(.motion-full) .noise { display: none; }
 
   /* Entrances resolve immediately rather than sliding in. */
-  .reveal { opacity: 1; transform: none; transition: none; }
+  html:not(.motion-full) .reveal { opacity: 1; transform: none; transition: none; }
 
   /* Hover transforms flattened; the colour change still reads. */
-  .card:hover, .step:hover, .dl-card:hover, .eco-card:hover,
-  .pcol:hover, .btn:hover, .show:hover .screen {
+  html:not(.motion-full) .card:hover, html:not(.motion-full) .step:hover,
+  html:not(.motion-full) .dl-card:hover, html:not(.motion-full) .eco-card:hover,
+  html:not(.motion-full) .pcol:hover, html:not(.motion-full) .btn:hover,
+  html:not(.motion-full) .show:hover .screen {
     transform: none !important;
   }
 
@@ -987,6 +990,26 @@ main, .nav, .foot { position: relative; z-index: 3; }
      .orb-glow, .orb-core, .pill-dot, .auth-crest, .auth-halo, .hub-bar,
      .wave, .call-wave, .bub.typing, .grad, .auth-title, .pairline. */
 }
+
+/* The switch, when someone turns motion down on a machine whose system
+   setting never asked for it. */
+html.motion-calm .rain,
+html.motion-calm .marquee-track,
+html.motion-calm .grid-floor,
+html.motion-calm .aurora span,
+html.motion-calm .glitch::before,
+html.motion-calm .glitch::after,
+html.motion-calm .spark,
+html.motion-calm .ring,
+html.motion-calm .stage-scan,
+html.motion-calm .hand-scan,
+html.motion-calm .doc-beam,
+html.motion-calm .call-ring span,
+html.motion-calm .dev-ring { animation: none !important; }
+html.motion-calm .rain,
+html.motion-calm .noise { display: none; }
+html.motion-calm .reveal { opacity: 1; transform: none; transition: none; }
+
 
 /* ---------------------------------------------------------------------
    Showcase — alternating capability blocks
@@ -1433,7 +1456,7 @@ main, .nav, .foot { position: relative; z-index: 3; }
 .rain i:nth-child(6) { left: 92%; animation-duration: 12s; animation-delay: 4.2s; opacity: .55; }
 @keyframes fall { to { transform: translateY(350vh); } }
 
-@media (prefers-reduced-motion: reduce) { .rain { display: none; } }
+@media (prefers-reduced-motion: reduce) { html:not(.motion-full) .rain { display: none; } }
 
 /* ---------------------------------------------------------------------
    Meet her — the character band
@@ -1746,7 +1769,58 @@ main, .nav, .foot { position: relative; z-index: 3; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .stage-scan, .dev-ring, .dev-halo { animation: none; }
-  .dev:hover, .dev-link:hover, .meet-stage:hover .stage-frame { transform: none; }
-  .dev-sheen { display: none; }
+  html:not(.motion-full) .stage-scan,
+  html:not(.motion-full) .dev-ring,
+  html:not(.motion-full) .dev-halo { animation: none; }
+  html:not(.motion-full) .dev:hover,
+  html:not(.motion-full) .dev-link:hover,
+  html:not(.motion-full) .meet-stage:hover .stage-frame { transform: none; }
+  html:not(.motion-full) .dev-sheen { display: none; }
 }
+
+
+/* ---------------------------------------------------------------------
+   Motion switch
+   --------------------------------------------------------------------- */
+
+.motion-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 13px; border-radius: 11px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255,255,255,.04);
+  color: var(--muted); cursor: pointer;
+  font: inherit; font-size: .78rem; font-weight: 700;
+  white-space: nowrap;
+  transition: color .3s, border-color .3s, background .3s, box-shadow .3s;
+}
+.motion-toggle:hover {
+  color: var(--text);
+  border-color: rgba(239, 68, 68, .45);
+  background: rgba(239, 68, 68, .1);
+  box-shadow: 0 0 20px rgba(239, 68, 68, .18);
+}
+.motion-toggle .mt-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--dim); transition: background .3s, box-shadow .3s;
+}
+.motion-toggle[aria-pressed="true"] { color: #fca5a5; border-color: rgba(239,68,68,.4); }
+.motion-toggle[aria-pressed="true"] .mt-dot {
+  background: var(--red); box-shadow: 0 0 10px var(--red);
+  animation: blip 1.6s ease-in-out infinite;
+}
+@media (max-width: 1000px) { .motion-toggle { display: none; } }
+.mobile-menu .motion-toggle { display: inline-flex; width: 100%; justify-content: center; margin-top: 10px; }
+
+
+/* Parallax drift, set from script. The variable defaults to zero, so a
+   browser that never runs the script still lays the page out correctly. */
+.orb { transform: translateY(var(--drift, 0)); transition: transform .12s linear; }
+.meet-stage { transform: translateY(var(--drift, 0)); transition: transform .12s linear; }
+html.motion-calm .orb,
+html.motion-calm .meet-stage { transform: none; }
+
+/* The mock screens fade between states rather than snapping. */
+.bub.ai, .bub.typing { transition: opacity .5s ease; }
+.hub-tabs span { transition: background .4s, color .4s, border-color .4s; }
+.hub-dot { transition: background .4s, box-shadow .4s; }
+.call-status { transition: color .4s; }
