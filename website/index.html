@@ -44,6 +44,7 @@
     </a>
 
     <nav class="nav-links" aria-label="Primary">
+      <a href="#meet">Meet her</a>
       <a href="#features">Features</a>
       <a href="#showcase">In action</a>
       <a href="#how">How it works</a>
@@ -66,6 +67,7 @@
   </div>
 
   <div class="mobile-menu" id="mobileMenu" hidden>
+    <a href="#meet">Meet her</a>
     <a href="#features">Features</a>
     <a href="#showcase">In action</a>
     <a href="#how">How it works</a>
@@ -152,6 +154,50 @@
       <span>LOCAL MODELS</span><i>◆</i><span>VOICE</span><i>◆</i><span>VISION</span><i>◆</i>
       <span>GESTURE CONTROL</span><i>◆</i><span>YOUR DOCUMENTS</span><i>◆</i><span>PHONE PAIRING</span><i>◆</i>
       <span>NO SUBSCRIPTION</span><i>◆</i><span>OFFLINE CAPABLE</span><i>◆</i>
+    </div>
+  </div>
+</section>
+
+<!-- ========================== CHARACTER ========================== -->
+<section class="meet" id="meet">
+  <div class="wrap meet-inner">
+    <div class="meet-copy reveal">
+      <span class="eyebrow">Meet her</span>
+      <h2>She has a face,<br /><span class="grad">and she looks back.</span></h2>
+      <p>
+        The assistant is not a blinking cursor. Open Speak and she is standing
+        there, breathing, watching, answering out loud &mdash; rendered live on
+        your own machine, not streamed from anywhere.
+      </p>
+      <ul class="meet-list">
+        <li><b>Idle, thinking, speaking</b> &mdash; she changes with the conversation</li>
+        <li><b>Pick a voice and a persona</b> to match how you like to be spoken to</li>
+        <li><b>Rendered locally</b>, so she works with the network off</li>
+      </ul>
+      <a class="btn btn-primary magnetic" href="#download">Get her running</a>
+    </div>
+
+    <div class="meet-stage reveal" data-delay="1">
+      <div class="stage-halo" aria-hidden="true"></div>
+      <div class="stage-frame">
+        <video
+          id="charVideo"
+          class="stage-video"
+          src="assets/character-idle.mp4"
+          autoplay muted loop playsinline
+          preload="metadata"
+          aria-label="The SMARAN.AI assistant character, idling"
+        ></video>
+        <span class="stage-scan" aria-hidden="true"></span>
+        <div class="stage-hud" aria-hidden="true">
+          <span class="stage-tag"><i class="stage-dot"></i> LIVE</span>
+          <span class="stage-meta">local render</span>
+        </div>
+        <i class="stage-corner tl" aria-hidden="true"></i>
+        <i class="stage-corner tr" aria-hidden="true"></i>
+        <i class="stage-corner bl" aria-hidden="true"></i>
+        <i class="stage-corner br" aria-hidden="true"></i>
+      </div>
     </div>
   </div>
 </section>
@@ -539,6 +585,59 @@
   </div>
 </section>
 
+<!-- ========================== FEEDBACK =========================== -->
+<section class="section alt" id="feedback">
+  <div class="wrap narrow">
+    <header class="head reveal">
+      <span class="eyebrow">Your turn</span>
+      <h2>Tell me what <span class="grad">is wrong with it.</span></h2>
+      <p>Bugs, missing features, things that annoyed you. It goes straight to the developer.</p>
+    </header>
+
+    <form class="fb reveal" id="feedbackForm" novalidate>
+      <div class="fb-halo" aria-hidden="true"></div>
+
+      <div class="fb-rating" role="radiogroup" aria-label="How would you rate it?">
+        <span class="fb-label">How was it?</span>
+        <div class="fb-stars" id="fbStars">
+          <button type="button" class="fb-star" data-value="1" role="radio" aria-checked="false" aria-label="1 star">&#9733;</button>
+          <button type="button" class="fb-star" data-value="2" role="radio" aria-checked="false" aria-label="2 stars">&#9733;</button>
+          <button type="button" class="fb-star" data-value="3" role="radio" aria-checked="false" aria-label="3 stars">&#9733;</button>
+          <button type="button" class="fb-star" data-value="4" role="radio" aria-checked="false" aria-label="4 stars">&#9733;</button>
+          <button type="button" class="fb-star" data-value="5" role="radio" aria-checked="false" aria-label="5 stars">&#9733;</button>
+        </div>
+        <span class="fb-score" id="fbScore">not rated</span>
+      </div>
+
+      <div class="fb-row">
+        <label class="fb-field">
+          <span>Name <em>optional</em></span>
+          <input type="text" name="name" autocomplete="name" placeholder="What should I call you?" />
+        </label>
+        <label class="fb-field">
+          <span>Email <em>optional, only if you want a reply</em></span>
+          <input type="email" name="email" autocomplete="email" placeholder="you@example.com" />
+        </label>
+      </div>
+
+      <label class="fb-field">
+        <span>What happened? <em>required</em></span>
+        <textarea name="message" rows="5" required
+                  placeholder="The more specific, the more fixable. What did you do, what did you expect, what happened instead?"></textarea>
+      </label>
+
+      <p class="fb-note" id="fbNote" role="status" aria-live="polite"></p>
+
+      <button type="submit" class="btn btn-primary block magnetic" id="fbSubmit">Send it</button>
+
+      <p class="fb-small">
+        Nothing is collected beyond what you type here. Leave the email blank and
+        it stays anonymous.
+      </p>
+    </form>
+  </div>
+</section>
+
 <!-- ========================== PRIVACY ============================ -->
 <section class="section alt" id="privacy">
   <div class="wrap">
@@ -624,6 +723,64 @@
   </div>
 </section>
 
+<!-- ========================== DEVELOPER ========================== -->
+<section class="section" id="developer">
+  <div class="wrap narrow">
+    <header class="head reveal">
+      <span class="eyebrow">Who built it</span>
+      <h2>One person, <span class="grad">and a lot of evenings.</span></h2>
+    </header>
+
+    <article class="dev reveal">
+      <div class="dev-halo" aria-hidden="true"></div>
+      <div class="dev-sheen" aria-hidden="true"></div>
+
+      <div class="dev-top">
+        <span class="dev-avatar">
+          <img src="assets/logo.png" alt="" width="64" height="64" />
+          <i class="dev-ring" aria-hidden="true"></i>
+        </span>
+        <div>
+          <h3>Shashwat Mishra</h3>
+          <p class="dev-role">Built and maintains SMARAN.AI</p>
+        </div>
+      </div>
+
+      <p class="dev-bio">
+        SMARAN.AI is not a company product. It is one developer deciding that an
+        assistant should run on your own machine, and then writing the thing.
+        If it helped, or broke, I would like to hear about it.
+      </p>
+
+      <div class="dev-links">
+        <a class="dev-link linkedin" href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener">
+          <span class="dev-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05a3.74 3.74 0 0 1 3.37-1.85c3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13Zm1.78 13.02H3.55V9h3.57v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.2 0 22.22 0Z"/>
+            </svg>
+          </span>
+          <span class="dev-text">
+            <b>LinkedIn</b>
+            <em>linkedin.com/in/sm980</em>
+          </span>
+          <span class="dev-arrow" aria-hidden="true">&#8599;</span>
+        </a>
+
+        <a class="dev-link github" href="https://github.com/SHASHWAT-MISHRA-997" target="_blank" rel="noopener">
+          <span class="dev-ico" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          </span>
+          <span class="dev-text">
+            <b>GitHub</b>
+            <em>Every line of this, readable</em>
+          </span>
+          <span class="dev-arrow" aria-hidden="true">&#8599;</span>
+        </a>
+      </div>
+    </article>
+  </div>
+</section>
+
 <!-- ============================ CTA ============================== -->
 <section class="cta">
   <div class="wrap cta-inner reveal">
@@ -658,7 +815,7 @@
       <a href="#privacy">Privacy</a>
       <a href="#faq">FAQ</a>
       <a href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://www.linkedin.com/in/shashwat-mishra-b7b41b21b/" target="_blank" rel="noopener">LinkedIn</a>
+      <a href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener">LinkedIn</a>
     </nav>
   </div>
   <div class="wrap foot-bottom">

@@ -7,6 +7,11 @@
 (() => {
   'use strict';
 
+  /* Reduced motion, in proportion. Windows ships with "show animations" off
+     on plenty of machines and browsers report that here, so treating it as
+     "render nothing" left those visitors looking at a dead page. The particle
+     field stays, drifting more slowly; only the things that chase the cursor
+     or retype themselves are dropped. */
   const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const $  = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -133,6 +138,9 @@
         let wait = erasing ? 28 : 52;
         if (!erasing && ci === line.length) { erasing = true; wait = 1900; }
         else if (erasing && ci === 0) { erasing = false; li = (li + 1) % lines.length; wait = 320; }
+        // The character listens to this, so she talks while a line is being
+        // typed and returns to idle in the pause afterwards.
+        window.dispatchEvent(new CustomEvent('smaran:typing', { detail: !erasing }));
         setTimeout(tick, wait);
       };
       setTimeout(tick, 700);
@@ -183,7 +191,7 @@
   /* ------------------------------------------------- particle backdrop */
 
   const canvas = $('#field');
-  if (canvas && !calm) {
+  if (canvas) {
     const ctx = canvas.getContext('2d', { alpha: true });
     let w = 0, h = 0, dots = [], raf = 0;
     const pointer = { x: -9999, y: -9999 };
@@ -202,8 +210,8 @@
       dots = Array.from({ length: count }, () => ({
         x: Math.random() * innerWidth,
         y: Math.random() * innerHeight,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
+        vx: (Math.random() - 0.5) * (calm ? 0.08 : 0.3),
+        vy: (Math.random() - 0.5) * (calm ? 0.08 : 0.3),
         r: Math.random() * 1.9 + 0.7,
       }));
     };
@@ -304,5 +312,95 @@
     if (!d.open) return;
     faqs.forEach((other) => { if (other !== d) other.open = false; });
   }));
+
+
+  /* ---------------------------------------------------- character stage */
+
+  /* She switches to the talking clip while the line above is being typed,
+     so the two read as one thing rather than two loops running side by side. */
+  const charVideo = $('#charVideo');
+  if (charVideo && !calm) {
+    let talking = false;
+    const setClip = (name) => {
+      const next = `assets/character-${name}.mp4`;
+      if (charVideo.getAttribute('src') === next) return;
+      charVideo.setAttribute('src', next);
+      charVideo.play().catch(() => {}); // autoplay can be refused; not fatal
+    };
+    window.addEventListener('smaran:typing', (e) => {
+      const now = Boolean(e.detail);
+      if (now === talking) return;
+      talking = now;
+      setClip(now ? 'talking' : 'idle');
+    });
+  }
+
+  /* ------------------------------------------------------------ feedback */
+
+  const form = $('#feedbackForm');
+  if (form) {
+    const note = $('#fbNote');
+    const scoreLabel = $('#fbScore');
+    const stars = $$('.fb-star', form);
+    let rating = 0;
+
+    const paint = (value) => stars.forEach((s) => {
+      const on = Number(s.dataset.value) <= value;
+      s.classList.toggle('on', on);
+      s.setAttribute('aria-checked', String(Number(s.dataset.value) === rating));
+    });
+
+    stars.forEach((star) => {
+      star.addEventListener('click', () => {
+        rating = Number(star.dataset.value);
+        paint(rating);
+        scoreLabel.textContent = `${rating} of 5`;
+      });
+      star.addEventListener('mouseenter', () => paint(Number(star.dataset.value)));
+    });
+    $('#fbStars').addEventListener('mouseleave', () => paint(rating));
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const message = String(data.get('message') || '').trim();
+
+      if (message.length < 10) {
+        note.className = 'fb-note bad';
+        note.textContent = 'A sentence or two, so there is something to act on.';
+        return;
+      }
+
+      const submit = $('#fbSubmit');
+      submit.disabled = true;
+      note.className = 'fb-note';
+      note.textContent = 'Sending…';
+
+      /* Netlify Forms would need a build-time form definition, and there is no
+         build step here. Opening a prefilled email keeps the message going
+         straight to a person, with nothing collected in between. */
+      const body = [
+        `Rating: ${rating ? `${rating}/5` : 'not given'}`,
+        `Name: ${String(data.get('name') || '').trim() || '(not given)'}`,
+        `Reply to: ${String(data.get('email') || '').trim() || '(anonymous)'}`,
+        '',
+        message,
+        '',
+        `— sent from ${location.href}`,
+      ].join(String.fromCharCode(10));
+
+      const href = 'mailto:shashwatmishra062@gmail.com'
+        + '?subject=' + encodeURIComponent(`SMARAN.AI feedback${rating ? ` (${rating}/5)` : ''}`)
+        + '&body=' + encodeURIComponent(body);
+
+      window.location.href = href;
+
+      setTimeout(() => {
+        submit.disabled = false;
+        note.className = 'fb-note ok';
+        note.textContent = 'Your mail app should have opened with it ready to send.';
+      }, 900);
+    });
+  }
 
 })();
