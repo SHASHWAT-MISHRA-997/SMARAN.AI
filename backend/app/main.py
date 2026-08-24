@@ -5453,9 +5453,13 @@ async def websocket_voice_live(websocket: WebSocket):
             payload = await websocket.receive_json()
             kind = payload.get("type")
             if kind == "audio":
+                # Google retired realtimeInput.mediaChunks: the Live API now
+                # closes the socket with 1007 the moment one arrives, which
+                # killed the session as soon as anyone spoke. The replacement
+                # takes a single blob under "audio" rather than a list.
                 await upstream.send(json.dumps({
                     "realtimeInput": {
-                        "mediaChunks": [{"mimeType": "audio/pcm;rate=16000", "data": payload.get("data", "")}]
+                        "audio": {"mimeType": "audio/pcm;rate=16000", "data": payload.get("data", "")}
                     }
                 }))
             elif kind == "image":
@@ -5464,10 +5468,10 @@ async def websocket_voice_live(websocket: WebSocket):
                 # is currently looking at.
                 await upstream.send(json.dumps({
                     "realtimeInput": {
-                        "mediaChunks": [{
+                        "video": {
                             "mimeType": str(payload.get("mime") or "image/jpeg"),
                             "data": payload.get("data", ""),
-                        }]
+                        }
                     }
                 }))
             elif kind == "text":
