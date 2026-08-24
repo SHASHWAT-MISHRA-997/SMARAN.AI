@@ -244,6 +244,19 @@ from app.plugin_routes import router as plugin_router
 from app.plugin_system import plugin_manager, PluginConfig
 app.include_router(plugin_router)
 
+@app.get("/api/updates/check")
+def check_for_updates(force: bool = False):
+    """Whether a newer build has been published.
+
+    Reads a public release feed and sends nothing identifying. Nothing is
+    downloaded or installed here - the interface shows the answer and the
+    person decides.
+    """
+    from app import updates
+
+    return updates.check(force=force)
+
+
 @app.get("/api/usage-reporting")
 def usage_reporting_status():
     """What is reported, and whether it is currently on."""

@@ -11,6 +11,7 @@ import DeveloperModal from './components/DeveloperModal';
 import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
 import AuthModal from './components/AuthModal';
+import UpdateNotice from './components/UpdateNotice';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 
 
@@ -285,6 +286,11 @@ const App = () => {
           token={currentUser?.session_token}
           apiBase={API_BASE}
         />
+      </ErrorBoundary>
+
+      {/* Says when a newer build exists. Installs nothing by itself. */}
+      <ErrorBoundary>
+        <UpdateNotice />
       </ErrorBoundary>
 
       {/* Sign in or create an account, including the Google route. */}
