@@ -2135,7 +2135,16 @@ def _persist_cloud_key(provider: str, api_key: Optional[str]) -> None:
 # key should be discovered in seconds, not after a ten second connect plus a
 # slow read. Routing through two dead providers was costing 22 seconds before
 # the first word appeared.
-_CLOUD_STREAM_TIMEOUT = httpx.Timeout(180.0, connect=4.0, read=180.0, write=15.0)
+# A read timeout of 180s meant one wedged provider held the whole request
+# for three minutes before the next route was even tried, and with several
+# providers configured that compounded. The gap between chunks of a stream
+# is small; it is the wait for the first byte that matters, and 45s is
+# generous even for a large model warming up.
+_CLOUD_STREAM_TIMEOUT = httpx.Timeout(60.0, connect=4.0, read=45.0, write=15.0)
+
+# Trying every configured route on a bad day turned one message into a very
+# long wait. Four attempts is enough to get past a rate limit or an outage.
+_CLOUD_MAX_ATTEMPTS = 4
 
 # A route that just failed is very likely to fail again on the next turn, so
 # it is skipped for a short while instead of being retried every message.
@@ -3387,8 +3396,11 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                     continue
                 normalized_candidates.append((provider, model, api_key))
             if not normalized_candidates:
-                yield json.dumps({'error': 'Cloud API selection is incomplete or not supported. Local inference was not used.'}) + '\n'
+                yield json.dumps({'error': 'No cloud provider is configured. Add a provider key in Model Catalog & Matrix, or run a local model.'}) + '\n'
                 return
+            # Cap the attempts so a long provider list cannot turn a single
+            # message into minutes of sequential failures.
+            normalized_candidates = normalized_candidates[:_CLOUD_MAX_ATTEMPTS]
             failures = []
             for provider, model, api_key in normalized_candidates:
                 endpoint = endpoints[provider]
@@ -3547,7 +3559,26 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             # Record why every route was rejected; without this the user only
             # ever sees "unavailable" and the cause cannot be diagnosed.
             logger.warning("Cloud routing failed for all candidates: " + "; ".join(failures))
-            yield json.dumps({'error': 'All configured free Cloud API routes are unavailable or rate-limited. Please configure your API Key in Settings ⚙️ or select a verified available provider.'}) + '\n'
+            # Tell the user what the log already knows. A bare "unavailable"
+            # gave no way to tell an expired key from a rate limit from an
+            # outage, so the only obvious move was to paste the key again.
+            def _explain(entry: str) -> str:
+                route, _, why = entry.partition(': ')
+                if 'HTTP 401' in why or 'HTTP 403' in why:
+                    return f'{route} rejected the key (wrong, expired, or lacking access)'
+                if 'HTTP 429' in why:
+                    return f'{route} is rate-limited right now'
+                if 'HTTP 5' in why:
+                    return f'{route} is having an outage'
+                if 'connection error' in why:
+                    return f'{route} could not be reached'
+                if 'empty response' in why:
+                    return f'{route} returned nothing'
+                return entry
+
+            detail = '; '.join(_explain(f) for f in failures[:4]) or 'no cloud provider is configured'
+            more = f' (and {len(failures) - 4} more)' if len(failures) > 4 else ''
+            yield json.dumps({'error': f'No cloud model could answer. {detail}{more}. Add or fix the provider key in Model Catalog & Matrix, or run a local model instead.'}) + '\n'
             return
         if file_count_intent:
             exact_count = f"You uploaded {session_file_count} files in this chat."

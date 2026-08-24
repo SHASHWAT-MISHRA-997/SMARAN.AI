@@ -1,0 +1,25 @@
+# The analytics collector, as Netlify Functions with Blobs for storage.
+#
+# The Python server in this folder remains the way to run it locally against
+# SQLite. This deployment exists because it needs a host that is awake when
+# the developer's machine is not, and Netlify's free tier provides both the
+# functions and the persistent storage.
+[build]
+  publish = "public"
+  command = ""
+
+[functions]
+  node_bundler = "esbuild"
+  # Ships the key file with the functions. It lives outside publish/,
+  # so it is readable by the function and not by the internet.
+  included_files = ["keys.json"]
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer"
+    # The dashboard is a private tool; keeping it out of indexes is the
+    # cheapest half of that, the key check on the API is the real half.
+    X-Robots-Tag = "noindex, nofollow"
