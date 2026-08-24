@@ -51,9 +51,27 @@ export class SmaranApiClient {
           continue;
         }
         const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8'));
-        if (parsed && typeof parsed.port === 'number') {
-          return `http://127.0.0.1:${parsed.port}`;
+        if (!parsed || typeof parsed.port !== 'number') {
+          continue;
         }
+
+        // The file survives a crash or a force-quit, and a stale advert sends
+        // every request to a dead port where it sits until it times out.
+        // Signal 0 does not kill anything; it only asks whether the process
+        // is still there.
+        if (typeof parsed.pid === 'number') {
+          try {
+            process.kill(parsed.pid, 0);
+          } catch (err: any) {
+            // ESRCH means no such process. EPERM means it exists but belongs
+            // to someone else, which still counts as running.
+            if (err && err.code === 'ESRCH') {
+              continue;
+            }
+          }
+        }
+
+        return `http://127.0.0.1:${parsed.port}`;
       }
     } catch (_) {
       // Discovery is best effort; fall through to the default.
@@ -480,7 +498,7 @@ export class SmaranApiClient {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(body),
-          "HTTP-Referer": "https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI",
+          "HTTP-Referer": "https://smaran-ai.netlify.app",
           "X-Title": "SMARAN AI Coder"
         }
       }, (res) => {

@@ -176,13 +176,13 @@ A raw `docker pull`/`docker run` can see only container/VM telemetry. Real host 
 
 ## VS Code extension
 
-Package: `vscode-smaran-coding-agent/smaran-ai-engineering-copilot-1.3.3.vsix`
+Package: `vscode-smaran-coding-agent/smaran-ai-codex-1.3.5.vsix`
 
 ```powershell
 code --install-extension .\vscode-smaran-coding-agent\smaran-ai-engineering-copilot-1.3.3.vsix
 ```
 
-Version 1.3.3 includes bounded workspace context, attachments, selected-language dictation, manual/opt-in read-aloud, and approval-gated create-file/run-command actions. It is not equivalent to Codex or Kilo Code: it has no general Explorer delete agent, no browser-control agent, image attachments provide metadata rather than pixel vision, and VS Code/Electron must expose Web Speech for dictation.
+The extension finds the running desktop app by reading the port it advertises in `runtime.json` rather than assuming 3003, and checks the advertised process is still alive before trusting it - a crash used to leave a stale advert behind and every request went to a dead port. It is not equivalent to Codex or Kilo Code: there is no general Explorer delete agent, no browser-control agent, image attachments provide metadata rather than pixel vision, and VS Code/Electron must expose Web Speech for dictation.
 
 ## Validation
 

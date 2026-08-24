@@ -2,7 +2,7 @@
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
   "description": "AI coding assistant with bounded workspace context, approval-gated file and terminal actions, attachments, optional dictation/read-aloud, and configurable model routing.",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {
@@ -147,7 +147,7 @@
         "smaran.apiKeys": {
           "type": "object",
           "default": {},
-          "markdownDescription": "Your own provider keys. Keys stay in your VS Code settings and are sent only to the provider you configure.\n\n**Free tiers:** [Groq](https://console.groq.com/keys) · [Google Gemini](https://aistudio.google.com/app/apikey) · [OpenRouter](https://openrouter.ai/keys) · [NVIDIA NIM](https://build.nvidia.com/)\n\n**Paid, optional:** [Anthropic Claude](https://console.anthropic.com/settings/keys) · [OpenAI](https://platform.openai.com/api-keys) · [DeepSeek](https://platform.deepseek.com/api_keys)",
+          "markdownDescription": "Your own provider keys. Keys stay in your VS Code settings and are sent only to the provider you configure.\n\n**Free tiers:** [Groq](https://console.groq.com/keys) \u00c2\u00b7 [Google Gemini](https://aistudio.google.com/app/apikey) \u00c2\u00b7 [OpenRouter](https://openrouter.ai/keys) \u00c2\u00b7 [NVIDIA NIM](https://build.nvidia.com/)\n\n**Paid, optional:** [Anthropic Claude](https://console.anthropic.com/settings/keys) \u00c2\u00b7 [OpenAI](https://platform.openai.com/api-keys) \u00c2\u00b7 [DeepSeek](https://platform.deepseek.com/api_keys)",
           "properties": {
             "groq": {
               "type": "string",
@@ -178,7 +178,9 @@
               "description": "DeepSeek API key (paid, optional)."
             }
           },
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "smaran.defaultModel": {
           "type": "string",
