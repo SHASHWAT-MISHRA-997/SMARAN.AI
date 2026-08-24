@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SMARAN.AI</title>
+<link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+
+<header class="bar">
+  <span class="mark"><img src="icons/48.png" alt="" width="22" height="22" /></span>
+  <div class="bar-text">
+    <strong>SMARAN.AI</strong>
+    <span class="state" id="state">Looking for the app…</span>
+  </div>
+  <button type="button" id="siteBtn" class="site" title="What this extension may do here">
+    <span class="site-dot" id="siteDot"></span>
+    <span id="siteLabel">—</span>
+  </button>
+</header>
+
+<!-- Per-site permission. Closed unless the button above is pressed. -->
+<section class="perm" id="perm" hidden>
+  <p class="perm-origin" id="permOrigin">—</p>
+  <p class="perm-note">
+    Reading the page happens only when you ask a question about it. Acting on
+    the page — clicking, typing — needs this switched on.
+  </p>
+  <div class="perm-choices" role="radiogroup" aria-label="What this extension may do here">
+    <button type="button" data-perm="allow" role="radio" aria-checked="false">
+      <b>Allow</b><em>Read and act on this site</em>
+    </button>
+    <button type="button" data-perm="ask" role="radio" aria-checked="true">
+      <b>Ask</b><em>Read only, act never</em>
+    </button>
+    <button type="button" data-perm="never" role="radio" aria-checked="false">
+      <b>Never</b><em>Do nothing on this site</em>
+    </button>
+  </div>
+</section>
+
+<main class="log" id="log">
+  <div class="hello">
+    <p class="hello-title">Ask about this page</p>
+    <p class="hello-sub">
+      The page is read only when you ask, and only the tab you are looking at.
+    </p>
+    <div class="chips">
+      <button type="button" class="chip">Summarise this page</button>
+      <button type="button" class="chip">What is this site asking me for?</button>
+      <button type="button" class="chip">Is anything here suspicious?</button>
+    </div>
+  </div>
+</main>
+
+<form class="composer" id="composer">
+  <label class="include">
+    <input type="checkbox" id="includePage" checked />
+    <span>Include the page</span>
+  </label>
+  <div class="input-row">
+    <textarea id="prompt" rows="1" placeholder="Ask about this page…" required></textarea>
+    <button type="submit" id="send" aria-label="Send">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"/>
+      </svg>
+    </button>
+  </div>
+</form>
+
+<script src="sidepanel.js"></script>
+</body>
+</html>

@@ -2067,13 +2067,21 @@ html.light {
 }
 
 /* The dark-only atmosphere. Kept at a whisper so the page still has depth. */
-html.light #codeRain { display: none; }
+html.light #codeRain { opacity: .2; }
 html.light .noise,
 html.light .scanlines { display: none; }
-html.light #field { opacity: .32; }
-html.light .grid-floor { opacity: .18; }
-html.light .aurora span { opacity: .1; }
-html.light .rain i { opacity: .18; }
+html.light #field { opacity: .55; }
+html.light .grid-floor {
+  opacity: .5;
+  background-image:
+    linear-gradient(rgba(160, 26, 26, .16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(160, 26, 26, .16) 1px, transparent 1px);
+}
+html.light .aurora span { opacity: .14; }
+html.light .rain i {
+  opacity: .3;
+  background: linear-gradient(to bottom, transparent, rgba(160, 26, 26, .5), transparent);
+}
 html.light .spotlight {
   background: radial-gradient(440px circle at var(--mx, 50%) var(--my, 30%),
               rgba(217, 38, 38, .07), transparent 72%);

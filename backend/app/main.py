@@ -386,6 +386,11 @@ def healthcheck_ping():
 # The regex exists for the paired phone, which reaches the machine over the
 # local network, and for the Android build whose WebView origin is
 # https://localhost.
+#
+# The Chrome extension is allowed by its exact id, not by permitting every
+# chrome-extension:// origin - that would let any extension the user has
+# installed call this API with their session attached. The id is fixed by
+# the public key in the extension's manifest so it does not drift.
 _LOCAL_ORIGIN_PATTERN = (
     r"^https?://("
     r"localhost|127\.\d+\.\d+\.\d+|\[::1\]|"
@@ -395,9 +400,14 @@ _LOCAL_ORIGIN_PATTERN = (
     r")(:\d+)?$"
 )
 
+_CHROME_EXTENSION_ORIGIN = "chrome-extension://chhffklihgllkmhnjbpcljppdpgihpfm"
+_ALLOWED_ORIGIN_PATTERN = (
+    _LOCAL_ORIGIN_PATTERN[:-1] + r"|^" + re.escape(_CHROME_EXTENSION_ORIGIN) + r"$"
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=_LOCAL_ORIGIN_PATTERN,
+    allow_origin_regex=_ALLOWED_ORIGIN_PATTERN,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

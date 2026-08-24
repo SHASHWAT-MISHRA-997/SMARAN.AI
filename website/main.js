@@ -231,6 +231,8 @@
 
   /* ------------------------------------------------- particle backdrop */
 
+  const isLight = () => document.documentElement.classList.contains('light');
+
   const canvas = $('#field');
   if (canvas) {
     const ctx = canvas.getContext('2d', { alpha: true });
@@ -258,6 +260,9 @@
     };
 
     const frame = () => {
+      // Rebuild if the viewport has changed under us. A tab that loaded while
+      // hidden reports zero width, and without this it never recovers.
+      if (canvas.width !== Math.round(innerWidth * Math.min(devicePixelRatio || 1, 2))) build();
       ctx.clearRect(0, 0, innerWidth, innerHeight);
 
       for (const d of dots) {
@@ -267,8 +272,8 @@
 
         ctx.beginPath();
         ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 92, 71, .85)';
-        ctx.shadowColor = 'rgba(239, 68, 68, .9)';
+        ctx.fillStyle = isLight() ? 'rgba(170, 26, 26, .7)' : 'rgba(255, 92, 71, .85)';
+        ctx.shadowColor = isLight() ? 'rgba(170, 26, 26, .35)' : 'rgba(239, 68, 68, .9)';
         ctx.shadowBlur = 6;
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -285,7 +290,9 @@
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
-          ctx.strokeStyle = `rgba(239, 68, 68, ${alpha})`;
+          ctx.strokeStyle = isLight()
+            ? `rgba(150, 30, 30, ${alpha * 0.85})`
+            : `rgba(239, 68, 68, ${alpha})`;
           ctx.lineWidth = 0.8;
           ctx.stroke();
         }
@@ -296,7 +303,9 @@
           ctx.beginPath();
           ctx.moveTo(dots[i].x, dots[i].y);
           ctx.lineTo(pointer.x, pointer.y);
-          ctx.strokeStyle = `rgba(255, 138, 92, ${(1 - pd2 / 26000) * 0.4})`;
+          ctx.strokeStyle = isLight()
+            ? `rgba(170, 40, 40, ${(1 - pd2 / 26000) * 0.35})`
+            : `rgba(255, 138, 92, ${(1 - pd2 / 26000) * 0.4})`;
           ctx.lineWidth = 0.8;
           ctx.stroke();
         }
@@ -601,8 +610,12 @@
     };
 
     const frame = () => {
+      if (rainCanvas.width !== Math.round(innerWidth * Math.min(devicePixelRatio || 1, 2))) build();
       // Fade rather than clear: this is what leaves the tail behind each head.
-      ctx.fillStyle = 'rgba(7, 7, 10, 0.09)';
+      // The wash has to match the page or it tints it - a black wash over
+      // white greys the whole canvas out.
+      const light = document.documentElement.classList.contains('light');
+      ctx.fillStyle = light ? 'rgba(247, 247, 249, 0.10)' : 'rgba(7, 7, 10, 0.09)';
       ctx.fillRect(0, 0, innerWidth, innerHeight);
 
       const step = FONT_SIZE + 6;
@@ -611,7 +624,10 @@
         const glyph = GLYPHS[(Math.random() * GLYPHS.length) | 0];
 
         // The head is brightest; everything it has already passed is dimmer.
-        ctx.fillStyle = col.hot ? 'rgba(255, 150, 120, .95)' : 'rgba(239, 68, 68, .72)';
+        // Darker and denser on white, where a bright red would glare.
+        ctx.fillStyle = light
+          ? (col.hot ? 'rgba(160, 20, 20, .55)' : 'rgba(120, 30, 30, .38)')
+          : (col.hot ? 'rgba(255, 150, 120, .95)' : 'rgba(239, 68, 68, .72)');
         ctx.fillText(glyph, x, col.y);
 
         col.y += col.speed * (FONT_SIZE * 0.22);

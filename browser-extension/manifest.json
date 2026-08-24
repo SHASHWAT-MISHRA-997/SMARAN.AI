@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "SMARAN.AI for Chrome",
+  "version": "1.0.0",
+  "description": "Ask SMARAN.AI about the page you are on, and let it act on that page when you allow it.",
+
+  "_comment_key": "Fixes the extension id so the desktop app can allow exactly this origin instead of every extension.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzpajwvfC6zrK2BRm3AfFVfq2hFwIoQz2buCrJyhjGgSX6VHUtibTP1jndJckgNNTizNn7RB/Ak6hHC115mhNX/C2IQQ/U0eXI7ot8h7SXYYYLdecdML3Js35wQWdpOGUNMYeLnAGaPzUHoFQwpAEBmz2VGIeLdJf1qu3X0CTcrgvSaYZ0Wh5Qf41+KW0VasXueeMTGCjSDrO0wFgMTnngHlizFBlJVNuw+w9ZidUgorOXTfwyoif7LnPaBmD2yBWI68I7kvA+Jt28PMwO4b7YOXbZ8T2t8JHSIJk9mihZrlcpF/r6HK/gw+BcukUCH/37aQGbaXN9sGeoRNO+HsJnwIDAQAB",
+
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel", "tabs"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+
+  "background": { "service_worker": "background.js", "type": "module" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "SMARAN.AI" },
+
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+
+  "content_security_policy": {
+    "extension_pages": "script-src '''self'''; object-src '''self'''"
+  }
+}
