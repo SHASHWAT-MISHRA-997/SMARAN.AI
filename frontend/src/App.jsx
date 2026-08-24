@@ -12,6 +12,7 @@ import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
 import AuthModal from './components/AuthModal';
 import UpdateNotice from './components/UpdateNotice';
+import ExtensionsHub from './components/ExtensionsHub';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 
 
@@ -31,6 +32,7 @@ const App = () => {
   const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
   const [isPairingOpen, setIsPairingOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isHubOpen, setIsHubOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [activeCollections, setActiveCollections] = useState([]);
@@ -235,6 +237,7 @@ const App = () => {
         onOpenDeveloper={() => setIsDeveloperOpen(true)}
         onOpenPairing={() => setIsPairingOpen(true)}
         onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenHub={() => setIsHubOpen(true)}
         token={currentUser?.session_token}
         user={currentUser}
       />
@@ -286,6 +289,11 @@ const App = () => {
           token={currentUser?.session_token}
           apiBase={API_BASE}
         />
+      </ErrorBoundary>
+
+      {/* Skills, connectors, plugins and local MCP servers. */}
+      <ErrorBoundary>
+        <ExtensionsHub isOpen={isHubOpen} onClose={() => setIsHubOpen(false)} />
       </ErrorBoundary>
 
       {/* Says when a newer build exists. Installs nothing by itself. */}

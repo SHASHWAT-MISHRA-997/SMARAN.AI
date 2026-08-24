@@ -4,7 +4,7 @@ import {
   MessageSquare, Plus, Trash2, X,
   Settings, Pencil, Check, Brain, Sparkles,
   ChevronLeft, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, User,
-  Activity, LayoutDashboard, QrCode, LogIn,
+  Activity, LayoutDashboard, QrCode, LogIn, Blocks,
 } from 'lucide-react';
 import ModelHubModal from './ModelHubModal';
 import { SmaranLogo } from './SmaranLogo';
@@ -104,7 +104,7 @@ const Sidebar = ({
   setIsModelHubOpen: externalSetIsModelHubOpen,
   onModelChange, position = 'left',
   onTogglePerformance, showPerformance, onOpenAnalytics,
-  onOpenDeveloper, onOpenPairing, onOpenAuth,
+  onOpenDeveloper, onOpenPairing, onOpenAuth, onOpenHub,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -498,6 +498,11 @@ const Sidebar = ({
             <button onClick={() => setIsMemoryOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
               <Brain className="w-4 h-4 shrink-0" /> Manage AI Memory
             </button>
+            {onOpenHub && (
+              <button onClick={onOpenHub} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-indigo-300 hover:bg-indigo-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
+                <Blocks className="w-4 h-4 shrink-0 text-indigo-300" /> Skills & Connectors
+              </button>
+            )}
             {onOpenAuth && (
               <button onClick={onOpenAuth} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-rose-400 hover:bg-rose-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
                 <LogIn className="w-4 h-4 shrink-0 text-rose-400" /> Sign In / Register
@@ -522,6 +527,7 @@ const Sidebar = ({
             <RailBtn icon={<Boxes className="w-5 h-5" />} label="Model Catalog & Matrix" onClick={() => setIsModelHubOpen(true)} violet />
             <RailBtn icon={<Activity className="w-5 h-5 text-emerald-400" />} label="Analytics Dashboard" onClick={onOpenAnalytics} />
             <RailBtn icon={<Brain className="w-5 h-5" />} label="Manage AI Memory" onClick={() => setIsMemoryOpen(true)} />
+            {onOpenHub && <RailBtn icon={<Blocks className="w-5 h-5 text-indigo-300" />} label="Skills & Connectors" onClick={onOpenHub} />}
             {onOpenAuth && <RailBtn icon={<LogIn className="w-5 h-5 text-rose-400" />} label="Sign In / Register" onClick={onOpenAuth} />}
             {onOpenPairing && <RailBtn icon={<QrCode className="w-5 h-5 text-sky-400" />} label="Link Your Phone" onClick={onOpenPairing} />}
             <RailBtn icon={<UserCheck className="w-5 h-5" />} label="About Developer" onClick={onOpenDeveloper} />
