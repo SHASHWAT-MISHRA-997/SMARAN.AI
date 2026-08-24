@@ -7,3 +7,6 @@ dashboard-key.txt
 
 # Deploy-time secrets, uploaded with the deploy, never committed.
 hosted/keys.json
+
+# Netlify CLI scratch state (just the site id, but build noise).
+.netlify/
