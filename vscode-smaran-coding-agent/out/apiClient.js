@@ -102,6 +102,51 @@ class SmaranApiClient {
         }
         return null;
     }
+    /** Keys the desktop app already holds, so they need not be typed twice.
+     *
+     * Without this the extension only worked while the app was running: the
+     * keys lived in the app's data directory and VS Code knew nothing about
+     * them, so closing the app took the assistant with it. Reading them here
+     * means the editor can talk to the same providers on its own.
+     *
+     * Anything set in VS Code settings wins, so a workspace can deliberately
+     * point somewhere else.
+     */
+    static desktopKeys() {
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            const os = require('os');
+            const roots = [
+                process.env.LOCALAPPDATA,
+                path.join(os.homedir(), 'Library', 'Application Support'),
+                path.join(os.homedir(), '.local', 'share'),
+                os.homedir(),
+            ].filter(Boolean);
+            for (const root of roots) {
+                const candidate = path.join(root, 'SMARAN.AI', 'data', 'cloud_keys.json');
+                if (!fs.existsSync(candidate)) {
+                    continue;
+                }
+                const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+                if (parsed && typeof parsed === 'object') {
+                    // Only strings, and only non-empty ones: a blank entry should fall
+                    // through to the next provider rather than being tried and failing.
+                    const keys = {};
+                    for (const [name, value] of Object.entries(parsed)) {
+                        if (typeof value === 'string' && value.trim()) {
+                            keys[name] = value.trim();
+                        }
+                    }
+                    return keys;
+                }
+            }
+        }
+        catch (_) {
+            // Best effort. No keys simply means the provider chain is shorter.
+        }
+        return {};
+    }
     async getModels() {
         try {
             // The backend exposes the catalog under /api/models/catalog; a bare
@@ -137,7 +182,7 @@ class SmaranApiClient {
     async askAgent(prompt, contextFiles, model = 'auto', onToken, responseLanguage = 'en') {
         const baseUrl = this.getBaseUrl();
         const config = vscode.workspace.getConfiguration('smaran');
-        const apiKeys = config.get('apiKeys') || {};
+        const apiKeys = { ...SmaranApiClient.desktopKeys(), ...(config.get('apiKeys') || {}) };
         const supportedLanguages = new Set(['en', 'hi', 'gu', 'pa', 'mr', 'ta', 'te', 'ml', 'kn', 'bn']);
         const targetLanguage = supportedLanguages.has(responseLanguage) ? responseLanguage : 'en';
         const payload = {

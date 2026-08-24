@@ -25,6 +25,35 @@
   const $  = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+  /* ---------------------------------------------------------------- theme */
+
+  /* Dark is the design; light is offered because not everyone wants a black
+     screen. The system preference decides the first visit, an explicit
+     choice wins after that and is remembered. */
+  const THEME_KEY = 'smaran-theme';
+  const prefersLight = window.matchMedia('(prefers-color-scheme: light)');
+  let theme = localStorage.getItem(THEME_KEY) || (prefersLight.matches ? 'light' : 'dark');
+
+  const applyTheme = () => {
+    document.documentElement.classList.toggle('light', theme === 'light');
+    document.querySelectorAll('.theme-toggle').forEach((b) =>
+      b.setAttribute('aria-label', theme === 'light' ? 'Switch to dark' : 'Switch to light'));
+  };
+  applyTheme();
+
+  document.querySelectorAll('.theme-toggle').forEach((b) => b.addEventListener('click', () => {
+    theme = theme === 'light' ? 'dark' : 'light';
+    localStorage.setItem(THEME_KEY, theme);
+    applyTheme();
+  }));
+
+  // Follow the system only while nobody has chosen for themselves.
+  prefersLight.addEventListener('change', (e) => {
+    if (localStorage.getItem(THEME_KEY)) return;
+    theme = e.matches ? 'light' : 'dark';
+    applyTheme();
+  });
+
   /* ---------------------------------------------------------------- nav */
 
   const nav = $('#nav');

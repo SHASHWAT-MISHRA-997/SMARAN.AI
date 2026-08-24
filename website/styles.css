@@ -19,7 +19,7 @@
 
   --text:       #f4f4f6;
   --muted:      #9a9aa6;
-  --dim:        #6b6b78;
+  --dim:        #7d7d8a;   /* 4.96:1 on --ink; #6b6b78 was 3.83 and failed */
 
   --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
@@ -2010,3 +2010,181 @@ html.motion-calm #codeRain { display: none; }
 @media (max-width: 620px) {
   .ide-card { padding: 22px 18px; }
 }
+
+
+/* The editor chooser: pick where it should open, rather than downloading a
+   file and pointing an editor at it by hand. */
+.ide-pick {
+  margin: 0 0 10px;
+  font-family: var(--mono); font-size: .72rem;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--dim);
+}
+.ide-choices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+
+.ide-choice {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 13px 15px;
+  border: 1px solid var(--line-soft); border-radius: 13px;
+  background: rgba(255,255,255,.03);
+  transition: transform .3s var(--ease), border-color .3s, background .3s, box-shadow .3s;
+}
+.ide-choice:hover {
+  transform: translateY(-2px);
+  border-color: rgba(239, 68, 68, .5);
+  background: rgba(239, 68, 68, .09);
+  box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 0 22px rgba(239, 68, 68, .18);
+}
+.ide-choice-name { font-size: .92rem; font-weight: 800; color: var(--text); }
+.ide-choice-sub { font-size: .74rem; color: var(--dim); }
+
+@media (max-width: 520px) { .ide-choices { grid-template-columns: 1fr; } }
+
+
+/* ---------------------------------------------------------------------
+   Light theme
+   The page is designed around light on black - glows, a code rain, a
+   particle field. Inverting the palette alone would leave grey text on
+   white and a black canvas over it, so the ambient layers are turned down
+   or off here rather than recoloured. Red stays as the accent, darkened
+   enough to hold contrast against white.
+   --------------------------------------------------------------------- */
+
+html.light {
+  --red:        #d92626;
+  --red-hot:    #e2452c;
+  --red-deep:   #a01414;
+  --ember:      #c9541f;
+
+  --ink:        #f7f7f9;
+  --ink-2:      #ffffff;
+  --panel:      rgba(255, 255, 255, 0.82);
+  --line:       rgba(217, 38, 38, 0.22);
+  --line-soft:  rgba(15, 15, 20, 0.1);
+
+  --text:       #14141a;
+  --muted:      #4a4a55;
+  --dim:        #6e6e7a;
+}
+
+/* The dark-only atmosphere. Kept at a whisper so the page still has depth. */
+html.light #codeRain { display: none; }
+html.light .noise,
+html.light .scanlines { display: none; }
+html.light #field { opacity: .32; }
+html.light .grid-floor { opacity: .18; }
+html.light .aurora span { opacity: .1; }
+html.light .rain i { opacity: .18; }
+html.light .spotlight {
+  background: radial-gradient(440px circle at var(--mx, 50%) var(--my, 30%),
+              rgba(217, 38, 38, .07), transparent 72%);
+}
+
+html.light body { background: var(--ink); }
+html.light ::-webkit-scrollbar-track { background: #ececf1; }
+
+/* Panels sit on white now, so the glass needs a border to exist at all. */
+html.light .card,
+html.light .step,
+html.light .dl-card,
+html.light .ide-card,
+html.light .pcol,
+html.light .fb,
+html.light .dev,
+html.light .screen,
+html.light .faq details {
+  border-color: rgba(15, 15, 20, .12);
+  box-shadow: 0 2px 14px rgba(15, 15, 20, .06);
+}
+html.light .card:hover,
+html.light .dl-card:hover,
+html.light .ide-card:hover,
+html.light .dev:hover {
+  box-shadow: 0 18px 44px rgba(15, 15, 20, .12), 0 0 30px rgba(217, 38, 38, .1);
+}
+
+/* The mock screens are dark devices; they stay dark, because a phone with a
+   white screen in a screenshot reads as a different product. */
+html.light .screen,
+html.light .stage-frame { background: #0a0a10; }
+html.light .ui-row { background: rgba(255,255,255,.14); }
+
+/* Outlined display type vanishes on white without a heavier stroke. */
+html.light .outline {
+  -webkit-text-stroke-width: 1.8px;
+  -webkit-text-stroke-color: rgba(217, 38, 38, .75);
+  text-shadow: none;
+}
+html.light .grad { filter: drop-shadow(0 0 12px rgba(217, 38, 38, .18)); }
+html.light .step-n { -webkit-text-stroke-color: rgba(217, 38, 38, .55); }
+
+/* Section tinting was built for a black page. */
+html.light .section.alt {
+  background:
+    linear-gradient(180deg, transparent, rgba(217, 38, 38, .04) 30%, transparent),
+    rgba(15, 15, 20, .02);
+}
+html.light .marquee { background: rgba(217, 38, 38, .05); }
+html.light .statband {
+  background:
+    radial-gradient(70% 140% at 50% 50%, rgba(217, 38, 38, .07), transparent 70%),
+    rgba(255, 255, 255, .6);
+}
+html.light .cta-inner { background: rgba(255, 255, 255, .8); }
+html.light .nav.stuck {
+  background: rgba(247, 247, 249, .88);
+  box-shadow: 0 8px 30px rgba(15, 15, 20, .08);
+}
+
+/* Inputs were dark fields on a dark page. */
+html.light .fb-field input,
+html.light .fb-field textarea,
+html.light .typer-line,
+html.light .pnote,
+html.light .ide-note code {
+  background: rgba(255, 255, 255, .9);
+  color: var(--text);
+}
+html.light .fb-field input::placeholder,
+html.light .fb-field textarea::placeholder { color: var(--dim); }
+html.light .typer .caret { background: var(--red); }
+html.light .hero-marks b,
+html.light .meet-list b,
+html.light .call-status,
+html.light .hand-tag,
+html.light .stage-tag,
+html.light .hub-pill { color: var(--red-deep); }
+
+html.light .btn-ghost {
+  background: rgba(15, 15, 20, .04);
+  border-color: rgba(15, 15, 20, .14);
+  color: var(--text);
+}
+html.light .btn-ghost:hover {
+  background: rgba(217, 38, 38, .08);
+  border-color: rgba(217, 38, 38, .4);
+}
+html.light .chips span,
+html.light .hub-tabs span { color: var(--muted); }
+
+/* ---- the switch ---- */
+
+.theme-toggle {
+  display: inline-grid; place-items: center;
+  width: 38px; height: 38px; border-radius: 11px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255,255,255,.04);
+  color: var(--muted); cursor: pointer;
+  transition: color .3s, border-color .3s, background .3s, box-shadow .3s, transform .3s var(--ease);
+}
+html.light .theme-toggle { background: rgba(15,15,20,.04); }
+.theme-toggle:hover {
+  color: var(--text);
+  transform: rotate(-12deg);
+  border-color: rgba(239, 68, 68, .45);
+  box-shadow: 0 0 18px rgba(239, 68, 68, .2);
+}
+.theme-toggle svg { width: 17px; height: 17px; }
+.theme-toggle .sun { display: none; }
+html.light .theme-toggle .sun { display: block; }
+html.light .theme-toggle .moon { display: none; }
+.mobile-menu .theme-toggle { width: 100%; height: 44px; margin-top: 10px; }
