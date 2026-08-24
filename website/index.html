@@ -45,7 +45,8 @@
     </a>
 
     <nav class="nav-links" aria-label="Primary">
-      <a href="#meet">Meet her</a>
+      <a href="#top">Home</a>
+      <a href="#meet">The assistant</a>
       <a href="#features">Features</a>
       <a href="#showcase">In action</a>
       <a href="#how">How it works</a>
@@ -67,7 +68,8 @@
   </div>
 
   <div class="mobile-menu" id="mobileMenu" hidden>
-    <a href="#meet">Meet her</a>
+    <a href="#top">Home</a>
+    <a href="#meet">The assistant</a>
     <a href="#features">Features</a>
     <a href="#showcase">In action</a>
     <a href="#how">How it works</a>
@@ -95,54 +97,49 @@
       <!-- The mascot: an ember with a face, drifting over the hero. Drawn
            rather than fetched, so it costs nothing and scales cleanly. -->
       <div class="mascot" id="mascot" aria-hidden="true">
-        <svg viewBox="0 0 120 132" width="120" height="132">
+        <svg viewBox="0 0 120 138" width="120" height="138">
           <defs>
-            <radialGradient id="emberFill" cx="50%" cy="34%" r="70%">
-              <stop offset="0%"   stop-color="#ffe0d2" />
-              <stop offset="30%"  stop-color="#ff9a6c" />
-              <stop offset="70%"  stop-color="#ef4444" />
-              <stop offset="100%" stop-color="#7d1010" />
+            <radialGradient id="emberFill" cx="46%" cy="30%" r="76%">
+              <stop offset="0%"   stop-color="#fff0e8" />
+              <stop offset="22%"  stop-color="#ffb08a" />
+              <stop offset="58%"  stop-color="#f4553f" />
+              <stop offset="88%"  stop-color="#c81f1f" />
+              <stop offset="100%" stop-color="#6d0f0f" />
+            </radialGradient>
+            <radialGradient id="emberSheen" cx="34%" cy="22%" r="34%">
+              <stop offset="0%"   stop-color="#fff" stop-opacity=".55" />
+              <stop offset="100%" stop-color="#fff" stop-opacity="0" />
             </radialGradient>
             <filter id="emberGlow" x="-70%" y="-70%" width="240%" height="240%">
-              <feGaussianBlur stdDeviation="6" result="b" />
+              <feGaussianBlur stdDeviation="7" result="b" />
               <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
             </filter>
           </defs>
 
-          <path class="mascot-body" filter="url(#emberGlow)" fill="url(#emberFill)"
-                d="M60 6c26 0 44 20 44 46v52c0 5-5 8-9 5l-9-7-9 7c-3 2-6 2-9 0l-8-6-8 6c-3 2-6 2-9 0l-9-7-9 7c-4 3-9 0-9-5V52C16 26 34 6 60 6Z" />
+          <!-- Body: a taller dome with a gentler hem than before. -->
+          <g filter="url(#emberGlow)">
+            <path class="mascot-body" fill="url(#emberFill)"
+                  d="M60 8c27 0 45 21 45 47v53c0 6-6 9-10 5l-7-7-7 7c-4 4-9 4-13 0l-6-6-6 6c-4 4-9 4-13 0l-7-7-7 7c-4 4-10 1-10-5V55C19 29 33 8 60 8Z" />
+            <ellipse class="mascot-sheen" cx="44" cy="40" rx="26" ry="22" fill="url(#emberSheen)" />
+          </g>
 
-          <!-- The face is a group per expression; script shows one at a time,
-               so each is a real drawing rather than a tweened blob. -->
-          <g class="mascot-face" data-face="calm">
-            <g class="face face-calm">
-              <ellipse class="eye" cx="43" cy="54" rx="9.5" ry="11.5" />
-              <ellipse class="eye" cx="77" cy="54" rx="9.5" ry="11.5" />
-              <circle class="glint" cx="46.5" cy="49" r="3.1" />
-              <circle class="glint" cx="80.5" cy="49" r="3.1" />
-            </g>
+          <!-- Eyes ride in their own group so script can nudge them towards
+               the pointer without disturbing the body. -->
+          <g class="mascot-eyes">
+            <ellipse class="eye" cx="45" cy="58" rx="10" ry="12" />
+            <ellipse class="eye" cx="78" cy="58" rx="10" ry="12" />
+            <circle class="glint big" cx="41" cy="52" r="3.6" />
+            <circle class="glint big" cx="74" cy="52" r="3.6" />
+            <circle class="glint small" cx="49" cy="63" r="1.7" />
+            <circle class="glint small" cx="82" cy="63" r="1.7" />
+          </g>
 
-            <g class="face face-happy">
-              <path class="line" d="M34 56q9-11 18 0" />
-              <path class="line" d="M68 56q9-11 18 0" />
-              <path class="line" d="M50 74q10 9 20 0" />
-            </g>
-
-            <g class="face face-think">
-              <ellipse class="eye" cx="43" cy="54" rx="9.5" ry="11.5" />
-              <ellipse class="eye" cx="77" cy="54" rx="9.5" ry="11.5" />
-              <circle class="glint" cx="39" cy="49" r="3.1" />
-              <circle class="glint" cx="73" cy="49" r="3.1" />
-              <path class="line" d="M52 76h16" />
-            </g>
-
-            <g class="face face-wow">
-              <ellipse class="eye" cx="43" cy="52" rx="10.5" ry="13" />
-              <ellipse class="eye" cx="77" cy="52" rx="10.5" ry="13" />
-              <circle class="glint" cx="46.5" cy="46" r="3.4" />
-              <circle class="glint" cx="80.5" cy="46" r="3.4" />
-              <ellipse class="mouth-o" cx="60" cy="78" rx="6" ry="7.5" />
-            </g>
+          <!-- One mouth, redrawn per mood. -->
+          <g class="mascot-mouth">
+            <path class="m m-calm"  d="M54 80q7.5 5 15 0" />
+            <path class="m m-happy" d="M50 78q11 12 22 0" />
+            <path class="m m-think" d="M55 81h13" />
+            <ellipse class="m m-wow" cx="61.5" cy="82" rx="5" ry="6" />
           </g>
         </svg>
       </div>
@@ -165,14 +162,10 @@
       </p>
 
       <div class="hero-cta reveal" data-delay="4">
-        <a class="btn btn-primary lg no-lift" href="#download" data-dl="windows">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10 4.6v6.9H3V5.5Zm0 13 7 .9v-6.8H3v5.9Zm8 1 10 1.3V12.5H11v7Zm0-15.9v7h10V3.2L11 4.6Z"/></svg>
-          <span>Download for Windows<em>233 MB · .exe installer</em></span>
+        <a class="btn btn-primary lg no-lift" href="#download">
+          <span>Download<em>Windows &amp; Android · free</em></span>
         </a>
-        <a class="btn btn-primary lg no-lift" href="#download" data-dl="android">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M17.6 9.5H6.4v8.2c0 .6.5 1.1 1.1 1.1h1.1v3a1.2 1.2 0 0 0 2.4 0v-3h2v3a1.2 1.2 0 0 0 2.4 0v-3h1.1c.6 0 1.1-.5 1.1-1.1V9.5ZM4.2 9.3A1.2 1.2 0 0 0 3 10.5v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2Zm15.6 0a1.2 1.2 0 0 0-1.2 1.2v5a1.2 1.2 0 0 0 2.4 0v-5a1.2 1.2 0 0 0-1.2-1.2ZM15.1 3l1-1.5a.3.3 0 0 0-.5-.3l-1 1.5a6.3 6.3 0 0 0-5.2 0l-1-1.5a.3.3 0 0 0-.5.3l1 1.5A5.3 5.3 0 0 0 6.4 8.3h11.2a5.3 5.3 0 0 0-2.5-5.3ZM9.5 6.2a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Zm5 0a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Z"/></svg>
-          <span>Download APK<em>31 MB · Android 7.0+</em></span>
-        </a>
+        <a class="btn btn-ghost lg" href="#meet">See it running</a>
       </div>
 
       <ul class="hero-marks reveal" data-delay="5">
@@ -219,7 +212,7 @@
 <section class="meet" id="meet">
   <div class="wrap meet-inner">
     <div class="meet-copy reveal">
-      <span class="eyebrow">Meet her</span>
+      <span class="eyebrow">The assistant</span>
       <h2>She has a face,<br /><span class="grad">and she looks back.</span></h2>
       <p>
         The assistant is not a blinking cursor. Open Speak and she is standing

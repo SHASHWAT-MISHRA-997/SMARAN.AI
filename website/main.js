@@ -623,38 +623,64 @@
 
   /* ------------------------------------------------------- mascot moods */
 
-  /* She cycles through expressions, lingers on calm, and reacts to the page:
-     thinking while the hero line types itself, delighted when someone hovers
-     a download. A face that only loops looks like a screensaver; one that
-     answers what you are doing looks like it is paying attention. */
-  const face = $('.mascot-face');
-  if (face) {
+  /* She watches the pointer and changes expression. The eyes track because
+     that is what makes a drawn face read as awake - a face that only loops
+     through moods looks like a screensaver, one that looks at you does not. */
+  const mascotSvg = $('#mascot svg');
+  if (mascotSvg) {
     const MOODS = ['calm', 'happy', 'calm', 'think', 'calm', 'wow'];
     let i = 0;
     let hold = 0;
+    const show = (mood) => mascotSvg.setAttribute('data-face', mood);
+    show('calm');
 
-    const show = (mood) => face.setAttribute('data-face', mood);
-
-    const drift = setInterval(() => {
+    setInterval(() => {
       if (hold > 0) { hold -= 1; return; }
       i = (i + 1) % MOODS.length;
       show(MOODS[i]);
-    }, 2600);
+    }, 2800);
 
-    // Reacting beats looping, so these override the cycle for a few beats.
+    // Eyes follow the pointer, clamped so they stay inside the face.
+    const eyes = $('.mascot-eyes');
+    if (eyes) {
+      let raf = 0;
+      let px = 0, py = 0;
+      window.addEventListener('pointermove', (e) => {
+        px = e.clientX; py = e.clientY;
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          const r = mascotSvg.getBoundingClientRect();
+          if (!r.width) return;
+          const cx = r.left + r.width / 2;
+          const cy = r.top + r.height * 0.44;
+          const dx = px - cx;
+          const dy = py - cy;
+          const dist = Math.hypot(dx, dy) || 1;
+          // Normalise, then allow at most a few pixels of travel.
+          const reach = Math.min(dist / 260, 1);
+          eyes.style.setProperty('--eye-x', `${(dx / dist * 5 * reach).toFixed(2)}px`);
+          eyes.style.setProperty('--eye-y', `${(dy / dist * 4 * reach).toFixed(2)}px`);
+        });
+      }, { passive: true });
+
+      // Looking at the pointer is only interesting while it is on the page.
+      window.addEventListener('pointerleave', () => {
+        eyes.style.setProperty('--eye-x', '0px');
+        eyes.style.setProperty('--eye-y', '0px');
+      });
+    }
+
+    // She reacts to what the page is doing, and that beats the idle cycle.
     window.addEventListener('smaran:typing', (e) => {
       if (!e.detail) return;
       show('think');
       hold = 1;
     });
-
-    $$('.btn.no-lift').forEach((btn) => {
-      btn.addEventListener('pointerenter', () => { show('happy'); hold = 2; });
-    });
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) clearInterval(drift);
-    });
+    $$('.btn').forEach((btn) => btn.addEventListener('pointerenter', () => {
+      show('happy');
+      hold = 2;
+    }));
   }
 
 })();

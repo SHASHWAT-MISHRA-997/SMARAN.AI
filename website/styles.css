@@ -1847,23 +1847,45 @@ html.motion-calm .meet-stage { transform: none; }
   50%      { transform: scaleX(1.035) scaleY(.975); }
 }
 
-.mascot .eye { fill: #1a0505; }
-.mascot .glint { fill: #fff; opacity: .95; }
-.mascot .line {
-  fill: none; stroke: #1a0505; stroke-width: 4; stroke-linecap: round;
+.mascot .eye { fill: #140404; }
+.mascot .glint { fill: #fff; }
+.mascot .glint.big { opacity: .96; }
+.mascot .glint.small { opacity: .55; }
+.mascot .mascot-sheen { pointer-events: none; }
+
+/* The eyes ride in their own group so they can be nudged towards the
+   pointer without the body following. Small numbers: a few pixels reads as
+   attention, more reads as a bug. */
+.mascot-eyes {
+  transform: translate(var(--eye-x, 0px), var(--eye-y, 0px));
+  transition: transform .22s cubic-bezier(.22, 1, .36, 1);
 }
-.mascot .mouth-o { fill: #1a0505; }
 
-/* One expression is shown at a time; script swaps which. Each is a real
-   drawing, so the face changes shape rather than just squashing. */
-.mascot .face { opacity: 0; transition: opacity .28s ease; }
-.mascot-face[data-face="calm"]  .face-calm,
-.mascot-face[data-face="happy"] .face-happy,
-.mascot-face[data-face="think"] .face-think,
-.mascot-face[data-face="wow"]   .face-wow { opacity: 1; }
+/* One mouth at a time, redrawn per mood rather than tweened. */
+.mascot .m {
+  fill: none; stroke: #140404; stroke-width: 4.2; stroke-linecap: round;
+  opacity: 0; transition: opacity .25s ease;
+}
+.mascot .m-wow { fill: #140404; stroke: none; }
+.mascot-face[data-face="calm"]  ~ .mascot-mouth .m-calm,
+.mascot-face[data-face="happy"] ~ .mascot-mouth .m-happy,
+.mascot-face[data-face="think"] ~ .mascot-mouth .m-think,
+.mascot-face[data-face="wow"]   ~ .mascot-mouth .m-wow { opacity: 1; }
 
-/* A blink on top of whichever expression is showing. */
-.mascot-face .eye { animation: mascot-blink 5.6s ease-in-out infinite; transform-origin: center; }
+/* The mood lives on the svg itself now, which is simpler to target. */
+.mascot svg[data-face="calm"]  .m-calm,
+.mascot svg[data-face="happy"] .m-happy,
+.mascot svg[data-face="think"] .m-think,
+.mascot svg[data-face="wow"]   .m-wow { opacity: 1; }
+
+/* Happy widens the eyes a little; thinking narrows them. */
+.mascot svg[data-face="happy"] .eye { transform: scale(1.06); transform-origin: center; }
+.mascot svg[data-face="think"] .eye { transform: scaleY(.72); transform-origin: center; }
+.mascot svg[data-face="wow"]   .eye { transform: scale(1.14); transform-origin: center; }
+.mascot .eye { transition: transform .25s ease; }
+
+/* A blink on top of whichever mood is showing. */
+.mascot-eyes .eye { animation: mascot-blink 5.6s ease-in-out infinite; }
 @keyframes mascot-blink {
   0%, 93%, 100% { transform: scaleY(1); }
   96%           { transform: scaleY(.08); }
@@ -1882,11 +1904,11 @@ html.motion-calm .meet-stage { transform: none; }
 
 html.motion-calm .mascot,
 html.motion-calm .mascot-body,
-html.motion-calm .mascot-face .eye { animation: none; }
+html.motion-calm .mascot-eyes .eye { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   html:not(.motion-full) .mascot,
   html:not(.motion-full) .mascot-body,
-  html:not(.motion-full) .mascot-face .eye { animation: none; }
+  html:not(.motion-full) .mascot-eyes .eye { animation: none; }
 }
 
 /* Single-item rows, now that the source links are gone. */
