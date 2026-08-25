@@ -303,6 +303,15 @@ app.include_router(lock_router)
 from app.companion import router as companion_router
 app.include_router(companion_router)
 
+# Local video generation. Imported lazily inside the try so a machine
+# without torch installed still starts: video is one feature, not a
+# reason for the whole app to refuse to run.
+try:
+    from app.video.routes import router as video_router
+    app.include_router(video_router)
+except Exception as _video_exc:  # pragma: no cover
+    logger.warning("Video generation unavailable: %s", _video_exc)
+
 # Spoken web navigation. The resolved URL opens in the user's own browser.
 from app.web_intents import detect_browser_command
 
