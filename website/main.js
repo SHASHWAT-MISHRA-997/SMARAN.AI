@@ -882,4 +882,51 @@
     }
   }
 
+  /* ------------------------------------------------- install tabs */
+
+  /* Windows / Android / CLI. Panels are switched with the `hidden` attribute
+     rather than display:none in a class, so a panel that is not showing is
+     genuinely out of the accessibility tree and out of tab order.
+
+     The platform the visitor is on is selected first. Being shown Android
+     steps on a desktop is a small thing that reads as the page not paying
+     attention. */
+  {
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.tabs .tab'));
+
+    if (tabs.length) {
+      var show = function (tab) {
+        tabs.forEach(function (t) {
+          var on = t === tab;
+          t.classList.toggle('is-on', on);
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+          var panel = document.getElementById(t.getAttribute('aria-controls'));
+          if (panel) panel.hidden = !on;
+        });
+      };
+
+      tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () { show(tab); });
+      });
+
+      // Left and right arrows move between tabs, which is what a screen
+      // reader user expects of a tablist.
+      document.querySelector('.tabs').addEventListener('keydown', function (e) {
+        var i = tabs.indexOf(document.activeElement);
+        if (i < 0) return;
+        var next = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : -1;
+        if (next < 0) return;
+        e.preventDefault();
+        var target = tabs[(next + tabs.length) % tabs.length];
+        target.focus();
+        show(target);
+      });
+
+      if (/android/i.test(navigator.userAgent)) {
+        var androidTab = document.getElementById('tb-and');
+        if (androidTab) show(androidTab);
+      }
+    }
+  }
+
 })();

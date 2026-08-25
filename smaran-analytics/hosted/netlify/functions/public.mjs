@@ -96,23 +96,49 @@ const sweep = async () => {
 const GITHUB_RELEASES =
   'https://api.github.com/repos/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases';
 
-/** GitHub's own count, taken where the file is actually served. */
+/**
+ * GitHub's own count, taken where the file is actually served.
+ *
+ * Cached for ten minutes. Unauthenticated GitHub allows 60 requests an hour
+ * per address, and Netlify's functions share addresses with everybody else on
+ * the platform, so calling it once per page view spent the allowance almost
+ * immediately and the site started showing a dash instead of a number.
+ *
+ * A failed fetch falls back to the last good value rather than to null, so a
+ * rate limit hides the figure only if it has never been read at all. The
+ * cached value is kept even once stale for the same reason: a number from ten
+ * minutes ago is true, and a dash is not more honest than that.
+ */
+const CACHE_MS = 10 * 60 * 1000;
+
 const githubDownloads = async () => {
+  const cache = getStore('cache-v1');
+  let last = null;
+  try {
+    last = await cache.get('github-downloads', { type: 'json' });
+    if (last && Date.now() - last.at < CACHE_MS) return last.total;
+  } catch { /* a cache miss is not a failure */ }
+
   try {
     const res = await fetch(GITHUB_RELEASES, {
       headers: { 'user-agent': 'smaran-analytics', accept: 'application/vnd.github+json' },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return last ? last.total : null;
+
     const releases = await res.json();
     let total = 0;
     for (const rel of releases) {
       for (const asset of rel.assets || []) total += asset.download_count;
     }
+    try {
+      await cache.setJSON('github-downloads', { total, at: Date.now() });
+    } catch { /* serving the number matters more than remembering it */ }
     return total;
   } catch {
-    // null, never 0. An unreachable API is not the same as nobody downloading,
-    // and the site hides the figure rather than printing a wrong one.
-    return null;
+    // null only when there has never been a reading. An unreachable API is
+    // not the same as nobody downloading, and the site hides the figure
+    // rather than printing a zero that reads as a fact.
+    return last ? last.total : null;
   }
 };
 
