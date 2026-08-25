@@ -1,7 +1,11 @@
 """Running LTX-Video locally.
 
-Loading follows the model card: LTXConditionPipeline from
-Lightricks/LTX-Video-0.9.8-dev. Two things there are deliberately not copied.
+Loading follows the model card: LTXConditionPipeline, over the components
+published at Lightricks/LTX-Video. Three things there are not copied.
+
+The card's examples name Lightricks/LTX-Video-0.9.8-dev as the repository.
+No such repository exists on the Hub, and passing it returns Repository
+Not Found, so the published id is used instead.
 
 The card's examples pass torch.bfloat16. That needs Ampere; a Turing card
 reports compute 7.5 and does not have it, so the precision comes from what the
@@ -25,7 +29,7 @@ from .registry import by_id
 
 logger = logging.getLogger(__name__)
 
-MODEL_ID = "ltx-video-0.9.8-dev"
+MODEL_ID = "ltx-video"
 
 # Above this much free VRAM the pipeline is kept resident, which is faster.
 # Below it, layers are moved in as needed. The number is a threshold this code

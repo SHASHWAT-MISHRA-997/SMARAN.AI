@@ -42,9 +42,13 @@ VERIFIED_ON = "2026-08-26"
 
 MODELS: List[VideoModel] = [
     VideoModel(
-        id="ltx-video-0.9.8-dev",
-        display_name="LTX-Video 0.9.8",
-        hf_repo="Lightricks/LTX-Video-0.9.8-dev",
+        id="ltx-video",
+        display_name="LTX-Video",
+        # The model card's own examples name Lightricks/LTX-Video-0.9.8-dev.
+        # That repository does not exist on the Hub - loading it returns
+        # "Repository Not Found" - so the id here is the published one the
+        # card belongs to, confirmed against the Hub's model listing.
+        hf_repo="Lightricks/LTX-Video",
         pipeline="LTXConditionPipeline",
         capabilities=["text-to-video", "image-to-video", "video-to-video", "keyframes"],
         min_vram_gb=1.0,
@@ -56,7 +60,11 @@ MODELS: List[VideoModel] = [
         code_license="Apache-2.0",
         weights_license="other (custom terms — read before commercial use)",
         max_seconds_claimed=60.0,
-        download_gb=None,
+        # Summed from the Hub's file listing for the components model_index.json
+        # actually references: text encoder 19.05, transformer 7.69, VAE 1.68.
+        # There is no fp16 variant to fall back to - one set of weights is all
+        # that is published.
+        download_gb=28.4,
         verified_on=VERIFIED_ON,
         source_url="https://github.com/Lightricks/LTX-Video",
         notes=(

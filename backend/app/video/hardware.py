@@ -87,11 +87,19 @@ def probe(model_dir: str = ".") -> Hardware:
     except Exception:
         free_b, total_b = 0, props.total_memory
 
+    # is_bf16_supported() counts emulation by default and so answers True on
+    # Turing, which has no bfloat16 in hardware — this card reports 7.5 and
+    # returns True for the plain call and False for the native one. Taking the
+    # default would pick an emulated path that is markedly slower than float16
+    # while looking like the better choice.
     try:
-        bf16 = bool(torch.cuda.is_bf16_supported())
-    except Exception:
-        # bfloat16 arrived with Ampere. Turing reports 7.5 and does not have it.
+        bf16 = bool(torch.cuda.is_bf16_supported(including_emulation=False))
+    except TypeError:
+        # Older builds have no flag; fall back to the capability that
+        # introduced bfloat16 in silicon.
         bf16 = cap >= (8, 0)
+    except Exception:
+        bf16 = False
 
     return Hardware(
         has_cuda=True,
