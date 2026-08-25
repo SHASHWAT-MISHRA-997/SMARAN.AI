@@ -844,8 +844,13 @@ ${userPrompt}`;
       font-size: 12px;
       line-height: 1.4;
       resize: none;
-      height: 32px;
+      /* A fixed 32px cannot hold two lines of 12px text at 1.4, and the
+         placeholder wrapped to two in a narrow panel, so its second line
+         was clipped. A minimum with room to grow fits both. */
+      min-height: 34px;
+      height: auto;
       max-height: 120px;
+      overflow-y: auto;
       outline: none;
       font-family: inherit;
       padding: 5px 2px;
@@ -988,7 +993,7 @@ ${userPrompt}`;
     <div class="input-container">
       <button class="btn-attach" onclick="pickAttachment()" title="Attach a text file or image metadata">📎</button>
       <button id="speakBtn" class="btn-attach" type="button" title="Dictate prompt using this VS Code runtime">🎙️</button>
-      <textarea id="promptInput" placeholder="Instruct SMARAN.AI... (Enter to send, Shift+Enter for newline)"></textarea>
+      <textarea id="promptInput" rows="1" placeholder="Instruct SMARAN.AI…" title="Enter to send, Shift+Enter for a newline"></textarea>
       <button id="readBtn" class="btn-attach" type="button" title="Read the last model response aloud">🔊</button>
       <button id="sendBtn" class="btn-send">SEND</button>
     </div>

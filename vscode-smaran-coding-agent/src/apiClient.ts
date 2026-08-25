@@ -141,7 +141,10 @@ export class SmaranApiClient {
           provider: m.company || m.provider || 'Multi-LLM'
         }));
       }
-    } catch (_) {}
+      } catch {
+        // The catalogue is optional: the built-in list below is a real
+        // fallback, not a guess, so a failed fetch is not worth surfacing.
+      }
 
     // Offline fallback. Every id here is a real, currently published model:
     // the previous list advertised models that do not exist, which is what
@@ -188,6 +191,10 @@ export class SmaranApiClient {
     // 1. Use a running SMARAN.AI app when there is one. The extension does not
     // depend on it: if no app is configured or advertising itself, this step is
     // skipped entirely rather than stalling on a connection that cannot succeed.
+    // Why each route declined, so a failure can name the reason instead of
+    // presenting silence as an answer.
+    const refusals: string[] = [];
+
     const appIsAvailable =
       Boolean(config.get<string>('backendUrl')?.trim()) ||
       SmaranApiClient.discoverRunningApp() !== null;
@@ -195,10 +202,12 @@ export class SmaranApiClient {
     if (appIsAvailable) {
       try {
         return await this._callLocalBackend(baseUrl, payload, onToken);
-      } catch (localErr: any) {
-        // App unreachable — continue with the user's own provider key or Ollama.
+        } catch (localErr: any) {
+          // App unreachable - continue with the user's own provider key or
+          // Ollama, but record why so a later failure can say what happened.
+          refusals.push(`SMARAN.AI app: ${localErr?.message || localErr}`);
+        }
       }
-    }
 
     // 2. Check user-configured API Keys
     const openRouterKey = apiKeys.openRouter || apiKeys.openrouter;
@@ -212,57 +221,70 @@ export class SmaranApiClient {
     if (groqKey && (model.startsWith('groq') || model === 'auto')) {
       try {
         return await this._callGroqDirect(groqKey, prompt, model, contextFiles, onToken);
-      } catch (_) {}
+      } catch (err: any) { refusals.push(String(err?.message || err)); }
     }
 
     if (openRouterKey) {
       try {
         return await this._callOpenRouterDirect(openRouterKey, prompt, model, contextFiles, onToken);
-      } catch (_) {}
+      } catch (err: any) { refusals.push(String(err?.message || err)); }
     }
 
     if (groqKey) {
       try {
         return await this._callGroqDirect(groqKey, prompt, model, contextFiles, onToken);
-      } catch (_) {}
+      } catch (err: any) { refusals.push(String(err?.message || err)); }
     }
 
     if (geminiKey) {
       try {
         return await this._callGeminiDirect(geminiKey, prompt, contextFiles, onToken);
-      } catch (_) {}
+      } catch (err: any) { refusals.push(String(err?.message || err)); }
     }
 
     if (nvidiaKey) {
       try {
         return await this._callNvidiaDirect(nvidiaKey, prompt, model, contextFiles, onToken);
-      } catch (_) {}
+      } catch (err: any) { refusals.push(String(err?.message || err)); }
     }
 
     if (deepseekKey) {
       try {
         return await this._callDeepSeekDirect(deepseekKey, prompt, contextFiles, onToken);
-      } catch (_) {}
+      } catch (err: any) { refusals.push(String(err?.message || err)); }
     }
 
     if (anthropicKey) {
       try {
         return await this._callAnthropicDirect(anthropicKey, prompt, contextFiles, onToken);
-      } catch (_) {}
+      } catch (err: any) { refusals.push(String(err?.message || err)); }
     }
 
     if (openaiKey) {
       try {
         return await this._callOpenAIDirect(openaiKey, prompt, contextFiles, onToken);
-      } catch (_) {}
+      } catch (err: any) { refusals.push(String(err?.message || err)); }
     }
 
     // 3. Local Ollama, if the user is running one on port 11434.
     {
       try {
         return await this._callLocalOllama(prompt, contextFiles, onToken);
-      } catch (_) {}
+      } catch (err: any) { refusals.push(String(err?.message || err)); }
 
+      // A configured route that failed is a different problem from no route at
+      // all, and they need different advice. Telling someone nothing is
+      // configured when their key was merely rejected sends them to re-enter a
+      // key that was never the issue.
+      if (refusals.length) {
+        throw new Error(
+          'Every configured route refused this request:\n' +
+          refusals.map((r) => '  - ' + r).join('\n') + '\n\n' +
+          "These are the providers' own messages, not a guess. A rejected key, " +
+          'an exhausted free quota and an unknown model all read differently above.'
+        );
+      }
+      
       throw new Error(
         'No AI engine is configured yet. Add your own provider key in VS Code ' +
         'Settings under "SMARAN.AI: Api Keys" — Groq, Google Gemini and ' +
@@ -271,6 +293,41 @@ export class SmaranApiClient {
         'also used automatically when present. Nothing was fabricated.'
       );
     }
+  }
+
+  /**
+   * The provider's answer, or the provider's own reason for not giving one.
+   *
+   * Every one of these APIs reports failure as valid JSON with an `error`
+   * object and no `choices`. Reaching for the content and falling back to a
+   * string turned that into a successful reply reading 'No response': the
+   * real message - 'User not found', 'insufficient credits', 'model not
+   * found' - was discarded, and because the call resolved rather than threw,
+   * the next provider in the chain was never tried.
+   */
+  private static _contentOrThrow(
+    provider: string,
+    status: number | undefined,
+    raw: string,
+    content: string | undefined | null,
+  ): string {
+    if (typeof content === 'string' && content.trim()) return content;
+
+    let reason = '';
+    try {
+      const parsed = JSON.parse(raw);
+      reason =
+        parsed?.error?.message ||
+        parsed?.error?.type ||
+        (typeof parsed?.error === 'string' ? parsed.error : '') ||
+        parsed?.message ||
+        '';
+    } catch {
+      reason = raw.slice(0, 200);
+    }
+
+    const code = status && status >= 400 ? ` (HTTP ${status})` : '';
+    throw new Error(`${provider}${code}: ${reason || 'returned no content'}`);
   }
 
   private _callLocalBackend(baseUrl: string, payload: any, onToken?: (token: string) => void): Promise<string> {
@@ -384,7 +441,7 @@ export class SmaranApiClient {
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            resolve(parsed.response || "No response from local Ollama");
+            resolve(SmaranApiClient._contentOrThrow('Local Ollama', res.statusCode, data, parsed.response));
           } catch (e) {
             reject(e);
           }
@@ -433,7 +490,7 @@ export class SmaranApiClient {
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            const ans = parsed.choices?.[0]?.message?.content || "No response";
+            const ans = SmaranApiClient._contentOrThrow('Groq', res.statusCode, data, parsed.choices?.[0]?.message?.content);
             if (onToken) onToken(ans);
             resolve(ans);
           } catch (e) {
@@ -554,7 +611,7 @@ export class SmaranApiClient {
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            const ans = parsed.choices?.[0]?.message?.content || "No response";
+            const ans = SmaranApiClient._contentOrThrow('OpenRouter', res.statusCode, data, parsed.choices?.[0]?.message?.content);
             if (onToken) onToken(ans);
             resolve(ans);
           } catch (e) {
@@ -593,7 +650,7 @@ export class SmaranApiClient {
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            const ans = parsed.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
+            const ans = SmaranApiClient._contentOrThrow('Google Gemini', res.statusCode, data, parsed.candidates?.[0]?.content?.parts?.[0]?.text);
             if (onToken) onToken(ans);
             resolve(ans);
           } catch (e) {
@@ -637,7 +694,7 @@ export class SmaranApiClient {
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            const ans = parsed.choices?.[0]?.message?.content || "No response";
+            const ans = SmaranApiClient._contentOrThrow('DeepSeek', res.statusCode, data, parsed.choices?.[0]?.message?.content);
             if (onToken) onToken(ans);
             resolve(ans);
           } catch (e) {
@@ -681,7 +738,7 @@ export class SmaranApiClient {
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            const ans = parsed.content?.[0]?.text || "No response";
+            const ans = SmaranApiClient._contentOrThrow('Anthropic', res.statusCode, data, parsed.content?.[0]?.text);
             if (onToken) onToken(ans);
             resolve(ans);
           } catch (e) {
@@ -725,7 +782,7 @@ export class SmaranApiClient {
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data);
-            const ans = parsed.choices?.[0]?.message?.content || "No response";
+            const ans = SmaranApiClient._contentOrThrow('OpenAI', res.statusCode, data, parsed.choices?.[0]?.message?.content);
             if (onToken) onToken(ans);
             resolve(ans);
           } catch (e) {
