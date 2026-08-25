@@ -32,11 +32,14 @@ _jobs_lock = threading.Lock()
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     image_path: Optional[str] = None
-    seconds: float = Field(4.0, gt=0, le=60)
-    width: int = Field(704, ge=128, le=1280)
-    height: int = Field(480, ge=128, le=1280)
-    fps: int = Field(24, ge=8, le=30)
-    steps: int = Field(30, ge=1, le=100)
+    seconds: float = Field(1.0, gt=0, le=60)
+    # Defaults match what was measured to produce usable output rather than
+    # the smallest thing that runs; below roughly 960x576 this model washes out.
+    width: int = Field(960, ge=128, le=1280)
+    height: int = Field(576, ge=128, le=1280)
+    fps: int = Field(30, ge=8, le=30)
+    steps: int = Field(40, ge=1, le=100)
+    guidance_scale: float = Field(3.0, ge=0, le=20)
     seed: Optional[int] = None
 
 
@@ -83,6 +86,7 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
             height=req.height,
             fps=req.fps,
             steps=req.steps,
+            guidance_scale=req.guidance_scale,
             seed=req.seed,
             progress=note,
         )

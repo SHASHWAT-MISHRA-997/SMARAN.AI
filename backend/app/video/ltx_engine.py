@@ -1,11 +1,18 @@
 """Running LTX-Video locally.
 
-Loading follows the model card: LTXConditionPipeline, over the components
-published at Lightricks/LTX-Video. Three things there are not copied.
+Loading uses the components published at Lightricks/LTX-Video. Three things
+the model card shows are deliberately not copied.
 
-The card's examples name Lightricks/LTX-Video-0.9.8-dev as the repository.
-No such repository exists on the Hub, and passing it returns Repository
-Not Found, so the published id is used instead.
+The card names Lightricks/LTX-Video-0.9.8-dev as the repository. No such
+repository exists on the Hub and passing it returns Repository Not Found, so
+the published id is used instead.
+
+The card also uses LTXConditionPipeline. In diffusers 0.39 that class builds
+its own timesteps and calls retrieve_timesteps without mu, while this
+repository's scheduler was written for 0.32 with use_dynamic_shifting set,
+which requires it - the pair raises before a single step runs. LTXPipeline
+and LTXImageToVideoPipeline both pass mu, so text-to-video and image-to-video
+go through those. They read the same weights.
 
 The card's examples pass torch.bfloat16. That needs Ampere; a Turing card
 reports compute 7.5 and does not have it, so the precision comes from what the
@@ -36,7 +43,7 @@ MODEL_ID = "ltx-video"
 # chooses, not a figure from the model card, and it is described that way.
 RESIDENT_VRAM_GB = 12.0
 
-_pipe = None
+_pipes: dict = {}
 _pipe_lock = threading.Lock()
 
 
@@ -44,26 +51,37 @@ class VideoError(RuntimeError):
     """A failure worth showing the user verbatim."""
 
 
-def _resolve_dtype(hw: Hardware):
+def _resolve_dtype(hw: Hardware, model) -> object:
+    """The precision to load at."""
     import torch
 
     if not hw.has_cuda:
         return torch.float32
+
+    # A model that names a precision gets it, whether or not the card has it
+    # in hardware. Preferring float16 here because this card only emulates
+    # bfloat16 produced a near-white static clip: fp16 tops out around 65504
+    # and this transformer overflows it, so the faster type produces nothing
+    # worth having. Emulated and correct beats native and blank.
+    required = getattr(model, "required_dtype", None)
+    if required:
+        return getattr(torch, required)
+
     return torch.bfloat16 if hw.supports_bfloat16 else torch.float16
 
 
-def load(progress: Optional[Callable[[str], None]] = None):
+def load(for_image: bool = False, progress: Optional[Callable[[str], None]] = None):
     """Load the pipeline once, and reuse it.
 
     Weights are several gigabytes and loading them takes minutes; doing it per
     request would make every generation feel broken. The lock is there because
     two requests arriving together would otherwise each start a download.
     """
-    global _pipe
+    kind = "image-to-video" if for_image else "text-to-video"
 
     with _pipe_lock:
-        if _pipe is not None:
-            return _pipe
+        if kind in _pipes:
+            return _pipes[kind]
 
         model = by_id(MODEL_ID)
         hw = probe()
@@ -73,14 +91,14 @@ def load(progress: Optional[Callable[[str], None]] = None):
 
         try:
             import torch
-            from diffusers import LTXConditionPipeline
+            from diffusers import LTXImageToVideoPipeline, LTXPipeline
         except ImportError as exc:
             raise VideoError(
                 "The video packages are not installed: %s. Install torch and "
                 "diffusers to generate video locally." % exc
             ) from exc
 
-        dtype = _resolve_dtype(hw)
+        dtype = _resolve_dtype(hw, model)
         if progress:
             progress(
                 "Loading %s at %s. The first run downloads several gigabytes of "
@@ -88,7 +106,14 @@ def load(progress: Optional[Callable[[str], None]] = None):
             )
 
         try:
-            pipe = LTXConditionPipeline.from_pretrained(model.hf_repo, torch_dtype=dtype)
+            cls = LTXImageToVideoPipeline if for_image else LTXPipeline
+            # The two share every component, so a second load would fetch
+            # nothing new but would put a second copy of 28 GB in memory.
+            other = next(iter(_pipes.values()), None)
+            if other is not None:
+                pipe = cls(**other.components)
+            else:
+                pipe = cls.from_pretrained(model.hf_repo, torch_dtype=dtype)
         except Exception as exc:
             raise VideoError("Could not load %s: %s" % (model.hf_repo, exc)) from exc
 
@@ -113,8 +138,8 @@ def load(progress: Optional[Callable[[str], None]] = None):
             if callable(fn):
                 fn()
 
-        _pipe = pipe
-        return _pipe
+        _pipes[kind] = pipe
+        return pipe
 
 
 def _round_to(value: int, base: int) -> int:
@@ -125,13 +150,23 @@ def generate(
     prompt: str,
     output_path: str,
     image_path: Optional[str] = None,
-    seconds: float = 4.0,
-    width: int = 704,
-    height: int = 480,
-    fps: int = 24,
-    steps: int = 30,
+    seconds: float = 1.0,
+    # The documented default is 1216x704 at 30 fps. That does not fit in 6 GB,
+    # and dropping far below it is what produced washed-out output: the same
+    # seed gave mean brightness 238 with 29% of pixels blown out at 704x480,
+    # against 172 and 1% at 960x576. Detail comes back with resolution.
+    width: int = 960,
+    height: int = 576,
+    fps: int = 30,
+    # 40 over 30 for the same reason. The 8-step figure in the release notes
+    # belongs to the distilled models, not to these weights.
+    steps: int = 40,
+    guidance_scale: float = 3.0,
     seed: Optional[int] = None,
-    negative_prompt: str = "worst quality, blurry, distorted, jittery",
+    negative_prompt: str = (
+        "worst quality, inconsistent motion, blurry, jittery, distorted, "
+        "overexposed, washed out"
+    ),
     progress: Optional[Callable[[str], None]] = None,
 ) -> dict:
     """Generate one clip and write it to output_path.
@@ -143,7 +178,7 @@ def generate(
     import torch
     from diffusers.utils import export_to_video
 
-    pipe = load(progress)
+    pipe = load(for_image=bool(image_path), progress=progress)
 
     # The architecture is patch-based: dimensions must be multiples of 32, and
     # frame count must be 8n+1. Passing an arbitrary number either errors or is
@@ -165,17 +200,16 @@ def generate(
         height=height,
         num_frames=frames,
         num_inference_steps=steps,
+        guidance_scale=guidance_scale,
         generator=generator,
     )
 
     if image_path:
-        from diffusers.pipelines.ltx.pipeline_ltx_condition import LTXVideoCondition
         from diffusers.utils import load_image
 
         if not os.path.exists(image_path):
             raise VideoError("No such image: %s" % image_path)
-        image = load_image(image_path)
-        kwargs["conditions"] = [LTXVideoCondition(image=image, frame_index=0)]
+        kwargs["image"] = load_image(image_path)
 
     if progress:
         progress(

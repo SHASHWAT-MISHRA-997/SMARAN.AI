@@ -29,6 +29,7 @@ class VideoModel:
     code_license: str
     weights_license: str
     max_seconds_claimed: Optional[float]
+    required_dtype: Optional[str]     # precision the weights need, if fixed
     download_gb: Optional[float]
     verified_on: str
     source_url: str
@@ -60,6 +61,11 @@ MODELS: List[VideoModel] = [
         code_license="Apache-2.0",
         weights_license="other (custom terms — read before commercial use)",
         max_seconds_claimed=60.0,
+        # Measured here, not assumed. float16 produced a near-white static
+        # clip - mean brightness 248 of 255 with 0.35 frame-to-frame change
+        # - while bfloat16 on the same seed gave 221.8 and 4.13. fp16's
+        # range tops out around 65504 and this transformer overflows it.
+        required_dtype="bfloat16",
         # Summed from the Hub's file listing for the components model_index.json
         # actually references: text encoder 19.05, transformer 7.69, VAE 1.68.
         # There is no fp16 variant to fall back to - one set of weights is all
@@ -87,6 +93,7 @@ MODELS: List[VideoModel] = [
         code_license="unverified",
         weights_license="other",
         max_seconds_claimed=5.4,
+        required_dtype=None,
         download_gb=None,
         verified_on=VERIFIED_ON,
         source_url="https://github.com/Tencent-Hunyuan/HunyuanVideo",
@@ -107,6 +114,7 @@ MODELS: List[VideoModel] = [
         code_license="Apache-2.0",
         weights_license="apache-2.0",
         max_seconds_claimed=None,
+        required_dtype=None,
         download_gb=None,
         verified_on=VERIFIED_ON,
         source_url="https://github.com/THUDM/CogVideo",
