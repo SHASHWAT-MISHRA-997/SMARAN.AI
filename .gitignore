@@ -81,3 +81,7 @@ dist-release/
 
 # Generated at build time; carries the analytics ingest key.
 backend/app/analytics_config.py
+
+# The saved Google client id. Not a secret, but it is per-installation
+# configuration rather than source.
+backend/data/google_oauth.json

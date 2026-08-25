@@ -414,7 +414,35 @@ app.add_middleware(
 )
 
 # Security headers middleware
-GOOGLE_CLIENT_ID = os.getenv("SMARAN_GOOGLE_CLIENT_ID", "").strip()
+_GOOGLE_CONFIG_FILE = os.path.join(settings.DATA_DIR, "google_oauth.json")
+
+
+def google_client_id() -> str:
+    """The OAuth client id, or empty when Google Sign-In is not set up.
+
+    Read on each call rather than captured at import: this used to come
+    from an environment variable only, which meant setting a system
+    variable and restarting the app to change it. Now it can be pasted
+    into Settings and takes effect immediately.
+
+    The environment variable still wins where one is set, so a packaged
+    build can ship with an id baked in.
+    """
+    from_env = os.getenv("SMARAN_GOOGLE_CLIENT_ID", "").strip()
+    if from_env:
+        return from_env
+    try:
+        with open(_GOOGLE_CONFIG_FILE, "r", encoding="utf-8") as handle:
+            return str(json.load(handle).get("client_id") or "").strip()
+    except (OSError, ValueError):
+        return ""
+
+
+def set_google_client_id(client_id: str) -> None:
+    """Save it beside the other provider keys."""
+    os.makedirs(settings.DATA_DIR, exist_ok=True)
+    with open(_GOOGLE_CONFIG_FILE, "w", encoding="utf-8") as handle:
+        json.dump({"client_id": client_id.strip()}, handle)
 
 
 @app.middleware("http")
@@ -432,8 +460,9 @@ async def add_security_headers(request: Request, call_next):
     # an iframe, so it needs an explicit hole in the policy. The hole only
     # opens when Google Sign-In is actually configured; a build without a
     # client id keeps the tighter policy.
-    google_script = " https://accounts.google.com https://apis.google.com" if GOOGLE_CLIENT_ID else ""
-    google_frame = "frame-src 'self' https://accounts.google.com; " if GOOGLE_CLIENT_ID else ""
+    _google_on = bool(google_client_id())
+    google_script = " https://accounts.google.com https://apis.google.com" if _google_on else ""
+    google_frame = "frame-src 'self' https://accounts.google.com; " if _google_on else ""
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         f"script-src 'self' 'unsafe-inline' 'unsafe-eval'{google_script}; "
@@ -532,7 +561,8 @@ def _verify_google_credential(credential: str) -> dict:
     matters most: without it a token minted for some other site would be
     accepted here.
     """
-    if not GOOGLE_CLIENT_ID:
+    configured = google_client_id()
+    if not configured:
         raise HTTPException(
             status_code=503,
             detail="Google Sign-In is not configured on this installation.",
@@ -550,7 +580,7 @@ def _verify_google_credential(credential: str) -> dict:
         raise HTTPException(status_code=401, detail="That Google sign-in could not be verified.")
 
     claims = reply.json()
-    if claims.get("aud") != GOOGLE_CLIENT_ID:
+    if claims.get("aud") != configured:
         raise HTTPException(status_code=401, detail="That Google sign-in was issued for a different app.")
     if claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
         raise HTTPException(status_code=401, detail="That Google sign-in came from an unexpected issuer.")
@@ -617,10 +647,35 @@ async def google_sign_in(req: GoogleSignInRequest, response: Response, request: 
     )
 
 
+@app.post("/api/auth/google/config")
+async def save_google_client_id(request: Request):
+    """Store the OAuth client id so Google Sign-In can be switched on.
+
+    A client id is not a secret - it is sent to every browser that loads
+    the sign-in button - so this needs no more protection than the local
+    API already has. The secret half never touches this app: the token
+    Google returns is verified against Google, not decrypted here.
+    """
+    body = await request.json()
+    client_id = str(body.get("client_id") or "").strip()
+
+    # An id that is not Google's shape would only fail later, in a place
+    # that is harder to connect back to this screen.
+    if client_id and not client_id.endswith(".apps.googleusercontent.com"):
+        raise HTTPException(
+            status_code=400,
+            detail="A Google client id ends with .apps.googleusercontent.com.",
+        )
+
+    set_google_client_id(client_id)
+    return {"configured": bool(client_id), "client_id": client_id or None}
+
+
 @app.get("/api/auth/google/config")
 def google_sign_in_config():
     """Lets the sign-in panel know whether to offer the Google button."""
-    return {"configured": bool(GOOGLE_CLIENT_ID), "client_id": GOOGLE_CLIENT_ID or None}
+    current = google_client_id()
+    return {"configured": bool(current), "client_id": current or None}
 
 
 def _get_or_create_device_user(db: Session, device_id: str, device_fingerprint: str = None) -> User:

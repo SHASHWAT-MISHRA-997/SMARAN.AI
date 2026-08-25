@@ -77,6 +77,103 @@ const settingsBrowserCapabilities = async () => {
  * Deliberately states the full list rather than a vague 'we collect some
  * diagnostics'. Someone who reads this should be able to decide.
  */
+/**
+ * Google Sign-In needs an OAuth client id, which only the owner of the
+ * project can create. Creating it is quick; getting it into the app used to
+ * mean setting a system environment variable and restarting, which is why
+ * this button never worked for anybody. Pasting it here is enough.
+ */
+const GoogleSignInSetting = () => {
+  const [state, setState] = React.useState(null);
+  const [value, setValue] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [saved, setSaved] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch(`${API_BASE}/api/auth/google/config`, { credentials: 'include' })
+      .then((r) => r.json())
+      .then((d) => { setState(d); setValue(d?.client_id || ''); })
+      .catch(() => setState({ configured: false }));
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    setSaved(false);
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/google/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ client_id: value.trim() }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof body.detail === 'string' ? body.detail : 'That was not accepted.');
+      }
+      setState(body);
+      setSaved(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!state) return null;
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-black/30 p-4">
+      <div className="flex items-center gap-2">
+        <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
+          <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
+          <path fill="#FBBC05" d="M11.8 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 17.1 2.1 20.4 2.1 24s.9 6.9 2.4 9.9l7.3-5.7z" />
+          <path fill="#EA4335" d="M24 10.8c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 4.2 29.9 2 24 2 15.4 2 8.1 6.9 4.5 14.1l7.3 5.7c1.7-5.2 6.5-9 12.2-9z" />
+        </svg>
+        <h4 className="text-sm font-black text-white">Continue with Google</h4>
+        <span className={`ml-auto text-[10px] font-bold ${state.configured ? 'text-emerald-400' : 'text-zinc-500'}`}>
+          {state.configured ? 'On' : 'Not set up'}
+        </span>
+      </div>
+
+      <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+        Paste an OAuth client id to offer Google sign-in. Create one for free in
+        the Google Cloud Console under <b className="text-zinc-400">APIs &amp; Services → Credentials</b>,
+        choosing <b className="text-zinc-400">Web application</b>. The client secret is
+        not needed and is never stored here.
+      </p>
+
+      <div className="mt-3 flex gap-2">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => { setValue(e.target.value); setSaved(false); }}
+          placeholder="1234567890-abc.apps.googleusercontent.com"
+          className="flex-1 rounded-lg border border-zinc-700 bg-black/40 px-3 py-2 font-mono text-[11px]
+                     text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-red-400/50"
+        />
+        <button
+          type="button"
+          onClick={save}
+          disabled={busy}
+          className="rounded-lg bg-red-600 px-3 py-2 text-xs font-black text-white transition hover:bg-red-500 disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-[11px] text-amber-300">{error}</p>}
+      {saved && !error && (
+        <p className="mt-2 text-[11px] text-emerald-400">
+          Saved. The button appears on the sign-in panel from now on.
+        </p>
+      )}
+    </div>
+  );
+};
+
 const PrivacyReporting = () => {
   const [info, setInfo] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
@@ -461,6 +558,7 @@ useEffect(() => {
             {/* Usage reporting. Shown plainly and switchable, because
                 collecting anything without saying so is both wrong and, under
                 the DPDP Act and the GDPR, unlawful. */}
+            <GoogleSignInSetting />
             <PrivacyReporting />
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
