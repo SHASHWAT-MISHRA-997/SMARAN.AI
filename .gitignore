@@ -1,6 +1,9 @@
 # Security & Secrets Protection
-.env
-.env.local
+# `.env*` rather than `.env` and `*.env`: those two miss anything with a
+# suffix, so a `.env.backup` or `.env.old` sitting in the tree would have been
+# committable. A template is the one thing worth tracking, so it is excepted.
+.env*
+!.env.example
 *.env
 litellm_config.yaml
 *.pem

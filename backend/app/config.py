@@ -1,11 +1,52 @@
 import os
+import sys
 import json
+from dotenv import dotenv_values
 from pydantic_settings import BaseSettings
 
 # Dynamic root data directory resolution
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _root_data = os.path.join(_project_root, "data")
 _default_data_dir = _root_data if os.path.isdir(_root_data) else os.getenv("DATA_DIR", "./data")
+
+
+# ── .env ─────────────────────────────────────────────────────────────────────
+# This module is imported before anything else reads the environment, so the
+# file is read here.
+#
+# Only keys prefixed SMARAN_ are taken. The .env in this tree was generated for
+# the Docker Compose stack and still carries DATABASE_URL pointing at a
+# `postgres` host, POSTGRES_* credentials and service ports. Importing those
+# wholesale swaps the desktop app's SQLite database for a host that does not
+# resolve, and the process dies on the first query. A prefix keeps the file
+# usable by both without either one inheriting the other's mistakes.
+#
+# A variable already in the real environment is never overwritten: the shell
+# and the installer outrank a file someone edited months ago.
+#
+# Frozen builds have no source tree, so the directory beside the .exe and the
+# data directory are searched too — those are the only two places a user of the
+# installed app can put a file.
+_ENV_PREFIX = "SMARAN_"
+
+
+def _env_candidates():
+    yield os.path.join(_project_root, ".env")
+    yield os.path.join(_default_data_dir, ".env")
+    if getattr(sys, "frozen", False):
+        yield os.path.join(os.path.dirname(sys.executable), ".env")
+
+
+for _env_path in _env_candidates():
+    if not os.path.isfile(_env_path):
+        continue
+    try:
+        _values = dotenv_values(_env_path, encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        continue
+    for _key, _value in _values.items():
+        if _key.startswith(_ENV_PREFIX) and _value is not None:
+            os.environ.setdefault(_key, _value)
 
 # ── Read auto-detected hardware config written by bootstrapper.py ─────────────
 _hw_config = {}
