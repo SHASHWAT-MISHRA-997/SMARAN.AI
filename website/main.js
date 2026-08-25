@@ -788,6 +788,10 @@
     }
 
     var targetOf = function (href) {
+      // The CLI is also a .exe, so it is matched before the generic rule.
+      // Otherwise every command-line download is counted as an installer and
+      // the two figures can never be told apart again.
+      if (/smaran\.exe(\?|$)/i.test(href)) return 'cli';
       if (/\.exe(\?|$)/i.test(href)) return 'exe';
       if (/\.apk(\?|$)/i.test(href)) return 'apk';
       if (/\.vsix(\?|$)/i.test(href) || /marketplace\.visualstudio\.com/i.test(href)) return 'vsix';
