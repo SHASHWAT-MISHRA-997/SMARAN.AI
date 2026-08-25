@@ -102,16 +102,49 @@ class MCPGitHubPlugin(ConnectorPlugin):
             }
 
         elif operation_name == "github_list_commits":
-            return {
-                "mcp_server": "github",
-                "status": "success",
-                "repo": f"{owner}/{repo}",
-                "commits": [
-                    {"sha": "8be13cc", "message": "fix: optically center send arrow inside circular action button", "author": "Shashwat Mishra"},
-                    {"sha": "eb2cf69", "message": "feat: full RAG + Web dual mode and model matrix update", "author": "Shashwat Mishra"},
-                    {"sha": "a6d4cbf", "message": "release: v2.5.0 production packaging", "author": "Shashwat Mishra"}
-                ]
-            }
+            owner = parameters.get("owner", "").strip()
+            repo = parameters.get("repo", "").strip()
+            limit = max(1, min(int(parameters.get("limit", 5) or 5), 100))
+            if not owner or not repo:
+                return {"mcp_server": "github", "status": "error",
+                        "error": "owner and repo are required."}
+
+            # The public commits API needs no token for a public repository.
+            # This previously returned invented commits; it now returns the
+            # repository's real ones, or says why it could not.
+            url = "https://api.github.com/repos/%s/%s/commits" % (owner, repo)
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    resp = await client.get(
+                        url,
+                        params={"per_page": limit},
+                        headers={"Accept": "application/vnd.github+json",
+                                 "User-Agent": "SMARAN-GitHub-MCP/1.0"},
+                    )
+                if resp.status_code == 404:
+                    return {"mcp_server": "github", "status": "error",
+                            "error": "No such repository, or it is private: %s/%s" % (owner, repo)}
+                if resp.status_code == 403:
+                    return {"mcp_server": "github", "status": "error",
+                            "error": "GitHub rate limit reached. Unauthenticated requests are capped at 60 an hour."}
+                if resp.status_code != 200:
+                    return {"mcp_server": "github", "status": "error",
+                            "http_status": resp.status_code, "error": resp.text[:200]}
+
+                commits = []
+                for item in resp.json():
+                    c = item.get("commit", {})
+                    commits.append({
+                        "sha": (item.get("sha") or "")[:12],
+                        "message": (c.get("message") or "").splitlines()[0][:120],
+                        "author": (c.get("author") or {}).get("name"),
+                        "date": (c.get("author") or {}).get("date"),
+                    })
+                return {"mcp_server": "github", "status": "success",
+                        "repository": "%s/%s" % (owner, repo),
+                        "count": len(commits), "commits": commits}
+            except Exception as e:
+                return {"mcp_server": "github", "status": "failed", "error": str(e)}
 
         return {"error": f"Unknown operation: {operation_name}"}
 

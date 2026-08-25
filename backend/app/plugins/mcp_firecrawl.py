@@ -104,13 +104,71 @@ class MCPFirecrawlPlugin(ConnectorPlugin):
                 return {"mcp_server": "firecrawl", "status": "failed", "error": str(e), "url": url}
 
         elif operation_name == "firecrawl_crawl_site":
-            base_url = parameters.get("base_url", "")
+            base_url = (parameters.get("base_url") or "").strip()
+            if not base_url:
+                return {"mcp_server": "firecrawl", "status": "error",
+                        "error": "base_url is required."}
+            if not base_url.startswith(("http://", "https://")):
+                base_url = "https://" + base_url
+
+            max_depth = max(1, min(int(parameters.get("max_depth", 2) or 2), 3))
+            # A ceiling on pages, because a crawl without one walks a whole
+            # site and never returns. This previously reported "pages_crawled:
+            # 5" without fetching anything at all.
+            max_pages = 12
+
+            from urllib.parse import urljoin, urlparse
+            origin = urlparse(base_url).netloc
+
+            seen, pages, queue = set(), [], [(base_url, 0)]
+            try:
+                async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                    while queue and len(pages) < max_pages:
+                        url, depth = queue.pop(0)
+                        if url in seen or depth > max_depth:
+                            continue
+                        seen.add(url)
+                        try:
+                            resp = await client.get(url, headers={"User-Agent": "SMARAN-Firecrawl-MCP/1.0"})
+                        except Exception as e:
+                            pages.append({"url": url, "status": "unreachable", "error": str(e)[:120]})
+                            continue
+                        if resp.status_code != 200:
+                            pages.append({"url": url, "status": "error", "http_status": resp.status_code})
+                            continue
+
+                        soup = BeautifulSoup(resp.text, "html.parser")
+                        for s in soup(["script", "style", "nav", "footer", "svg"]):
+                            s.decompose()
+                        text = soup.get_text(separator="\n", strip=True)
+                        pages.append({
+                            "url": url,
+                            "status": "ok",
+                            "title": soup.title.string.strip() if soup.title else url,
+                            "characters": len(text),
+                            "markdown_content": text[:2000],
+                        })
+
+                        # Only follow links on the same host: a crawl that
+                        # wanders onto other domains is not a crawl of this one.
+                        if depth < max_depth:
+                            for a in soup.find_all("a", href=True):
+                                link = urljoin(url, a["href"]).split("#")[0]
+                                if urlparse(link).netloc == origin and link not in seen:
+                                    queue.append((link, depth + 1))
+            except Exception as e:
+                return {"mcp_server": "firecrawl", "status": "failed", "error": str(e), "base_url": base_url}
+
+            fetched = [p for p in pages if p.get("status") == "ok"]
             return {
                 "mcp_server": "firecrawl",
-                "status": "success",
+                "status": "success" if fetched else "error",
                 "base_url": base_url,
-                "pages_crawled": 5,
-                "summary": f"Successfully crawled documentation pages for {base_url} with full link graphs and markdown export."
+                "pages_crawled": len(fetched),
+                "pages_attempted": len(pages),
+                "max_depth": max_depth,
+                "page_limit": max_pages,
+                "pages": pages,
             }
 
         return {"error": f"Unknown operation: {operation_name}"}

@@ -242,7 +242,12 @@ class PluginManager:
                 logger.info(f"Loaded plugin: {name}")
                 await self.trigger_hook("plugin_loaded", name, plugin)
             else:
-                reason = (
+                # A plugin that knows why it cannot start says so. Most of
+                # these wrap an external tool, and "initialize() returned
+                # false" tells the person reading it nothing they can act on,
+                # while "the paperclipai command is not on PATH" does.
+                stated = getattr(plugin, "unavailable_reason", None)
+                reason = stated or (
                     "initialize() returned false"
                     if not initialized
                     else "initialization exposed no runtime capabilities"

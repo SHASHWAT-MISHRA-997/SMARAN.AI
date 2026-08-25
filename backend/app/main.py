@@ -332,14 +332,8 @@ from app.plugins.headroom import HeadroomPlugin, metadata as headroom_metadata
 from app.plugins.claude_mem import ClaudeMemPlugin, metadata as claude_mem_metadata
 from app.plugins.task_observer import TaskObserverPlugin, metadata as task_observer_metadata
 from app.plugins.strix_security import StrixSecurityPlugin, metadata as strix_security_metadata
-from app.plugins.mcp_21st_dev import MCP21stDevPlugin, metadata as mcp_21st_dev_metadata
 from app.plugins.mcp_firecrawl import MCPFirecrawlPlugin, metadata as mcp_firecrawl_metadata
-from app.plugins.mcp_playwright import MCPPlaywrightPlugin, metadata as mcp_playwright_metadata
-from app.plugins.mcp_supabase import MCPSupabasePlugin, metadata as mcp_supabase_metadata
 from app.plugins.mcp_github import MCPGitHubPlugin, metadata as mcp_github_metadata
-from app.plugins.mcp_e2b import MCPE2BPlugin, metadata as mcp_e2b_metadata
-from app.plugins.mcp_google_stitch import MCPGoogleStitchPlugin, metadata as mcp_google_stitch_metadata
-from app.plugins.mcp_nano_banana import MCPNanoBananaPlugin, metadata as mcp_nano_banana_metadata
 
 plugin_manager.register_plugin(GoogleAgentsCLIPlugin, google_agents_cli_metadata, PluginConfig())
 plugin_manager.register_plugin(PaperclipPlugin, paperclip_metadata, PluginConfig())
@@ -351,14 +345,8 @@ plugin_manager.register_plugin(HeadroomPlugin, headroom_metadata, PluginConfig()
 plugin_manager.register_plugin(ClaudeMemPlugin, claude_mem_metadata, PluginConfig())
 plugin_manager.register_plugin(TaskObserverPlugin, task_observer_metadata, PluginConfig())
 plugin_manager.register_plugin(StrixSecurityPlugin, strix_security_metadata, PluginConfig())
-plugin_manager.register_plugin(MCP21stDevPlugin, mcp_21st_dev_metadata, PluginConfig())
 plugin_manager.register_plugin(MCPFirecrawlPlugin, mcp_firecrawl_metadata, PluginConfig())
-plugin_manager.register_plugin(MCPPlaywrightPlugin, mcp_playwright_metadata, PluginConfig())
-plugin_manager.register_plugin(MCPSupabasePlugin, mcp_supabase_metadata, PluginConfig())
 plugin_manager.register_plugin(MCPGitHubPlugin, mcp_github_metadata, PluginConfig())
-plugin_manager.register_plugin(MCPE2BPlugin, mcp_e2b_metadata, PluginConfig())
-plugin_manager.register_plugin(MCPGoogleStitchPlugin, mcp_google_stitch_metadata, PluginConfig())
-plugin_manager.register_plugin(MCPNanoBananaPlugin, mcp_nano_banana_metadata, PluginConfig())
 
 # Global Exception Handler (Zero information leakage)
 @app.exception_handler(Exception)

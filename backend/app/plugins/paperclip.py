@@ -56,6 +56,9 @@ class PaperclipPlugin(ToolPlugin):
             return True
         else:
             logger.error("Failed to initialize Paperclip plugin")
+            self.unavailable_reason = (
+                'The paperclipai command is not on PATH, so this plugin has nothing to drive. Install the Paperclip CLI and enable this again.'
+            )
             return False
     
     async def shutdown(self) -> bool:

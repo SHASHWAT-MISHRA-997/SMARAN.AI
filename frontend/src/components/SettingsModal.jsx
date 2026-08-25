@@ -531,6 +531,16 @@ useEffect(() => {
               </div>
             </div>
           </div>
+          {/* Sign-in gets its own section. It decides how someone gets
+              into the app, which has nothing to do with how the app looks,
+              and sitting under Appearance is where it went unnoticed. */}
+          <div className="space-y-3">
+            <label className="block text-xs font-black text-zinc-950 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> Sign-in
+            </label>
+            <GoogleSignInSetting />
+          </div>
+
           {/* Appearance & Updates */}
           <div className="space-y-3">
             <label className="block text-xs font-black text-zinc-950 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
@@ -558,7 +568,6 @@ useEffect(() => {
             {/* Usage reporting. Shown plainly and switchable, because
                 collecting anything without saying so is both wrong and, under
                 the DPDP Act and the GDPR, unlawful. */}
-            <GoogleSignInSetting />
             <PrivacyReporting />
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -192,10 +192,10 @@ const ExtensionsHub = ({ isOpen, onClose }) => {
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
 
-            {section === 'mcp' && (
+            {(
               <button
                 type="button"
-                onClick={() => setAdding(true)}
+                onClick={() => setAdding(section === 'mcp' ? 'mcp' : 'repo')}
                 className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-black
                            text-white transition hover:bg-red-500"
               >
@@ -224,10 +224,11 @@ const ExtensionsHub = ({ isOpen, onClose }) => {
                 <p className="text-sm font-bold text-zinc-400">
                   {query ? 'Nothing matches that.' : `No ${current.label.toLowerCase()} yet.`}
                 </p>
-                {section === 'mcp' && !query && (
+                {!query && (
                   <p className="max-w-sm text-[11px] leading-relaxed text-zinc-600">
-                    Add a local MCP server and it appears here. Saving the address does not
-                    connect to it; that happens when the assistant first needs it.
+                    {section === 'mcp'
+                      ? 'Add a local MCP server and it appears here. Saving the address does not connect to it; that happens when the assistant first needs it.'
+                      : 'Add one from a git repository. It is cloned and read straight away, so a bad address is reported now rather than failing quietly later.'}
                   </p>
                 )}
               </div>
@@ -328,7 +329,8 @@ const ExtensionsHub = ({ isOpen, onClose }) => {
       </div>
 
       {detail && <DetailPanel row={detail} onClose={() => setDetail(null)} />}
-      {adding && <AddServer onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
+      {adding === 'mcp' && <AddServer onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
+      {adding === 'repo' && <AddFromRepo onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
     </div>
   );
 };
@@ -389,6 +391,109 @@ const DetailPanel = ({ row, onClose }) => {
 };
 
 /** Save a local MCP server. Saving records the address; it does not connect. */
+/**
+ * Installing a skill, connector or plugin from a git repository.
+ *
+ * The backend clones and reads the manifest before answering, so this waits
+ * for a real outcome instead of showing a tick the moment the request is
+ * accepted. A repository that does not exist, or one with no manifest, says so
+ * here rather than leaving a failure in a log nobody reads.
+ */
+const AddFromRepo = ({ onClose, onSaved }) => {
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState('');
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const repo = url.trim();
+    if (!repo) return;
+
+    setBusy(true);
+    setError('');
+    setDone('');
+    try {
+      const response = await fetch(`${API_BASE}/api/plugins/install`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ repo_url: repo }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        // The backend writes these to be read; showing its words beats
+        // replacing them with something vaguer.
+        setError(data.detail || `Install failed (${response.status}).`);
+        return;
+      }
+      setDone(data.message || 'Installed.');
+      setTimeout(onSaved, 900);
+    } catch (err) {
+      setError(`Could not reach the app: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4">
+      <form
+        onSubmit={submit}
+        className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl"
+      >
+        <h3 className="text-sm font-black text-white">Add from a repository</h3>
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+          The repository is cloned and its <code>plugin.json</code> read before this
+          closes. Nothing is enabled until you turn it on.
+        </p>
+
+        <label className="mt-4 block text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+          Repository URL
+        </label>
+        <input
+          autoFocus
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://github.com/owner/name"
+          className="mt-1.5 w-full rounded-lg border border-zinc-800 bg-black px-3 py-2 text-sm
+                     text-white outline-none focus:border-red-500"
+        />
+
+        {error && (
+          <p className="mt-3 rounded-lg border border-rose-900/60 bg-rose-950/40 px-3 py-2 text-[11px] text-rose-300">
+            {error}
+          </p>
+        )}
+        {done && (
+          <p className="mt-3 rounded-lg border border-emerald-900/60 bg-emerald-950/40 px-3 py-2 text-[11px] text-emerald-300">
+            {done}
+          </p>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-3 py-1.5 text-xs font-bold text-zinc-400 hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy || !url.trim()}
+            className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-black
+                       text-white transition hover:bg-red-500 disabled:opacity-40"
+          >
+            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {busy ? 'Cloning…' : 'Install'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
 const AddServer = ({ onClose, onSaved }) => {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');

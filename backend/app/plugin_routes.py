@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
+import asyncio
 import logging
 import uuid
 import json
@@ -109,24 +110,52 @@ def get_plugin_status(plugin_name: str):
     )
 
 @router.post("/install", response_model=PluginInstallResponse)
-def install_plugin_from_repo(request: PluginInstallRequest, background_tasks: BackgroundTasks):
-    """Install a plugin from a git repository."""
-    # We'll run the installation in the background to avoid blocking
-    def install_task():
-        try:
-            success = plugin_manager.install_plugin_from_repo(request.repo_url, request.install_path)
-            if success:
-                logger.info(f"Successfully installed plugin from {request.repo_url}")
-            else:
-                logger.error(f"Failed to install plugin from {request.repo_url}")
-        except Exception as e:
-            logger.error(f"Error installing plugin from {request.repo_url}: {e}")
-    
-    background_tasks.add_task(install_task)
+async def install_plugin_from_repo(request: PluginInstallRequest):
+    """Install a plugin from a git repository, and report what happened.
+
+    This used to hand the work to a background task and return success=True
+    immediately - before the clone had even started. A repository that did not
+    exist, a network that was down and a missing manifest all reported success
+    and left a failure in the log where nobody would see it.
+
+    Cloning a plugin repository takes seconds, so it is worth waiting for the
+    answer rather than inventing one.
+    """
+    url = (request.repo_url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="A repository URL is required.")
+    if not url.startswith(("https://", "http://", "git@")):
+        raise HTTPException(
+            status_code=400,
+            detail="That does not look like a repository URL. Expected one starting https:// or git@.",
+        )
+
+    name = url.rstrip("/").split("/")[-1].replace(".git", "")
+
+    try:
+        # The clone is blocking, so it runs off the event loop rather than
+        # stalling every other request while it downloads.
+        ok = await asyncio.to_thread(
+            plugin_manager.install_plugin_from_repo, url, request.install_path
+        )
+    except Exception as exc:
+        logger.exception("plugin install failed for %s", url)
+        raise HTTPException(status_code=502, detail="Could not install: %s" % exc)
+
+    if not ok:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Cloned nothing usable from %s. A plugin repository needs a "
+                "plugin.json or smaran_plugin.json at its root." % url
+            ),
+        )
+
+    logger.info("installed plugin from %s", url)
     return PluginInstallResponse(
         success=True,
-        message=f"Plugin installation started for {request.repo_url}",
-        plugin_name=None  # We don't know the name until after installation
+        message="Installed %s. Enable it to load its tools." % name,
+        plugin_name=name,
     )
 
 @router.post("/{plugin_name}/enable")
