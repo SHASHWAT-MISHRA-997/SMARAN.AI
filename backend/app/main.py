@@ -300,6 +300,7 @@ app.include_router(lock_router)
 
 # Phone and tablet companion: QR pairing, two-way conversation sync, and
 # remote control in both directions.
+from app.local_engine import status as local_engine_status
 from app.companion import router as companion_router
 app.include_router(companion_router)
 
@@ -5737,6 +5738,12 @@ async def fetch_url_endpoint(
         raise HTTPException(status_code=500, detail=f"URL fetch failed: {str(e)}")
 
 
+@app.get("/api/models/local-status")
+async def local_model_status():
+    """Whether local inference can answer, and what to do when it cannot."""
+    return local_engine_status()
+
+
 @app.post("/api/models/compare")
 async def compare_models_endpoint(
     request: Request,
@@ -5962,6 +5969,9 @@ def get_models_catalog_endpoint(current_user: User = Depends(get_current_user)):
         "active_model_id": inventory.get("active_model") or None,
         "configured_model_id": inventory.get("configured_model") or None,
         "active_engine": inventory.get("engine", "unavailable"),
+        # "unavailable" alone sent people looking for an API key. This says
+        # which of the three situations it is and what to do about it.
+        "local_engine": local_engine_status(),
     }
 
 
