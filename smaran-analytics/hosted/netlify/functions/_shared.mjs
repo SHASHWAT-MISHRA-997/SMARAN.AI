@@ -37,6 +37,19 @@ export const ALLOWED_EVENTS = [
 
 export const ALLOWED_PLATFORMS = ['windows', 'macos', 'linux', 'android', 'unknown'];
 
+/* Events from the marketing site, which is a different thing from an install.
+   `visit` is counted once per browsing session, so it is a count of visits and
+   not of people: telling those apart needs a cookie or a fingerprint, and the
+   site promises neither.
+
+   `download_click` records that a download link was pressed. It is not the
+   same number as a completed download — GitHub counts those itself, server
+   side, and the dashboard shows that figure separately. A click that never
+   finishes still counts here, which is why the two are never added together. */
+export const WEB_EVENTS = ['visit', 'download_click'];
+
+export const WEB_LABELS = ['exe', 'apk', 'vsix', 'page', 'unknown'];
+
 export const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -69,6 +82,14 @@ const unb64url = (text) =>
 
 export const encodeEventKey = ({ ts, event, platform, appVersion, installId }) =>
   b64url(JSON.stringify([ts, event, platform, appVersion, installId, Math.random().toString(36).slice(2, 8)]));
+
+export const encodeWebKey = ({ ts, event, label }) =>
+  b64url(JSON.stringify([ts, event, label, Math.random().toString(36).slice(2, 8)]));
+
+export const decodeWebKey = (key) => {
+  const [ts, event, label] = JSON.parse(unb64url(key.split('/').pop()));
+  return { ts, event, label };
+};
 
 export const decodeEventKey = (key) => {
   const [ts, event, platform, appVersion, installId] = JSON.parse(unb64url(key.split('/').pop()));

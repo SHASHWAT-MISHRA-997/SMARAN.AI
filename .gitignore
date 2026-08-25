@@ -88,3 +88,9 @@ backend/app/analytics_config.py
 # The saved Google client id. Not a secret, but it is per-installation
 # configuration rather than source.
 backend/data/google_oauth.json
+
+# CLI build artefacts
+cli/build/
+cli/dist/
+cli/*.egg-info/
+cli/smaran_cli.egg-info/

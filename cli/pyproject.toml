@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smaran-cli"
+version = "1.0.0"
+description = "Command line for SMARAN.AI, the local-first AI assistant"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Shashwat Mishra" }]
+keywords = ["ai", "assistant", "cli", "local", "smaran"]
+
+# No dependencies on purpose. This talks to a local HTTP server over the
+# standard library, so installing it cannot break an environment and needs
+# nothing compiled.
+dependencies = []
+
+[project.urls]
+Homepage = "https://smaran-ai.netlify.app"
+Source = "https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI"
+
+[project.scripts]
+smaran = "smaran_cli.main:main"
+
+[tool.setuptools.packages.find]
+include = ["smaran_cli*"]

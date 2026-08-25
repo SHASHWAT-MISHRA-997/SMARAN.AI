@@ -742,4 +742,144 @@
     }));
   }
 
+  /* ---------------------------------------------------------- counting */
+
+  /* How many people came, and how many pressed a download button.
+
+     What leaves the browser is the word 'visit' or 'download_click' and, for a
+     click, which file. No id, no cookie, no referrer - the request body is two
+     short strings and nothing else, which is what lets the page keep saying
+     nothing about a visitor is uploaded.
+
+     A visit is counted once per session rather than per page load, so a reload
+     does not count twice. sessionStorage clears when the tab closes, so a
+     return tomorrow is a new visit: this counts visits, not people, and the
+     dashboard labels it that way.
+
+     Failures are swallowed. A counter that cannot be reached is not a reason
+     for a visitor to see an error, and blocking a download on it is worse than
+     not knowing the number. */
+  {
+    var HIT_ENDPOINT = 'https://smaran-analytics.netlify.app/hit';
+
+    var sendHit = function (event, label) {
+      try {
+        // keepalive, so a click still registers while the browser is already
+        // navigating away to the file.
+        fetch(HIT_ENDPOINT, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ event: event, label: label }),
+          keepalive: true,
+          mode: 'cors'
+        }).catch(function () {});
+      } catch (err) { /* never interrupt a visitor for a counter */ }
+    };
+
+    try {
+      if (!sessionStorage.getItem('smaran-counted')) {
+        sessionStorage.setItem('smaran-counted', '1');
+        sendHit('visit', 'page');
+      }
+    } catch (err) {
+      // Private windows can refuse sessionStorage. Counting is better than
+      // skipping; the worst case is a reload counted twice.
+      sendHit('visit', 'page');
+    }
+
+    var targetOf = function (href) {
+      if (/\.exe(\?|$)/i.test(href)) return 'exe';
+      if (/\.apk(\?|$)/i.test(href)) return 'apk';
+      if (/\.vsix(\?|$)/i.test(href) || /marketplace\.visualstudio\.com/i.test(href)) return 'vsix';
+      return 'unknown';
+    };
+
+    document.addEventListener('click', function (e) {
+      var link = e.target.closest && e.target.closest('a[href]');
+      if (!link) return;
+      var href = link.getAttribute('href') || '';
+      // Only real files. The in-page '#download' jump is navigation, not a
+      // download, and counting it would inflate the number that matters.
+      if (!/\.(exe|apk|vsix)(\?|$)|marketplace\.visualstudio\.com/i.test(href)) return;
+      sendHit('download_click', targetOf(href));
+    }, true);
+  }
+
+  /* ------------------------------------------------- live numbers */
+
+  /* Three counts under the download heading: files GitHub has served, visits
+     recorded here, and how many tabs are open on this page right now.
+
+     The third needs the page to say it is still here, so a random per-tab id
+     is beaten every 30 seconds. The id lives in sessionStorage, is never sent
+     anywhere else, and dies with the tab.
+
+     If any of it fails the band stays hidden. A visitor being told there are
+     zero downloads because a fetch failed would be worse than being told
+     nothing at all. */
+  {
+    var STATS = 'https://smaran-analytics.netlify.app/stats';
+    var LIVE  = 'https://smaran-analytics.netlify.app/live';
+    var band  = document.getElementById('liveBand');
+
+    if (band) {
+      var sid;
+      try {
+        sid = sessionStorage.getItem('smaran-sid');
+        if (!sid) {
+          sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
+          sessionStorage.setItem('smaran-sid', sid);
+        }
+      } catch (err) {
+        sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      }
+
+      var beat = function () {
+        // A tab in the background is not someone reading the page, so it stops
+        // beating and drops out of the count within two minutes.
+        if (document.hidden) return;
+        try {
+          fetch(LIVE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sid: sid })
+          }).catch(function () {});
+        } catch (err) { /* a counter is never worth an error */ }
+      };
+
+      var put = function (id, value) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        // A missing figure keeps the dash. Only a real number replaces it.
+        if (typeof value !== 'number') return;
+        var dot = el.querySelector('.live-dot');
+        el.textContent = value.toLocaleString('en-IN');
+        if (dot) el.insertBefore(dot, el.firstChild);
+      };
+
+      var refresh = function () {
+        fetch(STATS, { cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d) return;
+            put('liveDownloads', d.downloads);
+            put('liveVisitors', d.visitors);
+            put('liveViewing', d.viewing_now);
+            band.hidden = false;
+          })
+          .catch(function () {});
+      };
+
+      beat();
+      refresh();
+      setInterval(beat, 30000);
+      setInterval(refresh, 30000);
+
+      // Beating from a hidden tab would count someone who walked away.
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) { beat(); refresh(); }
+      });
+    }
+  }
+
 })();

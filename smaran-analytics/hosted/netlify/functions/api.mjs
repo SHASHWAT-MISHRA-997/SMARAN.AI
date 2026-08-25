@@ -1,6 +1,7 @@
 import { getStore } from '@netlify/blobs';
 import {
-  daysBetween, decodeEventKey, json, requireDashboardKey, resolveWindow, shiftDay, today,
+  daysBetween, decodeEventKey, decodeWebKey, json, requireDashboardKey, resolveWindow,
+  shiftDay, today,
 } from './_shared.mjs';
 
 /**
@@ -186,12 +187,116 @@ const eraseRoute = async (url) => {
   });
 };
 
+/**
+ * The website's numbers: visits and download clicks from the store, plus the
+ * download counts GitHub keeps.
+ *
+ * The two are reported side by side and never summed. A click is someone
+ * pressing the button and can be inflated by anyone who finds the open
+ * endpoint; GitHub's figure is counted at the server that serves the file and
+ * cannot be. Where they disagree, GitHub is the one to believe.
+ */
+const webRoute = async (url) => {
+  const { from, to } = resolveWindow({
+    days: url.searchParams.get('days'),
+    start: url.searchParams.get('start'),
+    end: url.searchParams.get('end'),
+  });
+
+  const store = readStore('web-v1');
+  const windowDays = daysBetween(from, to);
+
+  const batches = await Promise.all(
+    windowDays.map(async (day) => {
+      const { blobs } = await store.list({ prefix: `${day}/` });
+      return blobs.map((b) => decodeWebKey(b.key));
+    }),
+  );
+  const rows = batches.flat();
+
+  const visits = rows.filter((r) => r.event === 'visit');
+  const clicks = rows.filter((r) => r.event === 'download_click');
+
+  const daily = windowDays.map((day) => ({
+    day,
+    visits: visits.filter((r) => r.ts.slice(0, 10) === day).length,
+    download_clicks: clicks.filter((r) => r.ts.slice(0, 10) === day).length,
+  }));
+
+  /* GitHub's counter is all-time per asset, not per window, and it is labelled
+     that way rather than being sliced to look like it answers the same
+     question. A failure here leaves the field null: an unreachable API must
+     not be reported as a download count of zero. */
+  let githubDownloads = null;
+  try {
+    const res = await fetch(
+      'https://api.github.com/repos/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases',
+      { headers: { 'user-agent': 'smaran-analytics', accept: 'application/vnd.github+json' } },
+    );
+    if (res.ok) {
+      const releases = await res.json();
+      const assets = {};
+      let total = 0;
+      for (const rel of releases) {
+        for (const asset of rel.assets || []) {
+          assets[asset.name] = (assets[asset.name] || 0) + asset.download_count;
+          total += asset.download_count;
+        }
+      }
+      githubDownloads = { total_all_time: total, by_asset: assets };
+    }
+  } catch {
+    githubDownloads = null;
+  }
+
+  return json({
+    window_start: from,
+    window_end: to,
+    visits: visits.length,
+    download_clicks: clicks.length,
+    clicks_by_target: countBy(clicks, 'label'),
+    daily,
+    github_downloads: githubDownloads,
+    notes: {
+      visits: 'Counted once per browsing session, so this is visits, not people.',
+      download_clicks: 'Button presses. The endpoint is public and can be inflated.',
+      github_downloads: 'Counted by GitHub when the file is served. All-time, not the window.',
+    },
+  });
+};
+
+/**
+ * Clears the website counters.
+ *
+ * Deliberately behind the dashboard key and a POST: the visit endpoint is open
+ * to anyone, so an erase that was equally open would let a passer-by wipe the
+ * figures. Listing goes through the strong handle and deleting through a plain
+ * one, for the reason recorded on eraseRoute.
+ */
+const webResetRoute = async () => {
+  const store = readStore('web-v1');
+  const writes = getStore('web-v1');
+
+  /* One unprefixed listing, not one per day. Walking ten years of day
+     prefixes is 3650 round trips and times out long before it finishes —
+     which is exactly what it did the first time this was written. */
+  const { blobs } = await store.list();
+  await Promise.all(blobs.map((b) => writes.delete(b.key)));
+
+  return json({ erased: blobs.length });
+};
+
 export default async (req) => {
   const denied = requireDashboardKey(req);
   if (denied) return denied;
 
   const url = new URL(req.url);
   try {
+    if (url.pathname.endsWith('/web/reset')) {
+      if (req.method !== 'POST') return json({ detail: 'Use POST to erase.' }, 405);
+      return await webResetRoute(url);
+    }
+    if (url.pathname.endsWith('/web')) return await webRoute(url);
     if (url.pathname.endsWith('/summary')) return await summary(url);
     if (url.pathname.endsWith('/installs')) return await installsRoute(url);
     if (url.pathname.endsWith('/recent')) return await recentRoute(url);

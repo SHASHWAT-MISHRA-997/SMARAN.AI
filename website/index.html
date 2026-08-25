@@ -581,6 +581,24 @@
       <p>No trial period, no locked features, no card. Local models you download are yours to keep and cost nothing to run.</p>
     </header>
 
+    <!-- Live counters. Values arrive from the analytics function; the markup
+         ships with em dashes so a blocked or slow request shows "no number"
+         rather than a zero that reads as a fact. -->
+    <div class="live-band reveal" id="liveBand" hidden>
+      <div class="live-stat">
+        <b id="liveDownloads">&mdash;</b>
+        <span>downloads</span>
+      </div>
+      <div class="live-stat">
+        <b id="liveVisitors">&mdash;</b>
+        <span>visitors</span>
+      </div>
+      <div class="live-stat">
+        <b id="liveViewing"><span class="live-dot"></span>&mdash;</b>
+        <span>reading this right now</span>
+      </div>
+    </div>
+
     <div class="dl-grid">
       <article class="dl-card reveal">
         <div class="dl-halo"></div>
