@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="styles.css?v=a0e6dce2f2" />
 </head>
 
 <body>
@@ -700,11 +700,11 @@
     </div>
 
     <div class="tabpanel" role="tabpanel" id="tp-win" aria-labelledby="tb-win">
-      <ol class="steps">
+      <ol class="install-steps">
         <li>
           <h3>Download the installer</h3>
           <p>A single <code>.exe</code>, about 233&nbsp;MB. It contains everything the app needs to start.</p>
-          <a class="btn" href="#download">Go to downloads</a>
+          <a class="btn btn-ghost" href="#download">Go to downloads</a>
         </li>
         <li>
           <h3>Expect a warning, and read it</h3>
@@ -730,11 +730,11 @@
     </div>
 
     <div class="tabpanel" role="tabpanel" id="tp-and" aria-labelledby="tb-and" hidden>
-      <ol class="steps">
+      <ol class="install-steps">
         <li>
           <h3>Download the APK</h3>
           <p>About 31&nbsp;MB, for Android 7.0 and newer.</p>
-          <a class="btn" href="#download">Go to downloads</a>
+          <a class="btn btn-ghost" href="#download">Go to downloads</a>
         </li>
         <li>
           <h3>Allow the install</h3>
@@ -758,7 +758,7 @@
         A terminal client for the app already running on your machine. It is not a second copy: the model routing, the
         provider keys and the history stay in the desktop app, so the two can never disagree about which model answered.
       </p>
-      <ol class="steps">
+      <ol class="install-steps">
         <li>
           <h3>Install the desktop app first</h3>
           <p>The command line talks to it over <code>127.0.0.1</code>. Without the app running there is nothing to talk to.</p>
@@ -767,7 +767,7 @@
           <h3>Get <code>smaran</code></h3>
           <p>One file, about 9.5&nbsp;MB. It needs no Python and installs nothing &mdash; put it
              somewhere on your <code>PATH</code> and the <code>smaran</code> command works.</p>
-          <a class="btn" href="#download">Go to downloads</a>
+          <a class="btn btn-ghost" href="#download">Go to downloads</a>
         </li>
         <li>
           <h3>Use it</h3>
@@ -1086,6 +1086,6 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
   </div>
 </footer>
 
-<script src="main.js"></script>
+<script src="main.js?v=b4f06cf102"></script>
 </body>
 </html>
