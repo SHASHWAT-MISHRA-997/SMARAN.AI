@@ -9,9 +9,10 @@
     "color": "#090a0f",
     "theme": "dark"
   },
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/shashwatmishra997/SMARAN.AI"
+    "url": "https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads"
   },
   "engines": {
     "vscode": "^1.90.0"
