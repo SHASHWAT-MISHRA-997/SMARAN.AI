@@ -94,17 +94,34 @@ const AuthModal = ({ isOpen, onClose, onSignedIn }) => {
   const [google, setGoogle] = useState({ configured: false, clientId: null });
   const googleSlot = useRef(null);
   const [googleReady, setGoogleReady] = useState(false);
+  const [offerPin, setOfferPin] = useState(false);
+  const [pinValue, setPinValue] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinError, setPinError] = useState('');
 
   const registering = mode === 'register';
 
-  const finish = useCallback((user) => {
+  const finish = useCallback(async (user) => {
     setDone(true);
-    // A beat on the success state, so the panel does not simply blink away.
+
+    /* Offer the lock once, and only when there is not one already. It is
+       optional on purpose: a lock screen that was never asked for is a
+       nuisance, and this is a personal machine, not a shared terminal. */
+    let alreadyLocked = true;
+    try {
+      const status = await fetch(`${API_BASE}/api/lock/status`, { credentials: 'include' })
+        .then((r) => r.json());
+      alreadyLocked = Boolean(status?.enabled);
+    } catch {
+      // If the check fails, say nothing rather than offering twice.
+    }
+
     setTimeout(() => {
       onSignedIn?.(user);
-      onClose?.();
       setDone(false);
       setPassword('');
+      if (alreadyLocked) onClose?.();
+      else setOfferPin(true);
     }, 900);
   }, [onClose, onSignedIn]);
 
@@ -201,6 +218,93 @@ const AuthModal = ({ isOpen, onClose, onSignedIn }) => {
       setBusy(false);
     }
   };
+
+  const savePin = async (event) => {
+    event.preventDefault();
+    setPinBusy(true);
+    setPinError('');
+    try {
+      const response = await fetch(`${API_BASE}/api/lock/set`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ pin: pinValue }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === 'string' ? body.detail : 'That PIN was not accepted.');
+      }
+      onClose?.();
+      setOfferPin(false);
+      setPinValue('');
+    } catch (err) {
+      setPinError(err.message);
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
+  if (offerPin) {
+    return (
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/90 p-4 backdrop-blur-md">
+        <form
+          onSubmit={savePin}
+          className="w-full max-w-md overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl"
+        >
+          <div className="border-b border-zinc-800 px-6 py-5">
+            <h2 className="text-lg font-black text-white">Lock the app with a PIN?</h2>
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+              Optional. It asks for a PIN when the app starts, so whoever walks
+              past your desk cannot read your conversations. You can add or
+              change it later in Settings, and reset it with your account
+              password if you forget it.
+            </p>
+          </div>
+
+          <div className="space-y-3 p-6">
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              minLength={4}
+              maxLength={12}
+              value={pinValue}
+              onChange={(e) => setPinValue(e.target.value.replace(/\D/g, ''))}
+              placeholder="4 to 12 digits"
+              className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-3 text-center text-xl
+                         tracking-[0.4em] text-zinc-100 outline-none placeholder:text-sm
+                         placeholder:tracking-normal placeholder:text-zinc-600 focus:border-red-400/60"
+            />
+
+            {pinError && (
+              <p className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                {pinError}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={pinBusy || pinValue.length < 4}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-3 text-sm
+                         font-black text-white transition hover:bg-red-500 disabled:opacity-50"
+            >
+              {pinBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+              Set PIN
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setOfferPin(false); onClose?.(); }}
+              className="w-full rounded-xl border border-zinc-700 py-2.5 text-xs font-bold text-zinc-400
+                         transition hover:bg-zinc-800 hover:text-zinc-200"
+            >
+              Not now
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/90 p-4 backdrop-blur-md">
@@ -346,17 +450,43 @@ const AuthModal = ({ isOpen, onClose, onSignedIn }) => {
               )}
             </button>
 
+            {/* Shown either way. Hiding it entirely made people think Google
+                sign-in did not exist; saying what is missing is more use than
+                silence, and the instruction is short. */}
+            <div className="flex items-center gap-3 py-0.5">
+              <span className="h-px flex-1 bg-gradient-to-r from-transparent to-red-500/30" />
+              <span className="text-[10px] uppercase tracking-[0.25em] text-zinc-600">or</span>
+              <span className="h-px flex-1 bg-gradient-to-l from-transparent to-red-500/30" />
+            </div>
+
+            {!google.configured && (
+              <div className="rounded-xl border border-zinc-800 bg-black/40 p-3">
+                <p className="flex items-center gap-2 text-xs font-bold text-zinc-300">
+                  <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
+                    <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
+                    <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
+                    <path fill="#FBBC05" d="M11.8 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 17.1 2.1 20.4 2.1 24s.9 6.9 2.4 9.9l7.3-5.7z" />
+                    <path fill="#EA4335" d="M24 10.8c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 4.2 29.9 2 24 2 15.4 2 8.1 6.9 4.5 14.1l7.3 5.7c1.7-5.2 6.5-9 12.2-9z" />
+                  </svg>
+                  Continue with Google
+                </p>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-500">
+                  Needs a Google OAuth client id, which is free to create. Add it
+                  as <code className="rounded bg-zinc-900 px-1 text-[9px] text-zinc-400">SMARAN_GOOGLE_CLIENT_ID</code> and
+                  this becomes a working button.
+                </p>
+              </div>
+            )}
+
             {google.configured && (
-              <>
-                <div className={`flex items-center gap-3 py-0.5 ${googleReady ? '' : 'hidden'}`}>
-                  <span className="h-px flex-1 bg-gradient-to-r from-transparent to-red-500/30" />
-                  <span className="text-[10px] uppercase tracking-[0.25em] text-zinc-600">or</span>
-                  <span className="h-px flex-1 bg-gradient-to-l from-transparent to-red-500/30" />
-                </div>
+              /* Hidden until Google's script has actually drawn its button,
+                 so a blocked or offline load leaves a gap rather than a
+                 labelled empty box. */
+              <div className={googleReady ? '' : 'hidden'}>
                 {/* Google renders its own button here — its branding rules
                     require the button be theirs, not a copy of it. */}
                 <div ref={googleSlot} className="flex justify-center [color-scheme:dark]" />
-              </>
+              </div>
             )}
 
             <p className="pt-0.5 text-center text-[11px] text-zinc-500">

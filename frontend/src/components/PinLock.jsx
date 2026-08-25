@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Delete, Lock, ShieldCheck } from 'lucide-react';
+import { Delete, Loader2, Lock, ShieldCheck } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 
 /**
@@ -32,6 +32,15 @@ const PinLock = ({ children }) => {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+
+  /* Forgetting the PIN used to mean the app was shut for good. Recovery asks
+     for the account password rather than an email link: it proves the owner
+     is the one asking without involving anybody else, and it works offline. */
+  const [recovering, setRecovering] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [recoverError, setRecoverError] = useState('');
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -79,6 +88,24 @@ const PinLock = ({ children }) => {
       setBusy(false);
     }
   }, [busy, cooldown]);
+
+  const recover = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setRecoverError('');
+    try {
+      await request('/api/lock/reset', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, new_pin: newPin }),
+      });
+      // Straight in, rather than making someone type the PIN they just chose.
+      setState('open');
+    } catch (err) {
+      setRecoverError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const press = (key) => {
     if (key === 'del') {
@@ -177,11 +204,92 @@ const PinLock = ({ children }) => {
           <p className="max-w-xs text-center text-[11px] leading-5 text-amber-300">{error}</p>
         )}
 
+        <button
+          type="button"
+          onClick={() => { setRecovering(true); setRecoverError(''); }}
+          className="text-[11px] font-bold text-zinc-500 underline-offset-4 transition hover:text-red-300 hover:underline"
+        >
+          Forgotten your PIN?
+        </button>
+
         <p className="flex items-center gap-1.5 text-[10px] text-zinc-600">
           <ShieldCheck className="h-3 w-3" />
           The PIN is stored only as a hash on this machine.
         </p>
       </div>
+
+      {recovering && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/85 p-6 backdrop-blur-sm">
+          <form
+            onSubmit={recover}
+            className="w-full max-w-sm overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl"
+          >
+            <div className="border-b border-zinc-800 px-5 py-4">
+              <h2 className="text-sm font-black text-white">Set a new PIN</h2>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                Sign in with your account to choose a new one. Nobody else can do
+                this for you, and nothing is sent anywhere.
+              </p>
+            </div>
+
+            <div className="space-y-3 p-5">
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-red-400/60"
+              />
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Account password"
+                autoComplete="current-password"
+                className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-red-400/60"
+              />
+              <input
+                type="text"
+                required
+                inputMode="numeric"
+                pattern="[0-9]*"
+                minLength={4}
+                maxLength={12}
+                value={newPin}
+                onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                placeholder="New PIN (4 to 12 digits)"
+                className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-center text-lg tracking-[0.4em] text-zinc-100 outline-none placeholder:text-sm placeholder:tracking-normal placeholder:text-zinc-600 focus:border-red-400/60"
+              />
+
+              {recoverError && (
+                <p className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                  {recoverError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={busy || newPin.length < 4}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-sm font-black text-white transition hover:bg-red-500 disabled:opacity-50"
+              >
+                {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+                Set new PIN
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRecovering(false)}
+                className="w-full rounded-xl border border-zinc-700 py-2 text-[11px] font-bold text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-200"
+              >
+                Back
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };

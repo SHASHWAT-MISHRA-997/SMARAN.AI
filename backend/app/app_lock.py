@@ -25,8 +25,9 @@ import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/lock", tags=["lock"])
 
@@ -109,6 +110,13 @@ class PinSet(BaseModel):
 
 class PinCheck(BaseModel):
     pin: str = Field(..., min_length=1, max_length=PIN_MAX)
+
+
+class PinReset(BaseModel):
+    """Proving it is the account holder, not just whoever is sitting here."""
+    email: str
+    password: str
+    new_pin: str = Field(..., min_length=PIN_MIN, max_length=PIN_MAX)
 
 
 @router.get("/status")
@@ -198,3 +206,53 @@ def disable_pin(payload: PinCheck, request: Request):
     state.pop("configured_at", None)
     _save(state)
     return {"enabled": False, "message": "The PIN lock is off."}
+
+
+@router.post("/reset")
+def reset_pin(payload: PinReset, request: Request):
+    """Set a new PIN after proving the account password.
+
+    Deliberately not a back door: without the account password this does
+    nothing, so someone who finds the machine unlocked-but-PIN-locked
+    cannot clear the lock. Equally deliberately, it involves nobody else -
+    no email, no support address, no recovery service. The person who owns
+    the account is the only one who can do this, and they can do it offline.
+
+    Throttled on the same counter as PIN guesses, so it cannot be used to
+    brute-force the password either.
+    """
+    if not payload.new_pin.isdigit():
+        raise HTTPException(status_code=400, detail="The PIN must be digits only.")
+
+    key = _client_key(request)
+    wait = _throttle(key)
+    if wait:
+        raise HTTPException(status_code=429, detail=f"Too many attempts. Try again in {wait} seconds.")
+
+    # Imported here rather than at module load: app_lock is imported by
+    # main during startup, and importing main back would be circular.
+    from app.database import SessionLocal
+    from app.main import verify_password
+    from app.models import User
+
+    identifier = (payload.email or '').strip().lower()
+    db: Session = SessionLocal()
+    try:
+        user = db.query(User).filter(
+            (User.email == identifier) | (User.username == identifier)
+        ).first()
+
+        # One message for a missing account and a wrong password, so this
+        # cannot be used to find out which addresses have accounts.
+        if not user or not user.password_hash or not verify_password(payload.password, user.password_hash):
+            _record_failure(key)
+            raise HTTPException(status_code=401, detail="That email and password do not match an account.")
+    finally:
+        db.close()
+
+    _clear_failures(key)
+    state = _load()
+    state["pin_hash"] = _hash(payload.new_pin)
+    state["configured_at"] = datetime.now().isoformat(timespec="seconds")
+    _save(state)
+    return {"enabled": True, "message": "Your PIN has been changed."}
