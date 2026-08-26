@@ -679,7 +679,16 @@ export const HackerVoiceAssistant = ({
   const [visionMode, setVisionMode] = useState('off');
 
   // Character and speaking voice are the user's choice and are remembered.
-  const [avatarId, setAvatarId] = useState(() => localStorage.getItem('sm_avatar_id') || 'anime-girl');
+  const [avatarId, setAvatarId] = useState(() => {
+    const saved = localStorage.getItem('sm_avatar_id');
+    // A character that no longer exists leaves the picker showing a blank and
+    // the panel rendering nothing. Riyo was removed, so anyone who had it
+    // selected is moved back to a character that is still here.
+    const known = saved === 'core'
+      || MMD_CHARACTERS.some((c) => c.id === saved)
+      || AVATAR_CHARACTERS.some((c) => c.id === saved);
+    return known ? saved : 'anime-girl';
+  });
   // Background ambience. Each character has its own synthesised room tone,
   // and it ducks while the assistant speaks so it never sits over words.
   const [ambienceOn, setAmbienceOn] = useState(

@@ -127,9 +127,15 @@ const DesktopPairing = () => {
           <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left">
             <div>
               <h3 className="text-sm font-black text-white">Link your phone</h3>
+              {/* This used to say "Install SMARAN.AI on the phone", which
+                  described a step that does not happen. The QR holds a plain
+                  URL to this machine, so a camera app opens it in the phone's
+                  browser and nothing is installed. Saying otherwise sent
+                  people looking for an install that the code never performs. */}
               <p className="mt-1 text-[11px] leading-5 text-zinc-400">
-                Install SMARAN.AI on the phone, open <span className="font-bold text-zinc-200">Link a computer</span>,
-                and scan this code. Both devices must be on the same Wi-Fi.
+                Scan with the phone's camera. It opens SMARAN.AI in the phone's
+                browser with this code already filled in — nothing is installed.
+                Both devices must be on the same Wi-Fi.
               </p>
             </div>
 

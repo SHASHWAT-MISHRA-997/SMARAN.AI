@@ -15,27 +15,6 @@ import React, { useEffect, useRef, useState } from 'react';
  */
 export const AVATAR_CHARACTERS = [
   {
-    // Cut from one eight-second source that already moved through the three
-    // states: a calm portrait, the network expanding, then the result. Each
-    // clip plays forward and then backward so its last frame is its first -
-    // a straight cut from a continuous shot snaps visibly on every loop.
-    id: 'riyo',
-    name: 'Riyo',
-    // The whole frame matters here - face, network, panels, core - so it is
-    // shown whole. object-cover on a square source in a wide panel scales to
-    // the width and crops the height, which cut the top of the head off.
-    fit: 'contain',
-    // Still until spoken to. A loop that never stops reads as a screensaver;
-    // motion means something only when it starts.
-    stillWhenIdle: true,
-    gender: 'male',
-    clips: {
-      idle: '/avatar-video/core-idle.mp4',
-      thinking: '/avatar-video/core-thinking.mp4',
-      talking: '/avatar-video/core-talking.mp4',
-    },
-  },
-  {
     id: 'anime-girl',
     name: 'Myra',
     gender: 'female',

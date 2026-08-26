@@ -578,11 +578,22 @@ export class SmaranApiClient {
    * Cached for an hour: the list changes over days, and fetching it per
    * message would add a round trip to every reply.
    */
-  private static _freeModel: { id: string; at: number } | null = null;
+  private static _freeModel: { ids: string[]; at: number } | null = null;
 
-  private async _pickFreeOpenRouterModel(): Promise<string | null> {
+  // Free in the catalogue is not the same as usable with this key. The
+  // highest-context free model was thinkingmachines/inkling-small:free, which
+  // answers 403 "only available on agentic harnesses". Nothing in the
+  // catalogue row marks it — the :free entry carries the same fields as any
+  // other, checked against the live API rather than assumed — so the only way
+  // to know is to be refused, and then to remember.
+  private static _rejectedModels = new Set<string>();
+
+  /** Free models the catalogue offers, best first, minus any that refused us. */
+  private async _freeOpenRouterModels(): Promise<string[]> {
     const cached = SmaranApiClient._freeModel;
-    if (cached && Date.now() - cached.at < 3600000) return cached.id;
+    if (cached && Date.now() - cached.at < 3600000) {
+      return cached.ids.filter((id) => !SmaranApiClient._rejectedModels.has(id));
+    }
 
     const catalogue: any = await new Promise((resolve) => {
       const req = https.request({
@@ -603,26 +614,62 @@ export class SmaranApiClient {
     });
 
     const rows = catalogue?.data;
-    if (!Array.isArray(rows)) return null;
+    if (!Array.isArray(rows)) return [];
 
     // Zero on both sides, not just the prompt: a model that is free to send to
     // and charges for what it writes is not a free model.
+    //
+    // And it has to answer in text and nothing else. google/lyria-3-pro-preview
+    // is free and ranked fourth, but Lyria writes music; its row reads
+    // output_modalities ["text", "audio"], so merely requiring "text" let it
+    // through. A model for editing code emits text alone — checked against the
+    // live catalogue, not inferred from the name.
     const free = rows.filter((m: any) => {
       const p = m?.pricing || {};
-      return Number(p.prompt) === 0 && Number(p.completion) === 0;
+      if (!(Number(p.prompt) === 0 && Number(p.completion) === 0)) return false;
+      const out = m?.architecture?.output_modalities;
+      if (!Array.isArray(out)) return true;
+      return out.length === 1 && out[0] === 'text';
     });
-    if (!free.length) return null;
 
-    // The largest context among them, which is the one most likely to cope
-    // with a file's worth of workspace context.
+    // Largest context first, which copes best with a file's worth of
+    // workspace context. The whole list is kept, not just the winner, so a
+    // refusal has somewhere to go.
     free.sort((a: any, b: any) => (b.context_length || 0) - (a.context_length || 0));
-    const chosen = free[0].id;
-    SmaranApiClient._freeModel = { id: chosen, at: Date.now() };
-    return chosen;
+    const ids = free.map((m: any) => String(m.id));
+    SmaranApiClient._freeModel = { ids, at: Date.now() };
+    return ids.filter((id) => !SmaranApiClient._rejectedModels.has(id));
   }
 
   private async _callOpenRouterDirect(apiKey: string, prompt: string, model: string = 'auto', contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
-    const discovered = await this._pickFreeOpenRouterModel();
+    // A free model can still refuse this key — inkling-small:free answers 403
+    // "only available on agentic harnesses", and nothing in the catalogue
+    // says so. Walk the ranked list, remembering each refusal, so one gated
+    // model at the top does not sink the whole route.
+    const candidates = await this._freeOpenRouterModels();
+    const attempts = model === 'auto' || !model
+      ? candidates.slice(0, 4)
+      : [candidates[0]];
+    let lastError: Error | null = null;
+
+    for (const candidate of attempts.length ? attempts : [undefined]) {
+      try {
+        return await this._openRouterOnce(apiKey, prompt, model, candidate, contextFiles, onToken);
+      } catch (e: any) {
+        lastError = e;
+        const text = String(e?.message || '');
+        // 403 and 404 are about this model, so try the next one. Anything
+        // else — a bad key, a network failure — would fail identically for
+        // every model, and retrying would just be slower.
+        const modelSpecific = /\b(403|404)\b/.test(text);
+        if (!modelSpecific) throw e;
+        if (candidate) SmaranApiClient._rejectedModels.add(candidate);
+      }
+    }
+    throw lastError || new Error('OpenRouter refused every free model it offers.');
+  }
+
+  private _openRouterOnce(apiKey: string, prompt: string, model: string, discovered: string | undefined, contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
     return new Promise((resolve, reject) => {
       let sysMsg = "You are SMARAN.AI, a software engineering assistant. Use only the workspace context supplied in this request.";
       if (contextFiles && contextFiles.length > 0) {

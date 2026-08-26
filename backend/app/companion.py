@@ -126,8 +126,11 @@ def start_pairing(port: int = Query(..., ge=1, le=65535), current_user: User = D
     # The QR carries a URL, not raw JSON. A phone's own camera app shows
     # whatever a QR contains, so JSON produced a screenful of braces instead of
     # anything useful. A link opens the workspace served from this machine with
-    # the pairing code already filled in, which works whether or not the phone
-    # app is installed yet.
+    # the pairing code already filled in.
+    #
+    # This installs nothing, and the dialog no longer claims it does. An
+    # Android build exists and the website offers it, but it is not needed
+    # here and scanning does not fetch it.
     qr_payload = f"{base}/?pair={code}"
     return {
         "code": code,

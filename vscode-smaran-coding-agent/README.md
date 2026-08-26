@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.3.7-blue?style=for-the-badge&logo=semver)
+![Version](https://img.shields.io/badge/version-1.3.9-blue?style=for-the-badge&logo=semver)
 ![VS Code](https://img.shields.io/badge/VS_Code-1.90+-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)
 ![Publisher](https://img.shields.io/badge/publisher-ShashwatMishra-purple?style=for-the-badge&logo=visual-studio-code&logoColor=white)

@@ -334,6 +334,15 @@ try:
 except Exception as _video_exc:  # pragma: no cover
     logger.warning("Video generation unavailable: %s", _video_exc)
 
+# The Director: a script becomes shots, each shot a clip, the clips one file.
+# Planning needs neither torch nor a GPU, so it is registered separately and
+# stays useful on a machine that cannot render.
+try:
+    from app.director.routes import router as director_router
+    app.include_router(director_router)
+except Exception as _director_exc:  # pragma: no cover
+    logger.warning("Director unavailable: %s", _director_exc)
+
 # Spoken web navigation. The resolved URL opens in the user's own browser.
 from app.web_intents import detect_browser_command
 
