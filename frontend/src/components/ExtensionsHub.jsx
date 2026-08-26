@@ -47,7 +47,11 @@ const ExtensionsHub = ({ isOpen, onClose }) => {
     try {
       const [all, mine] = await Promise.all([
         fetch(`${API_BASE}/api/plugins`, { credentials: 'include' }).then((r) => r.json()),
-        fetch(`${API_BASE}/api/plugins/custom/all`, { credentials: 'include' }).then((r) => r.json()).catch(() => []),
+        // /api/mcp/servers reports what each server is actually doing:
+        // saved, connected, or failed with the reason. Listing does not
+        // start anything, so opening this panel launches no processes.
+        fetch(`${API_BASE}/api/mcp/servers`, { credentials: 'include' })
+          .then((r) => r.json()).then((d) => d.servers || []).catch(() => []),
       ]);
       const list = Array.isArray(all) ? all : Object.values(all?.plugins || all || {});
       setRows(list.filter(Boolean));
@@ -71,6 +75,24 @@ const ExtensionsHub = ({ isOpen, onClose }) => {
   const toggle = async (row) => {
     const on = row.runtime_status === 'active';
     setBusy(row.name);
+
+    // An MCP server is not a flag to flip. Turning it on starts the process,
+    // completes the protocol handshake and reads its tools, any of which can
+    // fail with a reason the person needs to see.
+    if (row.type === 'mcp') {
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/mcp/servers/${encodeURIComponent(row.name)}/probe`,
+          { method: 'POST', credentials: 'include' });
+        const data = await response.json().catch(() => ({}));
+        if (data.state === 'failed') setDetail({ ...row, status_detail: data.detail });
+        await load();
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
+
     try {
       await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(row.name)}/${on ? 'disable' : 'enable'}`, {
         method: 'POST',
@@ -85,7 +107,7 @@ const ExtensionsHub = ({ isOpen, onClose }) => {
   const removeCustom = async (id) => {
     setBusy(id);
     try {
-      await fetch(`${API_BASE}/api/plugins/custom/${encodeURIComponent(id)}`, {
+      await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -101,16 +123,23 @@ const ExtensionsHub = ({ isOpen, onClose }) => {
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const source = section === 'mcp'
-      ? custom.filter((c) => c.type === 'mcp').map((c) => ({
+      ? custom.map((c) => ({
           name: c.name,
-          description: c.description || c.url,
-          author: 'You',
+          description: c.target,
+          author: c.server?.name || 'You',
           type: 'mcp',
-          runtime_status: 'setup_required',
-          status_detail: `Saved target ${c.url}. This backend has not connected to it.`,
-          capabilities: [],
+          // The four states the backend distinguishes, mapped onto the
+          // three the table draws. A server that has never been reached is
+          // not the same as one that failed, and both differ from connected.
+          runtime_status:
+            c.state === 'connected' ? 'active'
+            : c.state === 'failed' ? 'error'
+            : c.state === 'off' ? 'disabled'
+            : 'setup_required',
+          status_detail: c.detail,
+          capabilities: (c.tools || []).map((t) => t.name),
           is_custom: true,
-          id: c.id,
+          id: c.name,
         }))
       : rows.filter((r) => r.type === section);
 
@@ -506,11 +535,14 @@ const AddServer = ({ onClose, onSaved }) => {
     setSaving(true);
     setError('');
     try {
-      const response = await fetch(`${API_BASE}/api/plugins/custom`, {
+      // The backend chooses the transport from the target: an http(s)
+      // address is spoken to over HTTP, anything else is run as a command.
+      // That is how servers are published, so both are accepted as written.
+      const response = await fetch(`${API_BASE}/api/mcp/servers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ name: name.trim(), type: 'mcp', url: url.trim(), description: description.trim() }),
+        body: JSON.stringify({ name: name.trim(), target: url.trim() }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -531,7 +563,7 @@ const AddServer = ({ onClose, onSaved }) => {
         className="w-full max-w-md overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl"
       >
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
-          <h3 className="font-black text-white">Add a local MCP server</h3>
+          <h3 className="font-black text-white">Add an MCP server</h3>
           <button type="button" onClick={onClose} aria-label="Close"
                   className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-white">
             <X className="h-4 w-4" />
@@ -541,7 +573,7 @@ const AddServer = ({ onClose, onSaved }) => {
         <div className="space-y-3 p-5">
           {[
             { label: 'Name', value: name, set: setName, placeholder: 'my-server', required: true },
-            { label: 'Address', value: url, set: setUrl, placeholder: 'http://127.0.0.1:8000', required: true },
+            { label: 'Address or command', value: url, set: setUrl, placeholder: 'npx -y @modelcontextprotocol/server-filesystem .', required: true },
             { label: 'Description', value: description, set: setDescription, placeholder: 'Optional', required: false },
           ].map((f) => (
             <label key={f.label} className="block">
