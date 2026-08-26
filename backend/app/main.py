@@ -4422,6 +4422,32 @@ async def local_espeak_tts(req: SherpaOnnxRequest, current_user: User = Depends(
             },
         )
 
+    # Kokoro before eSpeak. edge-tts above is Microsoft's online service, so
+    # when the connection is gone this is the first thing that still speaks,
+    # and it sounds like a person where eSpeak sounds like a machine. It is
+    # English only here: the bundled phonemiser reads the Latin alphabet, and
+    # it refuses anything else rather than pronouncing it as English.
+    if requested_lang.split("-")[0] == "en":
+        try:
+            from app.tts import kokoro
+
+            wav = await asyncio.to_thread(
+                kokoro.synthesize, text, "en", gender, speed
+            )
+            return Response(
+                content=wav,
+                media_type="audio/wav",
+                headers={
+                    "X-SMARAN-TTS-Engine": "kokoro-82m",
+                    "X-SMARAN-TTS-Language": "en",
+                },
+            )
+        except Exception as exc:
+            # Not fatal: eSpeak is still below. The reason is logged so a
+            # missing dependency or a failed download is findable rather
+            # than showing up as unexplained silence.
+            logger.warning("Kokoro could not speak, falling through: %s", exc)
+
     executable = shutil.which("espeak-ng")
     if not executable:
         raise HTTPException(status_code=503, detail="Local speech engine is not installed")
