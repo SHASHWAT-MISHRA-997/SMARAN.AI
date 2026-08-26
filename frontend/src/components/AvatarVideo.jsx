@@ -19,8 +19,15 @@ export const AVATAR_CHARACTERS = [
     // states: a calm portrait, the network expanding, then the result. Each
     // clip plays forward and then backward so its last frame is its first -
     // a straight cut from a continuous shot snaps visibly on every loop.
-    id: 'energy-core',
-    name: 'Energy Core',
+    id: 'riyo',
+    name: 'Riyo',
+    // The whole frame matters here - face, network, panels, core - so it is
+    // shown whole. object-cover on a square source in a wide panel scales to
+    // the width and crops the height, which cut the top of the head off.
+    fit: 'contain',
+    // Still until spoken to. A loop that never stops reads as a screensaver;
+    // motion means something only when it starts.
+    stillWhenIdle: true,
     gender: 'male',
     clips: {
       idle: '/avatar-video/core-idle.mp4',
@@ -50,6 +57,10 @@ const AvatarVideo = ({
     AVATAR_CHARACTERS.find((c) => c.id === characterId) || AVATAR_CHARACTERS[0];
 
   const state = isSpeaking ? 'talking' : isThinking ? 'thinking' : 'idle';
+
+  // A character can ask to hold its first frame while nothing is happening.
+  // The clip stays loaded, so the first word starts it moving with no pause.
+  const holdStill = Boolean(character.stillWhenIdle) && state === 'idle';
 
   // Two stacked players let one clip fade in while the other fades out, so a
   // state change never shows a blank frame.
@@ -83,6 +94,22 @@ const AvatarVideo = ({
     setFrontIsA(frontIsARef.current);
   }, [state, character]);
 
+  // Hold the frame while idle, and let it run the moment there is something
+  // to react to.
+  const holdStillRef = useRef(false);
+  useEffect(() => {
+    holdStillRef.current = holdStill;
+    [playerA.current, playerB.current].forEach((video) => {
+      if (!video || !video.src) return;
+      if (holdStill) {
+        video.pause();
+      } else if (video.paused) {
+        const play = video.play();
+        if (play?.catch) play.catch(() => {});
+      }
+    });
+  }, [holdStill]);
+
   // Prime the first clip.
   useEffect(() => {
     const first = playerA.current;
@@ -100,6 +127,10 @@ const AvatarVideo = ({
   // in a foreground tab, which left the character frozen.
   useEffect(() => {
     const keepPlaying = () => {
+        // Do not restart what was paused on purpose. This watchdog exists
+        // for embedded browsers that pause background media; without the
+        // guard it undid the hold within a second and a half.
+        if (holdStillRef.current) return;
       [playerA.current, playerB.current].forEach((video) => {
         if (video && video.src && video.paused) {
           const play = video.play();
@@ -121,9 +152,12 @@ const AvatarVideo = ({
     playsInline: true,
     preload: 'auto',
     onError: () => setLoadError(true),
-    // Fill the panel rather than letterboxing it. `object-contain` left
-    // large empty bands above and below the character.
-    className: 'absolute inset-0 w-full h-full object-cover object-top transition-opacity duration-500',
+      // Filling is right for a tall portrait clip, where letterboxing left
+      // large empty bands. It is wrong for a square composition in a wide
+      // panel, which is why the character chooses.
+      className: `absolute inset-0 w-full h-full ${
+        character.fit === 'contain' ? 'object-contain' : 'object-cover object-top'
+      } transition-opacity duration-500`,
   };
 
   return (

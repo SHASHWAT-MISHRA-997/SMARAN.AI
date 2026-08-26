@@ -1956,9 +1956,6 @@ export const HackerVoiceAssistant = ({
           {Ambience.isSupported() && (
             <CallToggle icon={Music2} label="Ambience" active={ambienceOn} onClick={() => setAmbienceOn((v) => !v)} />
           )}
-          {wakeWordSupported && (
-            <CallToggle icon={Radio} label="Wake" active={wakeWordEnabled} onClick={() => onToggleWakeWord?.()} />
-          )}
         </div>
       </div>
 
