@@ -121,7 +121,12 @@ const DeveloperModal = ({ isOpen, onClose }) => {
                 <div
                   key={title}
                   style={{ animationDelay: `${index * 55}ms` }}
-                  className={`group runtime-extension-card developer-highlight-card highlight-card-enter glass-deep sheen hover-lift relative overflow-hidden rounded-2xl border border-white/10 p-3.5 transition-colors ${ring}`}
+                  className={`group runtime-extension-card developer-highlight-card highlight-card-enter glass-deep sheen hover-lift relative overflow-hidden rounded-2xl border border-white/10 p-3.5 transition-colors ${ring} ${
+                    // Eleven cards in two columns leaves the last one alone beside an
+                    // empty half-row. The odd one out takes the whole width instead.
+                    highlights.length % 2 === 1 && index === highlights.length - 1
+                      ? 'md:col-span-2' : ''
+                  }`}
                 >
                   <div className="flex items-start gap-2.5">
                     <span className={`shrink-0 mt-0.5 grid place-items-center w-8 h-8 rounded-xl bg-white/5 border border-white/10 ${accent} transition-transform duration-300 group-hover:scale-110`}>
