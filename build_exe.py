@@ -63,6 +63,22 @@ HIDDEN_IMPORTS = [
     "app.password_policy",
     "app.updates",
     "app.desktop_agent",
+    "app.plugin_routes",
+    "app.local_engine",
+    # MCP is registered inside a try, so a static scan does not follow it.
+    # Without these the packaged build silently has no MCP support at all.
+    "app.mcp",
+    "app.mcp.client",
+    "app.mcp.manager",
+    "app.mcp.routes",
+    # Video is imported the same way. It needs torch, which this build
+    # excludes on purpose, so the router registers and then reports that
+    # PyTorch is not installed - which is true and is what should be said.
+    "app.video",
+    "app.video.hardware",
+    "app.video.registry",
+    "app.video.planner",
+    "app.video.routes",
     # QR rendering. The import sits inside the endpoint so the module loads
     # without it, which also meant PyInstaller's static scan never saw it and
     # the packaged build shipped without the library.
