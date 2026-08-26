@@ -80,6 +80,13 @@ HIDDEN_IMPORTS = [
     "app.video.planner",
     "app.video.routes",
     "app.video.install",
+    "app.imaging",
+    "app.imaging.registry",
+    "app.imaging.engine",
+    "app.imaging.routes",
+    "app.media",
+    "app.media.extract",
+    "app.media.routes",
     # QR rendering. The import sits inside the endpoint so the module loads
     # without it, which also meant PyInstaller's static scan never saw it and
     # the packaged build shipped without the library.

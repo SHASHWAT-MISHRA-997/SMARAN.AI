@@ -311,6 +311,14 @@ try:
 except Exception as _image_exc:  # pragma: no cover
     logger.warning("Image generation unavailable: %s", _image_exc)
 
+# Reading video files: frames and audio out, so video-to-images and
+# video-to-text need no model of their own.
+try:
+    from app.media.routes import router as media_router
+    app.include_router(media_router)
+except Exception as _media_exc:  # pragma: no cover
+    logger.warning("Media reading unavailable: %s", _media_exc)
+
 from app.mcp.routes import router as mcp_router
 app.include_router(mcp_router)
 
