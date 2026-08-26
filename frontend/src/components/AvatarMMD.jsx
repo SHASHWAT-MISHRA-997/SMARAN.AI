@@ -297,20 +297,46 @@ const AvatarMMD = ({
         const centre = new THREE.Vector3();
         bounds.getSize(size);
         bounds.getCenter(centre);
-        mesh.position.x -= centre.x;
-        mesh.position.z -= centre.z;
+        // Centre on the spine, not on the bounding box. Three.js measures a
+        // skinned mesh from its rest pose, so the box takes in the cape, which
+        // hangs to one side and dragged the "centre" with it — she rendered
+        // about 12% right of the panel centre while every DOM element around
+        // her was centred correctly. A bone sits on the body's own axis and
+        // no accessory can move it.
+        const spine = handles.bones.upperChest || handles.bones.chest || handles.bones.hips;
+        let spineY = null;
+        if (spine) {
+          spine.updateWorldMatrix(true, false);
+          const axis = new THREE.Vector3().setFromMatrixPosition(spine.matrixWorld);
+          mesh.position.x -= axis.x;
+          mesh.position.z -= axis.z;
+          spineY = axis.y;
+        } else {
+          mesh.position.x -= centre.x;
+          mesh.position.z -= centre.z;
+        }
 
-        // Measure again now the arms are down: the T-pose box was far wider
-        // and pushed the character off to one side.
-        const posed = new THREE.Box3().setFromObject(mesh);
-        const posedCentre = new THREE.Vector3();
-        posed.getCenter(posedCentre);
-        mesh.position.x -= posedCentre.x;
-        bounds.copy(posed);
+        bounds.copy(new THREE.Box3().setFromObject(mesh));
         bounds.getSize(size);
 
-        handles.framedHeight = size.y * 0.88;   // head down to roughly the knees
-        handles.aimHeight = bounds.max.y - handles.framedHeight * 0.46;
+        // Framing read out of MYRAA's own bundle rather than chosen by eye:
+        //   { targetBone: 上半身2, targetOffset: 1.2, distance: 22, fov: 30 }
+        // and it drives this same evelyn model, so the numbers transfer
+        // literally. At fov 30 a distance of 22 shows 2 * 22 * tan(15°) =
+        // 11.79 units; expressed against the measured 21.62-unit height that
+        // is 0.545, kept as a fraction so a model built at another scale
+        // still frames correctly.
+        //
+        // The old 0.88 framed head-to-knees and stood the camera 24 units
+        // back — a third further than MYRAA — which is why the face read as
+        // small and distant.
+        handles.framedHeight = size.y * 0.545;
+        // Aim at the bone, not at the top of the bounding box. The box takes
+        // in hair and accessories that sit above the visible crown, so
+        // measuring down from it left more headroom than intended.
+        handles.aimHeight = spineY !== null
+          ? spineY + 1.2
+          : bounds.max.y - handles.framedHeight * 0.403;
         handles.refit?.();
 
         // One more frame before revealing: the loader resolves when the
