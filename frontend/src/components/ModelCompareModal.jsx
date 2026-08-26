@@ -84,16 +84,37 @@ export default function ModelCompareModal({ isOpen, onClose, initialPrompt = '',
   useEffect(() => {
     if (!isOpen) return undefined;
     let cancelled = false;
+      (async () => {
     const savedKeys = readSavedKeys();
     setApiKeys(savedKeys);
     setProviderModels({});
     setProviderErrors({});
-    const entries = Object.entries(savedKeys);
-    if (!entries.length) {
-      setShowKeyInput(true);
-      return () => { cancelled = true; };
-    }
-
+      // Providers configured in the model catalogue are held by the backend,
+      // not by this browser. Reading only localStorage meant a key entered
+      // there was invisible here and was asked for a second time. The key
+      // itself is never sent back: an empty api_key tells the backend to use
+      // the one it already has.
+      let configured = [];
+      try {
+        const statusResponse = await fetch(`${apiBase || ''}/api/cloud/keys-status`, {
+          credentials: 'include',
+          headers: authHeaders(token),
+        });
+        if (statusResponse.ok) {
+          const statusBody = await statusResponse.json();
+          configured = statusBody.configured_providers || [];
+        }
+      } catch { /* offline: fall back to whatever is stored locally */ }
+      
+      const merged = { ...Object.fromEntries(configured.map((name) => [name, ''])), ...savedKeys };
+      if (cancelled) return;
+      setApiKeys(merged);
+      const entries = Object.entries(merged);
+      if (!entries.length) {
+        setShowKeyInput(true);
+        return;
+      }
+      
     entries.forEach(async ([provider, apiKey]) => {
       setProbingProviders((previous) => ({ ...previous, [provider]: true }));
       try {
@@ -113,6 +134,8 @@ export default function ModelCompareModal({ isOpen, onClose, initialPrompt = '',
       }
     });
     return () => { cancelled = true; };
+      })();
+      return () => { cancelled = true; };
   }, [isOpen, token, apiBase]);
 
   const allModels = useMemo(() => Object.entries(providerModels).flatMap(([provider, models]) => (
