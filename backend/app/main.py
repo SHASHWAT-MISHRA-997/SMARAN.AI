@@ -4254,38 +4254,44 @@ class SherpaOnnxRequest(BaseModel):
     language: Optional[str] = "en"
     voice_model: Optional[str] = "vits-sherpa-onnx-multilingual"
     speed: Optional[float] = 1.0
+    # Which voice to speak in. Defaults to female so an older caller that
+    # sends nothing hears exactly what it heard before.
+    gender: Optional[str] = "female"
 
 # Natural neural voices per language, used by the Edge TTS engine below.
 # These are free and need no API key or account. Windows itself usually ships
 # English-only voices, so this is what makes replies actually sound native in
 # the user's selected response language.
+# Voices, by language and then by gender. Every name here was read from
+# edge_tts.list_voices() rather than recalled: the previous table listed
+# pa-IN-OjasNeural, which the service does not have, so Punjabi failed.
+#
+# The old table had one voice per language and all of them were women, so a
+# male character answered in a woman's voice whatever was selected.
 NEURAL_VOICES = {
-    "en": "en-IN-NeerjaNeural",
-    "hi": "hi-IN-SwaraNeural",
-    "gu": "gu-IN-DhwaniNeural",
-    "mr": "mr-IN-AarohiNeural",
-    "ta": "ta-IN-PallaviNeural",
-    "te": "te-IN-ShrutiNeural",
-    "bn": "bn-IN-TanishaaNeural",
-    "kn": "kn-IN-SapnaNeural",
-    "ml": "ml-IN-SobhanaNeural",
-    "ur": "ur-IN-GulNeural",
-    "pa": "pa-IN-OjasNeural",
-    "ne": "ne-NP-HemkalaNeural",
-    "fr": "fr-FR-DeniseNeural",
-    "de": "de-DE-KatjaNeural",
-    "es": "es-ES-ElviraNeural",
-    "ru": "ru-RU-SvetlanaNeural",
-    "ar": "ar-EG-SalmaNeural",
-    "pt": "pt-BR-FranciscaNeural",
-    "it": "it-IT-ElsaNeural",
-    "ja": "ja-JP-NanamiNeural",
-    "ko": "ko-KR-SunHiNeural",
-    "zh-CN": "zh-CN-XiaoxiaoNeural",
+    "en": {"female": "en-IN-NeerjaNeural",   "male": "en-IN-PrabhatNeural"},
+    "hi": {"female": "hi-IN-SwaraNeural",    "male": "hi-IN-MadhurNeural"},
+    "gu": {"female": "gu-IN-DhwaniNeural",   "male": "gu-IN-NiranjanNeural"},
+    "mr": {"female": "mr-IN-AarohiNeural",   "male": "mr-IN-ManoharNeural"},
+    "ta": {"female": "ta-IN-PallaviNeural",  "male": "ta-IN-ValluvarNeural"},
+    "te": {"female": "te-IN-ShrutiNeural",   "male": "te-IN-MohanNeural"},
+    "bn": {"female": "bn-IN-TanishaaNeural", "male": "bn-IN-BashkarNeural"},
+    "kn": {"female": "kn-IN-SapnaNeural",    "male": "kn-IN-GaganNeural"},
+    "ml": {"female": "ml-IN-SobhanaNeural",  "male": "ml-IN-MidhunNeural"},
+    "ur": {"female": "ur-IN-GulNeural",      "male": "ur-IN-SalmanNeural"},
+    "ne": {"female": "ne-NP-HemkalaNeural",  "male": "ne-NP-SagarNeural"},
+    "fr": {"female": "fr-FR-VivienneMultilingualNeural", "male": "fr-FR-RemyMultilingualNeural"},
+    "de": {"female": "de-DE-SeraphinaMultilingualNeural", "male": "de-DE-FlorianMultilingualNeural"},
+    "es": {"female": "es-ES-XimenaNeural",   "male": "es-ES-AlvaroNeural"},
+    "ru": {"female": "ru-RU-SvetlanaNeural", "male": "ru-RU-DmitryNeural"},
 }
 
+# The service publishes no Punjabi voice under any locale. Hindi is the
+# nearest it has, and saying so beats a name that resolves to nothing.
+NEURAL_VOICE_SUBSTITUTES = {"pa": "hi"}
 
-async def _synthesize_neural_speech(text: str, lang: str, speed: float) -> Optional[bytes]:
+
+async def _synthesize_neural_speech(text: str, lang: str, speed: float, gender: str = "female") -> Optional[bytes]:
     """Render speech with Microsoft's free neural voices via edge-tts.
 
     Returns MP3 bytes, or None when the engine is unavailable (not installed or
@@ -4298,7 +4304,12 @@ async def _synthesize_neural_speech(text: str, lang: str, speed: float) -> Optio
     if importlib.util.find_spec("edge_tts") is None:
         return None
 
-    voice = NEURAL_VOICES.get(lang) or NEURAL_VOICES.get(lang.split("-")[0]) or NEURAL_VOICES["en"]
+    base = lang.split("-")[0]
+    base = NEURAL_VOICE_SUBSTITUTES.get(base, base)
+    pair = NEURAL_VOICES.get(lang) or NEURAL_VOICES.get(base) or NEURAL_VOICES["en"]
+    # A character's gender decides the voice. Without this every character
+    # spoke in the same woman's voice, whichever one was on screen.
+    voice = pair.get(gender) or pair.get("female") or next(iter(pair.values()))
     # edge-tts expects a relative rate such as "-10%" / "+15%".
     rate = f"{int(round((speed - 1.0) * 100)):+d}%"
 
@@ -4381,7 +4392,10 @@ async def local_espeak_tts(req: SherpaOnnxRequest, current_user: User = Depends(
     requested_lang = (req.language or "en").lower()
     speed = max(0.6, min(float(req.speed or 1.0), 1.6))
 
-    neural_audio = await _synthesize_neural_speech(text, requested_lang, speed)
+    gender = (getattr(req, "gender", None) or "female").lower()
+    if gender not in ("male", "female"):
+        gender = "female"
+    neural_audio = await _synthesize_neural_speech(text, requested_lang, speed, gender)
     if neural_audio:
         return Response(
             content=neural_audio,

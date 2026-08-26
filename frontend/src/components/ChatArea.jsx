@@ -1531,7 +1531,15 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ text: clean, language: langCode, speed: 0.95 }),
+        // The character on screen decides the voice. Without this every
+        // character read aloud in the same woman's voice, which is what a
+        // male character speaking as a woman was.
+        body: JSON.stringify({
+          text: clean,
+          language: langCode,
+          speed: 0.95,
+          gender: localStorage.getItem('sm_voice_gender') || 'female',
+        }),
       });
       if (!response.ok) throw new Error(`Local TTS returned ${response.status}`);
       const blob = await response.blob();
