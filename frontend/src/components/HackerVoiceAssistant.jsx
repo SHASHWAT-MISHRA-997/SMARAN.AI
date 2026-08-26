@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { LiveVoiceSession } from '../utils/liveVoice';
 import { Ambience } from '../utils/ambience';
+import EnergyCore from './EnergyCore';
 import GestureHUD from './GestureHUD';
 import CyberFX from './CyberFX';
 import { GESTURES } from '../utils/gestureControl';
@@ -1811,7 +1812,7 @@ export const HackerVoiceAssistant = ({
         <div className="absolute inset-0">
           {!showAvatar ? (
             <div className="w-full h-full flex items-center justify-center">
-              <AICoreSphere voiceState={voiceState} micVolume={micVolume} />
+              <EnergyCore voiceState={voiceState} micVolume={micVolume} />
             </div>
           ) : MMD_CHARACTERS.some((c) => c.id === avatarId) ? (
             <AvatarMMD
