@@ -40,7 +40,6 @@ const wsUrl = () => {
  * A normal web page cannot access Task Manager level data, but modern browsers
  * expose several useful signals:
  *   - GPU renderer name via WEBGL_debug_renderer_info
- *   - NPU / AI accelerator availability via navigator.ml (WebNN)
  *   - CPU logical threads via navigator.hardwareConcurrency
  *   - RAM class (rounded to nearest GB) via navigator.deviceMemory
  *   - Network type (wifi/cellular) via navigator.connection
@@ -182,46 +181,6 @@ export const detectClientDevice = async () => {
 
   const cleanGpu = tidyGpuName(gpu);
 
-  // ── NPU / AI accelerator detection via WebNN (navigator.ml) ──
-  let npuAvailable = false;
-  let npuName = "";
-  try {
-    if (navigator.ml) {
-      // Try to create an inference context — this probes whether the device
-      // actually has an accessible NPU/AI accelerator.
-      const preferredTypes = ["npu", "gpu", "cpu"];
-      for (const t of preferredTypes) {
-        try {
-          const ctx = await navigator.ml.createContext({ deviceType: t });
-          if (ctx) {
-            npuAvailable = t === "npu";
-            npuName = t === "npu" ? "WebNN NPU accelerator" : t === "gpu" ? "WebNN GPU accelerator" : "";
-            break;
-          }
-        } catch (_) {}
-      }
-    }
-  } catch (_) {}
-
-  // Chrome 113+ exposes navigator.ml.isNPUAvailablePromise
-  try {
-    if (!npuAvailable && navigator.ml?.isNPUAvailablePromise) {
-      const npuReady = await navigator.ml.isNPUAvailablePromise;
-      if (npuReady) {
-        npuAvailable = true;
-        if (!npuName) npuName = "WebNN NPU (available)";
-      }
-    }
-  } catch (_) {}
-
-  // Fallback: navigator.ai (experimental AI API in Chrome)
-  try {
-    if (!npuAvailable && navigator.ai) {
-      npuAvailable = true;
-      if (!npuName) npuName = "Browser AI API (experimental)";
-    }
-  } catch (_) {}
-
   // ── CPU logical threads ──
   const threads = Number.isFinite(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : null;
 
@@ -298,8 +257,6 @@ export const detectClientDevice = async () => {
     gpuVendor: gpuVendor || "",
     threads,
     ramClassGb: reportedRam,
-    npuAvailable,
-    npuName: npuName || "",
     networkType: networkType || (isWifi ? "wifi" : ""),
     networkEffectiveType: networkEffectiveType || "",
     networkDownlinkMbps: networkDownlink,
@@ -328,7 +285,6 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
   const [selectedMetric, setSelectedMetric] = useState("CPU");
   const [history, setHistory] = useState(emptyHistory);
 
-  // Detect client device asynchronously (NPU probe, battery, etc.)
   useEffect(() => {
     let cancelled = false;
     detectClientDevice().then((info) => {
@@ -605,7 +561,7 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
         <div className="performance-scroll flex-1 min-h-0 overflow-y-auto overscroll-contain p-2.5 flex flex-col gap-2">
 
           {/* Client identity — browser-reported device web vitals.
-              Shows manufacturer, model, OS, GPU, NPU, WiFi, RAM class,
+              Shows manufacturer, model, OS, GPU, WiFi, RAM class,
               screen size, battery — everything the browser honestly exposes. */}
           <div className="performance-glass-card glass-deep scanlines hover-lift relative rounded-xl border border-cyan-500/25 p-2.5 text-left">
             <div className="text-[10px] font-black uppercase tracking-wider text-cyan-700 dark:text-cyan-300 flex items-center gap-1.5">
@@ -659,18 +615,6 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
                       {cleanClientGpu}
                       {clientDevice.gpuVendor ? ` (${clientDevice.gpuVendor})` : ""}
                     </span>
-                  </div>
-                )}
-                {/* NPU — the key new field */}
-                {clientDevice.npuAvailable ? (
-                  <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 dark:text-emerald-400">
-                    <Sparkles className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
-                    <span>NPU: {clientDevice.npuName || "Available"}</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1 text-[9px] font-bold text-zinc-500 dark:text-zinc-500">
-                    <span className="text-zinc-400 shrink-0">NPU:</span>
-                    <span>Not available</span>
                   </div>
                 )}
                 {/* Network — speed class only. The browser cannot see the Wi-Fi

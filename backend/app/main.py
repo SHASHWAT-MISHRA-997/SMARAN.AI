@@ -2195,6 +2195,19 @@ async def list_cloud_models(request: Request, current_user: User = Depends(get_c
     body = await request.json()
     provider = str(body.get("provider", "")).lower().strip()
     api_key = str(body.get("api_key", "")).strip()
+
+    # Fall back to the key this installation already holds. A key configured
+    # in the model catalogue is stored on the backend, while the compare
+    # screen was reading the browser's own copy - so a provider that was
+    # already set up was asked for all over again. The key still never leaves
+    # here; the caller sends nothing and gets back only the model list.
+    if not api_key:
+        env_name = _CLOUD_PROVIDER_ENV_VARS.get(provider)
+        if env_name:
+            api_key = os.getenv(env_name, "").strip()
+        if not api_key and provider == "huggingface":
+            api_key = os.getenv("HF_TOKEN", "").strip()
+
     models, free_only = await _fetch_cloud_provider_models(provider, api_key)
     return {
         "provider": provider,

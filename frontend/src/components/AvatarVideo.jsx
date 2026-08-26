@@ -15,6 +15,20 @@ import React, { useEffect, useRef, useState } from 'react';
  */
 export const AVATAR_CHARACTERS = [
   {
+    // Cut from one eight-second source that already moved through the three
+    // states: a calm portrait, the network expanding, then the result. Each
+    // clip plays forward and then backward so its last frame is its first -
+    // a straight cut from a continuous shot snaps visibly on every loop.
+    id: 'energy-core',
+    name: 'Energy Core',
+    gender: 'male',
+    clips: {
+      idle: '/avatar-video/core-idle.mp4',
+      thinking: '/avatar-video/core-thinking.mp4',
+      talking: '/avatar-video/core-talking.mp4',
+    },
+  },
+  {
     id: 'anime-girl',
     name: 'Myra',
     gender: 'female',
