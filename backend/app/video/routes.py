@@ -62,6 +62,27 @@ async def models():
     }
 
 
+@router.get("/install")
+async def install_status():
+    """Whether the video packages are present, and what it would take."""
+    from .install import status
+
+    return status()
+
+
+@router.post("/install")
+async def install_start():
+    """Fetch the video packages. Reports progress; does not block."""
+    from .install import start, status
+
+    current = status()
+    if current["installed"]:
+        return {"started": False, "detail": "Already installed."}
+    if not current["can_install"]:
+        raise HTTPException(status_code=409, detail=current["blocker"])
+    return start()
+
+
 @router.get("/hardware")
 async def hardware():
     return probe().as_dict()

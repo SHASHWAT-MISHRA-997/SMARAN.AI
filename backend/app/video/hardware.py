@@ -52,7 +52,11 @@ def probe(model_dir: str = ".") -> Hardware:
             has_cuda=False, gpu_name="", vram_total_gb=0.0, vram_free_gb=0.0,
             compute_capability=None, supports_bfloat16=False,
             torch_version="", torch_is_cuda_build=False, disk_free_gb=disk_free,
-            reason="PyTorch is not installed.",
+            reason=(
+                "The video packages are not installed yet. They are about 3 GB "
+                "and are fetched on request rather than shipped to everyone, "
+                "since most installs never generate a video."
+            ),
         )
 
     version = getattr(torch, "__version__", "")
