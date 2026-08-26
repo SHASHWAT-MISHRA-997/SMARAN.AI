@@ -163,7 +163,10 @@ class SmaranApiClient {
                 }));
             }
         }
-        catch (_) { }
+        catch {
+            // The catalogue is optional: the built-in list below is a real
+            // fallback, not a guess, so a failed fetch is not worth surfacing.
+        }
         // Offline fallback. Every id here is a real, currently published model:
         // the previous list advertised models that do not exist, which is what
         // produced "Repository Not Found" when one of them was selected.
@@ -172,7 +175,7 @@ class SmaranApiClient {
             { id: 'deepseek/deepseek-r1', name: '🧠 DeepSeek R1 (configured provider required)', provider: 'DeepSeek' },
             { id: 'deepseek/deepseek-chat', name: '🤖 DeepSeek Chat (configured provider required)', provider: 'DeepSeek' },
             { id: 'groq/llama-3.3-70b-versatile', name: '⚡ Groq LLaMA 3.3 70B (Groq key required)', provider: 'Groq' },
-            { id: 'google/gemini-2.5-flash', name: '✨ Gemini Flash (Gemini key required)', provider: 'Google' },
+            { id: 'google/gemini-flash', name: '✨ Gemini Flash (Gemini key required)', provider: 'Google' },
             { id: 'openrouter/free', name: '🟢 OpenRouter free route (availability varies)', provider: 'OpenRouter' },
             { id: 'meta/llama-3.1-8b-instruct', name: '⚡ NVIDIA LLaMA 3.1 8B (NVIDIA key required)', provider: 'NVIDIA' },
             { id: 'claude-3-5-sonnet', name: '🧠 Claude (Anthropic or OpenRouter key required)', provider: 'Anthropic' },
@@ -199,6 +202,9 @@ class SmaranApiClient {
         // 1. Use a running SMARAN.AI app when there is one. The extension does not
         // depend on it: if no app is configured or advertising itself, this step is
         // skipped entirely rather than stalling on a connection that cannot succeed.
+        // Why each route declined, so a failure can name the reason instead of
+        // presenting silence as an answer.
+        const refusals = [];
         const appIsAvailable = Boolean(config.get('backendUrl')?.trim()) ||
             SmaranApiClient.discoverRunningApp() !== null;
         if (appIsAvailable) {
@@ -206,7 +212,9 @@ class SmaranApiClient {
                 return await this._callLocalBackend(baseUrl, payload, onToken);
             }
             catch (localErr) {
-                // App unreachable — continue with the user's own provider key or Ollama.
+                // App unreachable - continue with the user's own provider key or
+                // Ollama, but record why so a later failure can say what happened.
+                refusals.push(`SMARAN.AI app: ${localErr?.message || localErr}`);
             }
         }
         // 2. Check user-configured API Keys
@@ -221,62 +229,119 @@ class SmaranApiClient {
             try {
                 return await this._callGroqDirect(groqKey, prompt, model, contextFiles, onToken);
             }
-            catch (_) { }
+            catch (err) {
+                refusals.push(String(err?.message || err));
+            }
         }
         if (openRouterKey) {
             try {
                 return await this._callOpenRouterDirect(openRouterKey, prompt, model, contextFiles, onToken);
             }
-            catch (_) { }
+            catch (err) {
+                refusals.push(String(err?.message || err));
+            }
         }
         if (groqKey) {
             try {
                 return await this._callGroqDirect(groqKey, prompt, model, contextFiles, onToken);
             }
-            catch (_) { }
+            catch (err) {
+                refusals.push(String(err?.message || err));
+            }
         }
         if (geminiKey) {
             try {
                 return await this._callGeminiDirect(geminiKey, prompt, contextFiles, onToken);
             }
-            catch (_) { }
+            catch (err) {
+                refusals.push(String(err?.message || err));
+            }
         }
         if (nvidiaKey) {
             try {
                 return await this._callNvidiaDirect(nvidiaKey, prompt, model, contextFiles, onToken);
             }
-            catch (_) { }
+            catch (err) {
+                refusals.push(String(err?.message || err));
+            }
         }
         if (deepseekKey) {
             try {
                 return await this._callDeepSeekDirect(deepseekKey, prompt, contextFiles, onToken);
             }
-            catch (_) { }
+            catch (err) {
+                refusals.push(String(err?.message || err));
+            }
         }
         if (anthropicKey) {
             try {
                 return await this._callAnthropicDirect(anthropicKey, prompt, contextFiles, onToken);
             }
-            catch (_) { }
+            catch (err) {
+                refusals.push(String(err?.message || err));
+            }
         }
         if (openaiKey) {
             try {
                 return await this._callOpenAIDirect(openaiKey, prompt, contextFiles, onToken);
             }
-            catch (_) { }
+            catch (err) {
+                refusals.push(String(err?.message || err));
+            }
         }
         // 3. Local Ollama, if the user is running one on port 11434.
         {
             try {
                 return await this._callLocalOllama(prompt, contextFiles, onToken);
             }
-            catch (_) { }
+            catch (err) {
+                refusals.push(String(err?.message || err));
+            }
+            // A configured route that failed is a different problem from no route at
+            // all, and they need different advice. Telling someone nothing is
+            // configured when their key was merely rejected sends them to re-enter a
+            // key that was never the issue.
+            if (refusals.length) {
+                throw new Error('Every configured route refused this request:\n' +
+                    refusals.map((r) => '  - ' + r).join('\n') + '\n\n' +
+                    "These are the providers' own messages, not a guess. A rejected key, " +
+                    'an exhausted free quota and an unknown model all read differently above.');
+            }
             throw new Error('No AI engine is configured yet. Add your own provider key in VS Code ' +
                 'Settings under "SMARAN.AI: Api Keys" — Groq, Google Gemini and ' +
                 'OpenRouter all offer free tiers, and Claude, OpenAI or DeepSeek keys ' +
                 'work too. A local Ollama on port 11434, or an open SMARAN.AI app, is ' +
                 'also used automatically when present. Nothing was fabricated.');
         }
+    }
+    /**
+     * The provider's answer, or the provider's own reason for not giving one.
+     *
+     * Every one of these APIs reports failure as valid JSON with an `error`
+     * object and no `choices`. Reaching for the content and falling back to a
+     * string turned that into a successful reply reading 'No response': the
+     * real message - 'User not found', 'insufficient credits', 'model not
+     * found' - was discarded, and because the call resolved rather than threw,
+     * the next provider in the chain was never tried.
+     */
+    static _contentOrThrow(provider, status, raw, content) {
+        if (typeof content === 'string' && content.trim())
+            return content;
+        let reason = '';
+        try {
+            const parsed = JSON.parse(raw);
+            reason =
+                parsed?.error?.message ||
+                    parsed?.error?.type ||
+                    (typeof parsed?.error === 'string' ? parsed.error : '') ||
+                    parsed?.message ||
+                    '';
+        }
+        catch {
+            reason = raw.slice(0, 200);
+        }
+        const code = status && status >= 400 ? ` (HTTP ${status})` : '';
+        throw new Error(`${provider}${code}: ${reason || 'returned no content'}`);
     }
     _callLocalBackend(baseUrl, payload, onToken) {
         const url = `${baseUrl}/api/chat`;
@@ -385,7 +450,7 @@ class SmaranApiClient {
                 res.on('end', () => {
                     try {
                         const parsed = JSON.parse(data);
-                        resolve(parsed.response || "No response from local Ollama");
+                        resolve(SmaranApiClient._contentOrThrow('Local Ollama', res.statusCode, data, parsed.response));
                     }
                     catch (e) {
                         reject(e);
@@ -430,7 +495,7 @@ class SmaranApiClient {
                 res.on('end', () => {
                     try {
                         const parsed = JSON.parse(data);
-                        const ans = parsed.choices?.[0]?.message?.content || "No response";
+                        const ans = SmaranApiClient._contentOrThrow('Groq', res.statusCode, data, parsed.choices?.[0]?.message?.content);
                         if (onToken)
                             onToken(ans);
                         resolve(ans);
@@ -505,13 +570,73 @@ class SmaranApiClient {
             req.end();
         });
     }
-    _callOpenRouterDirect(apiKey, prompt, model = 'auto', contextFiles, onToken) {
+    /**
+     * A model OpenRouter is currently giving away.
+     *
+     * The slug used to be written into this file and it went stale: OpenRouter
+     * moved meta-llama/llama-3.3-70b-instruct:free onto its paid tier and every
+     * request came back "This model is unavailable for free". Any hardcoded name
+     * has the same fate waiting for it, so the catalogue is asked instead. It
+     * needs no key.
+     *
+     * Cached for an hour: the list changes over days, and fetching it per
+     * message would add a round trip to every reply.
+     */
+    static _freeModel = null;
+    async _pickFreeOpenRouterModel() {
+        const cached = SmaranApiClient._freeModel;
+        if (cached && Date.now() - cached.at < 3600000)
+            return cached.id;
+        const catalogue = await new Promise((resolve) => {
+            const req = https.request({
+                hostname: 'openrouter.ai',
+                path: '/api/v1/models',
+                method: 'GET',
+                headers: { 'User-Agent': 'SMARAN.AI' },
+            }, (res) => {
+                let data = '';
+                res.on('data', (c) => data += c);
+                res.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    }
+                    catch {
+                        resolve(null);
+                    }
+                });
+            });
+            req.on('error', () => resolve(null));
+            req.setTimeout(15000, () => { req.destroy(); resolve(null); });
+            req.end();
+        });
+        const rows = catalogue?.data;
+        if (!Array.isArray(rows))
+            return null;
+        // Zero on both sides, not just the prompt: a model that is free to send to
+        // and charges for what it writes is not a free model.
+        const free = rows.filter((m) => {
+            const p = m?.pricing || {};
+            return Number(p.prompt) === 0 && Number(p.completion) === 0;
+        });
+        if (!free.length)
+            return null;
+        // The largest context among them, which is the one most likely to cope
+        // with a file's worth of workspace context.
+        free.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
+        const chosen = free[0].id;
+        SmaranApiClient._freeModel = { id: chosen, at: Date.now() };
+        return chosen;
+    }
+    async _callOpenRouterDirect(apiKey, prompt, model = 'auto', contextFiles, onToken) {
+        const discovered = await this._pickFreeOpenRouterModel();
         return new Promise((resolve, reject) => {
             let sysMsg = "You are SMARAN.AI, a software engineering assistant. Use only the workspace context supplied in this request.";
             if (contextFiles && contextFiles.length > 0) {
                 sysMsg += "\n\nWorkspace Context Files:\n" + contextFiles.map(c => `--- ${c.path} ---\n${c.content}`).join('\n\n');
             }
-            let targetModel = "meta-llama/llama-3.3-70b-instruct:free";
+            // Whatever the catalogue says is free today. The named fallback is
+            // only for when the catalogue could not be read at all.
+            let targetModel = discovered || "meta-llama/llama-3.3-70b-instruct";
             if (model.includes('deepseek-r1') || model.includes('r1')) {
                 targetModel = "deepseek/deepseek-r1:free";
             }
@@ -519,7 +644,7 @@ class SmaranApiClient {
                 targetModel = "deepseek/deepseek-chat";
             }
             else if (model.includes('gemini')) {
-                targetModel = "google/gemini-2.0-flash-exp:free";
+                targetModel = "google/gemini-3.6-flash";
             }
             else if (model.includes('nemotron')) {
                 targetModel = "nvidia/llama-3.1-nemotron-70b-instruct:free";
@@ -551,7 +676,7 @@ class SmaranApiClient {
                 res.on('end', () => {
                     try {
                         const parsed = JSON.parse(data);
-                        const ans = parsed.choices?.[0]?.message?.content || "No response";
+                        const ans = SmaranApiClient._contentOrThrow('OpenRouter', res.statusCode, data, parsed.choices?.[0]?.message?.content);
                         if (onToken)
                             onToken(ans);
                         resolve(ans);
@@ -577,7 +702,7 @@ class SmaranApiClient {
             });
             const req = https.request({
                 hostname: "generativelanguage.googleapis.com",
-                path: `/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+                path: `/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -589,7 +714,7 @@ class SmaranApiClient {
                 res.on('end', () => {
                     try {
                         const parsed = JSON.parse(data);
-                        const ans = parsed.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
+                        const ans = SmaranApiClient._contentOrThrow('Google Gemini', res.statusCode, data, parsed.candidates?.[0]?.content?.parts?.[0]?.text);
                         if (onToken)
                             onToken(ans);
                         resolve(ans);
@@ -632,7 +757,7 @@ class SmaranApiClient {
                 res.on('end', () => {
                     try {
                         const parsed = JSON.parse(data);
-                        const ans = parsed.choices?.[0]?.message?.content || "No response";
+                        const ans = SmaranApiClient._contentOrThrow('DeepSeek', res.statusCode, data, parsed.choices?.[0]?.message?.content);
                         if (onToken)
                             onToken(ans);
                         resolve(ans);
@@ -675,7 +800,7 @@ class SmaranApiClient {
                 res.on('end', () => {
                     try {
                         const parsed = JSON.parse(data);
-                        const ans = parsed.content?.[0]?.text || "No response";
+                        const ans = SmaranApiClient._contentOrThrow('Anthropic', res.statusCode, data, parsed.content?.[0]?.text);
                         if (onToken)
                             onToken(ans);
                         resolve(ans);
@@ -718,7 +843,7 @@ class SmaranApiClient {
                 res.on('end', () => {
                     try {
                         const parsed = JSON.parse(data);
-                        const ans = parsed.choices?.[0]?.message?.content || "No response";
+                        const ans = SmaranApiClient._contentOrThrow('OpenAI', res.statusCode, data, parsed.choices?.[0]?.message?.content);
                         if (onToken)
                             onToken(ans);
                         resolve(ans);

@@ -48,7 +48,7 @@ export const ALLOWED_PLATFORMS = ['windows', 'macos', 'linux', 'android', 'unkno
    finishes still counts here, which is why the two are never added together. */
 export const WEB_EVENTS = ['visit', 'download_click'];
 
-export const WEB_LABELS = ['exe', 'apk', 'vsix', 'page', 'unknown'];
+export const WEB_LABELS = ['exe', 'apk', 'vsix', 'cli', 'page', 'unknown'];
 
 export const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {

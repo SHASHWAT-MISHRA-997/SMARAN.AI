@@ -154,7 +154,7 @@ export class SmaranApiClient {
       { id: 'deepseek/deepseek-r1', name: '🧠 DeepSeek R1 (configured provider required)', provider: 'DeepSeek' },
       { id: 'deepseek/deepseek-chat', name: '🤖 DeepSeek Chat (configured provider required)', provider: 'DeepSeek' },
       { id: 'groq/llama-3.3-70b-versatile', name: '⚡ Groq LLaMA 3.3 70B (Groq key required)', provider: 'Groq' },
-      { id: 'google/gemini-2.5-flash', name: '✨ Gemini Flash (Gemini key required)', provider: 'Google' },
+      { id: 'google/gemini-flash', name: '✨ Gemini Flash (Gemini key required)', provider: 'Google' },
       { id: 'openrouter/free', name: '🟢 OpenRouter free route (availability varies)', provider: 'OpenRouter' },
       { id: 'meta/llama-3.1-8b-instruct', name: '⚡ NVIDIA LLaMA 3.1 8B (NVIDIA key required)', provider: 'NVIDIA' },
       { id: 'claude-3-5-sonnet', name: '🧠 Claude (Anthropic or OpenRouter key required)', provider: 'Anthropic' },

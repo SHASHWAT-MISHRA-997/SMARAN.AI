@@ -94,7 +94,9 @@ def scan(force: bool = False) -> dict:
     g2p = _module_present("g2p_en")
     caps["text-to-speech-offline"] = {
         "available": onnx and g2p,
-        "reason": "Kokoro runs on the processor; no GPU is involved."
+        "reason": "Kokoro runs on the processor; no GPU is involved. English "
+                  "only: the phonemiser here reads the Latin alphabet, so the "
+                  "model's Hindi voices are refused rather than mispronounced."
                   if (onnx and g2p) else
                   "Needs onnxruntime and g2p-en. Without them only the online "
                   "voice works.",

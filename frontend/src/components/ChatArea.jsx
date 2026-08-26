@@ -2871,11 +2871,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             <span className="absolute w-3 h-3 rounded-full bg-indigo-500 animate-ping opacity-75" />
             <Sparkles className="relative w-4 h-4 text-indigo-600 dark:text-indigo-400 filter drop-shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
           </div>
-          <div className="flex items-center gap-2 truncate">
-            <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[10px] sm:text-xs uppercase tracking-wider">AI Engine:</span>
-            <span className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="hidden sm:inline shrink-0 text-zinc-500 dark:text-zinc-400 font-mono text-[10px] sm:text-xs uppercase tracking-wider">AI Engine:</span>
+            <span className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0" title={activeModelDisplay}>
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse mr-1.5" />
-              {activeModelDisplay}
+              <span className="truncate">{activeModelDisplay}</span>
             </span>
           </div>
         </div>

@@ -44,6 +44,14 @@ VOICES = {
     ("hi", "male"): "hm_omega",
 }
 
+# The Hindi voices are real and they load, but the only phonemiser here is
+# g2p-en, which reads English. Measured: Devanagari comes back empty, and
+# romanised Hindi comes back as an English reading of the spelling —
+# "Namaste" becomes /nʌmˈæst/, which is not the word. Rather than emit a
+# mispronunciation and call it Hindi, those voices are refused until a Hindi
+# phonemiser is wired up. Nothing about the voice files themselves is wrong.
+PHONEMISED_LANGUAGES = {"en"}
+
 # ARPAbet to IPA. Stress digits are dropped from the vowel and become a mark
 # before the syllable, which is how Kokoro's vocabulary carries stress.
 ARPA_TO_IPA = {
@@ -170,7 +178,16 @@ def phonemise(text: str) -> str:
             out.append("ˌ")
         out.append(ipa)
 
-    return "".join(out).strip()
+    result = "".join(out).strip()
+    # g2p-en silently drops anything outside its alphabet, so a page of
+    # Devanagari comes back as the punctuation and nothing else. Returning
+    # that would mean synthesising a comma and calling it speech.
+    if text.strip() and not any(c.isalpha() for c in result):
+        raise KokoroError(
+            "Nothing in that text could be turned into English phonemes. The "
+            "phonemiser here reads the Latin alphabet only."
+        )
+    return result
 
 
 def _load_session():
@@ -209,7 +226,15 @@ def synthesize(text: str, lang: str = "en", gender: str = "female",
     voice_name = VOICES.get((lang, gender)) or VOICES.get((lang, "female"))
     if not voice_name:
         raise KokoroError(
-            "Kokoro has no voice for %r. It ships English and Hindi here." % lang
+            "Kokoro has no voice for %r. Offline speech here is English only."
+            % lang
+        )
+    if lang not in PHONEMISED_LANGUAGES:
+        raise KokoroError(
+            "Kokoro ships a %s voice, but the phonemiser here reads English "
+            "only, so %s text would be pronounced as if it were English. Use "
+            "the online voice for %s until a %s phonemiser is added."
+            % (lang, lang, lang, lang)
         )
 
     ipa = phonemise(text)

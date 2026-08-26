@@ -276,7 +276,10 @@ export default function AnalyticsModal({ isOpen, onClose, token, apiBase }) {
           {filterType !== 'all' && <span className="text-[10px] text-amber-300">Model and hourly aggregates are hidden because the API stores them as all-time totals.</span>}
         </div>
 
-        <div className="px-4 sm:px-5 pt-2.5 bg-zinc-900/40 border-b border-zinc-800 flex items-center gap-2 shrink-0 overflow-x-auto">
+        {/* The three tabs need 589px and a phone gives 357. They used to sit in
+            a horizontally scrolling row, but a touch device draws no scrollbar,
+            so the last tab simply looked cut off. Below sm they wrap instead. */}
+        <div className="px-4 sm:px-5 pt-2.5 pb-0.5 sm:pb-0 bg-zinc-900/40 border-b border-zinc-800 flex flex-wrap sm:flex-nowrap items-center gap-2 shrink-0 sm:overflow-x-auto">
           <button type="button" onClick={() => setActiveTab('overview')} className={tabClass('overview', 'text-indigo-400')}>Overview</button>
           <button type="button" onClick={() => setActiveTab('daily')} className={tabClass('daily', 'text-emerald-400')}>Daily & Hourly</button>
           <button type="button" onClick={() => setActiveTab('models')} className={tabClass('models', 'text-amber-400')}>Model Usage & Latency</button>

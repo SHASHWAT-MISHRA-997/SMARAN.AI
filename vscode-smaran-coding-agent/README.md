@@ -54,11 +54,12 @@
 └─────────────────────────────────┴────────────────────────────┘
 ```
 
-### 🎙️ **Voice & Dictation** (Optional)
-- **Microphone button** → Dictate prompts using Web Speech API
-- **Speaker button** → Read-aloud last response
-- **Auto-read** → Optional automatic read-aloud of responses
-- **Language selector** → Shared across dictation, response, and read-aloud locales
+### 🎙️ **Dictation** (Optional)
+- **Microphone button** → Dictate prompts using the Web Speech API
+- Dictation is en-US. Read-aloud, the auto-read toggle and the response-language
+  menu were removed in 1.3.8: read-aloud depended on a speech-synthesis voice
+  that is not present in every VS Code runtime, so the buttons were frequently
+  inert, and the language menu only ever changed the dictation locale.
 
 ### 📎 **Attachment Support**
 - Text files (up to 50K chars/file)

@@ -797,8 +797,11 @@ ${userPrompt}`;
     }
     .btn-attach {
       background: none;
-      border: none;
-      color: #7b7e96;
+      border: 1px solid rgba(123, 126, 150, 0.28);
+      /* #7b7e96 on this bar sat near 3:1 against the field, which is why
+         the two icons read as smudges. Lifted to a legible grey and given
+         a hairline edge so each one is visibly a button. */
+      color: #b6bad2;
       cursor: pointer;
       padding: 6px;
       border-radius: 5px;
@@ -809,24 +812,14 @@ ${userPrompt}`;
     }
     .btn-attach:hover {
       color: var(--accent);
+      border-color: rgba(0, 240, 255, 0.45);
       background: rgba(0, 240, 255, 0.12);
     }
-    .btn-attach.active,
-    .voice-toggle.active {
+    .btn-attach svg { display: block; }
+    .btn-attach.active {
       color: #071016;
       background: var(--accent);
       box-shadow: 0 0 10px rgba(0, 240, 255, 0.35);
-    }
-    .voice-toggle {
-      width: 30px;
-      min-width: 30px;
-      height: 29px;
-      padding: 0;
-      border: 1px solid #25283b;
-      background: #121420;
-      color: #7b7e96;
-      border-radius: 5px;
-      cursor: pointer;
     }
     .voice-status {
       min-height: 12px;
@@ -969,32 +962,18 @@ ${userPrompt}`;
           <option value="deepseek/deepseek-r1">🧠 DeepSeek R1 (provider required)</option>
           <option value="groq/llama-3.3-70b">⚡ Groq LLaMA 3.3 (Groq key)</option>
           <option value="openrouter/free">🟢 OpenRouter free route (may vary)</option>
-          <option value="google/gemini-2.5-flash">✨ Gemini Flash (Gemini key)</option>
+          <option value="google/gemini-flash">✨ Gemini Flash (Gemini key)</option>
           <option value="nvidia/nemotron-3-ultra-70b">⚡ Nemotron (provider required)</option>
           <option value="claude-3-5-sonnet">🧠 Claude (provider required)</option>
           <option value="qwen2.5-coder">⚡ Qwen 2.5 Coder (installed Ollama)</option>
         </optgroup>
       </select>
-      <select id="languageSelect" class="language-select" aria-label="Response and voice language" title="Response, dictation, and read-aloud language">
-        <option value="en">English</option>
-        <option value="hi">हिन्दी</option>
-        <option value="pa">ਪੰਜਾਬੀ</option>
-        <option value="gu">ગુજરાતી</option>
-        <option value="mr">मराठी</option>
-        <option value="bn">বাংলা</option>
-        <option value="ta">தமிழ்</option>
-        <option value="te">తెలుగు</option>
-        <option value="ml">മലയാളം</option>
-        <option value="kn">ಕನ್ನಡ</option>
-      </select>
-      <button id="autoSpeakBtn" class="voice-toggle" type="button" aria-pressed="false" title="Automatically read final responses aloud">🔇</button>
     </div>
     
     <div class="input-container">
-      <button class="btn-attach" onclick="pickAttachment()" title="Attach a text file or image metadata">📎</button>
-      <button id="speakBtn" class="btn-attach" type="button" title="Dictate prompt using this VS Code runtime">🎙️</button>
+      <button class="btn-attach" onclick="pickAttachment()" title="Attach a text file or image metadata" aria-label="Attach a file"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+      <button id="speakBtn" class="btn-attach" type="button" title="Dictate prompt using this VS Code runtime" aria-label="Dictate"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 19v3"/></svg></button>
       <textarea id="promptInput" rows="1" placeholder="Instruct SMARAN.AI…" title="Enter to send, Shift+Enter for a newline"></textarea>
-      <button id="readBtn" class="btn-attach" type="button" title="Read the last model response aloud">🔊</button>
       <button id="sendBtn" class="btn-send">SEND</button>
     </div>
     <div id="voiceStatus" class="voice-status" role="status" aria-live="polite"></div>
@@ -1005,10 +984,11 @@ ${userPrompt}`;
     var promptInput = document.getElementById('promptInput');
     var sendBtn = document.getElementById('sendBtn');
     var speakBtn = document.getElementById('speakBtn');
-    var readBtn = document.getElementById('readBtn');
-    var autoSpeakBtn = document.getElementById('autoSpeakBtn');
     var modelSelect = document.getElementById('modelSelect');
-    var languageSelect = document.getElementById('languageSelect');
+    // The language menu was removed. Dictation still needs a locale,
+    // so it is fixed here rather than read from a control that is
+    // no longer on screen.
+    var uiLanguage = 'en';
     var voiceStatus = document.getElementById('voiceStatus');
     var chat = document.getElementById('chat');
     var activeFile = document.getElementById('activeFile');
@@ -1025,150 +1005,17 @@ ${userPrompt}`;
       en: 'en-US', hi: 'hi-IN', pa: 'pa-IN', gu: 'gu-IN', mr: 'mr-IN',
       bn: 'bn-IN', ta: 'ta-IN', te: 'te-IN', ml: 'ml-IN', kn: 'kn-IN'
     };
-    var savedUiState = vscode.getState() || {};
-    languageSelect.value = languageLocales[savedUiState.language] ? savedUiState.language : 'en';
-    var autoSpeakEnabled = savedUiState.autoSpeak === true;
-    var lastAssistantText = '';
     var speechRecognition = null;
     var recognitionBaseText = '';
     var recognitionHeard = false;
     var recognitionHadError = false;
-    var speechQueue = [];
-    var activeUtterance = null;
-    var speechRunId = 0;
-
-    function persistUiState() {
-      vscode.setState({ language: languageSelect.value, autoSpeak: autoSpeakEnabled });
-    }
 
     function setVoiceStatus(message, isError) {
       voiceStatus.textContent = message || '';
       voiceStatus.classList.toggle('error', Boolean(isError));
     }
 
-    function updateAutoSpeakButton() {
-      autoSpeakBtn.classList.toggle('active', autoSpeakEnabled);
-      autoSpeakBtn.setAttribute('aria-pressed', autoSpeakEnabled ? 'true' : 'false');
-      autoSpeakBtn.textContent = autoSpeakEnabled ? '🔊' : '🔇';
-      autoSpeakBtn.title = autoSpeakEnabled
-        ? 'Automatic read-aloud is on. Click to disable.'
-        : 'Automatic read-aloud is off. Click to enable.';
-    }
-
-    function plainSpeechText(text) {
-      var value = String(text || '');
-      var tick = String.fromCharCode(96);
-      var fenced = new RegExp(tick + tick + tick + '[\\s\\S]*?' + tick + tick + tick, 'g');
-      var links = new RegExp('\\[([^\\]]+)\\]\\([^)]+\\)', 'g');
-      return value
-        .replace(fenced, ' ')
-        .replace(links, '$1')
-        .replace(/[*#_~>]/g, ' ')
-        .replace(/<tool_call[\\s\\S]*?<\\/tool_call>/gi, ' ')
-        .replace(/\\s+/g, ' ')
-        .trim();
-    }
-
-    function stopSpeaking(message) {
-      speechRunId += 1;
-      speechQueue = [];
-      activeUtterance = null;
-      if ('speechSynthesis' in window) {
-        try { window.speechSynthesis.cancel(); } catch (_) {}
-      }
-      readBtn.classList.remove('active');
-      if (message !== undefined) setVoiceStatus(message, false);
-    }
-
-    function speakNext(runId) {
-      if (runId !== speechRunId || speechQueue.length === 0) {
-        activeUtterance = null;
-        readBtn.classList.remove('active');
-        if (runId === speechRunId) setVoiceStatus('Read-aloud finished.', false);
-        return;
-      }
-
-      var part = speechQueue.shift();
-      var utterance = new SpeechSynthesisUtterance(part);
-      var locale = languageLocales[languageSelect.value] || 'en-US';
-      utterance.lang = locale;
-      utterance.rate = 0.95;
-      utterance.pitch = 1;
-
-      try {
-        var voices = window.speechSynthesis.getVoices() || [];
-        var prefix = locale.split('-')[0].toLowerCase();
-        var matchingVoice = voices.find(function(voice) {
-          return String(voice.lang || '').toLowerCase().indexOf(prefix) === 0;
-        });
-        if (matchingVoice) utterance.voice = matchingVoice;
-      } catch (_) {}
-
-      utterance.onstart = function() {
-        if (runId !== speechRunId) return;
-        readBtn.classList.add('active');
-        setVoiceStatus('Reading response using an available OS voice (' + locale + ').', false);
-      };
-      utterance.onend = function() {
-        if (runId === speechRunId) speakNext(runId);
-      };
-      utterance.onerror = function(event) {
-        if (runId !== speechRunId) return;
-        var reason = event && event.error ? event.error : 'speech synthesis failed';
-        if (reason === 'canceled' || reason === 'interrupted') return;
-        speechQueue = [];
-        activeUtterance = null;
-        readBtn.classList.remove('active');
-        setVoiceStatus('Read-aloud error: ' + reason + '. Check installed OS voices and audio output.', true);
-      };
-      activeUtterance = utterance;
-      window.speechSynthesis.speak(utterance);
-    }
-
-    function speakText(text) {
-      if (!('speechSynthesis' in window) || typeof window.SpeechSynthesisUtterance === 'undefined') {
-        setVoiceStatus('Read-aloud is unavailable in this VS Code runtime.', true);
-        return;
-      }
-      var clean = plainSpeechText(text);
-      if (!clean) {
-        setVoiceStatus('There is no readable response text.', true);
-        return;
-      }
-
-      stopSpeaking();
-      var runId = speechRunId;
-      for (var offset = 0; offset < clean.length; offset += 220) {
-        speechQueue.push(clean.slice(offset, offset + 220));
-      }
-      setVoiceStatus('Starting read-aloud…', false);
-      speakNext(runId);
-    }
-
     sendBtn.addEventListener('click', function() { submit(); });
-    languageSelect.addEventListener('change', function() {
-      stopSpeaking();
-      persistUiState();
-      setVoiceStatus('Response and voice language set to ' + languageSelect.options[languageSelect.selectedIndex].text + '.', false);
-    });
-    autoSpeakBtn.addEventListener('click', function() {
-      autoSpeakEnabled = !autoSpeakEnabled;
-      if (!autoSpeakEnabled) stopSpeaking('Automatic read-aloud disabled.');
-      else setVoiceStatus('Automatic read-aloud enabled for final model responses.', false);
-      updateAutoSpeakButton();
-      persistUiState();
-    });
-    readBtn.addEventListener('click', function() {
-      if (activeUtterance || (window.speechSynthesis && window.speechSynthesis.speaking)) {
-        stopSpeaking('Read-aloud stopped.');
-        return;
-      }
-      if (!lastAssistantText) {
-        setVoiceStatus('No completed model response is available to read.', true);
-        return;
-      }
-      speakText(lastAssistantText);
-    });
     speakBtn.addEventListener('click', function() {
       var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!Recognition) {
@@ -1189,9 +1036,9 @@ ${userPrompt}`;
         speechRecognition.continuous = false;
         speechRecognition.interimResults = true;
         speechRecognition.maxAlternatives = 1;
-        speechRecognition.lang = languageLocales[languageSelect.value] || 'en-US';
+        speechRecognition.lang = languageLocales[uiLanguage] || 'en-US';
         speechRecognition.onstart = function() {
-          speakBtn.textContent = '⏹️';
+          speakBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
           speakBtn.classList.add('active');
           setVoiceStatus('Listening in ' + speechRecognition.lang + '… Click stop when finished.', false);
         };
@@ -1218,7 +1065,7 @@ ${userPrompt}`;
         speechRecognition.onend = function() {
           var shouldSubmit = recognitionHeard && !recognitionHadError && promptInput.value.trim().length > 0;
           speechRecognition = null;
-          speakBtn.textContent = '🎙️';
+          speakBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 19v3"/></svg>';
           speakBtn.classList.remove('active');
           if (shouldSubmit) {
             setVoiceStatus('Speech captured. Sending prompt…', false);
@@ -1230,12 +1077,11 @@ ${userPrompt}`;
         speechRecognition.start();
       } catch (error) {
         speechRecognition = null;
-        speakBtn.textContent = '🎙️';
+        speakBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 19v3"/></svg>';
         speakBtn.classList.remove('active');
         setVoiceStatus('Could not start dictation in this VS Code runtime.', true);
       }
     });
-    updateAutoSpeakButton();
     promptInput.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -1286,7 +1132,7 @@ ${userPrompt}`;
         type: 'sendMessage',
         prompt: t || 'Analyze attached context files',
         model: modelSelect.value,
-        language: languageSelect.value,
+        language: uiLanguage,
         attachments: payloadAttachments
       });
     }
@@ -1362,8 +1208,6 @@ ${userPrompt}`;
 
     function startNewChat() {
       saveCurrentSession();
-      stopSpeaking();
-      lastAssistantText = '';
       currentSessionId = 'session_' + Date.now();
       chat.innerHTML = '<div class="msg msg-agent"><strong>👋 SMARAN.AI New Session Started</strong><br>How can I assist with the supplied project context?</div>';
       document.querySelectorAll('.drawer').forEach(function(d) { d.classList.remove('open'); });
@@ -1409,7 +1253,6 @@ ${userPrompt}`;
       }).join('');
       var restoredAgentMessages = chat.querySelectorAll('.msg-agent');
       if (restoredAgentMessages.length > 0) {
-        lastAssistantText = restoredAgentMessages[restoredAgentMessages.length - 1].textContent || '';
       }
       chat.scrollTop = chat.scrollHeight;
       toggleDrawer('historyDrawer');
@@ -1487,14 +1330,12 @@ ${userPrompt}`;
           chat.scrollTop = chat.scrollHeight;
           break;
         case 'agentResponse':
-          lastAssistantText = String(m.response || '');
           var fullHtml = fmtMd(m.response);
           if (currentEl) { currentEl.innerHTML = fullHtml; }
           else { addMsg('msg-agent', fullHtml); }
           currentEl = null;
           chat.scrollTop = chat.scrollHeight;
           saveCurrentSession();
-          if (autoSpeakEnabled) speakText(lastAssistantText);
           break;
         case 'agentError':
           var errCard = '<div class="error-card">' +
