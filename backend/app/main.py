@@ -301,6 +301,11 @@ app.include_router(lock_router)
 # Phone and tablet companion: QR pairing, two-way conversation sync, and
 # remote control in both directions.
 from app.local_engine import status as local_engine_status
+# Model Context Protocol. MCP is an open specification, so a server
+# written for any client that speaks it works here unchanged.
+from app.mcp.routes import router as mcp_router
+app.include_router(mcp_router)
+
 from app.companion import router as companion_router
 app.include_router(companion_router)
 
