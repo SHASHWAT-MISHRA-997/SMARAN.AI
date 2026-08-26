@@ -136,7 +136,7 @@ const DesktopPairing = () => {
             {pairing && (
               <div className="space-y-1.5">
                 <p className="font-mono text-2xl font-black tracking-[0.3em] text-cyan-200">{pairing.code}</p>
-                <p className="font-mono text-[10px] text-zinc-500">{pairing.url}</p>
+                <p className="font-mono text-[10px] text-zinc-500" title="The address is in the QR code; it is not shown here.">{displayName(pairing.url)}</p>
                 <p className="text-[10px] text-zinc-500">
                   {expired
                     ? 'This code has lapsed.'
@@ -299,7 +299,7 @@ const PhonePairing = ({ onPaired }) => {
         <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/[.07] p-5 text-center">
           <Smartphone className="mx-auto h-6 w-6 text-emerald-400" />
           <p className="mt-2 text-sm font-black text-white">Linked to your computer</p>
-          <p className="mt-1 font-mono text-[11px] text-zinc-400">{link.url}</p>
+          <p className="mt-1 font-mono text-[11px] text-zinc-400">{displayName(link.url)}</p>
           <p className="mt-3 text-[11px] leading-5 text-zinc-400">
             Conversations sync both ways. When the computer is off this app keeps working on its own,
             and anything you say here appears there the next time it starts.
@@ -376,6 +376,20 @@ const PhonePairing = ({ onPaired }) => {
 };
 
 /* ------------------------------------------------------------------ */
+
+/* What to show instead of the address.
+
+   The QR still carries the real one - a phone cannot reach a name this network
+   does not resolve - but there is no reason to print it on screen. Anyone
+   watching over a shoulder, or a screenshot shared for help, was getting the
+   machine's address on the local network for nothing.
+
+   The port is kept because it is the part someone typing the address by hand
+   actually needs, and it gives away nothing on its own. */
+const displayName = (url) => {
+  const port = String(url || '').match(/:(\d+)/);
+  return port ? `SMARAN.AI:${port[1]}` : 'SMARAN.AI';
+};
 
 const DevicePairing = ({ isOpen, onClose }) => {
   const onPhone = isNativeApp();

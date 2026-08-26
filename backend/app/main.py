@@ -5774,6 +5774,18 @@ async def fetch_url_endpoint(
         raise HTTPException(status_code=500, detail=f"URL fetch failed: {str(e)}")
 
 
+@app.get("/api/capabilities")
+async def capabilities(force: bool = False):
+    """What this machine can do, decided by looking at it.
+
+    Nothing here is configured. A capability appears the moment the hardware
+    can carry it, and a refusal carries the numbers that would change it." + ""
+    """
+    from app.capability import scan
+
+    return scan(force=force)
+
+
 @app.get("/api/models/local-status")
 async def local_model_status():
     """Whether local inference can answer, and what to do when it cannot."""
