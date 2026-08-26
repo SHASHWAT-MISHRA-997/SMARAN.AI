@@ -566,20 +566,78 @@ export class SmaranApiClient {
     });
   }
 
-  private _callOpenRouterDirect(apiKey: string, prompt: string, model: string = 'auto', contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
+  /**
+   * A model OpenRouter is currently giving away.
+   *
+   * The slug used to be written into this file and it went stale: OpenRouter
+   * moved meta-llama/llama-3.3-70b-instruct:free onto its paid tier and every
+   * request came back "This model is unavailable for free". Any hardcoded name
+   * has the same fate waiting for it, so the catalogue is asked instead. It
+   * needs no key.
+   *
+   * Cached for an hour: the list changes over days, and fetching it per
+   * message would add a round trip to every reply.
+   */
+  private static _freeModel: { id: string; at: number } | null = null;
+
+  private async _pickFreeOpenRouterModel(): Promise<string | null> {
+    const cached = SmaranApiClient._freeModel;
+    if (cached && Date.now() - cached.at < 3600000) return cached.id;
+
+    const catalogue: any = await new Promise((resolve) => {
+      const req = https.request({
+        hostname: 'openrouter.ai',
+        path: '/api/v1/models',
+        method: 'GET',
+        headers: { 'User-Agent': 'SMARAN.AI' },
+      }, (res) => {
+        let data = '';
+        res.on('data', (c) => data += c);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.setTimeout(15000, () => { req.destroy(); resolve(null); });
+      req.end();
+    });
+
+    const rows = catalogue?.data;
+    if (!Array.isArray(rows)) return null;
+
+    // Zero on both sides, not just the prompt: a model that is free to send to
+    // and charges for what it writes is not a free model.
+    const free = rows.filter((m: any) => {
+      const p = m?.pricing || {};
+      return Number(p.prompt) === 0 && Number(p.completion) === 0;
+    });
+    if (!free.length) return null;
+
+    // The largest context among them, which is the one most likely to cope
+    // with a file's worth of workspace context.
+    free.sort((a: any, b: any) => (b.context_length || 0) - (a.context_length || 0));
+    const chosen = free[0].id;
+    SmaranApiClient._freeModel = { id: chosen, at: Date.now() };
+    return chosen;
+  }
+
+  private async _callOpenRouterDirect(apiKey: string, prompt: string, model: string = 'auto', contextFiles?: any[], onToken?: (token: string) => void): Promise<string> {
+    const discovered = await this._pickFreeOpenRouterModel();
     return new Promise((resolve, reject) => {
       let sysMsg = "You are SMARAN.AI, a software engineering assistant. Use only the workspace context supplied in this request.";
       if (contextFiles && contextFiles.length > 0) {
         sysMsg += "\n\nWorkspace Context Files:\n" + contextFiles.map(c => `--- ${c.path} ---\n${c.content}`).join('\n\n');
       }
 
-      let targetModel = "meta-llama/llama-3.3-70b-instruct:free";
+      // Whatever the catalogue says is free today. The named fallback is
+      // only for when the catalogue could not be read at all.
+      let targetModel = discovered || "meta-llama/llama-3.3-70b-instruct";
       if (model.includes('deepseek-r1') || model.includes('r1')) {
         targetModel = "deepseek/deepseek-r1:free";
       } else if (model.includes('deepseek-v4') || model.includes('deepseek')) {
         targetModel = "deepseek/deepseek-chat";
       } else if (model.includes('gemini')) {
-        targetModel = "google/gemini-2.0-flash-exp:free";
+        targetModel = "google/gemini-3.6-flash";
       } else if (model.includes('nemotron')) {
         targetModel = "nvidia/llama-3.1-nemotron-70b-instruct:free";
       } else if (model.includes('claude')) {
@@ -638,7 +696,7 @@ export class SmaranApiClient {
 
       const req = https.request({
         hostname: "generativelanguage.googleapis.com",
-        path: `/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        path: `/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
