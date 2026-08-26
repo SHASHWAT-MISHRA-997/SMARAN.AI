@@ -14,7 +14,7 @@ import { MMDLoader } from 'three/examples/jsm/loaders/MMDLoader.js';
  */
 
 export const MMD_CHARACTERS = [
-  { id: 'evelyn', name: 'Myraa', gender: 'female', file: '/characters/evelyn/model.pmx' },
+  { id: 'evelyn', name: 'Amarya', gender: 'female', file: '/characters/evelyn/model.pmx' },
 ];
 
 /**
@@ -149,8 +149,10 @@ const AvatarMMD = ({
   const orbitRef = useRef({ yaw: 0, pitch: 0, distanceScale: 1 });
   const pointerRef = useRef({ x: 0, y: 0 });
   const [viewLocked, setViewLocked] = useState(true);
-  const [eyesTracking, setEyesTracking] = useState(true);
-  const eyesTrackingRef = useRef(true);
+  // Off by default: the head turning to follow the cursor was distracting
+  // rather than lifelike. The button stays, so it can be turned back on.
+  const [eyesTracking, setEyesTracking] = useState(false);
+  const eyesTrackingRef = useRef(false);
   const stateRef = useRef({ isSpeaking, isListening, isThinking });
 
   useEffect(() => {
@@ -174,6 +176,17 @@ const AvatarMMD = ({
     // gives the character the brightness it is drawn to have.
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.35;
+    // setSize is called below with updateStyle = false, which sets the
+    // drawing buffer and deliberately leaves the CSS alone. That only works
+    // if the CSS makes the canvas fill its container — without it the element
+    // laid out at its buffer size instead, so at a device pixel ratio above 1
+    // it was wider than the panel holding it: measured 1047px inside an 838px
+    // parent, 209px of it clipped off the right. The character is dead centre
+    // of what is drawn, so clipping only the right edge is exactly what made
+    // her sit right of centre on screen.
+    Object.assign(renderer.domElement.style, {
+      display: 'block', width: '100%', height: '100%',
+    });
     mount.appendChild(renderer.domElement);
 
     // MMD toon materials want generous, shaped light rather than a PBR rig.

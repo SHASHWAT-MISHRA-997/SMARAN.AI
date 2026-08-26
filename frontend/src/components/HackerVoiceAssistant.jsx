@@ -1402,6 +1402,11 @@ export const HackerVoiceAssistant = ({
     const session = liveSessionRef.current;
     liveSessionRef.current = null;
     endedByUserRef.current = true;
+    // Silence her first. Hanging up released the microphone but left the
+    // reply already in flight still playing, so she kept talking after the
+    // call had visibly ended. This runs before anything else so the voice
+    // stops on the same click rather than after the teardown.
+    stopSpeaking?.();
     setLiveActive(false);
     setLiveState('idle');
     // Clear what was being said as well as the flags. Without this the
@@ -1413,7 +1418,7 @@ export const HackerVoiceAssistant = ({
     interimTranscriptRef.current = '';
     finalTranscriptRef.current = '';
     if (session) await session.stop();
-  }, []);
+  }, [stopSpeaking]);
 
   const startLiveSession = useCallback(async () => {
     // The turn-based recogniser and the live stream must not hold the
@@ -1915,28 +1920,21 @@ export const HackerVoiceAssistant = ({
             danger={isMuted}
             onClick={toggleMute}
           />
+          {/* One control, not two. Only one vision source can be live at a
+              time - visionMode holds a single value - so two buttons implied
+              a choice that was never on offer. This cycles the one setting
+              they actually shared: off, screen, camera, off. */}
           <CallToggle
-            icon={Monitor}
-            label="Screen"
-            active={visionMode === 'screen'}
+            icon={visionMode === 'camera' ? Camera : Monitor}
+            label={visionMode === 'camera' ? 'Camera' : visionMode === 'screen' ? 'Screen' : 'Vision'}
+            active={visionMode === 'screen' || visionMode === 'camera'}
             disabled={!liveActive}
             onClick={() => {
               const session = liveSessionRef.current;
               if (!session) return;
-              if (visionMode === 'screen') session.stopVision();
+              if (visionMode === 'screen') session.startVision('camera');
+              else if (visionMode === 'camera') session.stopVision();
               else session.startVision('screen');
-            }}
-          />
-          <CallToggle
-            icon={Camera}
-            label="Camera"
-            active={visionMode === 'camera'}
-            disabled={!liveActive}
-            onClick={() => {
-              const session = liveSessionRef.current;
-              if (!session) return;
-              if (visionMode === 'camera') session.stopVision();
-              else session.startVision('camera');
             }}
           />
 
