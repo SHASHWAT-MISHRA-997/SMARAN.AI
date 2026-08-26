@@ -59,6 +59,59 @@ const PinLock = ({ children }) => {
     return () => { cancelled = true; };
   }, []);
 
+  /* Locking itself again after a while, the way a phone does.
+
+     The lock only ran at startup, so once opened it stayed open until the app
+     was restarted - which is no protection at all for someone who walks away
+     from an unlocked machine. It now watches for activity and shuts after a
+     quiet period.
+
+     A PIN that is not set means there is nothing to shut, so the timer does
+     not run at all rather than locking someone out of an app they never
+     secured. */
+  const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60];
+  const [autoLockMinutes, setAutoLockMinutes] = useState(() => {
+    const saved = Number(localStorage.getItem('sm_autolock_minutes'));
+    return AUTO_LOCK_CHOICES.includes(saved) ? saved : 5;
+  });
+  const [lockEnabled, setLockEnabled] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('sm_autolock_minutes', String(autoLockMinutes));
+  }, [autoLockMinutes]);
+
+  useEffect(() => {
+    if (state !== 'open' || !lockEnabled || !autoLockMinutes) return undefined;
+
+    let timer;
+    const lockNow = () => {
+      setPin('');
+      setError('');
+      setState('locked');
+    };
+    const restart = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(lockNow, autoLockMinutes * 60 * 1000);
+    };
+
+    // Typing counts as much as moving; a long reply being read is not idleness,
+    // but a keyboard that has not been touched for minutes is.
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel'];
+    events.forEach((name) => window.addEventListener(name, restart, { passive: true }));
+
+    // Hiding the window is a stronger signal than silence: a phone locks when
+    // it goes in a pocket rather than waiting out the timer.
+    const onHidden = () => { if (document.hidden) lockNow(); };
+    document.addEventListener('visibilitychange', onHidden);
+
+    restart();
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((name) => window.removeEventListener(name, restart));
+      document.removeEventListener('visibilitychange', onHidden);
+    };
+  }, [state, lockEnabled, autoLockMinutes]);
+
   useEffect(() => {
     if (!cooldown) return undefined;
     const timer = window.setInterval(() => setCooldown((value) => Math.max(0, value - 1)), 1000);
@@ -78,6 +131,7 @@ const PinLock = ({ children }) => {
         method: 'POST',
         body: JSON.stringify({ pin: value }),
       });
+      setLockEnabled(true);
       setState('open');
     } catch (err) {
       setError(err.message);
@@ -99,6 +153,7 @@ const PinLock = ({ children }) => {
         body: JSON.stringify({ email, password, new_pin: newPin }),
       });
       // Straight in, rather than making someone type the PIN they just chose.
+      setLockEnabled(true);
       setState('open');
     } catch (err) {
       setRecoverError(err.message);
