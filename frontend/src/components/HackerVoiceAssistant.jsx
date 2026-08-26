@@ -1383,9 +1383,15 @@ export const HackerVoiceAssistant = ({
     return () => { cancelled = true; };
   }, [isOpen, API_BASE, token]);
 
+  // Set when the person hangs up, cleared when the panel is opened again.
+   // Without it there is no way to tell "no session yet" from "deliberately
+   // ended", and the auto-start effect cannot respect the difference.
+  const endedByUserRef = useRef(false);
+
   const stopLiveSession = useCallback(async () => {
     const session = liveSessionRef.current;
     liveSessionRef.current = null;
+    endedByUserRef.current = true;
     setLiveActive(false);
     setLiveState('idle');
     // Clear what was being said as well as the flags. Without this the
@@ -1459,12 +1465,19 @@ export const HackerVoiceAssistant = ({
   // Always release the microphone and socket when the panel closes.
   useEffect(() => {
     if (!isOpen && liveSessionRef.current) stopLiveSession();
+    // Reopening is a fresh intent to talk, so the hang-up is forgotten.
+    if (isOpen) endedByUserRef.current = false;
   }, [isOpen, stopLiveSession]);
 
   // Opening the panel starts the conversation. Requiring a second click on
   // "Go Live" before the assistant would listen made it feel switched off.
   useEffect(() => {
     if (!isOpen || !liveAvailable || liveSessionRef.current) return;
+    // Only until the person hangs up. This effect re-runs whenever
+    // startLiveSession is rebuilt - which happens on a character, language or
+    // voice change - so ending a call and then changing any of those started
+    // it again on its own, and the red button appeared to do nothing.
+    if (endedByUserRef.current) return;
     startLiveSession();
   }, [isOpen, liveAvailable, startLiveSession]);
 

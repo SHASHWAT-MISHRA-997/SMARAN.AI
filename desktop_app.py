@@ -136,7 +136,7 @@ def _find_free_port(preferred: int = 3003) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                probe.bind(("127.0.0.1", port))
+                probe.bind(("0.0.0.0", port))
                 return probe.getsockname()[1]
             except OSError:
                 continue
@@ -168,9 +168,19 @@ class _BackendServer:
             _log_startup_failure(exc)
             raise
 
+        # Bound to every interface, not just loopback. "Link your phone"
+        # hands the phone this machine's LAN address, and on loopback
+        # nothing was listening there - the QR pointed at an address that
+        # refused the connection, which is what "site can't be reached"
+        # was.
+        #
+        # What this opens, and what it does not: requests still need a
+        # session, CORS already refuses any origin outside localhost and
+        # the private ranges, and pairing needs a six-digit code that
+        # expires. The exposure is to the local network only.
         config = uvicorn.Config(
             fastapi_app,
-            host="127.0.0.1",
+            host="0.0.0.0",
             port=self.port,
             log_level="warning",
             access_log=False,
