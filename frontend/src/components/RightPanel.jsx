@@ -113,6 +113,10 @@ export const detectClientDevice = async () => {
     os = "Android";
     const match = ua.match(/Android\s+([\d.]+);\s*([^;)]+)/i);
     deviceName = match && match[2] ? match[2].replace(/\s+Build\/.*$/i, "").trim() : "";
+    // Chrome froze the Android model string for privacy and now reports "K"
+    // for every device. Showing it says nothing and looks like a bug, so a
+    // name that carries no information is dropped and only the OS is shown.
+    if (/^(k|;?\s*k)$/i.test(deviceName) || deviceName.length < 3) deviceName = "";
     deviceType = /Tablet|Nexus 7|Nexus 10|SM-T|iPad/i.test(ua) ? "Tablet" : "Mobile Device";
     isMobile = true;
     // Android manufacturer from UA (e.g. "samsung", "Xiaomi", "OnePlus", "Google")

@@ -343,6 +343,24 @@ pre {
   .composer-compact-send { display:flex !important; }
   .composer-input { order:-1 !important; }
 }
+
+  /* On a phone the composer had grown to roughly a third of the screen: a
+     text field plus two rows of buttons, each sized for a mouse. That left
+     too little room for the conversation it exists to serve, so the tool rows
+     tighten while the field keeps its size - shrinking what is typed into
+     would be the wrong thing to give back. */
+  @container chat-workspace (max-width: 520px) {
+    .composer-shell { gap:.25rem !important; padding:.4rem !important; }
+    .composer-compact-tools { gap:.25rem !important; }
+    .composer-compact-tools button,
+    .composer-compact-tools select {
+      padding-top:.25rem !important; padding-bottom:.25rem !important;
+      font-size:9px !important;
+    }
+    /* Labels are what makes each control tall. The icons carry the meaning at
+       this width, and the titles still name them for a screen reader. */
+    .composer-compact-tools .tool-label { display:none !important; }
+  }
 @container chat-workspace (min-width: 821px) {
   /* Two rows, not one: the toolbar had grown enough buttons that the text
      being typed was squeezed into a sliver. The field now owns a full row and
