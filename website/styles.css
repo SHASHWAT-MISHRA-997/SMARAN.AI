@@ -2478,9 +2478,16 @@ html.light .theme-toggle .moon { display: none; }
 
 .ext-grid {
   display: grid; gap: 18px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  align-items: start;
+  grid-template-columns: 1fr;
+  /* stretch, not start: with each card sizing to its own text the three ended
+     up ragged, leaving a hole under the shortest one and beside the tallest.
+     Equal heights within a row is the whole point of putting them in a row. */
+  align-items: stretch;
 }
+/* Two, then three. auto-fit was picking two at widths where three fit, which
+   left one card alone on a second row with a gap the width of two beside it. */
+@media (min-width: 720px)  { .ext-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1000px) { .ext-grid { grid-template-columns: repeat(3, 1fr); } }
 
 .ext-card {
   padding: 26px;
@@ -2493,9 +2500,24 @@ html.light .theme-toggle .moon { display: none; }
   transition: transform .4s var(--ease), border-color .4s;
 }
 .ext-card:hover { transform: translateY(-4px); border-color: rgba(255, 92, 71, 0.34); }
+.ext-card { display: flex; flex-direction: column; }
 .ext-card h3 { margin: 0 0 14px; font-size: 1.02rem; }
 .ext-card .ide-list { margin: 0; }
 
 .ext-open { margin-top: 40px; text-align: center; }
 .ext-open .ide-choices { justify-content: center; }
 .ext-open .ide-note { max-width: 560px; margin-left: auto; margin-right: auto; }
+
+/* An author rule that sets `display` beats the user-agent's [hidden] rule,
+   so .ext-grid { display: grid } kept the block on screen with the attribute
+   set. These put it back under the attribute's control. */
+.ext-grid[hidden],
+.ext-open[hidden] { display: none; }
+
+/* The download cards had the same ragged-gap problem as the extension ones:
+   Android is shorter than Windows, so the row left a hole beneath it, and
+   the third card sat alone. Equal heights within a row, and the content
+   pinned so the note stays at the bottom of whatever height it is given. */
+.dl-grid { align-items: stretch; }
+.dl-card { display: flex; flex-direction: column; }
+.dl-card .dl-note { margin-top: auto; }

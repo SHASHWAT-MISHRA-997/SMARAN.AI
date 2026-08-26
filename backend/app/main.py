@@ -399,7 +399,7 @@ app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="stati
 @app.get("/health")
 def healthcheck_ping():
     """Ultra-fast instant healthcheck endpoint for Docker, Launcher, and Extensions."""
-    return {"status": "ok", "app": "SMARAN.AI", "version": "2.8.2"}
+    return {"status": "ok", "app": "SMARAN.AI", "version": "2.8.3"}
 
 
 # CORS: local and private-network clients only.

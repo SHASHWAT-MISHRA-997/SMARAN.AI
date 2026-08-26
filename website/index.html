@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=a0e6dce2f2" />
+<link rel="stylesheet" href="styles.css?v=f00030240b" />
 </head>
 
 <body>
@@ -180,7 +180,6 @@
       <ul class="hero-marks reveal" data-delay="4">
         <li><b>No subscription.</b> Not a trial.</li>
         <li><b>Works offline</b> once a model is downloaded.</li>
-        <li><b>No account needed</b> to use it.</li>
       </ul>
     </div>
 
@@ -803,7 +802,7 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
         <a class="btn btn-primary lg magnetic"
            href="https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex"
            target="_blank" rel="noopener">Install the extension</a>
-        <a class="btn btn-ghost lg magnetic" href="#extension-detail">What it does</a>
+        <button type="button" class="btn btn-ghost lg magnetic" id="extToggle" aria-expanded="false" aria-controls="extension-detail">What it does</button>
       </div>
       <p class="ext-sub">
         Free and MIT-licensed. Also installs in Cursor, Windsurf and other
@@ -811,7 +810,7 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
       </p>
     </header>
 
-    <div class="ext-grid" id="extension-detail">
+    <div class="ext-grid" id="extension-detail" hidden>
 
       <article class="ext-card reveal">
         <h3>What you can ask it</h3>
@@ -845,7 +844,7 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
 
     </div>
 
-    <div class="ext-open reveal">
+    <div class="ext-open reveal" id="extension-open" hidden>
       <p class="ide-pick">Open it straight in your editor</p>
       <div class="ide-choices">
         <a class="ide-choice" href="vscode:extension/ShashwatMishra.smaran-ai-codex">
@@ -966,6 +965,12 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
           <ul>
             <li>Cloud models — only after you add a key, and only the message you send</li>
             <li>Web search — only when you switch it on</li>
+            <li>
+              <b>The live voice call</b> — Speak is served by Google's Gemini
+              Live, so while a call is open your microphone audio goes to Google,
+              and your camera or screen too if you switch one on. It needs a
+              Gemini key and a connection. Typing to a local model does not.
+            </li>
           </ul>
         </div>
       </div>
@@ -990,7 +995,7 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
       </details>
       <details class="reveal">
         <summary>Do I need internet?</summary>
-        <p>To download the app, Ollama and a model, yes. After that a local model works with the network off. Web search and cloud models obviously need a connection.</p>
+        <p>To download the app, Ollama and a model, yes. After that typing to a local model works with the network off. Web search and cloud models obviously need a connection — and so does Speak, the live voice call, which is served by Google's Gemini Live and needs a Gemini key. Offline speech is text-to-speech only, and English only.</p>
       </details>
       <details class="reveal">
         <summary>What hardware do I need?</summary>
@@ -1114,6 +1119,6 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
   </div>
 </footer>
 
-<script src="main.js?v=b4f06cf102"></script>
+<script src="main.js?v=8b2b7a48c6"></script>
 </body>
 </html>

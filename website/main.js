@@ -934,3 +934,32 @@
   }
 
 })();
+
+/* ---------------------------------------------------------------------------
+   Extension detail, on request.
+
+   The three cards used to sit open below the hero, which made the section long
+   before anyone had asked what it does. "What it does" opens them now. The
+   `hidden` attribute does the work rather than a class, so the block leaves
+   the layout and the accessibility tree at the same time, and aria-expanded
+   tells a screen reader which state the button is in.
+--------------------------------------------------------------------------- */
+(() => {
+  const button = document.getElementById('extToggle');
+  const detail = document.getElementById('extension-detail');
+  const open = document.getElementById('extension-open');
+  if (!button || !detail) return;
+
+  button.addEventListener('click', () => {
+    const showing = button.getAttribute('aria-expanded') === 'true';
+    button.setAttribute('aria-expanded', String(!showing));
+    detail.hidden = showing;
+    if (open) open.hidden = showing;
+    button.textContent = showing ? 'What it does' : 'Hide details';
+    // Scroll only when opening, and only if the cards would otherwise be
+    // below the fold. Scrolling on close would throw the reader upward.
+    if (!showing && detail.getBoundingClientRect().top > window.innerHeight * 0.9) {
+      detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+})();
