@@ -39,6 +39,7 @@ import CyberFX from './CyberFX';
 import { GESTURES } from '../utils/gestureControl';
 import AvatarVideo, { AVATAR_CHARACTERS } from './AvatarVideo';
 import AvatarMMD, { MMD_CHARACTERS } from './AvatarMMD';
+import CyberStage from './CyberStage';
 
 /* Prebuilt Gemini Live voices, grouped so a user can simply pick male or
    female. The service decides the exact timbre; these are its own voices. */
@@ -1398,6 +1399,9 @@ export const HackerVoiceAssistant = ({
    // ended", and the auto-start effect cannot respect the difference.
   const endedByUserRef = useRef(false);
 
+  // Which source to share is asked once, from the one Vision button.
+  const [visionMenuOpen, setVisionMenuOpen] = useState(false);
+
   const stopLiveSession = useCallback(async () => {
     const session = liveSessionRef.current;
     liveSessionRef.current = null;
@@ -1822,6 +1826,10 @@ export const HackerVoiceAssistant = ({
           rather than reading a dashboard. */}
       <div className="relative z-10 flex-1 min-h-0 overflow-hidden">
 
+        {/* The room she stands in. Behind the character, the caption and the
+            controls, so nothing it draws competes with them. */}
+        <CyberStage voiceState={voiceState} micVolume={micVolume} />
+
         {/* The character */}
         <div className="absolute inset-0">
           {!showAvatar ? (
@@ -1920,23 +1928,46 @@ export const HackerVoiceAssistant = ({
             danger={isMuted}
             onClick={toggleMute}
           />
-          {/* One control, not two. Only one vision source can be live at a
-              time - visionMode holds a single value - so two buttons implied
-              a choice that was never on offer. This cycles the one setting
-              they actually shared: off, screen, camera, off. */}
-          <CallToggle
-            icon={visionMode === 'camera' ? Camera : Monitor}
-            label={visionMode === 'camera' ? 'Camera' : visionMode === 'screen' ? 'Screen' : 'Vision'}
-            active={visionMode === 'screen' || visionMode === 'camera'}
-            disabled={!liveActive}
-            onClick={() => {
-              const session = liveSessionRef.current;
-              if (!session) return;
-              if (visionMode === 'screen') session.startVision('camera');
-              else if (visionMode === 'camera') session.stopVision();
-              else session.startVision('screen');
-            }}
-          />
+          {/* Both sources, one control. Two buttons implied they could run
+              together; visionMode holds a single value, so they never could.
+              This is one button that opens the pair, and shows which is live. */}
+          <div className="relative">
+            <CallToggle
+              icon={visionMode === 'camera' ? Camera : Monitor}
+              label={visionMode === 'camera' ? 'Camera' : visionMode === 'screen' ? 'Screen' : 'Vision'}
+              active={visionMode === 'screen' || visionMode === 'camera'}
+              disabled={!liveActive}
+              onClick={() => setVisionMenuOpen((v) => !v)}
+            />
+            {visionMenuOpen && liveActive && (
+              <div className="absolute bottom-full left-1/2 z-20 mb-3 -translate-x-1/2 rounded-xl border border-cyan-500/30 bg-zinc-950/95 p-1 shadow-xl backdrop-blur-md">
+                {[['screen', 'Screen', Monitor], ['camera', 'Camera', Camera]].map(([mode, text, Icon]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      const session = liveSessionRef.current;
+                      setVisionMenuOpen(false);
+                      if (!session) return;
+                      // Picking the source already running turns it off, so the
+                      // same control both starts and stops it.
+                      if (visionMode === mode) session.stopVision();
+                      else session.startVision(mode);
+                    }}
+                    className={`flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-left text-xs font-bold transition-colors cursor-pointer ${
+                      visionMode === mode
+                        ? 'bg-cyan-500/15 text-cyan-200'
+                        : 'text-zinc-300 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {text}
+                    {visionMode === mode && <span className="ml-auto pl-2 text-[10px] font-mono">ON</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* The one control that is not a toggle: answer or hang up. */}
           <button

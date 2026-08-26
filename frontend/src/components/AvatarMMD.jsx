@@ -259,7 +259,33 @@ const AvatarMMD = ({
 
     // Textures sit beside the model under the exact names the PMX asks for,
     // in their original formats, so the loader resolves them on its own.
-    new MMDLoader().load(
+    //
+    // The reveal used to wait two animation frames and hope the textures had
+    // arrived. They had not: the mesh appeared first and each texture landed
+    // on it afterwards, which is why she assembled in pieces instead of
+    // appearing whole. A LoadingManager says exactly when every file is in,
+    // so that is what the reveal waits for now.
+    const manager = new THREE.LoadingManager();
+    let revealTimer = null;
+
+    const reveal = () => {
+      if (disposed || revealTimer === 'done') return;
+      revealTimer = 'done';
+      // One frame after the last texture, so the first thing shown is a
+      // fully painted character rather than the frame that uploads them.
+      requestAnimationFrame(() => { if (!disposed) setStatus('ready'); });
+    };
+
+    manager.onLoad = reveal;
+    // A texture the PMX names but that is not on disk never completes, and
+    // onLoad would never fire. Rather than hide her indefinitely, show what
+    // did load and record which file was missing.
+    manager.onError = (url) => {
+      console.warn('[AvatarMMD] missing asset, showing the model without it:', url);
+      reveal();
+    };
+
+    new MMDLoader(manager).load(
       chosen.file,
       (mesh) => {
         if (disposed) return;
@@ -352,12 +378,11 @@ const AvatarMMD = ({
           : bounds.max.y - handles.framedHeight * 0.403;
         handles.refit?.();
 
-        // One more frame before revealing: the loader resolves when the
-        // mesh is built, which is a beat before every texture has been
-        // uploaded, and that beat is the bald-looking flash.
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          if (!disposed) setStatus('ready');
-        }));
+        // Reveal is driven by the manager above, not from here: the mesh
+        // being built is not the same as the model being finished. If the
+        // PMX carried no external textures the manager has already gone
+        // quiet, so this covers that case and nothing else.
+        if (manager.itemsTotal === manager.itemsLoaded) reveal();
       },
       undefined,
       (loadError) => {
