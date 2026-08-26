@@ -303,6 +303,14 @@ app.include_router(lock_router)
 from app.local_engine import status as local_engine_status
 # Model Context Protocol. MCP is an open specification, so a server
 # written for any client that speaks it works here unchanged.
+# Local image generation. Shares the video module's hardware probe, so
+# there is one answer to what this card can do.
+try:
+    from app.imaging.routes import router as image_router
+    app.include_router(image_router)
+except Exception as _image_exc:  # pragma: no cover
+    logger.warning("Image generation unavailable: %s", _image_exc)
+
 from app.mcp.routes import router as mcp_router
 app.include_router(mcp_router)
 
