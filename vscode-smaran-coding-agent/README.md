@@ -2,13 +2,13 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.3.9-blue?style=for-the-badge&logo=semver)
+![Version](https://img.shields.io/badge/version-1.4.0-blue?style=for-the-badge&logo=semver)
 ![VS Code](https://img.shields.io/badge/VS_Code-1.90+-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)
 ![Publisher](https://img.shields.io/badge/publisher-ShashwatMishra-purple?style=for-the-badge&logo=visual-studio-code&logoColor=white)
 
 [![Marketplace](https://img.shields.io/badge/VS_Code_Marketplace-Install-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/shashwatmishra997/SMARAN.AI)
+[![Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/shashwatmishra062/smaran-ai)
 
 </div>
@@ -38,21 +38,31 @@
 ### 🔐 **Security & Privacy First**
 - ✅ **Approval-gated actions** — Every file write and terminal command requires explicit confirmation
 - ✅ **Workspace-bounded** — Operates only within your opened workspace
-- ✅ **Local-first** — Runs on your hardware, no data leaves your machine
+- ✅ **Local-first by default** — With the SMARAN.AI app or Ollama answering, nothing leaves the machine. Choose a cloud route and the prompt, plus any files you attached, go to that provider; that is the whole point of the key.
 - ✅ **VS Code permissions** — Respects Workspace Trust and OS permissions
 
 ### 🌐 **Flexible Model Routing**
-```
-┌─────────────────────────────────────────────────────────────┐
-│  LOCAL MODELS (Ollama)          │  CLOUD PROVIDERS          │
-├─────────────────────────────────┼────────────────────────────┤
-│  qwen2.5-coder:7b              │  OpenAI (GPT-4, GPT-3.5)   │
-│  deepseek-coder:6.7b           │  Anthropic (Claude 3.5)    │
-│  codellama:7b                  │  Google (Gemini)           │
-│  llama3.1:8b                   │  Groq, Together, OpenRouter│
-│  ...and 50+ more               │  NVIDIA NIM, Mistral, etc. │
-└─────────────────────────────────┴────────────────────────────┘
-```
+Routes are tried in order and the first one configured answers. Every
+provider below is one the extension actually calls; the model named is the
+one it sends.
+
+| Route | Endpoint | Model sent |
+|-------|----------|------------|
+| SMARAN.AI app | `localhost` | Whatever the app has loaded |
+| Ollama | `localhost:11434` | Any model you have pulled |
+| OpenRouter | `openrouter.ai` | Discovered at runtime from the free catalogue |
+| Google Gemini | `generativelanguage.googleapis.com` | `gemini-3.6-flash` |
+| Anthropic | `api.anthropic.com` | `claude-3-5-sonnet-20241022` |
+| OpenAI | `api.openai.com` | `gpt-4o` |
+| DeepSeek | `api.deepseek.com` | `deepseek-chat` |
+| Groq | `api.groq.com` | LLaMA 3.3 70B |
+| NVIDIA NIM | `integrate.api.nvidia.com` | Nemotron 70B |
+
+The OpenRouter free route is not a fixed model. The catalogue is read at
+runtime, models that cost nothing on both prompt and completion are ranked
+by context length, and anything that emits more than text is skipped — a
+music model is free but cannot edit code. If one refuses with 403 or 404 it
+is remembered and the next is tried.
 
 ### 🎙️ **Dictation** (Optional)
 - **Microphone button** → Dictate prompts using the Web Speech API
@@ -70,29 +80,24 @@
 
 ## 🚀 Quick Start
 
-### 🎯 One-Command Install (Recommended)
+### 🎯 The extension on its own
 
-<div align="center">
+The extension does not need anything else installed. Add a provider key in
+its settings and it works — see the routing table above.
 
-**Windows PowerShell (Admin):**
-```powershell
-irm https://raw.githubusercontent.com/shashwatmishra997/SMARAN.AI/main/install-smaran.ps1 | iex
-```
+### 🖥️ With the SMARAN.AI app (optional)
 
-**macOS / Linux:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/shashwatmishra997/SMARAN.AI/main/install-smaran.sh | sh
-```
+Running the desktop app gives the extension a local route, so no prompt
+leaves the machine. Download the Windows installer from the releases page:
 
-</div>
+**[Releases — SMARAN.AI-Setup.exe](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest)**
 
-> ⚡ **What the installer does:**
-> 1. 🔍 Detects Docker & installs Docker Desktop if missing
-> 2. 📦 Pulls latest SMARAN.AI image (`shashwatmishra062/smaran-ai:latest`)
-> 3. 🔧 Configures Ollama + starter model (`qwen2.5:1.5b`)
-> 4. 🌐 Starts container on `localhost:3003` with health checks
-> 5. 🌍 Opens browser automatically when ready
-> 6. 📊 Starts **Windows Host Telemetry Bridge** for real GPU/CPU metrics
+The app serves on `localhost:3003`; the extension finds it there on its own.
+
+> The one-line `irm`/`curl` installers that used to be documented here were
+> removed in 1.4.0. They fetched `install-smaran.ps1` from a repository that
+> is private, so the URL returned 404 and the command could not have worked
+> for anyone. The scripts are not published anywhere public.
 
 ### 🐳 Manual Docker Start
 ```bash
@@ -199,12 +204,6 @@ For **accurate GPU/CPU/RAM metrics** matching Windows Task Manager:
 
 ---
 
-## 🎨 Screenshots
-
-
-
----
-
 ## 🛠️ Development
 
 ### Prerequisites
@@ -224,7 +223,7 @@ npm run watch            # Watch mode for development
 ```bash
 npm install -g @vscode/vsce
 vsce package
-# Creates: smaran-ai-codex-1.3.4.vsix
+# Creates: smaran-ai-codex-1.4.0.vsix
 ```
 
 ### Publish to Marketplace
@@ -284,7 +283,7 @@ Copyright (c) 2024-present **Shashwat Mishra**
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/sm980/)
 [![Portfolio](https://img.shields.io/badge/Portfolio-Visit-6366F1?style=for-the-badge&logo=vercel&logoColor=white)](https://shashwatmishra-portfolio.netlify.app/)
-[![GitHub](https://img.shields.io/badge/GitHub-Follow-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/shashwatmishra997)
+[![GitHub](https://img.shields.io/badge/GitHub-Follow-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997)
 
 </div>
 
@@ -305,6 +304,6 @@ Copyright (c) 2024-present **Shashwat Mishra**
 
 **⭐ Star the repo if you find it useful!**
 
-[![GitHub Stars](https://img.shields.io/github/stars/shashwatmishra997/SMARAN.AI?style=social)](https://github.com/shashwatmishra997/SMARAN.AI/stargazers)
+
 
 </div>

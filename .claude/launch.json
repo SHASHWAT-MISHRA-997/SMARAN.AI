@@ -7,6 +7,12 @@
       "runtimeArgs": ["run", "dev", "--", "--port", "3010", "--strictPort"],
       "cwd": "frontend",
       "port": 3010
+    },
+    {
+      "name": "website",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "4180", "--directory", "website"],
+      "port": 4180
     }
   ]
 }
