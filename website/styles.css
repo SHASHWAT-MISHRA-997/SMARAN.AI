@@ -2504,3 +2504,43 @@ html.light .theme-toggle .moon { display: none; }
 .dl-grid { align-items: stretch; }
 .dl-card { display: flex; flex-direction: column; }
 .dl-card .dl-note { margin-top: auto; }
+
+
+/* The developer links carried their brand colour only on hover, and YouTube
+   had no rule at all, so both sat grey until the pointer found them. The
+   colour is the recognition, so it is there from the start and the hover
+   only deepens it. */
+.dev-link.linkedin .dev-ico { color: #0a66c2; border-color: rgba(10,102,194,.45); background: rgba(10,102,194,.12); }
+.dev-link.youtube  .dev-ico { color: #ff0033; border-color: rgba(255,0,51,.42);  background: rgba(255,0,51,.12); }
+
+.dev-link.linkedin { border-color: rgba(10,102,194,.28); }
+.dev-link.youtube  { border-color: rgba(255,0,51,.26); }
+
+.dev-link.linkedin:hover .dev-ico {
+  color: #fff; background: #0a66c2;
+  box-shadow: 0 0 22px rgba(10,102,194,.65);
+  transform: scale(1.06);
+}
+.dev-link.youtube:hover {
+  border-color: rgba(255,0,51,.7);
+  box-shadow: 0 12px 34px rgba(255,0,51,.24), 0 0 26px rgba(255,0,51,.3);
+}
+.dev-link.youtube:hover .dev-ico {
+  color: #fff; background: #ff0033;
+  box-shadow: 0 0 22px rgba(255,0,51,.65);
+  transform: scale(1.06);
+}
+.dev-link.linkedin:hover .dev-text b { color: #4aa3ff; }
+.dev-link.youtube:hover  .dev-text b { color: #ff5c7a; }
+.dev-link .dev-arrow { transition: transform .35s var(--ease), opacity .35s; opacity: .55; }
+.dev-link:hover .dev-arrow { transform: translate(3px, -3px); opacity: 1; }
+
+/* The unfilled stars were white at 16% opacity: a faint grey on the dark
+   theme and nothing at all on the light one, so the rating control looked
+   like it was missing. Given a colour that shows on both. */
+html.light .fb-star { color: rgba(17, 17, 24, .26); }
+html.light .fb-star:hover { color: rgba(17, 17, 24, .45); }
+html.light .fb-star.on {
+  color: var(--red-hot);
+  text-shadow: 0 0 12px rgba(255, 92, 71, .5);
+}

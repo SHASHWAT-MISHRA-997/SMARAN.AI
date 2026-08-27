@@ -131,7 +131,13 @@ async def local_voice(socket: WebSocket):
                 # Checked before saying ready, so a missing Ollama is reported
                 # up front rather than after the first thing someone says.
                 try:
-                    model = await __import__("asyncio").to_thread(_pick_model)
+                    # Ollama does not add itself to Windows startup, so after
+                    # a restart it is installed and idle. Start it rather than
+                    # reporting a failure the person would have to fix by hand.
+                    import asyncio as _asyncio
+                    from app.storage import start_ollama
+                    await _asyncio.to_thread(start_ollama)
+                    model = await _asyncio.to_thread(_pick_model)
                     await send({"type": "ready", "engine": "local",
                                 "model": model,
                                 "note": "Running on this machine. Nothing is sent anywhere."})

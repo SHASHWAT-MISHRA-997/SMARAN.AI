@@ -351,3 +351,62 @@ def install_ollama(progress=None) -> dict:
             "again in a moment." % (size / 1e6)
         ),
     }
+
+
+def start_ollama(wait_seconds: float = 35.0) -> dict:
+    """Start Ollama if it is installed but not running.
+
+    Ollama does not add itself to Windows startup, so after a restart it is
+    installed and idle, and anything local fails with "not running" until
+    someone opens it by hand. Since the app knows it needs it and knows
+    where it is, it starts it.
+
+    This launches software already on the machine, chosen by the person who
+    installed it. It downloads nothing and installs nothing.
+    """
+    import time
+    import urllib.error
+    import urllib.request
+
+    def answering() -> bool:
+        try:
+            urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=2)
+            return True
+        except (urllib.error.URLError, OSError):
+            return False
+
+    if answering():
+        return {"running": True, "started": False,
+                "summary": "Ollama was already running."}
+
+    binary = ollama_binary()
+    if not binary:
+        return {"running": False, "started": False,
+                "summary": "Ollama is not installed, so there was nothing to start."}
+
+    try:
+        # Detached, with no console window: this is a background service and
+        # a command prompt flashing up on every call would be its own bug.
+        flags = 0
+        if os.name == "nt":
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) |                     getattr(subprocess, "DETACHED_PROCESS", 0)
+        subprocess.Popen([binary, "serve"], creationflags=flags,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        return {"running": False, "started": False,
+                "summary": "Could not start Ollama: %s" % exc}
+
+    # Popen returns before the port is open. Waited for, so the answer is
+    # whether it is actually serving rather than whether it was launched.
+    deadline = time.time() + wait_seconds
+    while time.time() < deadline:
+        if answering():
+            return {"running": True, "started": True,
+                    "summary": "Ollama was not running and has been started."}
+        time.sleep(0.5)
+
+    return {
+        "running": False, "started": True,
+        "summary": "Ollama was started but has not answered within %.0f "
+                   "seconds. It may still be coming up." % wait_seconds,
+    }
