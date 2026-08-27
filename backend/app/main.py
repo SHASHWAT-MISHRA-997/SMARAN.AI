@@ -354,6 +354,11 @@ app.include_router(workspace_router)
 from app.office.routes import router as office_router
 app.include_router(office_router)
 
+# A live call built from faster-whisper, a local model and Kokoro. Same
+# wire protocol as the Gemini one, so the browser chooses by URL.
+from app.voice_local.routes import router as local_voice_router
+app.include_router(local_voice_router)
+
 # Spoken web navigation. The resolved URL opens in the user's own browser.
 from app.web_intents import detect_browser_command
 

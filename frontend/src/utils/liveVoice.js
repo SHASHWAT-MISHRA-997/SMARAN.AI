@@ -45,6 +45,9 @@ export class LiveVoiceSession {
    */
   constructor(handlers = {}) {
     this.handlers = handlers;
+    // 'gemini' or 'local'. Remembered so a reconnect does not silently
+    // switch which engine is answering.
+    this.engine = handlers.engine || 'gemini';
     this.socket = null;
     this.micStream = null;
     this.inputContext = null;
@@ -94,7 +97,13 @@ export class LiveVoiceSession {
     const base = new URL(apiBase || window.location.origin, window.location.origin);
     const scheme = base.protocol === 'https:' ? 'wss:' : 'ws:';
     try {
-      this.socket = new WebSocket(`${scheme}//${base.host}/ws/voice/live`);
+      // Two engines, one protocol. `local` is faster-whisper, a model in
+      // Ollama and Kokoro, all on this machine and needing no key; `live`
+      // is Gemini, which is the only one of the two that can see a screen
+      // or a camera. The messages either sends are identical, so the only
+      // difference here is the path.
+      const path = this.engine === 'local' ? '/ws/voice/local' : '/ws/voice/live';
+      this.socket = new WebSocket(`${scheme}//${base.host}${path}`);
     } catch (error) {
       this.handlers.onError?.('Could not open the real-time voice channel.');
       this._emit('error');
