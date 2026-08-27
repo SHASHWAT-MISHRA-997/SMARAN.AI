@@ -343,6 +343,12 @@ try:
 except Exception as _director_exc:  # pragma: no cover
     logger.warning("Director unavailable: %s", _director_exc)
 
+# A folder the user opened, and edits waiting on their approval. No torch, no
+# GPU and nothing to download - it is the filesystem and a diff - so this is
+# registered plainly rather than behind a capability check.
+from app.workspace.routes import router as workspace_router
+app.include_router(workspace_router)
+
 # Spoken web navigation. The resolved URL opens in the user's own browser.
 from app.web_intents import detect_browser_command
 
