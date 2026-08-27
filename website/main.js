@@ -76,7 +76,10 @@
 
   /* Highlight whichever section is on screen. */
   const sections = $$('section[id]');
-  const navLinks = $$('.nav-links a');
+  const navLinks = $$('.nav-links a, .mobile-menu a[href^="#"]');
+  // The hero is visible before the observer delivers its first callback, so
+  // give both desktop and mobile navigation an immediate, truthful state.
+  navLinks.forEach((a) => a.classList.toggle('active', a.getAttribute('href') === '#top'));
   if ('IntersectionObserver' in window) {
     const spy = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {

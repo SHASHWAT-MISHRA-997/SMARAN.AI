@@ -2579,6 +2579,8 @@ html.light .fb-star.on {
 }
 html.light .mobile-menu a { color: #16161c; }
 html.light .mobile-menu a::before { background: rgba(200, 31, 31, .3); }
+html.light .mobile-menu a:active::before,
+html.light .mobile-menu a.active::before { background: var(--red-hot); }
 
 /* The primary button had no light-theme rule, so on a white background the
    red gradient washed out to something close to an outline — which is what
