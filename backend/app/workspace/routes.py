@@ -47,6 +47,12 @@ async def status():
     return workspace.describe()
 
 
+@router.get("/browse")
+async def browse(path: str = ""):
+    """Folders at a path, so the interface can offer a picker."""
+    return _guard(workspace.browse, path or None)
+
+
 @router.post("/open")
 async def open_folder(req: OpenRequest):
     return _guard(workspace.open, req.folder)

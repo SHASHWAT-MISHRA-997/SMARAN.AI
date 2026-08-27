@@ -4,8 +4,7 @@ import {
   MessageSquare, Plus, Trash2, X,
   Settings, Pencil, Check, Brain, Sparkles,
   ChevronLeft, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, User,
-  Activity, LayoutDashboard, QrCode, LogIn, Blocks,
-} from 'lucide-react';
+  Activity, LayoutDashboard, QrCode, LogIn, Blocks, FolderOpen,} from 'lucide-react';
 import ModelHubModal from './ModelHubModal';
 import { SmaranLogo } from './SmaranLogo';
 import { API_BASE, logoutUser, getCurrentUser, fetchWithAuth } from '../context/AuthContext';
@@ -101,6 +100,7 @@ const Sidebar = ({
   activeCollections, setActiveCollections,
   onNavigate, activeView, onExpandChange,
   isModelHubOpen: externalModelHubOpen,
+  onOpenWorkspace,
   setIsModelHubOpen: externalSetIsModelHubOpen,
   onModelChange, position = 'left',
   onTogglePerformance, showPerformance, onOpenAnalytics,
@@ -492,6 +492,9 @@ const Sidebar = ({
             <button onClick={() => setIsModelHubOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
               <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
             </button>
+            <button onClick={onOpenWorkspace} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
+              <FolderOpen className="w-4 h-4 shrink-0 text-cyan-400" /> Project Folder
+            </button>
             <button onClick={onOpenAnalytics} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-emerald-400 hover:bg-emerald-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
               <Activity className="w-4 h-4 shrink-0 text-emerald-400" /> Analytics Dashboard
             </button>
@@ -525,6 +528,7 @@ const Sidebar = ({
         ) : (
           <>
             <RailBtn icon={<Boxes className="w-5 h-5" />} label="Model Catalog & Matrix" onClick={() => setIsModelHubOpen(true)} violet />
+            <RailBtn icon={<FolderOpen className="w-5 h-5 text-cyan-400" />} label="Project Folder" onClick={onOpenWorkspace} />
             <RailBtn icon={<Activity className="w-5 h-5 text-emerald-400" />} label="Analytics Dashboard" onClick={onOpenAnalytics} />
             <RailBtn icon={<Brain className="w-5 h-5" />} label="Manage AI Memory" onClick={() => setIsMemoryOpen(true)} />
             {onOpenHub && <RailBtn icon={<Blocks className="w-5 h-5 text-indigo-300" />} label="Skills & Connectors" onClick={onOpenHub} />}

@@ -190,6 +190,61 @@ class Workspace:
     def _relative(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()
 
+    # ── browsing for a folder ──────────────────────────────────────────
+
+    @staticmethod
+    def browse(path: Optional[str] = None) -> dict:
+        """Directories at `path`, for a picker built in the interface.
+
+        Deliberately not a native dialog. pywebview's would work in the
+        desktop window and nowhere else, and the same app runs in a browser
+        and on a phone over the pairing link. This is one endpoint that
+        serves all three.
+
+        This is the one place that looks outside any root, because choosing
+        the root is the point. It lists directory names only - no file
+        contents, no sizes - so it cannot be used to read anything.
+        """
+        if path:
+            here = Path(path).expanduser()
+        else:
+            here = Path.home()
+
+        try:
+            here = here.resolve(strict=True)
+        except (FileNotFoundError, OSError):
+            raise WorkspaceError("There is no folder at %s." % path)
+        if not here.is_dir():
+            raise WorkspaceError("%s is not a folder." % here)
+
+        children = []
+        try:
+            for entry in sorted(here.iterdir(), key=lambda e: e.name.lower()):
+                if not entry.is_dir():
+                    continue
+                if entry.name.startswith(".") or entry.name in SKIP_DIRS:
+                    continue
+                children.append({"name": entry.name, "path": str(entry)})
+        except PermissionError:
+            raise WorkspaceError(
+                "Windows will not let this app list %s." % here
+            )
+
+        return {
+            "path": str(here),
+            "parent": None if here.parent == here else str(here.parent),
+            "folders": children,
+            # Somewhere to start rather than the filesystem root.
+            "shortcuts": [
+                {"name": n, "path": str(p)} for n, p in (
+                    ("Home", Path.home()),
+                    ("Desktop", Path.home() / "Desktop"),
+                    ("Documents", Path.home() / "Documents"),
+                    ("Downloads", Path.home() / "Downloads"),
+                ) if p.exists()
+            ],
+        }
+
     # ── reading ────────────────────────────────────────────────────────
 
     def tree(self, limit: int = MAX_TREE_ENTRIES) -> dict:

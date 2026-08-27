@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
+import WorkspacePanel from './components/WorkspacePanel';
 import ChatArea from './components/ChatArea';
 import CollectionManager from './components/CollectionManager';
 import SettingsModal from './components/SettingsModal';
@@ -28,6 +29,7 @@ const App = () => {
   const [activeView, setActiveView] = useState('chat');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isModelHubOpen, setIsModelHubOpen] = useState(false);
+  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
   const [isPairingOpen, setIsPairingOpen] = useState(false);
@@ -228,6 +230,7 @@ const App = () => {
         activeView={activeView}
         onExpandChange={setSidebarExpanded}
         isModelHubOpen={isModelHubOpen}
+        onOpenWorkspace={() => setIsWorkspaceOpen(true)}
         setIsModelHubOpen={setIsModelHubOpen}
         onModelChange={setSelectedModel}
         position={sidebarPosition}
@@ -325,6 +328,7 @@ const App = () => {
         />
       </ErrorBoundary>
 
+      <WorkspacePanel isOpen={isWorkspaceOpen} onClose={() => setIsWorkspaceOpen(false)} />
     </div>
     </PinLock>
   );
