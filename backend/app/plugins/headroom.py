@@ -1,26 +1,82 @@
+"""Making a prompt smaller, and counting the saving in tokens.
+
+Headroom is somebody else's project — github.com/headroomlabs-ai/headroom,
+Apache-2.0, 67,700 stars at the time of writing, published as `headroom-ai`
+on PyPI. It compresses tool output, logs, files and RAG chunks before they
+reach a model. None of that is reimplemented here. If the library is
+installed this hands the work to it; if it is not, a much smaller local
+tidy-up runs instead and says which one did the work.
+
+The version this replaced was the least dishonest of the plugins: it really
+did collapse whitespace and strip four filler words, and it really did
+measure the reduction. Two things were still wrong. It called that "semantic
+compression", which it is not — it is a regular expression and a four-word
+blocklist. And it counted `len(text.split())` and labelled the result
+tokens; words are not tokens, and for the model that matters the difference
+is about a quarter.
+
+tiktoken is already a dependency here, so the counts below are real token
+counts. Where tiktoken is missing it says the number is a word count.
+
+One trap worth recording: `pip install headroom` fetches an unrelated
+project — a command-line assistant at version 0.2.7. The compression library
+is `headroom-ai`.
 """
-Headroom Plugin for SMARAN.AI
-=============================
-Context engineering, real-time prompt compression, token caching & sliding window management.
-Inspired by: https://github.com/headroomlabs-ai/headroom.git
-"""
+
+from __future__ import annotations
 
 import logging
 import re
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List
+
 from app.plugin_system import ToolPlugin, PluginMetadata, PluginConfig, PluginType
 
 logger = logging.getLogger("headroom_plugin")
 
-class HeadroomPlugin(ToolPlugin):
-    """Plugin providing Headroom context compression and token headroom optimization."""
+INSTALL = 'pip install "headroom-ai[all]"'
 
-    def __init__(self, config: PluginConfig, metadata: PluginMetadata):
-        super().__init__(config, metadata)
+
+def _count(text: str) -> dict:
+    """Tokens if tiktoken is here, words otherwise, and it says which."""
+    try:
+        import tiktoken
+        enc = tiktoken.get_encoding("cl100k_base")
+        return {"n": len(enc.encode(text)), "unit": "tokens",
+                "counted_with": "tiktoken cl100k_base"}
+    except Exception:
+        return {"n": len(text.split()), "unit": "words",
+                "counted_with": "whitespace split - tiktoken is not installed, "
+                                "so this is a word count, not a token count"}
+
+
+def _library():
+    """The real Headroom, if it is installed."""
+    try:
+        from headroom import compress   # type: ignore
+        return compress
+    except Exception:
+        return None
+
+
+def _local_tidy(text: str, aggressive: bool) -> str:
+    """The small local fallback. Whitespace and filler; nothing clever."""
+    out = re.sub(r"\n{3,}", "\n\n", text)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    if aggressive:
+        for filler in (r"\bplease\b", r"\bkindly\b", r"\bas mentioned (?:previously|above)\b",
+                       r"\bin order to\b", r"\bit is important to note that\b",
+                       r"\bneedless to say\b", r"\bbasically\b", r"\bactually\b"):
+            out = re.sub(filler, "", out, flags=re.IGNORECASE)
+        out = re.sub(r"[ \t]{2,}", " ", out)
+        out = re.sub(r" +([,.;:])", r"\1", out)
+    return out.strip()
+
+
+class HeadroomPlugin(ToolPlugin):
+    """Compresses a prompt with Headroom if present, or a local tidy if not."""
 
     async def initialize(self, app_context: Dict[str, Any]) -> bool:
         self._initialized = True
-        logger.info("Headroom context compression plugin initialized.")
         return True
 
     async def shutdown(self) -> bool:
@@ -30,104 +86,125 @@ class HeadroomPlugin(ToolPlugin):
     def get_tools(self) -> List[Dict]:
         return [
             {
-                "name": "headroom_compress_prompt",
-                "description": "Compress long system and conversation prompts by 30-70% while preserving semantic fidelity.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "prompt": {
-                            "type": "string",
-                            "description": "The raw prompt text to compress"
-                        },
-                        "compression_level": {
-                            "type": "string",
-                            "enum": ["lite", "balanced", "aggressive"],
-                            "description": "Compression aggressiveness"
-                        }
-                    },
-                    "required": ["prompt"]
-                }
+                "name": "headroom_status",
+                "description": (
+                    "Whether the headroom-ai library is installed here, and "
+                    "how counting is done."
+                ),
+                "parameters": {"type": "object", "properties": {}},
             },
             {
-                "name": "headroom_analyze_budget",
-                "description": "Analyze token consumption, available context window headroom, and recommend pruning strategy.",
+                "name": "headroom_compress",
+                "description": (
+                    "Shrink text before it goes to a model. Uses headroom-ai "
+                    "when installed; otherwise a small local tidy. Reports "
+                    "which ran and the measured saving."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "messages": {
-                            "type": "array",
-                            "items": {"type": "object"},
-                            "description": "List of chat messages"
+                        "text": {"type": "string"},
+                        "aggressive": {
+                            "type": "boolean",
+                            "description": "Also strip filler words (local mode only).",
                         },
-                        "max_context_tokens": {
-                            "type": "integer",
-                            "description": "Target context window limit (e.g. 8192, 32768, 128000)"
-                        }
                     },
-                    "required": ["messages"]
-                }
-            }
+                    "required": ["text"],
+                },
+            },
         ]
 
     async def execute_tool(self, tool_name: str, arguments: Dict) -> Any:
-        if tool_name == "headroom_compress_prompt":
-            prompt = arguments.get("prompt", "")
-            level = arguments.get("compression_level", "balanced")
-            
-            # Semantic compression rules: remove boilerplate, deduplicate whitespace, compress repeated structures
-            compressed = re.sub(r'\n{3,}', '\n\n', prompt)
-            compressed = re.sub(r'[ \t]{2,}', ' ', compressed)
-            
-            if level == "aggressive":
-                # Remove filler words and condense formatting
-                fillers = [r'\bplease\b', r'\bkindly\b', r'\bas mentioned previously\b', r'\bin order to\b']
-                for f in fillers:
-                    compressed = re.sub(f, '', compressed, flags=re.IGNORECASE)
-                compressed = re.sub(r'[ \t]{2,}', ' ', compressed).strip()
-
-            raw_tokens = max(1, len(prompt.split()))
-            compressed_tokens = max(1, len(compressed.split()))
-            reduction = round((1.0 - (compressed_tokens / raw_tokens)) * 100, 1)
-
+        if tool_name == "headroom_status":
+            counting = _count("probe")
             return {
-                "status": "success",
-                "original_tokens_approx": raw_tokens,
-                "compressed_tokens_approx": compressed_tokens,
-                "reduction_percentage": max(0.0, reduction),
-                "compressed_text": compressed
+                "library_installed": _library() is not None,
+                "install": INSTALL,
+                "counting": counting["counted_with"],
+                "project": "https://github.com/headroomlabs-ai/headroom",
+                "docs": "https://docs.headroomlabs.ai/docs",
+                "warning": (
+                    "`pip install headroom` is a different project. The "
+                    "compression library is `headroom-ai`."
+                ),
+                "note": (
+                    "Headroom is not bundled and none of it is reimplemented "
+                    "here. Without it, a small local whitespace and filler "
+                    "tidy runs instead, which is far less than Headroom does."
+                ),
             }
 
-        elif tool_name == "headroom_analyze_budget":
-            messages = arguments.get("messages", [])
-            max_tokens = arguments.get("max_context_tokens", 8192)
-            
-            total_words = sum(len(m.get("content", "").split()) for m in messages if isinstance(m, dict))
-            approx_tokens = int(total_words * 1.3)
-            headroom_tokens = max(0, max_tokens - approx_tokens)
-            usage_percent = round((approx_tokens / max_tokens) * 100, 1) if max_tokens > 0 else 0
+        if tool_name == "headroom_compress":
+            text = arguments.get("text") or ""
+            if not text.strip():
+                return {"error": "There is nothing to compress."}
 
+            before = _count(text)
+            compress = _library()
+
+            if compress is not None:
+                try:
+                    result = compress([{"role": "user", "content": text}])
+                    # The library's return shape is its own; take the text out
+                    # of whatever it hands back rather than assuming a key.
+                    if isinstance(result, dict):
+                        messages = result.get("messages") or []
+                    else:
+                        messages = result or []
+                    out = "\n".join(
+                        m.get("content", "") for m in messages
+                        if isinstance(m, dict)
+                    ) or text
+                    engine = "headroom-ai"
+                except Exception as exc:
+                    logger.warning("headroom-ai failed, using the local tidy: %s", exc)
+                    out = _local_tidy(text, bool(arguments.get("aggressive")))
+                    engine = "local tidy (headroom-ai raised: %s)" % str(exc)[:80]
+            else:
+                out = _local_tidy(text, bool(arguments.get("aggressive")))
+                engine = "local tidy"
+
+            after = _count(out)
+            saved = before["n"] - after["n"]
             return {
-                "total_messages": len(messages),
-                "consumed_tokens_approx": approx_tokens,
-                "max_tokens_budget": max_tokens,
-                "available_headroom_tokens": headroom_tokens,
-                "context_usage_percent": usage_percent,
-                "recommendation": "SAFE_TO_PROCEED" if usage_percent < 80 else "SLIDING_WINDOW_PRUNING_RECOMMENDED"
+                "engine": engine,
+                "compressed": out,
+                "before": before["n"],
+                "after": after["n"],
+                "saved": saved,
+                "unit": before["unit"],
+                "reduction_percent": (round(saved / before["n"] * 100, 1)
+                                      if before["n"] else 0.0),
+                "counted_with": before["counted_with"],
+                "note": (
+                    "Measured on this text, not a claimed average. The local "
+                    "tidy only removes whitespace and filler; it is not "
+                    "semantic compression and does not pretend to be."
+                    if engine.startswith("local") else
+                    "Compressed by headroom-ai and measured before and after."
+                ),
             }
 
-        raise ValueError(f"Unknown Headroom tool: {tool_name}")
+        raise ValueError("Unknown Headroom tool: %s" % tool_name)
+
 
 metadata = PluginMetadata(
     name="headroom",
-    version="1.8.0",
-    description="Context engineering, dynamic prompt compression, token caching and memory window optimizer.",
-    author="Headroom Labs",
+    version="2.0.0",
+    description=(
+        "Compresses text before it reaches a model, using headroom-ai when "
+        "installed and a small local tidy when not. Counts real tokens."
+    ),
+    # Written for SMARAN.AI. Headroom is a separate Apache-2.0 project by
+    # Headroom Labs; this calls it and does not reimplement it. The earlier
+    # metadata named them as the author of this file, which was not true.
+    author="SMARAN.AI",
     plugin_type=PluginType.TOOL,
     entry_point="headroom:HeadroomPlugin",
     dependencies=[],
-    config_schema={"default_compression": {"type": "string", "default": "balanced"}},
-    tags=["context", "compression", "token-budget", "optimization", "efficiency"],
-    homepage="https://github.com/headroomlabs-ai/headroom",
-    repository="https://github.com/headroomlabs-ai/headroom.git",
-    license="Apache-2.0"
+    config_schema={},
+    tags=["compression", "tokens", "context"],
+    homepage="https://docs.headroomlabs.ai/docs",
+    repository="https://github.com/headroomlabs-ai/headroom",
+    license="Apache-2.0",
 )
