@@ -2,6 +2,19 @@
 UI/UX Pro Max Skill
 ===================
 A skill that provides UI/UX design guidance and suggestions.
+
+
+Unlike the other plugins in this folder, nothing here was fabricated. It
+returns design principles and checklists, and where it mentions evidence it
+says what evidence would be needed to verify a principle rather than
+inventing any. That is what a skill is, and it was left as it was.
+
+The real ui-ux-pro-max is a separate MIT project by nextlevelbuilder with
+192 industry-specific reasoning rules and design-system generation. It
+installs into Claude Code through its plugin marketplace, or through the
+`ui-ux-pro-max-cli` npm package which provides the `uipro` command - note
+that the older `uipro-cli` package is stale. None of it is implemented here,
+and the metadata no longer claims otherwise.
 """
 
 from app.plugin_system import SkillPlugin, PluginMetadata, PluginConfig, PluginType
@@ -422,8 +435,15 @@ class UIUXProMaxSkill(SkillPlugin):
 metadata = PluginMetadata(
     name="ui-ux-pro-max-skill",
     version="0.1.0",
-    description="Provides UI/UX design guidance and suggestions (nextlevelbuilder/ui-ux-pro-max-skill)",
-    author="nextlevelbuilder",
+    description=(
+        "UI/UX design guidance and review checklists. Not the "
+        "ui-ux-pro-max skill itself - that is a separate MIT project."
+    ),
+    # Written for SMARAN.AI. ui-ux-pro-max is a separate MIT project by
+    # nextlevelbuilder, installed through Claude Code's plugin marketplace or
+    # the `ui-ux-pro-max-cli` npm package; none of it is vendored here. The
+    # earlier metadata named them as this file's author, which was not true.
+    author="SMARAN.AI",
     plugin_type=PluginType.SKILL,
     entry_point="ui_ux_pro_max_skill:UIUXProMaxSkill",
     dependencies=[],
