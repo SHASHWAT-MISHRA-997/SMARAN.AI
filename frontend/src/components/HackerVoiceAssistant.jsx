@@ -1402,6 +1402,13 @@ export const HackerVoiceAssistant = ({
   // Which source to share is asked once, from the one Vision button.
   const [visionMenuOpen, setVisionMenuOpen] = useState(false);
 
+  // Which engine serves a live call. Remembered, because someone running
+  // without a key wants local every time, not once.
+  const [voiceEngine, setVoiceEngine] = useState(
+    () => localStorage.getItem('sm_voice_engine') || 'gemini',
+  );
+  useEffect(() => { localStorage.setItem('sm_voice_engine', voiceEngine); }, [voiceEngine]);
+
   const stopLiveSession = useCallback(async () => {
     const session = liveSessionRef.current;
     liveSessionRef.current = null;
@@ -1440,6 +1447,7 @@ export const HackerVoiceAssistant = ({
     setUploadStatus('idle');
 
     const session = new LiveVoiceSession({
+      engine: voiceEngine,
       onStateChange: (state) => {
         setLiveState(state);
         if (state === 'speaking') {
@@ -1781,6 +1789,23 @@ export const HackerVoiceAssistant = ({
           <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900/90 border border-zinc-800 text-[11px] font-bold text-zinc-300 font-mono shadow-inner">
             <Cpu className="w-3.5 h-3.5 text-emerald-400" />
             <span>{activeModelDisplay}</span>
+          </div>
+
+          {/* Which engine answers. Local is faster-whisper, Ollama and Kokoro
+              on this machine - no key and no network, but no vision either.
+              Gemini is the only one that can see a screen or a camera. */}
+          <div className="hidden sm:flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1.5">
+            <Cpu className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <select
+              value={voiceEngine}
+              onChange={(e) => setVoiceEngine(e.target.value)}
+              disabled={liveActive}
+              title={liveActive ? "End the call to change engine." : "Which engine answers during a call"}
+              className="bg-transparent text-[11px] font-black text-zinc-200 outline-none cursor-pointer disabled:opacity-50"
+            >
+              <option value="gemini" className="bg-zinc-900 text-white font-bold">Gemini &middot; sees screen</option>
+              <option value="local" className="bg-zinc-900 text-white font-bold">Local &middot; no key</option>
+            </select>
           </div>
 
           {/* Character picker */}
