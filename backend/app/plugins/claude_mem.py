@@ -1,28 +1,57 @@
-"""
-Claude-Mem Plugin for SMARAN.AI
-===============================
-Persistent cross-session long-term memory, observation tagging, and episodic recall engine.
-Inspired by: https://github.com/thedotmack/claude-mem.git
+"""Memory that survives the process, because it is written to the database.
+
+This plugin described itself as "persistent cross-session long-term episodic
+memory" and kept everything in `self.observations`, a Python list on the
+instance. It was neither persistent nor cross-session: closing the app lost
+every observation, and the tool that reported "status: stored" had stored
+nothing that would still be there in a minute.
+
+The app already has real memory — a `user_memory` table that outlives
+sessions, refreshes and history deletion. This now reads and writes that,
+which is the only way the description on the tin becomes true.
+
+Recall is keyword matching over stored facts, and it says so. Calling it
+semantic when it is a substring search is the same class of claim as calling
+a list persistent.
 """
 
+from __future__ import annotations
+
 import logging
-import json
-from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List
+
 from app.plugin_system import ToolPlugin, PluginMetadata, PluginConfig, PluginType
 
 logger = logging.getLogger("claude_mem_plugin")
 
-class ClaudeMemPlugin(ToolPlugin):
-    """Plugin providing persistent episodic memory, observation tagging, and semantic recall."""
+# The memory belongs to a user, and on this machine that is the local one.
+# Resolved per call rather than held, so it follows whoever is signed in.
+LOCAL_USER = "local_default_user"
 
-    def __init__(self, config: PluginConfig, metadata: PluginMetadata):
-        super().__init__(config, metadata)
-        self.observations: List[Dict[str, Any]] = []
+
+def _session():
+    from app.database import SessionLocal
+    return SessionLocal()
+
+
+def _user_id(db) -> int:
+    from app.models import User
+
+    user = (db.query(User).filter(User.username == LOCAL_USER).first()
+            or db.query(User).order_by(User.id).first())
+    if not user:
+        raise RuntimeError(
+            "There is no user record yet, so there is nowhere to attach a "
+            "memory. Use the app once and it will exist."
+        )
+    return user.id
+
+
+class ClaudeMemPlugin(ToolPlugin):
+    """Records and recalls facts in the database the rest of the app uses."""
 
     async def initialize(self, app_context: Dict[str, Any]) -> bool:
         self._initialized = True
-        logger.info("Claude-Mem episodic memory plugin initialized.")
         return True
 
     async def shutdown(self) -> bool:
@@ -32,125 +61,165 @@ class ClaudeMemPlugin(ToolPlugin):
     def get_tools(self) -> List[Dict]:
         return [
             {
-                "name": "claudemem_record_observation",
-                "description": "Record a permanent user preference, codebase insight, project decision, or domain fact into cross-session memory.",
+                "name": "claudemem_record",
+                "description": (
+                    "Write a fact to long-term memory. Stored in the "
+                    "user_memory table, so it survives restarts."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "category": {
-                            "type": "string",
-                            "enum": ["user_preference", "project_architecture", "bug_fix", "workflow_rule", "domain_fact"],
-                            "description": "Category of memory observation"
-                        },
-                        "observation": {
-                            "type": "string",
-                            "description": "The concise fact or insight to remember permanently"
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Searchable tags (e.g. ['python', 'frontend', 'docker'])"
-                        }
+                        "observation": {"type": "string",
+                                        "description": "The fact to remember."},
+                        "category": {"type": "string",
+                                     "description": "What part of the person it describes."},
                     },
-                    "required": ["category", "observation"]
-                }
+                    "required": ["observation"],
+                },
             },
             {
                 "name": "claudemem_recall",
-                "description": "Search stored cross-session memory observations using semantic tags and keywords.",
+                "description": (
+                    "Find stored facts by keyword. This is substring "
+                    "matching, not semantic search."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query or topic to recall"
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of observations to retrieve"
-                        }
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer"},
                     },
-                    "required": ["query"]
-                }
+                    "required": ["query"],
+                },
             },
             {
-                "name": "claudemem_get_timeline",
-                "description": "Retrieve chronological evolution and timeline of project decisions and observations.",
+                "name": "claudemem_timeline",
+                "description": "Stored facts in the order they were recorded.",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "days": {
-                            "type": "integer",
-                            "description": "Lookback period in days (default: 30)"
-                        }
-                    }
-                }
-            }
+                    "properties": {"limit": {"type": "integer"}},
+                },
+            },
         ]
 
     async def execute_tool(self, tool_name: str, arguments: Dict) -> Any:
-        if tool_name == "claudemem_record_observation":
-            category = arguments.get("category", "domain_fact")
-            obs_text = arguments.get("observation", "").strip()
-            tags = arguments.get("tags", [])
-            
-            entry = {
-                "id": len(self.observations) + 1,
-                "timestamp": datetime.now().isoformat(),
-                "category": category,
-                "observation": obs_text,
-                "tags": tags
-            }
-            self.observations.append(entry)
-            
-            return {
-                "status": "stored",
-                "entry_id": entry["id"],
-                "total_memories": len(self.observations),
-                "recorded_at": entry["timestamp"]
-            }
+        from app.models import UserMemory
 
-        elif tool_name == "claudemem_recall":
-            query = arguments.get("query", "").lower()
-            limit = arguments.get("limit", 5)
-            
-            matched = []
-            for obs in reversed(self.observations):
-                content = (obs["observation"] + " " + " ".join(obs.get("tags", []))).lower()
-                if any(word in content for word in query.split()):
-                    matched.append(obs)
-                if len(matched) >= limit:
-                    break
-                    
-            return {
-                "status": "success",
-                "query": query,
-                "matched_count": len(matched),
-                "memories": matched
-            }
+        if tool_name == "claudemem_record":
+            fact = (arguments.get("observation") or "").strip()
+            if not fact:
+                return {"error": "Nothing to remember - the observation was empty."}
 
-        elif tool_name == "claudemem_get_timeline":
-            days = arguments.get("days", 30)
-            return {
-                "status": "success",
-                "lookback_days": days,
-                "total_entries": len(self.observations),
-                "timeline": self.observations[-20:]
-            }
+            db = _session()
+            try:
+                uid = _user_id(db)
+                # A fact already held is not written twice. Duplicates make
+                # recall noisier and tell nobody anything new.
+                existing = (db.query(UserMemory)
+                            .filter(UserMemory.user_id == uid,
+                                    UserMemory.fact == fact).first())
+                if existing:
+                    return {
+                        "stored": False, "id": existing.id,
+                        "note": "Already held, recorded %s." % existing.created_at,
+                    }
 
-        raise ValueError(f"Unknown Claude-Mem tool: {tool_name}")
+                row = UserMemory(
+                    user_id=uid, fact=fact,
+                    category=(arguments.get("category") or "durable_record"),
+                )
+                db.add(row)
+                db.commit()
+                db.refresh(row)
+                total = db.query(UserMemory).filter(UserMemory.user_id == uid).count()
+                return {
+                    "stored": True, "id": row.id,
+                    "recorded_at": str(row.created_at),
+                    "total_facts_held": total,
+                    "note": "Written to user_memory; it survives a restart.",
+                }
+            except Exception as exc:
+                db.rollback()
+                return {"error": str(exc)[:200]}
+            finally:
+                db.close()
+
+        if tool_name == "claudemem_recall":
+            words = [w for w in (arguments.get("query") or "").lower().split() if w]
+            limit = max(1, min(int(arguments.get("limit") or 8), 50))
+            if not words:
+                return {"error": "No query given."}
+
+            db = _session()
+            try:
+                uid = _user_id(db)
+                rows = (db.query(UserMemory)
+                        .filter(UserMemory.user_id == uid)
+                        .order_by(UserMemory.created_at.desc()).all())
+                matches = []
+                for row in rows:
+                    haystack = "%s %s" % (row.fact.lower(), (row.category or "").lower())
+                    hits = sum(1 for w in words if w in haystack)
+                    if hits:
+                        matches.append((hits, row))
+                # Most words matched first: a fact containing two of the three
+                # search words is a better answer than one containing one.
+                matches.sort(key=lambda pair: -pair[0])
+                return {
+                    "query": " ".join(words),
+                    "searched": len(rows),
+                    "matched": len(matches),
+                    "facts": [{
+                        "id": r.id, "fact": r.fact, "category": r.category,
+                        "recorded_at": str(r.created_at), "words_matched": n,
+                    } for n, r in matches[:limit]],
+                    "method": "keyword match over stored facts, not semantic search",
+                }
+            except Exception as exc:
+                return {"error": str(exc)[:200]}
+            finally:
+                db.close()
+
+        if tool_name == "claudemem_timeline":
+            limit = max(1, min(int(arguments.get("limit") or 20), 200))
+            db = _session()
+            try:
+                uid = _user_id(db)
+                rows = (db.query(UserMemory)
+                        .filter(UserMemory.user_id == uid)
+                        .order_by(UserMemory.created_at.desc())
+                        .limit(limit).all())
+                total = db.query(UserMemory).filter(UserMemory.user_id == uid).count()
+                return {
+                    "total_facts_held": total,
+                    "showing": len(rows),
+                    "facts": [{
+                        "id": r.id, "fact": r.fact, "category": r.category,
+                        "recorded_at": str(r.created_at),
+                    } for r in rows],
+                }
+            except Exception as exc:
+                return {"error": str(exc)[:200]}
+            finally:
+                db.close()
+
+        raise ValueError("Unknown claude-mem tool: %s" % tool_name)
+
 
 metadata = PluginMetadata(
     name="claude-mem",
-    version="1.5.2",
-    description="Persistent cross-session long-term episodic memory, observation tagging, and timeline recall.",
-    author="TheDotMack",
+    version="2.0.0",
+    description=(
+        "Long-term memory in the user_memory table, so it survives restarts. "
+        "Recall is keyword matching and says so."
+    ),
+    # Written for SMARAN.AI. The earlier metadata credited "TheDotMack" and
+    # linked their repository; none of this is their code.
+    author="SMARAN.AI",
     plugin_type=PluginType.TOOL,
     entry_point="claude_mem:ClaudeMemPlugin",
     dependencies=[],
     config_schema={},
-    tags=["memory", "cross-session", "recall", "observations", "timeline"],
-    homepage="https://github.com/thedotmack/claude-mem",
-    repository="https://github.com/thedotmack/claude-mem.git",
-    license="MIT"
+    tags=["memory", "persistent", "recall"],
+    license="MIT",
 )
