@@ -7,7 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from . import documents, messaging
+from . import contacts, documents, messaging
 
 router = APIRouter(prefix="/api/office", tags=["office"])
 
@@ -15,7 +15,8 @@ router = APIRouter(prefix="/api/office", tags=["office"])
 def _guard(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
-    except (documents.OfficeError, messaging.MessagingError) as exc:
+    except (documents.OfficeError, messaging.MessagingError,
+            contacts.ContactError) as exc:
         # 400, not 500: the request was understood and refused for a reason
         # worth reading, not a crash.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -90,3 +91,48 @@ async def message(req: MessageRequest):
     if service in ("email", "gmail"):
         return _guard(messaging.email, req.to, req.subject, req.text)
     return _guard(messaging.social, service, req.text, req.to)
+
+
+# ── contacts ───────────────────────────────────────────────────────────
+
+class ContactRequest(BaseModel):
+    name: str
+    number: str
+    is_self: bool = False
+
+
+@router.get("/contacts")
+async def list_contacts():
+    return {"contacts": contacts.everyone(), "you": contacts.myself()}
+
+
+@router.post("/contacts")
+async def add_contact(req: ContactRequest):
+    return _guard(contacts.add, req.name, req.number, req.is_self)
+
+
+@router.delete("/contacts/{name}")
+async def remove_contact(name: str):
+    return _guard(contacts.remove, name)
+
+
+class NamedMessage(BaseModel):
+    #: A name from the contact book, or "me".
+    to: str
+    text: str = ""
+    service: str = "whatsapp"
+
+
+@router.post("/message/by-name")
+async def message_by_name(req: NamedMessage):
+    """Message one named person. Resolves to exactly one or refuses."""
+    who = _guard(contacts.resolve, req.to)
+    service = (req.service or "whatsapp").lower()
+    if service == "telegram":
+        result = _guard(messaging.telegram, who["number"], req.text)
+    elif service == "sms":
+        result = _guard(messaging.sms, who["number"], req.text)
+    else:
+        result = _guard(messaging.whatsapp, who["number"], req.text)
+    result["resolved_to"] = who["name"]
+    return result
