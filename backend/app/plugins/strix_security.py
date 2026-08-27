@@ -1,26 +1,129 @@
+"""Scanning code for the mistakes that actually get made.
+
+The previous version was half real. It did run regular expressions over a
+snippet, which is a genuine thing to do, and then spoiled it three ways.
+
+It scored with `100 - findings * 20`, a scale nobody chose: five findings
+came to zero and six to minus twenty, and a hardcoded password counted the
+same as a missing rate limit. It used `re.search`, which stops at the first
+match, so ten SQL injections were reported as one. And its endpoint "audit"
+asked the caller whether the endpoint had authentication and then told them
+what they had just said — a truth table over its own inputs, verifying
+nothing.
+
+What is here now reports what it found and where: every match, with a line
+number and the line, counted by severity. There is no score, because a
+number out of a hundred implies a measurement of security that a dozen
+regular expressions cannot make. And the endpoint check reads this app's own
+source to find routes that never mention a user dependency, which is a
+question about the code rather than about the caller.
+
+It is a linter. It finds patterns known to be dangerous; it does not prove
+anything is safe, and it says so in its own output.
 """
-STRIX Security Plugin for SMARAN.AI
-===================================
-Automated AI vulnerability scanning, penetration testing heuristics, code hardening & compliance auditing.
-Inspired by: https://github.com/usestrix/strix.git
-"""
+
+from __future__ import annotations
 
 import logging
 import re
-from typing import List, Dict, Any, Optional
+from pathlib import Path
+from typing import Any, Dict, List
+
 from app.plugin_system import ToolPlugin, PluginMetadata, PluginConfig, PluginType
 
 logger = logging.getLogger("strix_security_plugin")
 
-class StrixSecurityPlugin(ToolPlugin):
-    """Plugin providing STRIX AI-driven vulnerability assessment and code security scanning."""
+# Each pattern is here because it catches a mistake that is made in real code,
+# and each carries why it matters rather than a bare label.
+PATTERNS = [
+    (r"""(?i)\b(api[_-]?key|secret|password|passwd|token)\s*=\s*['"][^'"\s]{8,}['"]""",
+     "hardcoded-secret", "high",
+     "A credential in source is in every copy of the repository and every "
+     "backup. Read it from the environment."),
 
-    def __init__(self, config: PluginConfig, metadata: PluginMetadata):
-        super().__init__(config, metadata)
+    (r"subprocess\.(?:run|call|Popen|check_output)\([^)]*shell\s*=\s*True",
+     "shell-injection", "critical",
+     "shell=True passes the string to a shell, so anything interpolated into "
+     "it can add its own commands. Pass a list of arguments instead."),
+
+    (r"""(?:execute|executemany)\s*\(\s*f['"]""",
+     "sql-injection", "critical",
+     "An f-string in a query puts the value into the SQL itself. Use a "
+     "parameterised query so the driver keeps them apart."),
+
+    (r"\beval\s*\(|\bexec\s*\(",
+     "arbitrary-execution", "critical",
+     "eval and exec run whatever they are given. If any part comes from "
+     "input, that is remote code execution."),
+
+    (r"dangerouslySetInnerHTML",
+     "xss", "medium",
+     "This inserts HTML without escaping. Anything user-supplied inside it "
+     "can carry script."),
+
+    (r"pickle\.loads?\s*\(",
+     "unsafe-deserialisation", "high",
+     "Unpickling executes code contained in the data. Only ever unpickle "
+     "something you produced yourself."),
+
+    (r"verify\s*=\s*False",
+     "tls-verification-off", "high",
+     "Disabling certificate verification makes the connection trivially "
+     "interceptable."),
+
+    (r"""(?i)\bhttp://(?!localhost|127\.0\.0\.1|0\.0\.0\.0)[a-z0-9.-]+""",
+     "plaintext-http", "low",
+     "Plain HTTP to a remote host is readable in transit. Only loopback is "
+     "exempt here."),
+]
+
+SEVERITY_ORDER = ("critical", "high", "medium", "low")
+
+
+def _scan_text(text: str, source: str = "") -> List[dict]:
+    """Every match, with its line. Not just the first one."""
+    findings: List[dict] = []
+    lines = text.splitlines()
+    for pattern, name, severity, why in PATTERNS:
+        # finditer, not search: a file with ten of the same mistake has ten
+        # of them, and reporting one was the old bug.
+        for match in re.finditer(pattern, text):
+            line_no = text.count("\n", 0, match.start()) + 1
+            findings.append({
+                "rule": name,
+                "severity": severity,
+                "line": line_no,
+                "text": (lines[line_no - 1].strip()[:160] if line_no <= len(lines) else ""),
+                "why": why,
+                **({"file": source} if source else {}),
+            })
+    findings.sort(key=lambda f: (SEVERITY_ORDER.index(f["severity"]), f.get("file", ""), f["line"]))
+    return findings
+
+
+def _summary(findings: List[dict]) -> dict:
+    counts = {s: sum(1 for f in findings if f["severity"] == s) for s in SEVERITY_ORDER}
+    return {
+        "total": len(findings),
+        "by_severity": counts,
+        # No score. A number out of a hundred would imply a measurement of
+        # security, and a set of regular expressions cannot make one.
+        "verdict": (
+            "Nothing matched. That means these patterns did not fire, not "
+            "that the code is safe."
+            if not findings else
+            "%d match%s. Each is a pattern known to be dangerous, not a "
+            "proven vulnerability - read the line before acting."
+            % (len(findings), "" if len(findings) == 1 else "es")
+        ),
+    }
+
+
+class StrixSecurityPlugin(ToolPlugin):
+    """A pattern linter that reports what it found and where."""
 
     async def initialize(self, app_context: Dict[str, Any]) -> bool:
         self._initialized = True
-        logger.info("STRIX security analysis plugin initialized.")
         return True
 
     async def shutdown(self) -> bool:
@@ -31,101 +134,137 @@ class StrixSecurityPlugin(ToolPlugin):
         return [
             {
                 "name": "strix_scan_code",
-                "description": "Perform static and heuristic vulnerability analysis on code snippets (SQLi, IDOR, XSS, Secret Leaks, Command Injection).",
+                "description": (
+                    "Scan a code snippet for dangerous patterns. Reports every "
+                    "match with its line number. Finds patterns, not proof."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "code_snippet": {"type": "string", "description": "Source code text to scan"},
-                        "language": {"type": "string", "enum": ["python", "javascript", "sql", "html", "all"], "description": "Code language"}
+                        "code_snippet": {"type": "string",
+                                         "description": "Source text to scan."},
                     },
-                    "required": ["code_snippet"]
-                }
+                    "required": ["code_snippet"],
+                },
             },
             {
-                "name": "strix_audit_endpoint_security",
-                "description": "Evaluate an API endpoint design for authentication, authorization ownership (IDOR), rate-limiting, and CSRF protection.",
+                "name": "strix_scan_folder",
+                "description": (
+                    "Scan the currently open project folder. Requires a folder "
+                    "to be open; reads only files inside it."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "endpoint_path": {"type": "string", "description": "API path (e.g. '/api/chat/sessions/{id}')"},
-                        "http_method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"]},
-                        "has_auth_guard": {"type": "boolean"},
-                        "has_ownership_check": {"type": "boolean"},
-                        "has_rate_limit": {"type": "boolean"}
+                        "max_files": {"type": "integer",
+                                      "description": "Stop after this many files."},
                     },
-                    "required": ["endpoint_path", "http_method"]
-                }
-            }
+                },
+            },
+            {
+                "name": "strix_find_unguarded_routes",
+                "description": (
+                    "Read this app's own source and list HTTP routes whose "
+                    "handler never mentions a user dependency."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
         ]
 
     async def execute_tool(self, tool_name: str, arguments: Dict) -> Any:
         if tool_name == "strix_scan_code":
-            code = arguments.get("code_snippet", "")
-            findings = []
-            
-            # Check hardcoded secrets
-            secret_patterns = [
-                (r'(?i)(api_key|secret|password|token)\s*=\s*[\'"][A-Za-z0-9_\-]{8,}[\'"]', "POTENTIAL_HARDCODED_SECRET", "HIGH"),
-                (r'(?i)subprocess\.run\(.*shell\s*=\s*True.*\)', "COMMAND_INJECTION_RISK", "CRITICAL"),
-                (r'(?i)f["\']SELECT .* FROM .* WHERE .*\{.*\}', "SQL_INJECTION_RISK", "CRITICAL"),
-                (r'(?i)dangerouslySetInnerHTML', "XSS_RISK", "MEDIUM")
-            ]
-            for pat, name, sev in secret_patterns:
-                if re.search(pat, code):
-                    findings.append({
-                        "type": name,
-                        "severity": sev,
-                        "recommendation": f"Sanitize input or extract configuration to environment variable."
-                    })
-                    
-            status_summary = "SECURE" if not findings else ("WARNING" if any(f["severity"] == "CRITICAL" for f in findings) else "REVIEW")
+            findings = _scan_text(arguments.get("code_snippet", "") or "")
+            return {"findings": findings, **_summary(findings)}
+
+        if tool_name == "strix_scan_folder":
+            from app.workspace.core import workspace
+
+            if not workspace.root:
+                return {"error": "No folder is open. Open one first; this "
+                                 "reads only files inside it."}
+
+            limit = int(arguments.get("max_files") or 400)
+            findings: List[dict] = []
+            scanned = 0
+            for entry in workspace.tree()["entries"]:
+                if scanned >= limit:
+                    break
+                if not entry["text"] or entry["size"] > 400_000:
+                    continue
+                try:
+                    text = workspace.resolve(entry["path"]).read_text(
+                        encoding="utf-8", errors="strict")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                scanned += 1
+                findings.extend(_scan_text(text, entry["path"]))
+
+            findings.sort(key=lambda f: (SEVERITY_ORDER.index(f["severity"]),
+                                         f.get("file", ""), f["line"]))
             return {
-                "scan_status": status_summary,
-                "total_vulnerabilities_detected": len(findings),
-                "findings": findings,
-                "strix_score": 100 - (len(findings) * 20)
+                "root": str(workspace.root),
+                "files_scanned": scanned,
+                "findings": findings[:400],
+                "truncated": len(findings) > 400,
+                **_summary(findings),
             }
 
-        elif tool_name == "strix_audit_endpoint_security":
-            path = arguments.get("endpoint_path", "")
-            method = arguments.get("http_method", "GET")
-            auth = arguments.get("has_auth_guard", False)
-            ownership = arguments.get("has_ownership_check", False)
-            rate_limit = arguments.get("has_rate_limit", False)
+        if tool_name == "strix_find_unguarded_routes":
+            # A real question about real code: which route handlers never
+            # mention the dependency that supplies a user. Reported as
+            # "worth checking", because a route can be public on purpose.
+            source = Path(__file__).resolve().parents[1] / "main.py"
+            try:
+                text = source.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                return {"error": "Could not read %s: %s" % (source, exc)}
 
-            risks = []
-            if not auth and not path.startswith("/api/auth"):
-                risks.append("Endpoint lacks mandatory authentication verification (401 guard).")
-            if not ownership and ("{id}" in path or "{docId}" in path or "{colId}" in path):
-                risks.append("Endpoint accepts object ID without explicit user ownership verification (IDOR vulnerability).")
-            if not rate_limit and method in ["POST", "PUT", "DELETE"]:
-                risks.append("Mutation endpoint lacks rate limiting protection against automated abuse.")
+            lines = text.splitlines()
+            unguarded = []
+            for i, line in enumerate(lines):
+                m = re.match(r"\s*@app\.(get|post|put|delete|patch)\(\s*[\"']([^\"']+)", line)
+                if not m:
+                    continue
+                # The handler is the block until the next decorator or a
+                # top-level def, which is enough to see its signature.
+                body = []
+                for j in range(i + 1, min(i + 40, len(lines))):
+                    if lines[j].startswith("@app.") or (j > i + 1 and lines[j].startswith("def ")):
+                        break
+                    body.append(lines[j])
+                joined = "\n".join(body)
+                if "current_user" not in joined and "get_current_user" not in joined:
+                    unguarded.append({"method": m.group(1).upper(),
+                                      "path": m.group(2), "line": i + 1})
 
             return {
-                "endpoint": f"{method} {path}",
-                "security_rating": "A" if not risks else ("C" if len(risks) == 1 else "F"),
-                "passed_checks": {
-                    "authentication": auth,
-                    "idor_protection": ownership,
-                    "rate_limiting": rate_limit
-                },
-                "identified_vulnerabilities": risks,
-                "remediation_status": "COMPLIANT" if not risks else "ACTION_REQUIRED"
+                "source": str(source),
+                "routes_without_a_user_dependency": unguarded,
+                "count": len(unguarded),
+                "note": (
+                    "These handlers do not mention current_user. Some are "
+                    "meant to be public - health, static, the update check. "
+                    "This is a list to read, not a list of faults."
+                ),
             }
 
-        raise ValueError(f"Unknown STRIX tool: {tool_name}")
+        raise ValueError("Unknown STRIX tool: %s" % tool_name)
+
 
 metadata = PluginMetadata(
     name="strix-security",
-    version="1.6.0",
-    description="Automated AI vulnerability scanner, IDOR verification, secret detection and security defense agent.",
-    author="Strix Labs",
+    version="2.0.0",
+    description=(
+        "A pattern linter for dangerous code. Reports every match with its "
+        "line, counted by severity, and claims no more than that."
+    ),
+    # Written for SMARAN.AI. The earlier metadata credited "Strix Labs" and
+    # linked their repository; none of this is their code.
+    author="SMARAN.AI",
     plugin_type=PluginType.TOOL,
     entry_point="strix_security:StrixSecurityPlugin",
     dependencies=[],
     config_schema={},
-    tags=["security", "vulnerability-scanner", "idor-defense", "audit", "pentesting"],
-    homepage="https://github.com/usestrix/strix",
-    repository="https://github.com/usestrix/strix.git",
-    license="Apache-2.0"
+    tags=["security", "linter", "static-analysis"],
+    license="MIT",
 )

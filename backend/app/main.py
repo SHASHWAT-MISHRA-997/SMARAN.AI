@@ -359,83 +359,6 @@ app.include_router(office_router)
 from app.voice_local.routes import router as local_voice_router
 app.include_router(local_voice_router)
 
-# Where model weights sit and how to get the space back. No torch and no
-# GPU - it is directory sizes and a delete - so it is registered plainly.
-from app.storage import install_ollama, ollama_state, remove as _remove_model, usage as _model_usage
-
-
-@app.get("/api/models/storage")
-async def model_storage():
-    """What weights cost on this disk, measured per location."""
-    return _model_usage()
-
-
-@app.get("/api/models/engine")
-async def model_engine_state():
-    """Whether Ollama is installed, running, and has anything pulled."""
-    return ollama_state()
-
-
-@app.post("/api/models/engine/install")
-async def model_engine_install():
-    """Fetch Ollama's own installer and run it. Never automatic."""
-    from fastapi import HTTPException as _HTTPException
-    try:
-        return install_ollama()
-    except Exception as exc:
-        raise _HTTPException(status_code=400, detail=str(exc)) from exc
-
-# Spoken web navigation. The resolved URL opens in the user's own browser.
-from app.web_intents import detect_browser_command
-
-plugin_manager.set_app_context({
-    "db_engine": engine,
-    "settings": settings,
-})
-
-# Plugin registrations
-from app.plugins.google_agents_cli import GoogleAgentsCLIPlugin, metadata as google_agents_cli_metadata
-from app.plugins.paperclip import PaperclipPlugin, metadata as paperclip_metadata
-from app.plugins.three_d_website import ThreeDWebsitePlugin, metadata as three_d_website_metadata
-from app.plugins.ui_ux_pro_max_skill import UIUXProMaxSkill, metadata as ui_ux_pro_max_skill_metadata
-from app.plugins.reverse_skill import ReverseSkill, metadata as reverse_skill_metadata
-from app.plugins.omni_route import OmniRoutePlugin, metadata as omni_route_metadata
-from app.plugins.headroom import HeadroomPlugin, metadata as headroom_metadata
-from app.plugins.claude_mem import ClaudeMemPlugin, metadata as claude_mem_metadata
-from app.plugins.task_observer import TaskObserverPlugin, metadata as task_observer_metadata
-from app.plugins.strix_security import StrixSecurityPlugin, metadata as strix_security_metadata
-from app.plugins.mcp_firecrawl import MCPFirecrawlPlugin, metadata as mcp_firecrawl_metadata
-from app.plugins.mcp_github import MCPGitHubPlugin, metadata as mcp_github_metadata
-
-plugin_manager.register_plugin(GoogleAgentsCLIPlugin, google_agents_cli_metadata, PluginConfig())
-plugin_manager.register_plugin(PaperclipPlugin, paperclip_metadata, PluginConfig())
-plugin_manager.register_plugin(ThreeDWebsitePlugin, three_d_website_metadata, PluginConfig())
-plugin_manager.register_plugin(UIUXProMaxSkill, ui_ux_pro_max_skill_metadata, PluginConfig())
-plugin_manager.register_plugin(ReverseSkill, reverse_skill_metadata, PluginConfig())
-plugin_manager.register_plugin(OmniRoutePlugin, omni_route_metadata, PluginConfig())
-plugin_manager.register_plugin(HeadroomPlugin, headroom_metadata, PluginConfig())
-plugin_manager.register_plugin(ClaudeMemPlugin, claude_mem_metadata, PluginConfig())
-plugin_manager.register_plugin(TaskObserverPlugin, task_observer_metadata, PluginConfig())
-plugin_manager.register_plugin(StrixSecurityPlugin, strix_security_metadata, PluginConfig())
-plugin_manager.register_plugin(MCPFirecrawlPlugin, mcp_firecrawl_metadata, PluginConfig())
-plugin_manager.register_plugin(MCPGitHubPlugin, mcp_github_metadata, PluginConfig())
-
-# Global Exception Handler (Zero information leakage)
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    if isinstance(exc, HTTPException):
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": exc.detail}
-        )
-    logger.exception("Global unhandled exception caught")
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": f"Request processing failed: {str(exc)}"}
-    )
-
-app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="static")
-
 @app.get("/api/test/ping")
 @app.get("/api/ping")
 @app.get("/health")
@@ -6944,3 +6867,81 @@ async def serve_frontend(path_name: str):
         response.headers["Expires"] = "0"
         return response
     raise HTTPException(status_code=404, detail="SPA entry index.html not found in frontend_dist")
+
+
+# Where model weights sit and how to get the space back. No torch and no
+# GPU - it is directory sizes and a delete - so it is registered plainly.
+from app.storage import install_ollama, ollama_state, remove as _remove_model, usage as _model_usage
+
+
+@app.get("/api/models/storage")
+async def model_storage(current_user: User = Depends(get_current_user)):
+    """What weights cost on this disk, measured per location."""
+    return _model_usage()
+
+
+@app.get("/api/models/engine")
+async def model_engine_state(current_user: User = Depends(get_current_user)):
+    """Whether Ollama is installed, running, and has anything pulled."""
+    return ollama_state()
+
+
+@app.post("/api/models/engine/install")
+async def model_engine_install(current_user: User = Depends(get_current_user)):
+    """Fetch Ollama's own installer and run it. Never automatic."""
+    from fastapi import HTTPException as _HTTPException
+    try:
+        return install_ollama()
+    except Exception as exc:
+        raise _HTTPException(status_code=400, detail=str(exc)) from exc
+
+# Spoken web navigation. The resolved URL opens in the user's own browser.
+from app.web_intents import detect_browser_command
+
+plugin_manager.set_app_context({
+    "db_engine": engine,
+    "settings": settings,
+})
+
+# Plugin registrations
+from app.plugins.google_agents_cli import GoogleAgentsCLIPlugin, metadata as google_agents_cli_metadata
+from app.plugins.paperclip import PaperclipPlugin, metadata as paperclip_metadata
+from app.plugins.three_d_website import ThreeDWebsitePlugin, metadata as three_d_website_metadata
+from app.plugins.ui_ux_pro_max_skill import UIUXProMaxSkill, metadata as ui_ux_pro_max_skill_metadata
+from app.plugins.reverse_skill import ReverseSkill, metadata as reverse_skill_metadata
+from app.plugins.omni_route import OmniRoutePlugin, metadata as omni_route_metadata
+from app.plugins.headroom import HeadroomPlugin, metadata as headroom_metadata
+from app.plugins.claude_mem import ClaudeMemPlugin, metadata as claude_mem_metadata
+from app.plugins.task_observer import TaskObserverPlugin, metadata as task_observer_metadata
+from app.plugins.strix_security import StrixSecurityPlugin, metadata as strix_security_metadata
+from app.plugins.mcp_firecrawl import MCPFirecrawlPlugin, metadata as mcp_firecrawl_metadata
+from app.plugins.mcp_github import MCPGitHubPlugin, metadata as mcp_github_metadata
+
+plugin_manager.register_plugin(GoogleAgentsCLIPlugin, google_agents_cli_metadata, PluginConfig())
+plugin_manager.register_plugin(PaperclipPlugin, paperclip_metadata, PluginConfig())
+plugin_manager.register_plugin(ThreeDWebsitePlugin, three_d_website_metadata, PluginConfig())
+plugin_manager.register_plugin(UIUXProMaxSkill, ui_ux_pro_max_skill_metadata, PluginConfig())
+plugin_manager.register_plugin(ReverseSkill, reverse_skill_metadata, PluginConfig())
+plugin_manager.register_plugin(OmniRoutePlugin, omni_route_metadata, PluginConfig())
+plugin_manager.register_plugin(HeadroomPlugin, headroom_metadata, PluginConfig())
+plugin_manager.register_plugin(ClaudeMemPlugin, claude_mem_metadata, PluginConfig())
+plugin_manager.register_plugin(TaskObserverPlugin, task_observer_metadata, PluginConfig())
+plugin_manager.register_plugin(StrixSecurityPlugin, strix_security_metadata, PluginConfig())
+plugin_manager.register_plugin(MCPFirecrawlPlugin, mcp_firecrawl_metadata, PluginConfig())
+plugin_manager.register_plugin(MCPGitHubPlugin, mcp_github_metadata, PluginConfig())
+
+# Global Exception Handler (Zero information leakage)
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail}
+        )
+    logger.exception("Global unhandled exception caught")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": f"Request processing failed: {str(exc)}"}
+    )
+
+app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="static")
