@@ -57,6 +57,17 @@ export class SmaranApiClient {
 
         // The file survives a crash or a force-quit, and a stale advert sends
         // every request to a dead port where it sits until it times out.
+        // An advert older than a day is not worth trusting: the app rewrites
+        // this file on every start, so a stale one means it was force-quit
+        // long ago and that port now belongs to nobody.
+        try {
+          if (Date.now() - fs.statSync(candidate).mtimeMs > 24 * 60 * 60 * 1000) {
+            continue;
+          }
+        } catch (_) {
+          // An unreadable stat is not a reason to skip; the checks below apply.
+        }
+
         // Signal 0 does not kill anything; it only asks whether the process
         // is still there.
         if (typeof parsed.pid === 'number') {
@@ -345,7 +356,13 @@ export class SmaranApiClient {
             port: u.port || (isHttps ? 443 : 80),
             path: u.pathname + u.search,
             method: 'POST',
-            timeout: 5000,
+            // 800ms, not 5000. A stale runtime.json points at a dead port, and
+        // Windows reuses process ids, so the liveness check can pass for an
+        // unrelated process and this is reached anyway. A running app answers
+        // on loopback in single-digit milliseconds; when it is absent this is
+        // the pause before the editor moves on to a provider key, and five
+        // seconds of it on every prompt is what felt like waiting for the app.
+        timeout: 800,
             headers: {
               'Content-Type': 'application/json',
               'Content-Length': Buffer.byteLength(bodyData),

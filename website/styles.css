@@ -2544,3 +2544,51 @@ html.light .fb-star.on {
   color: var(--red-hot);
   text-shadow: 0 0 12px rgba(255, 92, 71, .5);
 }
+
+/* ===================== MOBILE MENU, GIVEN SOME LIFE =====================
+   Every link was var(--muted) with a hairline under it and nothing else —
+   no accent, no active state, no feedback on tap. On a phone that is the
+   whole navigation, and it read as a flat grey list. */
+
+.mobile-menu a {
+  position: relative;
+  color: var(--text);
+  padding-left: 18px;
+  border-radius: 10px;
+  transition: color .25s, background .25s, padding-left .25s var(--ease);
+}
+/* A small ember beside each item, brightening for the section you are in. */
+.mobile-menu a::before {
+  content: "";
+  position: absolute; left: 2px; top: 50%;
+  width: 6px; height: 6px; margin-top: -3px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, .35);
+  transition: background .25s, box-shadow .25s, transform .25s var(--ease);
+}
+.mobile-menu a:active,
+.mobile-menu a.active {
+  background: rgba(239, 68, 68, .1);
+  padding-left: 22px;
+}
+.mobile-menu a:active::before,
+.mobile-menu a.active::before {
+  background: var(--red-hot);
+  box-shadow: 0 0 12px rgba(255, 92, 71, .8);
+  transform: scale(1.35);
+}
+html.light .mobile-menu a { color: #16161c; }
+html.light .mobile-menu a::before { background: rgba(200, 31, 31, .3); }
+
+/* The primary button had no light-theme rule, so on a white background the
+   red gradient washed out to something close to an outline — which is what
+   "Download installer" looked like on a phone in daylight. */
+html.light .btn-primary {
+  background: linear-gradient(135deg, #f4553f, #c81f1f);
+  color: #fff;
+  border-color: rgba(200, 31, 31, .5);
+  box-shadow: 0 10px 26px rgba(200, 31, 31, .28);
+}
+html.light .btn-primary:hover {
+  box-shadow: 0 14px 34px rgba(200, 31, 31, .4);
+}

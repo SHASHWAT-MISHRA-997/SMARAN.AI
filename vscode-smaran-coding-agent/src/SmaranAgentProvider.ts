@@ -111,8 +111,12 @@ export class SmaranAgentProvider implements vscode.WebviewViewProvider {
         } else {
           const raw = await vscode.workspace.fs.readFile(uri);
           content = new TextDecoder('utf-8').decode(raw);
-          if (content.length > 50000) {
-            content = content.slice(0, 50000) + '\n...[Truncated for token optimization]';
+          // 50,000 characters is roughly 12,000 tokens - smaller than one large
+          // source file, and every model this routes to takes far more. Raised
+          // to 200,000, about 50,000 tokens, which still leaves room in a 128k
+          // context for the reply.
+          if (content.length > 200000) {
+            content = content.slice(0, 200000) + '\n...[Truncated at 200,000 characters]';
           }
         }
 

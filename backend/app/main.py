@@ -364,7 +364,7 @@ app.include_router(local_voice_router)
 @app.get("/health")
 def healthcheck_ping():
     """Ultra-fast instant healthcheck endpoint for Docker, Launcher, and Extensions."""
-    return {"status": "ok", "app": "SMARAN.AI", "version": "2.8.4"}
+    return {"status": "ok", "app": "SMARAN.AI", "version": "2.8.5"}
 
 
 # CORS: local and private-network clients only.

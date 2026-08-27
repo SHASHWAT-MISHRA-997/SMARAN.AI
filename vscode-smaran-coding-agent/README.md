@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.4.0-blue?style=for-the-badge&logo=semver)
+![Version](https://img.shields.io/badge/version-1.5.0-blue?style=for-the-badge&logo=semver)
 ![VS Code](https://img.shields.io/badge/VS_Code-1.90+-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)
 ![Publisher](https://img.shields.io/badge/publisher-ShashwatMishra-purple?style=for-the-badge&logo=visual-studio-code&logoColor=white)
@@ -72,7 +72,7 @@ is remembered and the next is tried.
   inert, and the language menu only ever changed the dictation locale.
 
 ### 📎 **Attachment Support**
-- Text files (up to 50K chars/file)
+- Text files (up to 200K chars/file, about 50K tokens)
 - Image files (metadata only in current version)
 - Workspace file manifest (60 entries max)
 
