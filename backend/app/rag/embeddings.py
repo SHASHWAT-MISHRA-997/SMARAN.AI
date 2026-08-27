@@ -9,8 +9,32 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+#: Which backend produced the last vector, and whether it meant anything.
+#: Read by semantic_status(); set by the manager below.
+_LAST_BACKEND = {"name": "none", "semantic": False, "why": "nothing embedded yet"}
+
+
+def semantic_status() -> dict:
+    """Whether embeddings here carry meaning, and why not when they do not.
+
+    This exists because the fallback below is a random vector. Callers that
+    offer "semantic search" need to be able to tell the difference, and
+    before this they could not: they received a list of floats either way.
+    """
+    return dict(_LAST_BACKEND)
+
+
 def _generate_fallback_embedding(text: str, dim: int = 1024) -> list[float]:
-    """Generate a deterministic 1024-dimensional normalized embedding vector from text hash."""
+    """A random vector seeded from the text's hash. NOT an embedding.
+
+    Two sentences meaning the same thing land nowhere near each other here,
+    because nothing about meaning survives a hash. It exists only so that
+    callers expecting a fixed-width vector do not crash when no real
+    embedder is reachable, and any search built on it returns noise.
+
+    Anything presenting results from this as semantic search is wrong.
+    semantic_status() reports when it is in use.
+    """
     seed = int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16)
     rng = np.random.RandomState(seed)
     vec = rng.randn(dim)
@@ -123,6 +147,7 @@ class OllamaEmbeddings:
         if self.openrouter_embedder.is_available():
             vec = self.openrouter_embedder.embed_query(text)
             if vec:
+                _LAST_BACKEND.update(name="openrouter", semantic=True, why="")
                 return vec
 
         # 2. Try Local Ollama Embeddings
@@ -135,10 +160,21 @@ class OllamaEmbeddings:
                 if response.status_code == 200:
                     embeddings = response.json().get("embeddings", [])
                     if embeddings:
+                        _LAST_BACKEND.update(name="ollama", semantic=True, why="")
                         return embeddings[0]
         except Exception as e:
             logger.warning(f"Ollama embed query unavailable ({e})")
         
+        # Loud, once per reason: silently returning noise is how "semantic
+        # search" ends up meaning nothing.
+        _LAST_BACKEND.update(
+            name="hash-fallback", semantic=False,
+            why=("No embedding backend answered. OpenRouter needs a working "
+                 "key and Ollama needs an embedding model pulled and the "
+                 "server started with --embeddings. Results from this are "
+                 "not semantic."))
+        logger.warning("Embeddings fell back to hash vectors - search is not semantic. %s",
+                       _LAST_BACKEND["why"])
         return _generate_fallback_embedding(text)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -149,6 +185,7 @@ class OllamaEmbeddings:
         if self.openrouter_embedder.is_available():
             vecs = self.openrouter_embedder.embed_documents(texts)
             if vecs and len(vecs) == len(texts):
+                _LAST_BACKEND.update(name="openrouter", semantic=True, why="")
                 return vecs
 
         # 2. Try Local Ollama Embeddings
@@ -161,8 +198,13 @@ class OllamaEmbeddings:
                 if response.status_code == 200:
                     embeddings = response.json().get("embeddings", [])
                     if embeddings and len(embeddings) == len(texts):
+                        _LAST_BACKEND.update(name="ollama", semantic=True, why="")
                         return embeddings
         except Exception as e:
             logger.warning(f"Ollama batch embed unavailable ({e})")
 
+        _LAST_BACKEND.update(
+            name="hash-fallback", semantic=False,
+            why="No embedding backend answered; these vectors carry no meaning.")
+        logger.warning("Batch embeddings fell back to hash vectors - not semantic.")
         return [_generate_fallback_embedding(t) for t in texts]

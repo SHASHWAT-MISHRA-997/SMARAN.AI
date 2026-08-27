@@ -2,6 +2,13 @@
 Reverse Skill
 =============
 A skill that provides reverse operations on various data types with additional utilities.
+
+This has nothing to do with the reverse-skill project on GitHub. That one
+(zhaoxuya520/reverse-skill, MIT, PowerShell) is a router for reverse
+engineering and authorised penetration-testing tooling. This file reverses
+strings and checks palindromes, which somebody arrived at by reading
+"reverse" as "reverse a string". The functions work; only the name and the
+credit were wrong, and both are now gone.
 """
 
 from app.plugin_system import SkillPlugin, PluginMetadata, PluginConfig, PluginType
@@ -414,16 +421,22 @@ class ReverseSkill(SkillPlugin):
 
 # Plugin metadata
 metadata = PluginMetadata(
-    name="reverse-skill",
-    version="0.1.0",
-    description="Provides reverse operations on strings, lists, and words with analysis capabilities (zhaoxuya520/reverse-skill)",
-    author="zhaoxuya520",
+    name="text-reverse",
+    version="1.0.0",
+    description=(
+        "Reverses strings, lists and word order, and checks palindromes. "
+        "Unrelated to the reverse-skill project, despite the old name."
+    ),
+    # Written for SMARAN.AI. This was called reverse-skill and credited
+    # zhaoxuya520, whose project of that name is a reverse *engineering* and
+    # authorised-pentesting skill router written in PowerShell. Somebody read
+    # "reverse" as "reverse a string". There is no relationship between the
+    # two, so the attribution and the links are gone rather than corrected.
+    author="SMARAN.AI",
     plugin_type=PluginType.SKILL,
     entry_point="reverse_skill:ReverseSkill",
     dependencies=[],
     config_schema={},
-    tags=["reverse", "string", "list", "utility", "palindrome", "analysis"],
-    homepage="https://github.com/zhaoxuya520/reverse-skill",
-    repository="https://github.com/zhaoxuya520/reverse-skill",
+    tags=["string", "list", "utility", "palindrome"],
     license="MIT"
 )
