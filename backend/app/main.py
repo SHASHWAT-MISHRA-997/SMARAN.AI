@@ -2367,11 +2367,38 @@ def _route_in_cooldown(provider: str, model: str) -> bool:
     return True
 
 
+import time as _time
+
+# When each provider's request went out, so the outcome helpers below can
+# turn it into a latency. Last write wins per provider, which is accurate
+# enough for a rolling median and is what the plugin says it is.
+_route_started: dict = {}
+
+
+def _route_begin(provider: str) -> None:
+    _route_started[provider] = _time.perf_counter()
+
+
+def _route_record(provider: str, ok: bool) -> None:
+    """Hand a real timing to the routing plugin. Never fatal."""
+    started = _route_started.pop(provider, None)
+    if started is None:
+        return
+    try:
+        from app.plugins.omni_route import record
+        record(provider, (_time.perf_counter() - started) * 1000, ok)
+    except Exception:
+        # A measurement is not worth failing a reply over.
+        pass
+
+
 def _note_route_failure(provider: str, model: str) -> None:
+    _route_record(provider, False)
     _cloud_route_failures[(provider, model)] = time.time()
 
 
 def _note_route_success(provider: str, model: str) -> None:
+    _route_record(provider, True)
     _cloud_route_failures.pop((provider, model), None)
 
 
@@ -3633,6 +3660,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         payload = {'model': model, 'messages': anthropic_messages, 'stream': True, 'temperature': 0.1, 'max_tokens': 4096}
                         if system_text:
                             payload['system'] = system_text
+                        _route_begin(provider)
                         async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                             async with client.stream('POST', f'{endpoint}/messages', headers=headers, json=payload) as response:
                                 if response.status_code != 200:
@@ -3658,6 +3686,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         payload = {'contents': contents, 'generationConfig': {'maxOutputTokens': 4096}}
                         if system_text:
                             payload['system_instruction'] = {'parts': [{'text': system_text}]}
+                        _route_begin(provider)
                         async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                             async with client.stream('POST', f'{endpoint}/models/{model}:streamGenerateContent', params={'alt': 'sse', 'key': api_key}, json=payload) as response:
                                 if response.status_code != 200:
@@ -3696,6 +3725,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
                         if provider == 'openrouter':
                             headers.update({'HTTP-Referer': 'http://localhost:3003', 'X-Title': 'SMARAN.AI'})
+                        _route_begin(provider)
                         async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                             async with client.stream('POST', f'{endpoint}/chat/completions', headers=headers, json={'model': model, 'messages': messages_payload, 'stream': True, 'temperature': 0.1, 'max_tokens': 4096}) as response:
                                 if response.status_code != 200:
