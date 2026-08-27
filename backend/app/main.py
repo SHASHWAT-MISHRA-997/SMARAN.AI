@@ -349,6 +349,11 @@ except Exception as _director_exc:  # pragma: no cover
 from app.workspace.routes import router as workspace_router
 app.include_router(workspace_router)
 
+# Documents and messages. Office is driven through COM when it is present
+# and refuses with that fact when it is not; nothing here sends anything.
+from app.office.routes import router as office_router
+app.include_router(office_router)
+
 # Spoken web navigation. The resolved URL opens in the user's own browser.
 from app.web_intents import detect_browser_command
 
