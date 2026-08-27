@@ -156,7 +156,13 @@ class OllamaEmbeddings:
             if url_base:
                 url = f"{url_base}/api/embed"
                 payload = {"model": self.model, "input": text}
-                response = requests.post(url, json=payload, timeout=10)
+                # 10 seconds was not enough for the first call after a
+                # restart: Ollama loads the embedding model on demand, that
+                # took longer, the request timed out and the manager fell
+                # through to hash vectors - so the first search after every
+                # restart silently returned noise. Measured cold load here
+                # was over ten seconds and well under sixty.
+                response = requests.post(url, json=payload, timeout=60)
                 if response.status_code == 200:
                     embeddings = response.json().get("embeddings", [])
                     if embeddings:
@@ -194,7 +200,8 @@ class OllamaEmbeddings:
             if url_base:
                 url = f"{url_base}/api/embed"
                 payload = {"model": self.model, "input": texts}
-                response = requests.post(url, json=payload, timeout=30)
+                # Same reason as embed_query, with more to do.
+                response = requests.post(url, json=payload, timeout=120)
                 if response.status_code == 200:
                     embeddings = response.json().get("embeddings", [])
                     if embeddings and len(embeddings) == len(texts):
