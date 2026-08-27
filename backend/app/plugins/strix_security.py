@@ -1,25 +1,31 @@
-"""Scanning code for the mistakes that actually get made.
+"""A pattern linter, and a check for whether the real Strix is here.
 
-The previous version was half real. It did run regular expressions over a
-snippet, which is a genuine thing to do, and then spoiled it three ways.
+Strix is somebody else's project — github.com/usestrix/strix, Apache-2.0,
+58,750 stars, published as `strix-agent` on PyPI. It is not a linter. It runs
+autonomous penetration-testing agents against a running application in Docker,
+finds vulnerabilities dynamically and validates them with actual
+proofs-of-concept. Its own README draws the contrast explicitly: it exists
+because static analysis produces false positives.
 
-It scored with `100 - findings * 20`, a scale nobody chose: five findings
-came to zero and six to minus twenty, and a hardcoded password counted the
-same as a missing rate limit. It used `re.search`, which stops at the first
-match, so ten SQL injections were reported as one. And its endpoint "audit"
-asked the caller whether the endpoint had authentication and then told them
-what they had just said — a truth table over its own inputs, verifying
-nothing.
+Which makes what follows worth being plain about. The scanner here *is*
+static analysis — regular expressions over text. It is the category Strix was
+built to improve on, and none of Strix is implemented here. It is kept
+because a fast pattern check has its uses, and it is named for what it is.
 
-What is here now reports what it found and where: every match, with a line
-number and the line, counted by severity. There is no score, because a
-number out of a hundred implies a measurement of security that a dozen
-regular expressions cannot make. And the endpoint check reads this app's own
-source to find routes that never mention a user dependency, which is a
-question about the code rather than about the caller.
+The version this replaced was half real and spoiled three ways. It scored
+with `100 - findings * 20`, a scale nobody chose: five findings came to zero,
+six to minus twenty, and a hardcoded password counted the same as a missing
+rate limit. It used re.search, which stops at the first match, so ten SQL
+injections were reported as one. And its endpoint "audit" asked the caller
+whether the endpoint had authentication and then told them what they had just
+said — a truth table over its own inputs, verifying nothing.
 
-It is a linter. It finds patterns known to be dangerous; it does not prove
-anything is safe, and it says so in its own output.
+What is here now reports every match with its line number and the line
+itself, counted by severity, with no score. It also reads this app's own
+source for route handlers that never mention a user dependency, which is a
+question about the code rather than about the caller. That check found three
+unguarded routes on its first run, all of them added by me earlier the same
+day.
 """
 
 from __future__ import annotations
@@ -162,6 +168,14 @@ class StrixSecurityPlugin(ToolPlugin):
                 },
             },
             {
+                "name": "strix_real_agent_status",
+                "description": (
+                    "Whether the actual strix-agent is installed here. The "
+                    "scanner in this plugin is not it."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+            {
                 "name": "strix_find_unguarded_routes",
                 "description": (
                     "Read this app's own source and list HTTP routes whose "
@@ -171,7 +185,32 @@ class StrixSecurityPlugin(ToolPlugin):
             },
         ]
 
+    @staticmethod
+    def _real_strix() -> dict:
+        """Whether the actual Strix is installed, asked of the machine."""
+        import importlib.util
+        import shutil
+
+        installed = importlib.util.find_spec("strix") is not None
+        return {
+            "installed": installed,
+            "cli": shutil.which("strix"),
+            "docker": shutil.which("docker") is not None,
+            "install": "pipx install strix-agent",
+            "needs": "Docker running and an LLM API key",
+            "project": "https://github.com/usestrix/strix",
+            "note": (
+                "Strix runs pentesting agents against a live application in "
+                "Docker and proves findings. None of that is implemented "
+                "here; the scanner below is static analysis, which is the "
+                "category Strix was built to improve on."
+            ),
+        }
+
     async def execute_tool(self, tool_name: str, arguments: Dict) -> Any:
+        if tool_name == "strix_real_agent_status":
+            return self._real_strix()
+
         if tool_name == "strix_scan_code":
             findings = _scan_text(arguments.get("code_snippet", "") or "")
             return {"findings": findings, **_summary(findings)}
@@ -255,8 +294,8 @@ metadata = PluginMetadata(
     name="strix-security",
     version="2.0.0",
     description=(
-        "A pattern linter for dangerous code. Reports every match with its "
-        "line, counted by severity, and claims no more than that."
+        "A pattern linter for dangerous code, and a check for whether the "
+        "real strix-agent is installed. Implements none of Strix itself."
     ),
     # Written for SMARAN.AI. The earlier metadata credited "Strix Labs" and
     # linked their repository; none of this is their code.
@@ -266,5 +305,7 @@ metadata = PluginMetadata(
     dependencies=[],
     config_schema={},
     tags=["security", "linter", "static-analysis"],
+    homepage="https://www.strix.ai/",
+    repository="https://github.com/usestrix/strix",
     license="MIT",
 )
