@@ -1,7 +1,27 @@
-"""
-Firecrawl MCP Server Plugin for SMARAN.AI
-=========================================
-Model Context Protocol (MCP) Server for real-time web scraping, full website crawling, and markdown extraction.
+"""Fetching a page and taking the readable text out of it.
+
+What runs below is httpx and BeautifulSoup: it requests the URL, drops
+script, style, nav, footer and svg, and returns the remaining text with the
+title and the links. That is real - it fetches the page you name and the
+character count is of what came back. It is also the whole of it.
+
+Three things the old header said that were not so.
+
+It called itself an MCP server. It speaks no Model Context Protocol, runs no
+server and holds no session; it is a function that downloads a page.
+
+It named "Firecrawl Team" as the author. Firecrawl is a separate project -
+github.com/firecrawl/firecrawl, 173,149 stars, AGPL-3.0, formerly under
+mendableai - and none of their code is here. They do publish an MCP server,
+firecrawl-mcp-server, which is not this. This file was written for SMARAN.AI.
+
+And it declared the licence MIT while crediting them, which reads as their
+AGPL-3.0 work relicensed. This file is SMARAN.AI's own, under SMARAN.AI's
+licence, and borrows nothing.
+
+What Firecrawl does that this does not: JavaScript rendering, proxy
+rotation, PDF and image parsing, structured extraction, and crawls at a
+scale this ceiling of twelve pages exists to avoid.
 """
 import logging
 import httpx
@@ -176,14 +196,22 @@ class MCPFirecrawlPlugin(ConnectorPlugin):
 metadata = PluginMetadata(
     name="mcp-firecrawl",
     version="1.0.0",
-    description="MCP Server for real-time web scraping, full website crawling, and markdown extraction.",
-    author="Firecrawl Team",
+    description=(
+        "Fetches a page over HTTP and extracts its readable text, title "
+        "and links with BeautifulSoup. No JavaScript rendering, and not "
+        "an MCP server."
+    ),
+    # Written for SMARAN.AI. Firecrawl is a separate AGPL-3.0 project and
+    # none of its code is here; the earlier metadata named its team as the
+    # author of this file, which was not true.
+    author="SMARAN.AI",
     plugin_type=PluginType.CONNECTOR,
     entry_point="mcp_firecrawl:MCPFirecrawlPlugin",
     dependencies=[],
     config_schema={},
-    tags=["mcp", "firecrawl", "web-scraping", "crawler", "markdown", "search"],
+    tags=["web-scraping", "crawler", "text-extraction"],
     homepage="https://firecrawl.dev",
-    repository="https://github.com/mendableai/firecrawl",
+    # Linked because the name is theirs, not because this is their code.
+    repository="https://github.com/firecrawl/firecrawl",
     license="MIT"
 )

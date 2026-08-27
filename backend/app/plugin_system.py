@@ -177,6 +177,8 @@ class PluginManager:
         # separate.  A class being imported is not proof that its dependencies,
         # credentials or remote service are ready.
         self._load_errors: Dict[str, str] = {}
+        #: Not an error: the plugin works, its external tool is absent.
+        self._setup_required: Dict[str, str] = {}
         self._load_attempted: Dict[str, bool] = {}
     
     def set_app_context(self, context: Dict[str, Any]):
@@ -228,6 +230,7 @@ class PluginManager:
 
         self._load_attempted[name] = True
         self._load_errors.pop(name, None)
+        self._setup_required.pop(name, None)
         plugin._initialized = False
         try:
             initialized = bool(await plugin.initialize(self.app_context))
@@ -252,8 +255,17 @@ class PluginManager:
                     if not initialized
                     else "initialization exposed no runtime capabilities"
                 )
-                self._load_errors[name] = reason
-                logger.warning("Plugin %s is not runtime-ready: %s", name, reason)
+                # A plugin that named its own reason is telling us the
+                # environment is missing something, not that it broke. Those
+                # are two different things and were being shown as one: the
+                # interface painted "Failed" in red for a machine that simply
+                # does not have Node, or the paperclip CLI, or a checkout.
+                if stated:
+                    self._setup_required[name] = reason
+                    self._load_errors.pop(name, None)
+                else:
+                    self._load_errors[name] = reason
+                logger.info("Plugin %s is not runtime-ready: %s", name, reason)
             return success
         except Exception as e:
             plugin._initialized = False
@@ -383,6 +395,9 @@ class PluginManager:
             elif not enabled:
                 runtime_status = "disabled"
                 status_detail = "Registered, but disabled by configuration."
+            elif name in self._setup_required:
+                runtime_status = "setup_required"
+                status_detail = self._setup_required[name]
             elif name in self._load_errors:
                 runtime_status = "error"
                 status_detail = f"Initialization failed: {self._load_errors[name]}"

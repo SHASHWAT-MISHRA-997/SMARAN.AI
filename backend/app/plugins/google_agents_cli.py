@@ -37,9 +37,29 @@ class GoogleAgentsCLIPlugin(ToolPlugin):
             self.agents_cli_path = None
     
     async def initialize(self, app_context: Dict[str, Any]) -> bool:
-        """Initialize the plugin."""
-        logger.info("Google Agents CLI plugin initialized")
-        return True
+        """Ready only if the CLI it drives is actually here.
+
+        This used to return True unconditionally and then expose no tools,
+        which left the interface showing a plugin that was running and could
+        do nothing.
+        """
+        if self.agents_cli_path:
+            logger.info("Google Agents CLI found at %s", self.agents_cli_path)
+            return True
+
+        # Named as a setup step, not a failure: the app is fine, the CLI is
+        # simply not installed. The package name is worth stating because it
+        # differs from the command - `pip install agents-cli` fetches nothing,
+        # since the project publishes as google-agents-cli.
+        self.unavailable_reason = (
+            "The agents-cli command is not on this machine. It belongs to "
+            "google/agents-cli, a separate Apache-2.0 project; install it "
+            "with `uvx google-agents-cli setup` - note the PyPI package is "
+            "google-agents-cli even though the command is agents-cli. "
+            "Nothing here is broken."
+        )
+        logger.info("Google Agents CLI is not installed; the plugin stays off.")
+        return False
     
     async def shutdown(self) -> bool:
         """Cleanup"""
@@ -146,7 +166,10 @@ metadata = PluginMetadata(
     name="google-agents-cli",
     version="1.3.1",
     description="Integrates google/agents-cli as a tool for running AI agents",
-    author="Google LLC",
+    # Written for SMARAN.AI. agents-cli is Google's Apache-2.0 project;
+    # this launches it and contains none of its code, so naming Google as
+    # the author of this file was not right.
+    author="SMARAN.AI",
     plugin_type=PluginType.TOOL,
     entry_point="google_agents_cli:GoogleAgentsCLIPlugin",
     dependencies=[],

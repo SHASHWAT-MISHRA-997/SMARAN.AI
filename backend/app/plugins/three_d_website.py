@@ -47,7 +47,21 @@ class ThreeDWebsitePlugin(ToolPlugin):
             logger.info("3D Website plugin dependencies satisfied")
             self.available = True
         else:
-            logger.warning(f"3D Website plugin dependencies not met: node={self.node_available}, repo={self.repo_available}")
+            logger.info("3D Website plugin is off: node=%s, repo=%s",
+                        self.node_available, self.repo_available)
+            # Which of the two is missing, so "Failed" does not read as a
+            # fault in the app when the answer is that a checkout is absent.
+            missing = []
+            if not self.node_available:
+                missing.append("Node.js is not on PATH")
+            if not self.repo_available:
+                missing.append("the ankitstage21/3D-website checkout is not "
+                               "beside this plugin")
+            self.unavailable_reason = (
+                "Not started: %s. Nothing is broken - this plugin drives a "
+                "separate project that is not present."
+                % " and ".join(missing)
+            )
             self.available = False
     
     async def initialize(self, app_context: Dict[str, Any]) -> bool:
@@ -59,7 +73,10 @@ class ThreeDWebsitePlugin(ToolPlugin):
             logger.info("3D Website plugin initialized")
             return True
         else:
-            logger.warning("3D Website plugin initialized with limited functionality")
+            # It did not initialize. Saying "initialized with limited
+            # functionality" while returning False described the opposite
+            # of what happened.
+            logger.info("3D Website plugin is not started: %s", self.unavailable_reason)
             return False  # Still return True if we want to allow partial functionality
     
     async def shutdown(self) -> bool:
@@ -213,7 +230,9 @@ metadata = PluginMetadata(
     name="3d-website",
     version="0.1.0",
     description="Integrates ankitstage21/3D-website for 3D model operations",
-    author="ankitstage21",
+    # Written for SMARAN.AI. The 3D-website project is ankitstage21's;
+    # this builds against a checkout of it and includes none of it.
+    author="SMARAN.AI",
     plugin_type=PluginType.TOOL,
     entry_point="three_d_website:ThreeDWebsitePlugin",
     dependencies=[],

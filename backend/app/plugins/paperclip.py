@@ -38,13 +38,26 @@ class PaperclipPlugin(ToolPlugin):
         except Exception as e:
             logger.error(f"Failed to check Paperclip CLI: {e}")
         
-        # Don't block startup with slow pip install attempts
-        repo_path = os.path.join(os.path.dirname(__file__), "paperclip_repo", "cli")
-        if os.path.exists(repo_path):
-            self.paperclip_path = "paperclipai"
-        else:
-            logger.info("Paperclip CLI optional tool ready")
-            self.paperclip_path = None
+        # Its own installer puts the CLI under ~/.paperclip/cli, which is not
+        # added to PATH - so looking only at PATH reports "not installed" for
+        # a machine that has it. Checked where it actually lands, the same
+        # mistake this project already made with Ollama.
+        from pathlib import Path
+
+        candidates = [
+            Path.home() / ".paperclip" / "cli" / "paperclipai",
+            Path.home() / ".paperclip" / "cli" / "paperclipai.cmd",
+            Path.home() / ".paperclip" / "cli" / "index.js",
+            Path(os.path.dirname(__file__)) / "paperclip_repo" / "cli",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                logger.info("Paperclip CLI found at %s", candidate)
+                self.paperclip_path = str(candidate)
+                return
+
+        logger.info("Paperclip CLI is not installed; the plugin stays off.")
+        self.paperclip_path = None
     
     async def initialize(self, app_context: Dict[str, Any]) -> bool:
         """Initialize the plugin."""
@@ -55,9 +68,12 @@ class PaperclipPlugin(ToolPlugin):
             logger.info("Paperclip plugin initialized")
             return True
         else:
-            logger.error("Failed to initialize Paperclip plugin")
+            # Not an error. The CLI is simply not installed here, and
+            # logging that at error level is how the interface came to
+            # show a red "Failed" for a machine that is perfectly fine.
+            logger.info("Paperclip CLI is not installed; the plugin stays off.")
             self.unavailable_reason = (
-                'The paperclipai command is not on PATH, so this plugin has nothing to drive. Install the Paperclip CLI and enable this again.'
+                'Paperclip is not installed on this machine, so there is nothing for this to drive. It is a separate MIT project - install it with `npx paperclipai onboard` and turn this on again. Nothing is broken; the tool simply is not here.'
             )
             return False
     
@@ -164,7 +180,9 @@ metadata = PluginMetadata(
     name="paperclip",
     version="0.3.1",
     description="Integrates paperclipai/paperclip for AI agent orchestration",
-    author="paperclipai",
+    # Written for SMARAN.AI. Paperclip is a separate MIT project by
+    # paperclipai; this drives its CLI and vendors none of it.
+    author="SMARAN.AI",
     plugin_type=PluginType.TOOL,
     entry_point="paperclip:PaperclipPlugin",
     dependencies=[],

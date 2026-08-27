@@ -1,7 +1,18 @@
-"""
-GitHub MCP Server Plugin for SMARAN.AI
-======================================
-Model Context Protocol (MCP) Server for real-time GitHub repository inspection, commit history, pull requests, issues, and file tree.
+"""Reading GitHub through its public REST API.
+
+This one does what it says. Asked about usestrix/strix it returned that
+project's own description and five commit SHAs that match the repository, so
+the data is live and not a table written into the source.
+
+The header was still wrong on two counts. It is not an MCP server: it speaks
+no Model Context Protocol and runs no server, it makes HTTPS calls to
+api.github.com with httpx. And it credited "GitHub / Model Context Protocol"
+as the author and linked modelcontextprotocol/servers, which is a real MIT
+project whose code is not here. GitHub's own MCP server is another separate
+thing again. This file was written for SMARAN.AI.
+
+Worth knowing in use: these are unauthenticated calls, so GitHub allows
+about sixty an hour from one address and private repositories are invisible.
 """
 import logging
 import httpx
@@ -151,14 +162,22 @@ class MCPGitHubPlugin(ConnectorPlugin):
 metadata = PluginMetadata(
     name="mcp-github",
     version="1.0.0",
-    description="MCP Server for real-time GitHub repository inspection, commit history, pull requests, issues, and file tree.",
-    author="GitHub / Model Context Protocol",
+    description=(
+        "Reads public GitHub repositories, commits, issues, pull requests and "
+        "file trees live from the REST API. Unauthenticated, so roughly sixty "
+        "requests an hour and public repositories only."
+    ),
+    # Written for SMARAN.AI. It calls GitHub's public API; it contains no code
+    # from GitHub or from modelcontextprotocol/servers, which the earlier
+    # metadata credited as its author.
+    author="SMARAN.AI",
     plugin_type=PluginType.CONNECTOR,
     entry_point="mcp_github:MCPGitHubPlugin",
     dependencies=[],
     config_schema={},
     tags=["mcp", "github", "git", "version-control", "code-search", "prs", "issues"],
     homepage="https://github.com",
-    repository="https://github.com/modelcontextprotocol/servers",
+    # GitHub's REST API reference - the thing this actually calls.
+    repository="https://docs.github.com/en/rest",
     license="MIT"
 )
