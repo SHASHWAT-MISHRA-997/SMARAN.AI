@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery } from 'lucide-react';
+import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear,} from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
 import { downloadProjectZip, downloadSingleFile } from '../utils/zip';
@@ -1311,6 +1311,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     () => localStorage.getItem('sm_wake_phrase') || WAKE_PHRASE_DEFAULT,
   );
   const wakeListenerRef = useRef(null);
+  // Whether the browser has a recogniser at all. Without this the toggle
+  // would offer something that silently never fires.
+  const wakeWordSupported = WakeWordListener.isSupported();
   const [isDictating, setIsDictating] = useState(false);
   const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'thinking' | 'speaking'
   const [voiceTranscript, setVoiceTranscript] = useState('');
@@ -3390,6 +3393,27 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               <Globe className={`w-3.5 h-3.5 ${isWebSearchEnabled ? 'animate-pulse text-blue-500' : ''}`} />
               <span>{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
             </button>
+
+            {/* Wake phrase. Sits here rather than inside voice mode because
+                the point of it is to work while you are typing: it listens
+                only for the phrase, and only when voice mode is closed. */}
+            {wakeWordSupported && (
+              <button
+                type="button"
+                onClick={() => setWakeWordEnabled((value) => !value)}
+                className={`h-8 px-2.5 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1 text-xs font-bold ${
+                  wakeWordEnabled
+                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+                title={wakeWordEnabled
+                  ? `Listening for "${wakePhrase}" while you type. Click to stop.`
+                  : `Listen for "${wakePhrase}" in the background`}
+              >
+                <Ear className={`w-3.5 h-3.5 ${wakeWordEnabled ? 'animate-pulse text-amber-500' : ''}`} />
+                <span>{wakeWordEnabled ? 'Wake ON' : 'Wake OFF'}</span>
+              </button>
+            )}
 
             {/* Compare */}
             <button

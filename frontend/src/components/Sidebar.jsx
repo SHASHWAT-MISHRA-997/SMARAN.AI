@@ -489,36 +489,32 @@ const Sidebar = ({
       <div className={`shrink-0 border-t border-zinc-300/60 dark:border-zinc-800/80 p-2 space-y-1 ${expanded ? '' : 'flex flex-col items-center'}`}>
         {expanded ? (
           <>
-            <button onClick={() => setIsModelHubOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
-              <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
-            </button>
-            <button onClick={onOpenWorkspace} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
-              <FolderOpen className="w-4 h-4 shrink-0 text-cyan-400" /> Project Folder
-            </button>
-            <button onClick={onOpenAnalytics} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-emerald-400 hover:bg-emerald-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
-              <Activity className="w-4 h-4 shrink-0 text-emerald-400" /> Analytics Dashboard
-            </button>
-            <button onClick={() => setIsMemoryOpen(true)} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
-              <Brain className="w-4 h-4 shrink-0" /> Manage AI Memory
-            </button>
-            {onOpenHub && (
-              <button onClick={onOpenHub} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-indigo-300 hover:bg-indigo-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
-                <Blocks className="w-4 h-4 shrink-0 text-indigo-300" /> Skills & Connectors
-              </button>
-            )}
-            {onOpenAuth && (
-              <button onClick={onOpenAuth} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-rose-400 hover:bg-rose-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
-                <LogIn className="w-4 h-4 shrink-0 text-rose-400" /> Sign In / Register
-              </button>
-            )}
-            {onOpenPairing && (
-              <button onClick={onOpenPairing} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-sky-400 hover:bg-sky-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
-                <QrCode className="w-4 h-4 shrink-0 text-sky-400" /> Link Your Phone
-              </button>
-            )}
-            <button onClick={onOpenDeveloper} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8 btn-lightning-hover sidebar-item-highlight sidebar-item-glow nav-neon sheen transition-all duration-300">
-              <UserCheck className="w-4 h-4 shrink-0 text-cyan-400" /> About Developer
-            </button>
+              {/* Eight stacked full-width rows pushed chat history off the screen
+                  entirely on a short window. Same eight destinations, laid out four
+                  to a row: two rows instead of eight, and the labels move into the
+                  tooltip rather than disappearing. */}
+              <div className="grid grid-cols-4 gap-1">
+                {[
+                  { key: 'models', label: 'Model Catalog & Matrix', icon: <Boxes className="w-4 h-4" />, tone: 'text-indigo-400 hover:bg-indigo-500/10', onClick: () => setIsModelHubOpen(true) },
+                  { key: 'folder', label: 'Project Folder', icon: <FolderOpen className="w-4 h-4" />, tone: 'text-cyan-400 hover:bg-cyan-500/10', onClick: onOpenWorkspace },
+                  { key: 'analytics', label: 'Analytics Dashboard', icon: <Activity className="w-4 h-4" />, tone: 'text-emerald-400 hover:bg-emerald-500/10', onClick: onOpenAnalytics },
+                  { key: 'memory', label: 'Manage AI Memory', icon: <Brain className="w-4 h-4" />, tone: 'text-violet-400 hover:bg-violet-500/10', onClick: () => setIsMemoryOpen(true) },
+                  onOpenHub && { key: 'hub', label: 'Skills & Connectors', icon: <Blocks className="w-4 h-4" />, tone: 'text-indigo-300 hover:bg-indigo-500/10', onClick: onOpenHub },
+                  onOpenAuth && { key: 'auth', label: 'Sign In / Register', icon: <LogIn className="w-4 h-4" />, tone: 'text-rose-400 hover:bg-rose-500/10', onClick: onOpenAuth },
+                  onOpenPairing && { key: 'pair', label: 'Link Your Phone', icon: <QrCode className="w-4 h-4" />, tone: 'text-sky-400 hover:bg-sky-500/10', onClick: onOpenPairing },
+                  { key: 'dev', label: 'About Developer', icon: <UserCheck className="w-4 h-4" />, tone: 'text-cyan-400 hover:bg-cyan-500/10', onClick: onOpenDeveloper },
+                ].filter(Boolean).map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={item.onClick}
+                    title={item.label}
+                    aria-label={item.label}
+                    className={`flex h-10 items-center justify-center rounded-xl border border-transparent cursor-pointer transition-all duration-300 ${item.tone}`}
+                  >
+                    {item.icon}
+                  </button>
+                ))}
+              </div>
 
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={() => onNavigate('settings')} className="flex items-center gap-2 px-3 py-2.5 border border-zinc-400 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:text-indigo-700 dark:hover:text-white hover:border-indigo-500 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow hover-lift transition-all duration-300 shadow-sm"><Settings className="w-4 h-4" /><span>Settings</span></button>
