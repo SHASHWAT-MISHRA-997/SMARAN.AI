@@ -359,6 +359,32 @@ app.include_router(office_router)
 from app.voice_local.routes import router as local_voice_router
 app.include_router(local_voice_router)
 
+# Where model weights sit and how to get the space back. No torch and no
+# GPU - it is directory sizes and a delete - so it is registered plainly.
+from app.storage import install_ollama, ollama_state, remove as _remove_model, usage as _model_usage
+
+
+@app.get("/api/models/storage")
+async def model_storage():
+    """What weights cost on this disk, measured per location."""
+    return _model_usage()
+
+
+@app.get("/api/models/engine")
+async def model_engine_state():
+    """Whether Ollama is installed, running, and has anything pulled."""
+    return ollama_state()
+
+
+@app.post("/api/models/engine/install")
+async def model_engine_install():
+    """Fetch Ollama's own installer and run it. Never automatic."""
+    from fastapi import HTTPException as _HTTPException
+    try:
+        return install_ollama()
+    except Exception as exc:
+        raise _HTTPException(status_code=400, detail=str(exc)) from exc
+
 # Spoken web navigation. The resolved URL opens in the user's own browser.
 from app.web_intents import detect_browser_command
 
@@ -415,7 +441,7 @@ app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="stati
 @app.get("/health")
 def healthcheck_ping():
     """Ultra-fast instant healthcheck endpoint for Docker, Launcher, and Extensions."""
-    return {"status": "ok", "app": "SMARAN.AI", "version": "2.8.3"}
+    return {"status": "ok", "app": "SMARAN.AI", "version": "2.8.4"}
 
 
 # CORS: local and private-network clients only.
@@ -6461,53 +6487,28 @@ async def delete_model_endpoint(
     request: Request,
     current_user: User = Depends(get_current_user)
 ):
-    """Permanently delete cached model weights and free VRAM/RAM disk space."""
+    """Delete a model everywhere it is, and report the space that came back.
+
+    The previous version searched six hard-coded paths, ran `ollama rm`
+    inside a bare `except: pass`, and returned deleted=true whenever it had
+    touched anything. It could not tell thirty gigabytes freed from nothing
+    at all. app.storage measures each location before removing it and the
+    figure below is the sum of what actually went.
+    """
     body = await request.json()
-    model_id = body.get("model_id", "").strip()
+    model_id = (body.get("model_id") or "").strip()
     if not model_id:
         raise HTTPException(status_code=400, detail="model_id is required.")
 
-    import shutil
-    import gc
-    model_entry = next((m for m in MODELS_CATALOG if m["id"] == model_id), None)
-    hf_repo = model_entry.get("hf_repo", model_id) if model_entry else model_id
-    hf_folder_name = f"models--{hf_repo.replace('/', '--')}"
-    
-    home_dir = os.path.expanduser("~")
-    data_dir = os.path.abspath(os.getenv("DATA_DIR", "./data"))
-    hf_home = os.path.abspath(os.getenv("HF_HOME", os.path.join(data_dir, "models")))
-    hub_cache = os.path.abspath(os.getenv("HUGGINGFACE_HUB_CACHE", os.path.join(hf_home, "hub")))
-    possible_dirs = [
-        os.path.join(hub_cache, hf_folder_name),
-        os.path.join(hf_home, "hub", hf_folder_name),
-        os.path.join(home_dir, ".cache", "huggingface", "hub", hf_folder_name),
-        os.path.join("/root/.cache/huggingface/hub", hf_folder_name),
-        os.path.join(data_dir, "models", "hub", hf_folder_name),
-        os.path.join(data_dir, "models", hf_folder_name),
-    ]
-    deleted = False
-    for d in possible_dirs:
-        if os.path.exists(d):
-            try:
-                shutil.rmtree(d, ignore_errors=True)
-                deleted = True
-                logger.info(f"Deleted model directory: {d}")
-            except Exception as e:
-                logger.error(f"Failed to delete model directory {d}: {e}")
+    entry = next((m for m in MODELS_CATALOG if m["id"] == model_id), None)
+    hf_repo = (entry or {}).get("hf_repo", model_id)
+    ollama_tag = _normalized_model_identifier((entry or {}).get("ollama_tag", ""))
 
-    try:
-        ollama_tag = _normalized_model_identifier(
-            model_entry.get("ollama_tag", "") if model_entry else ""
-        )
-        if ollama_tag in VERIFIED_OLLAMA_TAGS:
-            import subprocess
-            subprocess.run(["ollama", "rm", ollama_tag], check=False)
-            deleted = True
-    except Exception:
-        pass
+    result = _remove_model(model_id, hf_repo=hf_repo, ollama_tag=ollama_tag)
 
-    # Flush GPU VRAM & Garbage Collector
+    # Whatever was resident is no longer wanted either.
     try:
+        import gc
         gc.collect()
         import torch
         if torch.cuda.is_available():
@@ -6517,11 +6518,9 @@ async def delete_model_endpoint(
         pass
 
     _model_download_in_progress.discard(model_id)
-    return {
-        "message": f"Successfully deleted model weights for '{model_id}'. Disk space & VRAM reclaimed.",
-        "model_id": model_id,
-        "deleted": deleted
-    }
+    result["message"] = result["summary"]
+    result["deleted"] = bool(result["removed"])
+    return result
 
 
 # System Agent routes

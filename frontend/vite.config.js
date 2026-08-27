@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 // Change this version to force new asset hashes and bust browser caches.
-const BUILD_VERSION = 'v2.8.3';
+const BUILD_VERSION = 'v2.8.4';
 
 // https://vite.dev/config/
 export default defineConfig({

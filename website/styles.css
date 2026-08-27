@@ -715,7 +715,11 @@ main, .nav, .foot { position: relative; z-index: 3; }
 
 /* --- download --------------------------------------------------------- */
 
-.dl-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+/* Three cards in two columns left the third alone with a hole beside it.
+   Three columns at the width they fit, so the row simply completes. */
+.dl-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+@media (min-width: 720px)  { .dl-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1120px) { .dl-grid { grid-template-columns: repeat(3, 1fr); } }
 
 .dl-card {
   position: relative; overflow: hidden;
@@ -1364,27 +1368,10 @@ html.motion-calm .reveal { opacity: 1; transform: none; transition: none; }
    Stat band
    --------------------------------------------------------------------- */
 
-.statband {
-  padding: 56px 0;
-  border-block: 1px solid var(--line);
-  background:
-    radial-gradient(70% 140% at 50% 50%, rgba(239, 68, 68, .09), transparent 70%),
-    rgba(0, 0, 0, .35);
-}
-.statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; text-align: center; }
-.stat b {
-  display: block;
-  font-size: clamp(2.1rem, 5vw, 3.2rem); font-weight: 900; letter-spacing: -.03em;
-  background: linear-gradient(180deg, #fff, #fca5a5 60%, var(--red));
-  -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent; color: transparent;
-  filter: drop-shadow(0 0 18px rgba(239, 68, 68, .35));
-  line-height: 1.1;
-}
-.stat span {
-  font-family: var(--mono); font-size: .72rem;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
-}
+
+
+
+
 
 /* ---------------------------------------------------------------------
    Ecosystem row
@@ -2136,11 +2123,7 @@ html.light .section.alt {
     rgba(15, 15, 20, .02);
 }
 html.light .marquee { background: rgba(217, 38, 38, .05); }
-html.light .statband {
-  background:
-    radial-gradient(70% 140% at 50% 50%, rgba(217, 38, 38, .07), transparent 70%),
-    rgba(255, 255, 255, .6);
-}
+
 html.light .cta-inner { background: rgba(255, 255, 255, .8); }
 html.light .nav.stuck {
   background: rgba(247, 247, 249, .88);

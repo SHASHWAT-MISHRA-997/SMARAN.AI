@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=f00030240b" />
+<link rel="stylesheet" href="styles.css?v=7bde18396c" />
 </head>
 
 <body>
@@ -177,10 +177,6 @@
 
 
 
-      <ul class="hero-marks reveal" data-delay="4">
-        <li><b>No subscription.</b> Not a trial.</li>
-        <li><b>Works offline</b> once a model is downloaded.</li>
-      </ul>
     </div>
 
     <!-- The mark, given depth: rotating rings, a lit core, orbiting sparks. -->
@@ -538,14 +534,6 @@
 </section>
 
 <!-- ============================ STATS ============================ -->
-<section class="statband">
-  <div class="wrap statgrid">
-    <div class="stat reveal"><b data-count="63">0</b><span>models in the hub</span></div>
-    <div class="stat reveal" data-delay="1"><b data-count="9">0</b><span>screen sizes tested</span></div>
-    <div class="stat reveal" data-delay="2"><b data-count="3">0</b><span>platforms shipped</span></div>
-    <div class="stat reveal" data-delay="3"><b data-count="0">0</b><span>rupees per month</span></div>
-  </div>
-</section>
 
 <!-- ============================ HOW ============================= -->
 <section class="section alt" id="how">
@@ -609,7 +597,7 @@
           <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10 4.6v6.9H3V5.5Zm0 13 7 .9v-6.8H3v5.9Zm8 1 10 1.3V12.5H11v7Zm0-15.9v7h10V3.2L11 4.6Z"/></svg>
           <div>
             <h3>Windows</h3>
-            <p class="dl-meta">10 &amp; 11 · 64-bit · 233 MB</p>
+            <p class="dl-meta">10 &amp; 11 · 64-bit · 260 MB</p>
           </div>
         </div>
         <a class="btn btn-primary block no-lift" id="dlWin"
@@ -621,7 +609,7 @@
           <li>Disk depends entirely on which models you download</li>
           <li>A GPU makes it faster; it is not required</li>
           <li>Webcam only if you want vision or gestures</li>
-          <li>Ollama installed separately, for running models locally</li>
+          <li>Ollama runs local models; the app can install it for you</li>
         </ul>
         <p class="dl-note">
           Windows may warn about an unrecognised publisher — the app is not
@@ -958,6 +946,8 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
             <li>Your conversation history</li>
             <li>Any API keys you enter</li>
             <li>Camera and microphone input</li>
+            <li>The live voice call on the Local engine &mdash; heard, answered and
+                spoken here, with the network off</li>
           </ul>
         </div>
         <div class="pcol warn reveal" data-delay="1">
@@ -966,10 +956,12 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
             <li>Cloud models — only after you add a key, and only the message you send</li>
             <li>Web search — only when you switch it on</li>
             <li>
-              <b>The live voice call</b> — Speak is served by Google's Gemini
-              Live, so while a call is open your microphone audio goes to Google,
-              and your camera or screen too if you switch one on. It needs a
-              Gemini key and a connection. Typing to a local model does not.
+              <b>The live voice call, on the Gemini engine</b> — while a call is
+              open your microphone audio goes to Google, and your camera or screen
+              too if you switch one on. It needs a Gemini key and a connection.
+              The call bar has a second engine, <b>Local</b>, which does none of
+              that: it listens, thinks and speaks on this machine and needs no key.
+              It cannot see a screen or a camera — only Gemini can.
             </li>
           </ul>
         </div>
@@ -995,7 +987,7 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
       </details>
       <details class="reveal">
         <summary>Do I need internet?</summary>
-        <p>To download the app, Ollama and a model, yes. After that typing to a local model works with the network off. Web search and cloud models obviously need a connection — and so does Speak, the live voice call, which is served by Google's Gemini Live and needs a Gemini key. Offline speech is text-to-speech only, and English only.</p>
+        <p>To download the app, Ollama and a model, yes. After that typing to a local model works with the network off. Web search and cloud models obviously need a connection — Speak has two engines: the Gemini one needs a key and a connection, the Local one needs neither — it listens, thinks and speaks on your own machine, so a voice call works with the network off too. Offline speech is text-to-speech only, and English only.</p>
       </details>
       <details class="reveal">
         <summary>What hardware do I need?</summary>
@@ -1015,7 +1007,7 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
       </details>
       <details class="reveal">
         <summary>Is the source available?</summary>
-        <p>The code is on GitHub. Note that there is no licence file yet, so it is not correct to call it open source — read it, build it, but the owner has not granted redistribution rights.</p>
+        <p>Not yet. The repository is private — a link to it returns a 404 for anyone but the owner — and there is no licence file, which means it would not be correct to call it open source even once it opens. The released builds are public; the source is not.</p>
       </details>
     </div>
   </div>
