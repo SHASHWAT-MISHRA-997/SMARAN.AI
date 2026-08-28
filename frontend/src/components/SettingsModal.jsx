@@ -320,9 +320,9 @@ const SettingsModal = ({
                     className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-xs font-bold text-zinc-900 dark:text-white outline-none focus:border-indigo-500"
                   >
                     <option value="auto">Auto (Smart Routing - Fastest available)</option>
-                    <option value="deepseek-coder:6.7b">DeepSeek Coder 6.7B (Local Optimized)</option>
-                    <option value="llama3.2:3b">Llama 3.2 3B Instruct (Ultra Fast)</option>
-                    <option value="qwen2.5-coder:7b">Qwen 2.5 Coder 7B (Full Precision)</option>
+                    {!isMobile && <option value="deepseek-coder:6.7b">DeepSeek Coder 6.7B (Local Optimized)</option>}
+                    {!isMobile && <option value="llama3.2:3b">Llama 3.2 3B Instruct (Ultra Fast)</option>}
+                    {!isMobile && <option value="qwen2.5-coder:7b">Qwen 2.5 Coder 7B (Full Precision)</option>}
                   </select>
                 </div>
 
@@ -340,7 +340,7 @@ const SettingsModal = ({
                     </select>
                   </div>
 
-                  <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-2">
+                  {!isMobile && <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-2">
                     <span className="block text-xs font-black text-zinc-900 dark:text-white">Hardware Performance Panel</span>
                     <select
                       value={performancePosition}
@@ -351,7 +351,7 @@ const SettingsModal = ({
                       <option value="left">Left Panel</option>
                       <option value="hidden">Hidden</option>
                     </select>
-                  </div>
+                  </div>}
                 </div>
               </div>
             )}

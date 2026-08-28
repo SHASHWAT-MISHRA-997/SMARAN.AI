@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear,} from 'lucide-react';
+import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch,} from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
 import { downloadProjectZip, downloadSingleFile } from '../utils/zip';
@@ -1247,9 +1247,11 @@ const voiceGender = (name = '') => {
   return '';
 };
 
-const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenDeveloper }) => {
+const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenDeveloper, onOpenWorkspace }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  const inputValueRef = useRef('');
+  useEffect(() => { inputValueRef.current = input; }, [input]);
   const [telemetry, setTelemetry] = useState(null);
   const [streaming, setStreaming] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -1270,6 +1272,25 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [isModelNoticeExpanded, setIsModelNoticeExpanded] = useState(false);
   // Language Selector  - English, Hindi
   const [selectedLanguage, setSelectedLanguage] = useState(() => localStorage.getItem('sm_response_language') || 'en');
+  const [workspaceStatus, setWorkspaceStatus] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshWorkspace = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/workspace/status`, { credentials: 'include' });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled) setWorkspaceStatus(data);
+      } catch (_) {
+        // Project context is optional; chat remains available without it.
+      }
+    };
+    refreshWorkspace();
+    window.addEventListener('focus', refreshWorkspace);
+    const timer = window.setInterval(refreshWorkspace, 5000);
+    return () => { cancelled = true; window.removeEventListener('focus', refreshWorkspace); window.clearInterval(timer); };
+  }, []);
   const [translatedResponse, setTranslatedResponse] = useState(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const translateTimerRef = useRef(null);
@@ -1321,6 +1342,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [isSpeakingAudio, setIsSpeakingAudio] = useState(false);
   const [micVolume, setMicVolume] = useState(0);
   const recognitionRef = useRef(null);
+  const sidebarDictationRef = useRef(null);
   const audioContextRef = useRef(null);
   const micStreamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -1645,6 +1667,90 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     setVoiceState('idle');
   };
 
+  // Sidebar Voice is continuous dictation into the composer. Speak remains a
+  // separate two-way voice conversation with spoken assistant responses.
+  useEffect(() => {
+    const stop = () => {
+      const active = sidebarDictationRef.current;
+      if (active?.kind === 'recording') {
+        try { active.recorder.stop(); } catch (_) {}
+        active.stream?.getTracks?.().forEach((track) => track.stop());
+      } else {
+        try { active?.stop?.(); } catch (_) {}
+      }
+      sidebarDictationRef.current = null;
+      setIsDictating(false);
+      window.dispatchEvent(new CustomEvent('smaran:dictation-state', { detail: { active: false } }));
+    };
+    const startRecordedDictation = async () => {
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        window.dispatchEvent(new CustomEvent('smaran:dictation-error', { detail: { message: 'This browser cannot access a microphone for dictation.' } }));
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+        const recorder = new MediaRecorder(stream, { mimeType });
+        const startingText = inputValueRef.current.trim();
+        audioChunksRef.current = [];
+        recorder.ondataavailable = (event) => { if (event.data?.size) audioChunksRef.current.push(event.data); };
+        recorder.onstop = async () => {
+          const transcript = await transcribeRecordedAudio();
+          if (transcript) setInput([startingText, transcript].filter(Boolean).join(' ').trim());
+          else window.dispatchEvent(new CustomEvent('smaran:dictation-error', { detail: { message: 'No speech was recognized. Check microphone permission, then try again.' } }));
+        };
+        sidebarDictationRef.current = { kind: 'recording', recorder, stream };
+        recorder.start(250);
+        setIsDictating(true);
+        composerRef.current?.focus?.();
+        window.dispatchEvent(new CustomEvent('smaran:dictation-state', { detail: { active: true } }));
+      } catch (error) {
+        const message = error?.name === 'NotAllowedError'
+          ? 'Microphone permission was denied. Allow it in the app or browser settings, then try again.'
+          : 'Microphone could not be started.';
+        window.dispatchEvent(new CustomEvent('smaran:dictation-error', { detail: { message } }));
+      }
+    };
+    const toggle = async () => {
+      if (sidebarDictationRef.current) { stop(); return; }
+      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!Recognition) {
+        await startRecordedDictation();
+        return;
+      }
+      const recognition = new Recognition();
+      recognition.lang = getRecognitionLang(selectedLanguage);
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      const startingText = inputValueRef.current.trim();
+      recognition.onresult = (event) => {
+        let finalText = ''; let interimText = '';
+        for (let i = 0; i < event.results.length; i += 1) {
+          const text = event.results[i][0]?.transcript || '';
+          if (event.results[i].isFinal) finalText += text; else interimText += text;
+        }
+        setInput([startingText, finalText, interimText].filter(Boolean).join(' ').trim());
+      };
+      recognition.onerror = (event) => {
+        const message = event.error === 'not-allowed' || event.error === 'service-not-allowed'
+          ? 'Microphone permission was denied. Allow it in the app or browser settings, then try again.'
+          : event.error === 'aborted' ? '' : `Voice dictation stopped: ${event.error || 'unknown error'}.`;
+        if (message) window.dispatchEvent(new CustomEvent('smaran:dictation-error', { detail: { message } }));
+        stop();
+      };
+      recognition.onend = () => { if (sidebarDictationRef.current === recognition) stop(); };
+      sidebarDictationRef.current = recognition;
+      try {
+        recognition.start();
+        setIsDictating(true);
+        composerRef.current?.focus?.();
+        window.dispatchEvent(new CustomEvent('smaran:dictation-state', { detail: { active: true } }));
+      } catch (_) { stop(); }
+    };
+    window.addEventListener('smaran:toggle-dictation', toggle);
+    return () => { window.removeEventListener('smaran:toggle-dictation', toggle); stop(); };
+  }, [selectedLanguage]);
+
   const composerRef = useRef(null);
   const [clientDevice, setClientDevice] = useState(null);
 
@@ -1719,7 +1825,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
   const handleInputChange = (event) => {
-    setInput(event.target.value);
+    const nextValue = event.target.value;
+    setInput(nextValue);
+    window.dispatchEvent(new CustomEvent('smaran:pet-state', {
+      detail: { state: nextValue.trim() ? 'typing' : 'idle', message: '' },
+    }));
     autoSizeComposer(event.target);
   };
 
@@ -2432,6 +2542,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     if (e && e.preventDefault) e.preventDefault();
     const userPrompt = (directPrompt || input || '').trim();
     if (!userPrompt || streaming) return;
+    window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'running', message: 'Working on it…' } }));
 
     // Spoken turns are answered conversationally, without web/document grounding.
     const isVoiceTurn = Boolean(isVoicePrompt || isVoiceModeOpenRef.current);
@@ -2515,6 +2626,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               );
               setStreaming(false);
               streamingRef.current = false;
+              window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'waiting', message: 'Your approval is needed' } }));
               if (isVoicePrompt && isVoiceModeOpen) {
                 speakText(`Confirmation required for ${execData.title || action}. Please confirm on your screen.`);
               }
@@ -2549,6 +2661,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               );
               setStreaming(false);
               streamingRef.current = false;
+              window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'waving', message: 'Done!' } }));
               if (isVoicePrompt || isVoiceModeOpen || isVoiceModeOpenRef.current) {
                 speakText(execData.message || 'Done, sir.');
               }
@@ -2657,6 +2770,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                 }
               }
               if (parsed.token) {
+                if (!fullResponseText) window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'review', message: 'Answering…' } }));
                 fullResponseText += parsed.token;
                 incomingQueueRef.current.push(parsed.token);
                 if (!typewriterTimerRef.current) {
@@ -2699,6 +2813,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       }
     } catch (err) {
       console.error(err);
+      window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'failed', message: 'Something went wrong' } }));
       const errMsg = `Request failed: ${err.message || 'Unable to communicate with the AI model.'}`;
       fullResponseText = errMsg;
       displayedResponse = errMsg;
@@ -2725,6 +2840,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       );
       setStreaming(false);
       streamingRef.current = false;
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'idle', message: '' } })), 1300);
       if (isVoicePrompt || isVoiceModeOpen || isVoiceModeOpenRef.current) {
         const finalVoiceReply = finalResult || (selectedLanguage === 'hi' ? "मॉडल से कोई उत्तर नहीं मिला। कृपया मॉडल या API स्थिति जाँचें।" : "The selected model returned no answer. Please check its runtime or API status.");
         setVoiceAiResponse(finalVoiceReply);
@@ -2796,7 +2912,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     if (pending) {
       if (matchesWord(queryText, NEGATIVE_WORDS)) {
         pendingVoiceCommandRef.current = null;
-        emitVoiceReply(selectedLanguage === 'en' ? 'Cancelled.' : 'ठीक है, रद्द कर दिया।');
+        emitVoiceReply(selectedLanguage === 'en' ? 'Cancelled.' : 'Action cancelled.');
         return true;
       }
       if (matchesWord(queryText, AFFIRMATIVE_WORDS)) {
@@ -2810,7 +2926,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           const data = await res.json();
           emitVoiceReply(data?.message || 'Done.');
         } catch (_) {
-          emitVoiceReply(selectedLanguage === 'en' ? 'That action could not be completed.' : 'यह क्रिया पूरी नहीं हो सकी।');
+          emitVoiceReply(selectedLanguage === 'en' ? 'That action could not be completed.' : 'Action could not be completed.');
         }
         return true;
       }
@@ -2902,7 +3018,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               data-testid="performance-toggle"
               onClick={onTogglePanel}
               title="Toggle Performance Panel"
-              className="p-2 rounded-xl bg-indigo-50 dark:bg-zinc-900 hover:bg-indigo-100 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-zinc-800 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 shadow-xs hover:scale-105 transition-all cursor-pointer flex items-center gap-1.5 font-bold text-xs"
+              className="hidden md:flex p-2 rounded-xl bg-indigo-50 dark:bg-zinc-900 hover:bg-indigo-100 dark:hover:bg-indigo-950/50 border border-indigo-200 dark:border-zinc-800 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 shadow-xs hover:scale-105 transition-all cursor-pointer items-center gap-1.5 font-bold text-xs"
             >
               <LayoutDashboard className="w-4 h-4" />
               <span className="hidden md:inline text-[11px]">Performance</span>
@@ -2911,13 +3027,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         </div>
       </div>
 
-      {/* Single Row Real-Time Hardware & Speed Telemetry Ribbon (Auto-adjusts with panel) */}
-      {/* Telemetry ribbon — wraps on small screens so every chip is readable
-          without dragging the row sideways. */}
-      <div className="w-full px-3 sm:px-6 py-1.5 bg-white/80 dark:bg-zinc-950/60 backdrop-blur-md border-b border-zinc-200/70 dark:border-zinc-800/60 flex flex-wrap items-center gap-x-1.5 gap-y-1 sm:gap-x-2.5 font-mono text-[10px] sm:text-[11px] select-none shrink-0 z-10 transition-all duration-300">
-        {/* `contents` lets every chip flow in the parent's single wrap context,
-            so they pack into two tidy rows instead of each group wrapping
-            separately and spilling onto a third. */}
+      {/* Single Row Real-Time Hardware & Speed Telemetry Ribbon (Hidden on mobile per user request) */}
+      <div className="hidden sm:flex w-full px-3 sm:px-6 py-1.5 bg-white/80 dark:bg-zinc-950/60 backdrop-blur-md border-b border-zinc-200/70 dark:border-zinc-800/60 flex-wrap items-center gap-x-1.5 gap-y-1 sm:gap-x-2.5 font-mono text-[10px] sm:text-[11px] select-none shrink-0 z-10 transition-all duration-300">
         <div className="contents">
           {/* Real Client Active Device (Mobile / Tablet / Laptop) */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-700 dark:text-indigo-300 font-bold" title={`Browser-reported client hint: ${reportedDevice} (${reportedOs}). Browser hints can be unavailable or spoofed.`}>
@@ -2964,7 +3075,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           </div>
 
           {/* Response Latency */}
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-700 dark:text-indigo-300 font-bold">
+          <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-700 dark:text-indigo-300 font-bold">
             <Timer className="w-3 h-3 text-indigo-500 shrink-0" />
             <span className="hidden sm:inline">Latency:</span>
             <span className="text-indigo-600 dark:text-indigo-400 font-black">
@@ -3183,8 +3294,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
       {/* Input Box Console — Responsive: Clean 2-tier toolbar on Mobile (<640px) | Single unified capsule on Desktop (≥640px) */}
       <div className="px-2 sm:px-5 pb-3 sm:pb-5 pt-1 bg-transparent shrink-0 relative z-10 w-full max-w-full">
+        <div className="mx-auto mb-2 hidden max-w-4xl items-center gap-1.5 sm:flex">
+          <span className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 px-2.5 text-[11px] font-semibold text-zinc-300">
+          <Laptop className="h-3.5 w-3.5 text-indigo-400" /> Local
+          </span>
+          <button type="button" onClick={onOpenWorkspace}
+            className="inline-flex h-8 max-w-[280px] items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 px-2.5 text-[11px] font-semibold text-zinc-200 transition hover:border-indigo-500/60 hover:bg-zinc-800"
+            title={workspaceStatus?.open ? workspaceStatus.root : 'Workspace active'}>
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+            <span className="truncate">{workspaceStatus?.open ? String(workspaceStatus.root).split(/[\\/]/).filter(Boolean).pop() : 'SMARAN Workspace'}</span>
+          </button>
+          <span title={`Git branch: ${workspaceStatus?.git?.branch || 'main'}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 px-2.5 text-[11px] font-semibold text-zinc-300">
+            <GitBranch className="h-3.5 w-3.5 text-emerald-400" /> {workspaceStatus?.git?.branch || 'main'}
+          </span>
+        </div>
         <form data-testid="chat-composer" onSubmit={handleSend} className="composer-shell max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 bg-gradient-to-b from-white/95 to-zinc-50/90 dark:from-zinc-900/95 dark:to-zinc-950/95 border border-indigo-300/60 dark:border-indigo-500/35 rounded-2xl sm:rounded-3xl p-2.5 sm:p-2.5 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.55)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all w-full overflow-hidden">
-          
           {/* Hidden file inputs */}
           <input
             type="file"
@@ -3214,7 +3338,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             </button>
           </div>
 
-          {/* Main Textarea Area (100% full width with attached send button on mobile, flex-1 on desktop) */}
+          {/* Main Textarea Area */}
           <div className="composer-input w-full sm:flex-1 relative min-w-0 flex items-center gap-1.5 order-first sm:order-none">
             <textarea
               ref={composerRef}
@@ -3244,119 +3368,109 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               <span className="absolute right-10 sm:right-2 top-2 text-[10px] text-indigo-500 font-bold animate-pulse">Translating...</span>
             )}
             
-            {/* Mobile Send Button — Attached directly to textarea, never overflows */}
+            {/* Mobile Send Button */}
             <button
               type="submit"
               disabled={!activeSessionId || !input.trim() || streaming || directUploading}
-              className="composer-compact-send sm:hidden w-8 h-8 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 text-white items-center justify-center shrink-0 shadow-md shadow-indigo-500/30 transition-all cursor-pointer disabled:opacity-30 disabled:shadow-none"
+              className="composer-compact-send sm:hidden w-8 h-8 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-500/30 transition-all cursor-pointer disabled:opacity-30 disabled:shadow-none"
               title="Send Message"
             >
               <Send className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Mobile Toolbar: Row 1 & Row 2 (sm:hidden) */}
-          <div className="composer-compact-tools sm:hidden w-full flex-col gap-1.5 pt-2 border-t border-zinc-200/70 dark:border-zinc-800/80">
-            {/* Mobile Tier 1: Attachments & Grounding Mode */}
-            <div className="flex items-center justify-between gap-1 w-full">
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={!activeSessionId || directUploading}
-                  className="flex items-center gap-1 px-2 py-1 bg-zinc-100 dark:bg-zinc-800/90 text-zinc-700 dark:text-zinc-300 rounded-lg text-[10px] font-bold border border-zinc-200 dark:border-zinc-700/60 cursor-pointer disabled:opacity-35"
-                  title="Attach Files"
-                >
-                  <Upload className="w-3 h-3 text-indigo-500" />
-                  <span>File</span>
-                </button>
+          {/* Mobile Tools Strip (sm:hidden) — Single Touch-Scrollable Action Bar */}
+          <div className="composer-compact-tools sm:hidden w-full flex items-center gap-1.5 pt-2 border-t border-zinc-200/70 dark:border-zinc-800/80 overflow-x-auto no-scrollbar py-0.5">
+            {/* Speak Button — Prominent Primary Mobile Action */}
+            <button
+              type="button"
+              onClick={openVoiceMode}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-fuchsia-600 text-white rounded-xl font-black text-xs shadow-md shadow-violet-500/25 cursor-pointer hover:scale-105 active:scale-95 transition-all shrink-0"
+              title="Real-time Voice Mode (Speak & AI Responds Aloud)"
+            >
+              <Volume2 className="w-3.5 h-3.5 animate-pulse" />
+              <span>Speak</span>
+            </button>
 
-                <button
-                  type="button"
-                  onClick={() => folderInputRef.current?.click()}
-                  disabled={!activeSessionId || directUploading}
-                  className="flex items-center gap-1 px-2 py-1 bg-zinc-100 dark:bg-zinc-800/90 text-indigo-600 dark:text-indigo-400 rounded-lg text-[10px] font-bold border border-zinc-200 dark:border-zinc-700/60 cursor-pointer disabled:opacity-35"
-                  title="Upload Entire Folder"
-                >
-                  <FolderPlus className="w-3 h-3" />
-                  <span>Folder</span>
-                </button>
+            {/* File Attach */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!activeSessionId || directUploading}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl text-xs font-bold border border-zinc-200 dark:border-zinc-700/60 cursor-pointer disabled:opacity-35 shrink-0"
+              title="Attach Files"
+            >
+              <Upload className="w-3.5 h-3.5 text-indigo-500" />
+              <span>File</span>
+            </button>
 
-              </div>
+            {/* Folder Attach */}
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              disabled={!activeSessionId || directUploading}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold border border-zinc-200 dark:border-zinc-700/60 cursor-pointer disabled:opacity-35 shrink-0"
+              title="Upload Folder"
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+              <span>Folder</span>
+            </button>
 
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setIsRagEnabled(!isRagEnabled)}
-                  disabled={!activeSessionId || directUploading}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black border transition-all cursor-pointer ${
-                    isRagEnabled
-                      ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/40 shadow-xs'
-                      : 'bg-zinc-100 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700/60'
-                  }`}
-                  title={isRagEnabled ? 'RAG Mode Active' : 'Direct AI Mode'}
-                >
-                  <Brain className={`w-2.5 h-2.5 ${isRagEnabled ? 'text-purple-600 dark:text-purple-400' : ''}`} />
-                  <span>{isRagEnabled ? 'RAG' : 'AI'}</span>
-                </button>
+            {/* RAG Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsRagEnabled(!isRagEnabled)}
+              disabled={!activeSessionId || directUploading}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+                isRagEnabled
+                  ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/40 shadow-xs'
+                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700/60'
+              }`}
+              title={isRagEnabled ? 'RAG Mode Active' : 'Direct AI Mode'}
+            >
+              <Brain className={`w-3.5 h-3.5 ${isRagEnabled ? 'text-purple-600 dark:text-purple-400' : ''}`} />
+              <span>{isRagEnabled ? 'RAG' : 'Direct AI'}</span>
+            </button>
 
-                <button
-                  type="button"
-                  onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
-                  disabled={!activeSessionId || directUploading}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black border transition-all cursor-pointer ${
-                    isWebSearchEnabled
-                      ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-500/40 shadow-xs'
-                      : 'bg-zinc-100 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700/60'
-                  }`}
-                  title={isWebSearchEnabled ? 'Live Web Search Active' : 'Web Search Inactive'}
-                >
-                  <Globe className={`w-2.5 h-2.5 ${isWebSearchEnabled ? 'animate-pulse text-blue-500' : ''}`} />
-                  <span>{isWebSearchEnabled ? 'WEB' : 'WEB'}</span>
-                </button>
-              </div>
-            </div>
+            {/* Web Search Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+              disabled={!activeSessionId || directUploading}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+                isWebSearchEnabled
+                  ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-500/40 shadow-xs'
+                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700/60'
+              }`}
+              title={isWebSearchEnabled ? 'Live Web Search Active' : 'Web Search Inactive'}
+            >
+              <Globe className={`w-3.5 h-3.5 ${isWebSearchEnabled ? 'animate-pulse text-blue-500' : ''}`} />
+              <span>{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
+            </button>
 
-            {/* Mobile Tier 2: Compare, Language, Mic, Speak */}
-            <div className="flex items-center gap-1 w-full min-w-0 pt-1">
-              <div className="flex items-center gap-1 min-w-0 flex-1">
-                <button
-                  type="button"
-                  onClick={() => { setComparePrompt(input); setIsModelCompareOpen(true); }}
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/30 cursor-pointer shrink-0"
-                  title="Compare Models Side-by-Side"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span>Compare</span>
-                </button>
+            {/* Compare Mode */}
+            <button
+              type="button"
+              onClick={() => { setComparePrompt(input); setIsModelCompareOpen(true); }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/30 cursor-pointer shrink-0"
+              title="Compare Models Side-by-Side"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Compare</span>
+            </button>
 
-                {/* The language name must stay fully readable: a fixed narrow
-                    cap clipped names like "English" mid-word on phones. */}
-                <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-700 rounded-lg pl-1.5 pr-1 py-1 shadow-xs min-w-0 flex-1" title="Response Language">
-                  <Globe className="w-3 h-3 text-indigo-400 shrink-0" />
-                  <select
-                    value={selectedLanguage}
-                    onChange={(e) => setSelectedLanguage(e.target.value)}
-                    className="text-[11px] font-bold text-zinc-100 bg-zinc-900 outline-none cursor-pointer min-w-0 w-full truncate"
-                  >
-                    {LANGUAGES.map((l) => (
-                      <option key={l.code} value={l.code} className="bg-zinc-900 text-zinc-100 font-bold">{l.flag} {l.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={openVoiceMode}
-                  className="flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-fuchsia-600 text-white rounded-lg font-black text-[11px] shadow-sm cursor-pointer hover:scale-105 active:scale-95 transition-all"
-                  title="Real-time Voice Mode (Speak & AI Responds Aloud)"
-                >
-                  <Volume2 className="w-3.5 h-3.5 animate-pulse" />
-                  <span>Speak</span>
-                </button>
-              </div>
+            {/* Language Selector */}
+            <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-2 py-1 shrink-0" title="Response Language">
+              <Globe className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+              <select
+                value={selectedLanguage}
+                onChange={(e) => setSelectedLanguage(e.target.value)}
+                className="text-xs font-bold text-zinc-900 dark:text-zinc-100 bg-transparent outline-none cursor-pointer"
+              >
+                {LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-bold">{l.flag} {l.name}</option>
+                ))}
+              </select>
             </div>
           </div>
 
