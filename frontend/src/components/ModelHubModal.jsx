@@ -69,7 +69,12 @@ const CLOUD_PROVIDERS = [
 ];
 
 const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
-  const [activeTab, setActiveTab] = useState('local'); // 'local' | 'cloud'
+  const mobileDevice = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
+  const [activeTab, setActiveTab] = useState(() => mobileDevice ? 'cloud' : 'local'); // 'local' | 'cloud'
+
+  useEffect(() => {
+    if (isOpen && mobileDevice) setActiveTab('cloud');
+  }, [isOpen, mobileDevice]);
   const [catalog, setCatalog] = useState([]);
   const [userGpuVram, setUserGpuVram] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -420,7 +425,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
           <div className="px-6 pt-3 pb-0 bg-zinc-900/30 border-b border-zinc-800/80 flex items-center gap-2 shrink-0 overflow-x-auto">
             <button
               onClick={() => setActiveTab('local')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-t-2xl text-xs font-black transition-all border-t border-x cursor-pointer ${
+              className={`hidden md:flex items-center gap-2 px-4 py-2.5 rounded-t-2xl text-xs font-black transition-all border-t border-x cursor-pointer ${
                 activeTab === 'local'
                   ? 'bg-zinc-950 border-zinc-800 text-indigo-400 shadow-md'
                   : 'bg-zinc-900/40 border-transparent text-zinc-400 hover:text-zinc-200'

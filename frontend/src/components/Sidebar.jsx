@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom';
 import {
   MessageSquare, Plus, Trash2, X,
   Settings, Pencil, Check, Brain, Sparkles,
-  ChevronLeft, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, User,
-  Activity, LayoutDashboard, QrCode, LogIn, Blocks, FolderOpen,} from 'lucide-react';
+  ChevronLeft, ChevronDown, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, User,
+  Activity, LayoutDashboard, QrCode, LogIn, Blocks, FolderOpen, Globe2, Volume2, ArrowDownToLine
+} from 'lucide-react';
 import ModelHubModal from './ModelHubModal';
 import { SmaranLogo } from './SmaranLogo';
 import { API_BASE, logoutUser, getCurrentUser, fetchWithAuth } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
-
 
 /* Tooltip uses a React Portal so parent overflow never clips it. */
 const Tip = ({ label, children }) => {
@@ -65,8 +65,7 @@ const Tip = ({ label, children }) => {
   );
 };
 
-
-/* Collapsed icon button */
+/* Collapsed icon button with high contrast in light & dark modes */
 const RailBtn = ({ icon, label, onClick, active = false, danger = false, violet = false }) => (
   <Tip label={label}>
     <button
@@ -75,16 +74,15 @@ const RailBtn = ({ icon, label, onClick, active = false, danger = false, violet 
       aria-label={label}
       title={label}
       className={`
-        flex flex-col items-center justify-center gap-1 w-12 h-12 rounded-xl
-        transition-all duration-200 cursor-pointer group relative
-        btn-lightning-hover sidebar-item-highlight nav-neon sheen
+        flex flex-col items-center justify-center gap-1 w-11 h-11 rounded-xl
+        transition-all duration-200 cursor-pointer group relative border
         ${active
-          ? 'bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-400/40'
+          ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-500/20'
           : danger
-            ? 'text-rose-400 hover:bg-rose-500/15 hover:text-rose-300'
+            ? 'text-rose-500 hover:bg-rose-500/15 border-transparent'
             : violet
-              ? 'text-violet-400 hover:bg-violet-500/15 hover:text-violet-300'
-              : 'text-zinc-400 hover:bg-zinc-700/60 hover:text-white'
+              ? 'text-violet-600 dark:text-violet-400 hover:bg-violet-500/15 border-transparent'
+              : 'text-zinc-700 dark:text-zinc-200 bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-white shadow-xs'
         }
       `}
     >
@@ -92,7 +90,6 @@ const RailBtn = ({ icon, label, onClick, active = false, danger = false, violet 
     </button>
   </Tip>
 );
-
 
 const Sidebar = ({
   token, user, sessions, activeSessionId, setActiveSessionId,
@@ -104,15 +101,44 @@ const Sidebar = ({
   setIsModelHubOpen: externalSetIsModelHubOpen,
   onModelChange, position = 'left',
   onTogglePerformance, showPerformance, onOpenAnalytics,
-  onOpenDeveloper, onOpenPairing, onOpenAuth, onOpenHub,
+  onOpenDeveloper, onOpenPairing, onOpenAuth,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showUtilityMenu, setShowUtilityMenu] = useState(false);
+  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(false);
+  const [dictationError, setDictationError] = useState('');
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
+  const isLoggedIn = Boolean(user || token || (typeof window !== 'undefined' && localStorage.getItem('sm_token')));
+
+  useEffect(() => {
+    const openMemory = () => setIsMemoryOpen(true);
+    const dictationState = (event) => setVoiceOutputEnabled(Boolean(event.detail?.active));
+    const dictationFailed = (event) => setDictationError(event.detail?.message || 'Voice dictation could not start.');
+    window.addEventListener('smaran:open-memory', openMemory);
+    window.addEventListener('smaran:dictation-state', dictationState);
+    window.addEventListener('smaran:dictation-error', dictationFailed);
+    return () => {
+      window.removeEventListener('smaran:open-memory', openMemory);
+      window.removeEventListener('smaran:dictation-state', dictationState);
+      window.removeEventListener('smaran:dictation-error', dictationFailed);
+    };
+  }, []);
 
   // Editing
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  const requestClearHistory = async () => {
+    if (!confirmClearHistory) {
+      setConfirmClearHistory(true);
+      return false;
+    }
+    const cleared = await onClearHistory?.();
+    if (cleared) setConfirmClearHistory(false);
+    return Boolean(cleared);
+  };
 
   // Memory
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
@@ -335,24 +361,22 @@ const Sidebar = ({
   const sidebarDesktop = (
     <aside className={`
       hidden md:flex flex-col shrink-0 z-40
-      bg-[#f3f4f6] dark:bg-[#1a1b1e] text-zinc-900 dark:text-zinc-100 sidebar-cyber-border
+      bg-[#f3f4f6] dark:bg-[#171717] text-zinc-900 dark:text-zinc-100 sidebar-cyber-border
       ${position === 'right' ? 'md:order-3 h-screen sticky top-0 border-l border-zinc-300/70 dark:border-zinc-800' : 'md:order-1 h-screen sticky top-0 border-r border-zinc-300/70 dark:border-zinc-800'}
       transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]
-      ${expanded ? 'w-[268px]' : 'w-[64px]'}
+      ${expanded ? 'w-[304px]' : 'w-[64px]'}
     `}>
 
       {/* TOP: 3D Motion Logo + Toggle */}
       <div className={`
-        flex items-center border-b border-zinc-300/60 dark:border-zinc-800/80 shrink-0 h-[64px] bg-zinc-200/50 dark:bg-zinc-950/40 backdrop-blur-md
-        ${expanded ? 'px-4 justify-between' : 'justify-center px-0'}
+        flex items-center shrink-0 h-[56px]
+        ${expanded ? 'px-5 justify-between' : 'justify-center px-0'}
       `}>
         {expanded ? (
           <>
-            <Logo3DMotion size="sm" />
-            <div className="ml-2.5 flex-1 min-w-0 animate-in fade-in duration-200 select-none flex items-center">
-              <div className="text-sm sm:text-base font-black tracking-wider uppercase leading-none flex items-center">
-                <span className="bg-gradient-to-r from-amber-400 via-orange-500 to-indigo-400 bg-clip-text text-transparent font-extrabold filter drop-shadow-[0_0_10px_rgba(249,115,22,0.5)]">SMARAN</span>
-                <span className="text-white font-extrabold ml-1 px-1.5 py-0.5 rounded-md bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500 text-[10px] shadow-[0_0_10px_rgba(99,102,241,0.5)]">.AI</span>
+            <div className="flex-1 min-w-0 animate-in fade-in duration-200 select-none flex items-center">
+              <div className="text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 flex items-center">
+                <span>SMARAN.AI</span><ChevronDown className="ml-1 h-3.5 w-3.5 text-zinc-500" />
               </div>
             </div>
             <Tip label="Collapse sidebar">
@@ -361,7 +385,7 @@ const Sidebar = ({
                 aria-label="Collapse sidebar"
                 title="Collapse sidebar"
                 onClick={() => setExpanded(false)}
-                className="ml-2 p-2 rounded-xl text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-white bg-zinc-200/80 dark:bg-zinc-900/80 hover:bg-indigo-600/20 border border-zinc-300/70 dark:border-zinc-800 hover:border-indigo-500/50 shadow-xs hover:scale-105 transition-all cursor-pointer btn-lightning-hover"
+                className="ml-2 p-1.5 rounded-lg text-zinc-500 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition cursor-pointer"
               >
                 <PanelLeftClose className="w-4.5 h-4.5" />
               </button>
@@ -383,14 +407,13 @@ const Sidebar = ({
       </div>
 
       {/* New conversation button */}
-      <div className={`shrink-0 ${expanded ? 'p-3' : 'flex justify-center py-3 px-2'}`}>
+      <div className={`shrink-0 ${expanded ? 'px-2 pb-1' : 'flex justify-center py-3 px-2'}`}>
         {expanded ? (
           <button
             onClick={() => { onCreateSession(); onNavigate('chat'); }}
-            className="w-full flex items-center justify-center gap-2 bg-zinc-800/60 hover:bg-zinc-700/70 text-zinc-200 font-bold text-xs uppercase tracking-wider rounded-full py-2.5 border border-zinc-700/40 hover:border-indigo-500/30 transition-all cursor-pointer"
+            className="nav-neon sheen w-full flex items-center gap-3 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white font-normal text-sm rounded-lg px-3 py-2 transition cursor-pointer"
           >
-            <Plus className="w-4 h-4 text-indigo-400" />
-            New Conversation
+            <Plus className="w-4 h-4" /> New chat
           </button>
         ) : (
           <RailBtn
@@ -402,11 +425,24 @@ const Sidebar = ({
         )}
       </div>
 
+      {/* Product destinations stay visible instead of being buried in a modal. */}
+      <div className={`shrink-0 ${expanded ? 'px-2 pb-2 space-y-0.5' : 'px-2 py-2 flex flex-col items-center gap-1'}`}>
+        {expanded ? <>
+          <button onClick={() => onNavigate('sites')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'sites' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Globe2 className="h-4 w-4"/> Sites</button>
+          <button onClick={() => onNavigate('plugins')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'plugins' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Blocks className="h-4 w-4"/> Plugins</button>
+          <p className="px-3 pb-1 pt-4 text-xs font-medium text-zinc-500">Projects</p>
+          <button onClick={() => onNavigate('chat')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'chat' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><FolderOpen className="h-4 w-4"/><span className="truncate">SMARAN.AI</span></button>
+        </> : <>
+          <RailBtn icon={<Globe2 className="h-5 w-5"/>} label="Sites" active={activeView === 'sites'} onClick={() => onNavigate('sites')}/>
+          <RailBtn icon={<Blocks className="h-5 w-5"/>} label="Plugins & Skills" active={activeView === 'plugins'} onClick={() => onNavigate('plugins')}/>
+        </>}
+      </div>
+
       {/* Chat history */}
       <div className={`flex-1 overflow-y-auto ${expanded ? 'px-3 py-1' : 'px-2 py-1 flex flex-col items-center gap-1'}`}>
         {expanded && (
-          <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest px-2 mb-2">
-            Chat History
+          <span className="block text-xs font-medium text-zinc-500 px-3 mb-2 mt-2">
+            Recents
           </span>
         )}
 
@@ -414,40 +450,21 @@ const Sidebar = ({
           <p className="text-xs text-zinc-600 italic px-2 py-1 font-bold">No conversations yet.</p>
         )}
 
-        {sessions.map((s) => {
+        {expanded && sessions.map((s) => {
           const isActive = activeSessionId === s.id && activeView === 'chat';
           const isEditing = editingSessionId === s.id;
           const isConfirmDel = confirmDeleteId === s.id;
-
-          if (!expanded) {
-            return (
-              <Tip key={s.id} label={s.title || 'Chat'}>
-                <button
-                  onClick={() => handleSessionClick(s.id)}
-                  className={`
-                    w-12 h-10 flex items-center justify-center rounded-xl transition-all cursor-pointer
-                    ${isActive
-                      ? 'bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-400/30'
-                      : 'text-zinc-500 hover:bg-zinc-700/60 hover:text-white'}
-                  `}
-                >
-                  <MessageSquare className="w-4.5 h-4.5" />
-                </button>
-              </Tip>
-            );
-          }
 
           return (
             <div
               key={s.id}
               onClick={() => !isEditing && handleSessionClick(s.id)}
               className={`
-                group w-full flex items-center justify-between rounded-full px-3 py-2 text-xs font-bold
-                cursor-pointer transition-all duration-200 border mb-1
-                sidebar-item-highlight btn-lightning-hover
+                nav-neon sheen group w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm font-normal
+                cursor-pointer transition-all duration-200 mb-0.5
                 ${isActive
-                  ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/20 active shadow-[0_0_12px_rgba(99,102,241,0.2)]'
-                  : 'text-zinc-600 dark:text-zinc-400 border-transparent hover:bg-zinc-200/60 dark:hover:bg-zinc-800/40 hover:shadow-[0_0_10px_rgba(99,102,241,0.08)]'}
+                  ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60'}
               `}
             >
               <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -486,52 +503,162 @@ const Sidebar = ({
       </div>
 
       {/* BOTTOM: Actions */}
-      <div className={`shrink-0 border-t border-zinc-300/60 dark:border-zinc-800/80 p-2 space-y-1 ${expanded ? '' : 'flex flex-col items-center'}`}>
+      <div className={`relative shrink-0 border-t border-zinc-200 dark:border-zinc-800/80 p-2.5 ${expanded ? 'space-y-2' : 'flex flex-col items-center gap-1.5'}`}>
         {expanded ? (
           <>
-              {/* Eight stacked full-width rows pushed chat history off the screen
-                  entirely on a short window. Same eight destinations, laid out four
-                  to a row: two rows instead of eight, and the labels move into the
-                  tooltip rather than disappearing. */}
-              <div className="grid grid-cols-4 gap-1">
-                {[
-                  { key: 'models', label: 'Model Catalog & Matrix', icon: <Boxes className="w-4 h-4" />, tone: 'text-indigo-400 hover:bg-indigo-500/10', onClick: () => setIsModelHubOpen(true) },
-                  { key: 'folder', label: 'Project Folder', icon: <FolderOpen className="w-4 h-4" />, tone: 'text-cyan-400 hover:bg-cyan-500/10', onClick: onOpenWorkspace },
-                  { key: 'analytics', label: 'Analytics Dashboard', icon: <Activity className="w-4 h-4" />, tone: 'text-emerald-400 hover:bg-emerald-500/10', onClick: onOpenAnalytics },
-                  { key: 'memory', label: 'Manage AI Memory', icon: <Brain className="w-4 h-4" />, tone: 'text-violet-400 hover:bg-violet-500/10', onClick: () => setIsMemoryOpen(true) },
-                  onOpenHub && { key: 'hub', label: 'Skills & Connectors', icon: <Blocks className="w-4 h-4" />, tone: 'text-indigo-300 hover:bg-indigo-500/10', onClick: onOpenHub },
-                  onOpenAuth && { key: 'auth', label: 'Sign In / Register', icon: <LogIn className="w-4 h-4" />, tone: 'text-rose-400 hover:bg-rose-500/10', onClick: onOpenAuth },
-                  onOpenPairing && { key: 'pair', label: 'Link Your Phone', icon: <QrCode className="w-4 h-4" />, tone: 'text-sky-400 hover:bg-sky-500/10', onClick: onOpenPairing },
-                  { key: 'dev', label: 'About Developer', icon: <UserCheck className="w-4 h-4" />, tone: 'text-cyan-400 hover:bg-cyan-500/10', onClick: onOpenDeveloper },
-                ].filter(Boolean).map((item) => (
+            {showUtilityMenu && (
+              <div className="absolute bottom-[110px] left-2 right-2 rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-2 shadow-2xl z-50 backdrop-blur-md">
+                <div className="grid grid-cols-2 gap-1.5">
                   <button
-                    key={item.key}
-                    onClick={item.onClick}
-                    title={item.label}
-                    aria-label={item.label}
-                    className={`flex h-10 items-center justify-center rounded-xl border border-transparent cursor-pointer transition-all duration-300 ${item.tone}`}
+                    onClick={() => { onNavigate('settings'); setShowUtilityMenu(false); }}
+                    className="flex items-center justify-center gap-1.5 px-2.5 py-2 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl cursor-pointer text-xs font-bold transition"
                   >
-                    {item.icon}
+                    <Settings className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Settings</span>
                   </button>
-                ))}
+                  {onClearHistory && (
+                    <button
+                      onClick={requestClearHistory}
+                      className={`flex items-center justify-center gap-1.5 px-2.5 py-2 border rounded-xl cursor-pointer text-xs font-bold transition ${
+                        confirmClearHistory
+                          ? 'border-rose-500 bg-rose-600 text-white'
+                          : 'border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30'
+                      }`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{confirmClearHistory ? 'Confirm' : 'Clear'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {dictationError && (
+              <div role="alert" className="mb-1 rounded-xl border border-amber-700/50 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+                {dictationError}
+                <button type="button" onClick={() => setDictationError('')} className="ml-1 font-bold underline text-indigo-600 dark:text-white">Dismiss</button>
+              </div>
+            )}
+
+            {/* Distinct Voice Control Card */}
+            <div className="flex items-center justify-between p-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 shadow-xs">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
+                  voiceOutputEnabled
+                    ? 'bg-emerald-500 text-white animate-pulse'
+                    : 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400'
+                }`}>
+                  <Volume2 className="w-3.5 h-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="block text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
+                    {voiceOutputEnabled ? 'Voice Listening...' : 'Voice Assistant'}
+                  </span>
+                  <span className="block text-[10px] text-zinc-500 dark:text-zinc-400">
+                    {voiceOutputEnabled ? 'Microphone active' : 'Click to activate'}
+                  </span>
+                </div>
               </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={() => onNavigate('settings')} className="flex items-center gap-2 px-3 py-2.5 border border-zinc-400 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:text-indigo-700 dark:hover:text-white hover:border-indigo-500 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow hover-lift transition-all duration-300 shadow-sm"><Settings className="w-4 h-4" /><span>Settings</span></button>
-              {onClearHistory && <button onClick={onClearHistory} className="flex items-center gap-2 px-3 py-2.5 border border-orange-400 dark:border-rose-700 text-orange-700 dark:text-rose-300 hover:text-white hover:bg-orange-600 dark:hover:bg-rose-600 hover:border-orange-600 dark:hover:border-rose-500 rounded-xl cursor-pointer text-xs font-bold sidebar-item-glow hover-lift transition-all duration-300 shadow-sm hover:shadow-[0_0_14px_rgba(244,63,94,0.25)]"><Trash2 className="w-4 h-4" /><span>Clear History</span></button>}
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigate('chat');
+                  window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:toggle-dictation')), 120);
+                }}
+                className={`px-2.5 py-1 text-xs font-black rounded-lg transition border cursor-pointer ${
+                  voiceOutputEnabled
+                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                    : 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700'
+                }`}
+              >
+                {voiceOutputEnabled ? 'Stop' : 'Speak'}
+              </button>
+            </div>
+
+            {/* Distinct User Profile & Sign In Row */}
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-2 shadow-xs">
+              <button
+                type="button"
+                onClick={() => setShowUtilityMenu((v) => !v)}
+                className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer group"
+              >
+                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
+                  SM
+                </div>
+                <div className="min-w-0 flex-1 truncate">
+                  <span className="block text-xs font-extrabold text-zinc-900 dark:text-white tracking-wide truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
+                    SHASHWAT MISHRA
+                  </span>
+                  <span className="block text-[10px] font-medium text-zinc-500 dark:text-zinc-400">
+                    Pro Workspace
+                  </span>
+                </div>
+              </button>
+
+              {isLoggedIn ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('account')}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-[11px] font-black text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition cursor-pointer"
+                  title="Pro Workspace Active"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>PRO</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpenAuth ? onOpenAuth() : onNavigate('account')}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-[11px] font-bold text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white transition cursor-pointer"
+                  title="Sign in or register"
+                >
+                  <LogIn className="w-3 h-3 text-indigo-500" />
+                  <span>Sign in</span>
+                </button>
+              )}
             </div>
           </>
         ) : (
           <>
-            <RailBtn icon={<Boxes className="w-5 h-5" />} label="Model Catalog & Matrix" onClick={() => setIsModelHubOpen(true)} violet />
-            <RailBtn icon={<FolderOpen className="w-5 h-5 text-cyan-400" />} label="Project Folder" onClick={onOpenWorkspace} />
-            <RailBtn icon={<Activity className="w-5 h-5 text-emerald-400" />} label="Analytics Dashboard" onClick={onOpenAnalytics} />
-            <RailBtn icon={<Brain className="w-5 h-5" />} label="Manage AI Memory" onClick={() => setIsMemoryOpen(true)} />
-            {onOpenHub && <RailBtn icon={<Blocks className="w-5 h-5 text-indigo-300" />} label="Skills & Connectors" onClick={onOpenHub} />}
-            {onOpenAuth && <RailBtn icon={<LogIn className="w-5 h-5 text-rose-400" />} label="Sign In / Register" onClick={onOpenAuth} />}
-            {onOpenPairing && <RailBtn icon={<QrCode className="w-5 h-5 text-sky-400" />} label="Link Your Phone" onClick={onOpenPairing} />}
-            <RailBtn icon={<UserCheck className="w-5 h-5" />} label="About Developer" onClick={onOpenDeveloper} />
-            <RailBtn icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => onNavigate('settings')} />
+            {/* Voice toggle button in collapsed rail */}
+            <RailBtn
+              icon={<Volume2 className={`w-5 h-5 ${voiceOutputEnabled ? 'text-emerald-400 animate-pulse' : 'text-indigo-600 dark:text-indigo-400'}`} />}
+              label={voiceOutputEnabled ? 'Voice Listening (Active)' : 'Voice Assistant'}
+              active={voiceOutputEnabled}
+              onClick={() => {
+                onNavigate('chat');
+                window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:toggle-dictation')), 120);
+              }}
+            />
+
+            {/* Sign in button in collapsed rail — only if not logged in */}
+            {!isLoggedIn && (
+              <RailBtn
+                icon={<LogIn className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />}
+                label="Sign in / Register"
+                onClick={() => onOpenAuth ? onOpenAuth() : onNavigate('account')}
+              />
+            )}
+
+            {/* Software Updates & Downloads button in collapsed rail */}
+            <RailBtn
+              icon={<ArrowDownToLine className="w-5 h-5 text-red-500 hover:text-red-400" />}
+              label="Software Updates & Downloads"
+              onClick={() => onNavigate('updates')}
+            />
+
+            {/* Profile Avatar button in collapsed rail */}
+            <Tip label="SHASHWAT MISHRA (Pro)">
+              <button
+                type="button"
+                aria-label="SHASHWAT MISHRA profile"
+                onClick={() => { setExpanded(true); setShowUtilityMenu(true); }}
+                className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center text-xs font-black text-white shadow-md hover:scale-105 transition cursor-pointer border border-indigo-400/30"
+              >
+                SM
+              </button>
+            </Tip>
           </>
         )}
       </div>
@@ -541,7 +668,7 @@ const Sidebar = ({
   /* Mobile sidebar */
   const mobileSidebar = (
     <>
-      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-[#1a1b1e] border-b border-zinc-800 shrink-0 z-30 mobile-px-4 mobile-py-3">
+      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-white/95 dark:bg-[#1a1b1e] border-b border-zinc-200 dark:border-zinc-800 shrink-0 z-30 mobile-px-4 mobile-py-3">
         <div className="flex items-center gap-2">
           <Logo3DMotion size="sm" />
           <span className="font-black text-sm tracking-wide select-none flex items-center ml-1">
@@ -552,7 +679,7 @@ const Sidebar = ({
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
-          className="text-zinc-400 hover:text-white p-1.5 rounded-xl bg-zinc-800 border border-zinc-700 cursor-pointer"
+          className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white p-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer"
           aria-label="Open navigation menu"
           aria-controls="smaran-mobile-navigation"
           aria-expanded={mobileOpen}
@@ -568,9 +695,9 @@ const Sidebar = ({
         aria-label="SMARAN.AI navigation"
         aria-hidden={!mobileOpen}
         inert={!mobileOpen}
-        className={`md:hidden fixed top-0 bottom-0 left-0 w-[268px] max-w-full bg-[#1a1b1e] border-r border-zinc-800 flex flex-col z-50 transition-transform duration-300 sidebar-mobile-fix sidebar-mobile-scroll ${mobileOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'}`}
+        className={`md:hidden fixed top-0 bottom-0 left-0 w-[268px] max-w-full bg-white dark:bg-[#1a1b1e] border-r border-zinc-200 dark:border-zinc-800 flex flex-col z-50 transition-transform duration-300 sidebar-mobile-fix sidebar-mobile-scroll ${mobileOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'}`}
       >
-        <div className="p-4 flex items-center justify-between border-b border-zinc-800 shrink-0">
+        <div className="p-4 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 shrink-0">
           <div className="flex items-center gap-2.5">
             <Logo3DMotion size="sm" />
             <div>
@@ -580,25 +707,30 @@ const Sidebar = ({
               </div>
             </div>
           </div>
-          <button type="button" onClick={() => setMobileOpen(false)} className="text-zinc-500 hover:text-white cursor-pointer" aria-label="Close navigation menu"><X className="w-5 h-5" /></button>
+          <button type="button" onClick={() => setMobileOpen(false)} className="text-zinc-500 hover:text-zinc-950 dark:hover:text-white cursor-pointer" aria-label="Close navigation menu"><X className="w-5 h-5" /></button>
         </div>
 
         <div className="p-3 shrink-0">
           <button onClick={() => { onCreateSession(); onNavigate('chat'); setMobileOpen(false); }}
-            className="w-full flex items-center justify-center gap-2 bg-zinc-800/60 hover:bg-zinc-700/70 text-zinc-200 font-bold text-xs uppercase tracking-wider rounded-full py-2.5 border border-zinc-700/40 transition-all cursor-pointer">
+            className="w-full flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800/60 hover:bg-zinc-200 dark:hover:bg-zinc-700/70 text-zinc-800 dark:text-zinc-200 font-bold text-xs uppercase tracking-wider rounded-full py-2.5 border border-zinc-200 dark:border-zinc-700/40 transition-all cursor-pointer">
             <Plus className="w-4 h-4 text-indigo-400" /> New Conversation
           </button>
         </div>
 
+        <nav className="px-3 pb-3 space-y-1 border-b border-zinc-200 dark:border-zinc-800">
+          <button onClick={() => { onNavigate('sites'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'sites' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Globe2 className="h-4 w-4"/> Sites</button>
+          <button onClick={() => { onNavigate('plugins'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'plugins' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Blocks className="h-4 w-4"/> Plugins & Skills</button>
+        </nav>
+
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-1 space-y-1">
           <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest px-2 mb-2">Chat History</span>
           {sessions.length === 0 ? (
-            <p className="text-xs text-zinc-600 italic px-2 py-1 font-bold">No conversations yet.</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-600 italic px-2 py-1 font-bold">No conversations yet.</p>
           ) : sessions.map(s => (
             <div key={s.id} onClick={() => handleSessionClick(s.id)}
-              className={`group w-full flex items-center justify-between rounded-full px-3 py-2 text-xs font-bold cursor-pointer transition-all border btn-lightning-hover ${activeSessionId === s.id && activeView === 'chat' ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/20 shadow-[0_0_10px_rgba(99,102,241,0.2)]' : 'text-zinc-400 hover:bg-zinc-800/60 border-transparent hover:shadow-[0_0_8px_rgba(99,102,241,0.08)]'}`}>
+              className={`group w-full flex items-center justify-between rounded-full px-3 py-2 text-xs font-bold cursor-pointer transition-all border btn-lightning-hover ${activeSessionId === s.id && activeView === 'chat' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/20 shadow-[0_0_10px_rgba(99,102,241,0.2)]' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60 border-transparent hover:shadow-[0_0_8px_rgba(99,102,241,0.08)]'}`}>
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-zinc-500" />
+                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-zinc-400 dark:text-zinc-500" />
                 <span className="truncate">{s.title}</span>
               </div>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -609,45 +741,42 @@ const Sidebar = ({
           ))}
         </div>
 
-        <div className="p-3 border-t border-zinc-800 space-y-1.5 shrink-0 max-h-[55dvh] overflow-y-auto overscroll-contain sidebar-mobile-footer">
-          <button onClick={() => { setIsModelHubOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-indigo-400 hover:bg-indigo-500/8">
-            <Boxes className="w-4 h-4 shrink-0 text-indigo-400" /> Model Catalog & Matrix
-          </button>
-          {onOpenAnalytics && (
-            <button onClick={() => { onOpenAnalytics(); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-emerald-400 hover:bg-emerald-500/8">
-              <Activity className="w-4 h-4 shrink-0 text-emerald-400" /> Analytics Dashboard
-            </button>
-          )}
-          <button onClick={() => { setIsMemoryOpen(true); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-violet-400 hover:bg-violet-500/8">
-            <Brain className="w-4 h-4 shrink-0" /> Manage AI Memory
-          </button>
-          {onOpenPairing && (
-            <button onClick={() => { onOpenPairing(); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-sky-400 hover:bg-sky-500/8">
-              <QrCode className="w-4 h-4 shrink-0 text-sky-400" /> Link Your Phone
-            </button>
-          )}
-          <button onClick={() => { onOpenDeveloper(); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-cyan-400 hover:bg-cyan-500/8">
-            <UserCheck className="w-4 h-4 shrink-0 text-cyan-400" /> About Developer
-          </button>
-          {onTogglePerformance && (
-            <button onClick={() => { onTogglePerformance(); setMobileOpen(false); }} className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black border border-transparent cursor-pointer text-emerald-400 hover:bg-emerald-500/10">
-              <Activity className="w-4 h-4 shrink-0 text-emerald-400 animate-pulse" /> Live Hardware Performance
-            </button>
-          )}
+        <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2 shrink-0 max-h-[55dvh] overflow-y-auto overscroll-contain sidebar-mobile-footer">
+          {/* User Profile & Voice Pill */}
+          <div className="flex w-full items-center justify-between gap-2 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 shadow-xs">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
+                SM
+              </div>
+              <span className="text-xs font-black text-zinc-900 dark:text-white truncate">
+                SHASHWAT MISHRA
+              </span>
+            </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => { onNavigate('settings'); setMobileOpen(false); }} className="min-w-0 w-full flex items-center justify-center gap-1.5 px-2 py-2.5 border border-zinc-800 text-zinc-300 hover:text-white rounded-xl cursor-pointer text-[11px] font-bold"><Settings className="w-4 h-4 shrink-0" /><span className="break-words">Settings</span></button>
-            {onClearHistory && <button onClick={() => { onClearHistory(); setMobileOpen(false); }} className="min-w-0 w-full flex items-center justify-center gap-1.5 px-2 py-2.5 border border-rose-800 text-rose-300 hover:text-white hover:border-rose-600 rounded-xl cursor-pointer text-[11px] font-bold"><Trash2 className="w-4 h-4 shrink-0" /><span className="break-words">Clear History</span></button>}
+            <button
+              type="button"
+              onClick={() => {
+                onNavigate('chat');
+                setMobileOpen(false);
+                window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:toggle-dictation')), 120);
+              }}
+              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-black transition border shadow-xs ${
+                voiceOutputEnabled
+                  ? 'bg-emerald-600 text-white border-emerald-500'
+                  : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-300 dark:border-zinc-700'
+              }`}
+            >
+              <Volume2 className="h-3.5 w-3.5 text-white" />
+              <span className="text-white font-bold">{voiceOutputEnabled ? 'Listening' : 'Voice'}</span>
+            </button>
           </div>
 
-          <div 
-            onClick={() => { onOpenDeveloper(); setMobileOpen(false); }}
-            className="pt-2 border-t border-zinc-800/60 text-center cursor-pointer hover:bg-zinc-800/40 py-1.5 rounded-xl transition-all"
-            title="Click to view Developer Profile & Architecture"
-          >
-            <div className="text-[10px] font-semibold text-zinc-500">
-              Developed by <span className="font-extrabold text-indigo-400 hover:underline">SHASHWAT MISHRA</span>
-            </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => { onNavigate('settings'); setMobileOpen(false); }} className="min-w-0 w-full flex items-center justify-center gap-1.5 px-2 py-2 border border-zinc-300 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl cursor-pointer text-[11px] font-bold"><Settings className="w-4 h-4 shrink-0" /><span className="break-words">Settings</span></button>
+            {onClearHistory && <button onClick={async () => { if (await requestClearHistory()) setMobileOpen(false); }} className={`min-w-0 w-full flex items-center justify-center gap-1.5 px-2 py-2 border rounded-xl cursor-pointer text-[11px] font-bold ${confirmClearHistory ? 'border-rose-500 bg-rose-600 text-white' : 'border-rose-800 text-rose-300 hover:text-white hover:border-rose-600'}`}><Trash2 className="w-4 h-4 shrink-0" /><span className="break-words">{confirmClearHistory ? 'Confirm Clear' : 'Clear History'}</span></button>}
+          </div>
+
+          <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800/60 text-center py-1.5">
             <div className="flex items-center justify-center gap-2 mt-1 text-[10px]">
               <a href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-cyan-400 hover:underline font-bold">
                 LinkedIn

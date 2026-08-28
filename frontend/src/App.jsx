@@ -8,12 +8,15 @@ import RightPanel from './components/RightPanel';
 import StarfieldCanvas from './components/StarfieldCanvas';
 import ErrorBoundary from './components/ErrorBoundary';
 import AnalyticsModal from './components/AnalyticsModal';
+import ModelHubModal from './components/ModelHubModal';
 import DeveloperModal from './components/DeveloperModal';
 import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
 import AuthModal from './components/AuthModal';
 import UpdateNotice from './components/UpdateNotice';
 import ExtensionsHub from './components/ExtensionsHub';
+import SitesHub from './components/SitesHub';
+import DesktopPet from './components/DesktopPet';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 
 
@@ -34,7 +37,6 @@ const App = () => {
   const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
   const [isPairingOpen, setIsPairingOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [isHubOpen, setIsHubOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [activeCollections, setActiveCollections] = useState([]);
@@ -162,8 +164,6 @@ const App = () => {
   };
 
   const handleClearHistory = async () => {
-    const confirmed = window.confirm('Are you sure you want to delete ALL chat history? This action cannot be undone.');
-    if (!confirmed) return;
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/privacy/clear-all`, {
         method: 'DELETE',
@@ -172,12 +172,15 @@ const App = () => {
         setSessions([]);
         setActiveSessionId(null);
         await handleCreateSession();
+        return true;
       } else {
         alert('Failed to clear history. Please try again.');
+        return false;
       }
     } catch (err) {
       console.error(err);
       alert('Failed to clear history. Please try again.');
+      return false;
     }
   };
   const handleRenameSession = async (id, newTitle) => {
@@ -199,8 +202,14 @@ const App = () => {
     }
   };
 
+  const [settingsTab, setSettingsTab] = useState('general');
+
   const handleNavigate = (view) => {
     if (view === 'settings') {
+      setSettingsTab('general');
+      setIsSettingsOpen(true);
+    } else if (view === 'updates') {
+      setSettingsTab('updates');
       setIsSettingsOpen(true);
     } else if (view !== 'login') {
       // 'login' is intentionally inert: this build has no accounts.
@@ -240,7 +249,6 @@ const App = () => {
         onOpenDeveloper={() => setIsDeveloperOpen(true)}
         onOpenPairing={() => setIsPairingOpen(true)}
         onOpenAuth={() => setIsAuthOpen(true)}
-        onOpenHub={() => setIsHubOpen(true)}
         token={currentUser?.session_token}
         user={currentUser}
       />
@@ -259,28 +267,38 @@ const App = () => {
             onTogglePanel={() => setShowRightPanel((v) => !v)}
             onOpenModelHub={() => setIsModelHubOpen(true)}
             onOpenAnalytics={() => setIsAnalyticsOpen(true)}
+            onOpenWorkspace={() => setIsWorkspaceOpen(true)}
           />
         )}
         
         {activeView === 'collections' && (
           <CollectionManager />
         )}
+        {activeView === 'sites' && <SitesHub />}
+        {activeView === 'plugins' && <ExtensionsHub embedded />}
       </main>
 
       {/* Right side Task Manager / Brand panel — desktop only */}
-      {showRightPanel && <RightPanel selectedModel={selectedModel} showPanel={showRightPanel && performancePosition !== 'hidden'} position={performancePosition} onClose={() => setShowRightPanel(false)} />}
+      {activeView === 'chat' && showRightPanel && <div className="hidden md:contents"><RightPanel selectedModel={selectedModel} showPanel={showRightPanel && performancePosition !== 'hidden'} position={performancePosition} onClose={() => setShowRightPanel(false)} /></div>}
 
       {/* Settings Dialog Overlay */}
       <ErrorBoundary>
         <SettingsModal
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
+          initialTab={settingsTab}
           onModelChange={setSelectedModel}
           selectedModel={selectedModel}
           sidebarPosition={sidebarPosition}
           onSidebarPositionChange={setSidebarPosition}
           performancePosition={performancePosition}
           onPerformancePositionChange={(value) => { setPerformancePosition(value); if (value !== 'hidden') setShowRightPanel(true); }}
+          onOpenConnections={() => { setIsSettingsOpen(false); setIsPairingOpen(true); }}
+          onOpenAccount={() => { setIsSettingsOpen(false); setIsAuthOpen(true); }}
+          onOpenModels={() => { setIsSettingsOpen(false); setIsModelHubOpen(true); }}
+          onOpenAnalytics={() => { setIsSettingsOpen(false); setIsAnalyticsOpen(true); }}
+          onOpenMemory={() => { setIsSettingsOpen(false); window.dispatchEvent(new CustomEvent('smaran:open-memory')); }}
+          onOpenDeveloper={() => { setIsSettingsOpen(false); setIsDeveloperOpen(true); }}
         />
       </ErrorBoundary>
 
@@ -294,9 +312,14 @@ const App = () => {
         />
       </ErrorBoundary>
 
-      {/* Skills, connectors, plugins and local MCP servers. */}
+      {/* Model Matrix & Catalog Overlay */}
       <ErrorBoundary>
-        <ExtensionsHub isOpen={isHubOpen} onClose={() => setIsHubOpen(false)} />
+        <ModelHubModal
+          isOpen={isModelHubOpen}
+          onClose={() => setIsModelHubOpen(false)}
+          onSelectModel={(model) => setSelectedModel(model)}
+          selectedModel={selectedModel}
+        />
       </ErrorBoundary>
 
       {/* Says when a newer build exists. Installs nothing by itself. */}
@@ -329,6 +352,7 @@ const App = () => {
       </ErrorBoundary>
 
       <WorkspacePanel isOpen={isWorkspaceOpen} onClose={() => setIsWorkspaceOpen(false)} />
+      <div className="hidden md:contents"><DesktopPet /></div>
     </div>
     </PinLock>
   );

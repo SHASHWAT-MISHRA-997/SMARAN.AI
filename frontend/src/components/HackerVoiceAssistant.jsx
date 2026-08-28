@@ -88,6 +88,8 @@ const LIVE_VOICES = [
   { id: 'Orus', label: 'Orus — steady', gender: 'male' },
 ];
 
+const isMobileVoiceDevice = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
+
 /**
  * 3D Holographic Iron Man Mark-LXXXV & JARVIS Cyber Arc Reactor Canvas
  * Features:
@@ -996,36 +998,42 @@ export const HackerVoiceAssistant = ({
           return;
         }
         if (e.error === 'no-speech') {
-          setRecognizerStatus('idle');
-          setRecognizerIssue('No speech was detected; restarting the recognizer.');
+          setRecognizerStatus('active');
+          if (isOpen && !isMutedRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') {
+            setTimeout(() => {
+              if (isOpen && !isMutedRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') {
+                startRecognition();
+              }
+            }, isMobileVoiceDevice() ? 900 : 300);
+          }
           return;
         }
         const permissionError = e.error === 'not-allowed' || e.error === 'service-not-allowed';
         setRecognizerStatus(permissionError ? 'denied' : 'error');
         setRecognizerIssue(permissionError
-          ? 'Speech recognition permission or service access was denied.'
+          ? 'Speech recognition permission or service access was denied. Please allow microphone in browser.'
           : `Speech recognition error: ${e.error || 'unknown error'}.`);
         if (permissionError && mediaRecorderRef.current?.state !== 'recording') {
           setVoiceState('error');
           voiceStateRef.current = 'error';
         }
-        if (isOpen && !isMutedRef.current && voiceStateRef.current === 'listening') {
+        if (isOpen && !isMutedRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') {
           setTimeout(() => {
-            if (isOpen && !isMutedRef.current && voiceStateRef.current === 'listening') {
+            if (isOpen && !isMutedRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') {
               startRecognition();
             }
-          }, 300);
+          }, isMobileVoiceDevice() ? 1000 : 500);
         }
       };
 
       recognition.onend = () => {
-        setRecognizerStatus((current) => current === 'denied' || current === 'error' ? current : 'stopped');
-        if (isOpen && !isMutedRef.current && voiceStateRef.current === 'listening') {
+        setRecognizerStatus((current) => current === 'denied' || current === 'error' ? current : 'active');
+        if (isOpen && !isMutedRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') {
           setTimeout(() => {
-            if (isOpen && !isMutedRef.current && voiceStateRef.current === 'listening') {
+            if (isOpen && !isMutedRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') {
               startRecognition();
             }
-          }, 50);
+          }, isMobileVoiceDevice() ? 900 : 250);
         }
       };
 
@@ -1035,7 +1043,7 @@ export const HackerVoiceAssistant = ({
       setRecognizerStatus('error');
       setRecognizerIssue(`Speech recognition could not start: ${error?.message || 'unknown error'}.`);
       setTimeout(() => {
-        if (isOpen && !isMutedRef.current) startRecognition();
+        if (isOpen && !isMutedRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') startRecognition();
       }, 500);
     }
   }, [isOpen, selectedLanguage, stopRecognition]);
@@ -1809,7 +1817,7 @@ export const HackerVoiceAssistant = ({
           </div>
 
           {/* Character picker */}
-          <div className="hidden sm:flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1 shadow-sm" title="Choose who you are speaking with">
+          <div className="flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1 shadow-sm max-w-[130px] sm:max-w-none" title="Choose who you are speaking with">
             <UserRound className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <select
               value={showAvatar ? avatarId : 'core'}
@@ -1818,7 +1826,7 @@ export const HackerVoiceAssistant = ({
                 setShowAvatar(true);
                 setAvatarId(e.target.value);
               }}
-              className="bg-transparent text-[11px] font-black text-zinc-200 outline-none cursor-pointer"
+              className="bg-transparent text-[11px] font-black text-zinc-200 outline-none cursor-pointer truncate w-full"
             >
               {MMD_CHARACTERS.map((c) => (
                 <option key={c.id} value={c.id} className="bg-zinc-900 text-white font-bold">
@@ -2015,7 +2023,7 @@ export const HackerVoiceAssistant = ({
             }`} />
           </button>
 
-          <CallToggle icon={Hand} label="Gesture" active={gestureMode} onClick={() => setGestureMode((v) => !v)} />
+          <span className="hidden md:contents"><CallToggle icon={Hand} label="Gesture" active={gestureMode} onClick={() => setGestureMode((v) => !v)} /></span>
           {Ambience.isSupported() && (
             <CallToggle icon={Music2} label="Ambience" active={ambienceOn} onClick={() => setAmbienceOn((v) => !v)} />
           )}
@@ -2024,7 +2032,7 @@ export const HackerVoiceAssistant = ({
 
       {/* Stark-workshop gesture layer, above everything but click-through. */}
       <GestureHUD
-        isOpen={gestureMode}
+        isOpen={gestureMode && !isMobileVoiceDevice()}
         onClose={() => setGestureMode(false)}
         onAction={handleGestureAction}
       />
