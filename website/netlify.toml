@@ -16,6 +16,7 @@
     X-Frame-Options = "DENY"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+    Cache-Control = "no-cache, no-store, must-revalidate"
 
 # Nothing here is fingerprinted, so a long cache would strand visitors on an
 # old stylesheet. An hour helps without making a typo permanent.
@@ -33,3 +34,30 @@
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=604800"
+
+[[headers]]
+  for = "/SMARAN.AI.apk"
+  [headers.values]
+    Content-Type = "application/vnd.android.package-archive"
+    Content-Disposition = "attachment; filename=\"SMARAN.AI.apk\""
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/SMARAN.AI-v2.8.6.apk"
+  [headers.values]
+    Content-Type = "application/vnd.android.package-archive"
+    Content-Disposition = "attachment; filename=\"SMARAN.AI-v2.8.6.apk\""
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/smaran.exe"
+  [headers.values]
+    Content-Type = "application/octet-stream"
+    Content-Disposition = "attachment; filename=\"smaran.exe\""
+    Cache-Control = "public, max-age=86400"
+
+[[redirects]]
+  from = "/download/SMARAN.AI-Setup.exe"
+  to = "https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI-Setup.exe"
+  status = 302
+  force = true

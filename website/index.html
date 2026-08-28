@@ -596,6 +596,7 @@
           </div>
         </div>
         <a class="btn btn-primary block no-lift" id="dlWin"
+           download="SMARAN.AI-Setup.exe"
            href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI-Setup.exe">
           Download installer
         </a>
@@ -623,7 +624,8 @@
           </div>
         </div>
         <a class="btn btn-primary block no-lift" id="dlApk"
-           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI.apk">
+           download="SMARAN.AI-v2.8.6.apk"
+           href="/SMARAN.AI-v2.8.6.apk">
           Download APK
         </a>
         <ul class="dl-list">
@@ -633,11 +635,7 @@
           <li>Heavy models still run on the computer</li>
         </ul>
         <p class="dl-note">
-          Android will ask you to allow installing from your browser, because
-          this is not from the Play Store. That prompt is Android doing its job.
-          The download can also sit at the full size for a moment before it says
-          complete — Chrome scans an APK after it arrives. It is finished when
-          it appears in your Downloads.
+          Android will ask you to allow installing from your browser. When download finishes, swipe down your notification shade or open your phone's <b>Downloads</b> app to tap and install.
         </p>
       </article>
       <article class="dl-card reveal" data-delay="2">
@@ -650,7 +648,8 @@
           </div>
         </div>
         <a class="btn btn-primary block no-lift" id="dlCli"
-           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran.exe">
+           download="smaran.exe"
+           href="/smaran.exe">
           Download smaran.exe
         </a>
         <ul class="dl-list">
@@ -749,9 +748,10 @@
           <p>The command line talks to it over <code>127.0.0.1</code>. Without the app running there is nothing to talk to.</p>
         </li>
         <li>
-          <h3>Get <code>smaran</code></h3>
-          <p>One file, about 9.5&nbsp;MB. It needs no Python and installs nothing &mdash; put it
-             somewhere on your <code>PATH</code> and the <code>smaran</code> command works.</p>
+          <h3>Get <code>smaran.exe</code></h3>
+          <p>One file, about 9.5&nbsp;MB. Download directly or run in PowerShell:</p>
+          <pre class="code"><code>curl.exe -L -o smaran.exe https://smaran-ai.netlify.app/smaran.exe</code></pre>
+          <p>Put it somewhere on your <code>PATH</code> and the <code>smaran</code> command works.</p>
           <a class="btn btn-ghost" href="#download">Go to downloads</a>
         </li>
         <li>
