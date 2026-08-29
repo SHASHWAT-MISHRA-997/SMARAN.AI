@@ -87,6 +87,51 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
   // missing. Start on the catalog and switch to installed once there is
   // actually something installed to look at.
   const [showDiscoverModels, setShowDiscoverModels] = useState(true);
+
+  // Installing a model Ollama has but this catalogue does not.
+  const [pullName, setPullName] = useState('');
+  const [pullNote, setPullNote] = useState('');
+  const pullByName = async () => {
+    const name = pullName.trim();
+    if (!name) return;
+    setPullNote(`Starting ${name}…`);
+    try {
+      const res = await fetch(`${API_BASE}/api/models/pull`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setPullNote(`Could not start: ${data?.detail || `HTTP ${res.status}`}`);
+        return;
+      }
+      // Poll the same progress the catalogue downloads report, and pass on
+      // Ollama's own words when it refuses - an unknown tag and a full disk
+      // read very differently.
+      const poll = setInterval(async () => {
+        try {
+          const s = await fetch(`${API_BASE}/api/models/download-status`, { credentials: 'include' });
+          const state = (await s.json())?.downloads?.[name];
+          if (!state) return;
+          if (state.status === 'error') {
+            clearInterval(poll);
+            setPullNote(`${name} failed: ${state.error}`);
+          } else if (state.status === 'complete') {
+            clearInterval(poll);
+            setPullNote(`${name} is installed.`);
+            setPullName('');
+            fetchCatalog();
+          } else {
+            setPullNote(`${name}: ${state.percent || 0}%${state.total_gb ? ` of ${state.total_gb} GB` : ''}`);
+          }
+        } catch (_) { /* keep polling */ }
+      }, 1500);
+    } catch (err) {
+      setPullNote(`Could not start: ${String(err).slice(0, 80)}`);
+    }
+  };
   const pickedInitialView = useRef(false);
   const [downloadingMap, setDownloadingMap] = useState({});
 
@@ -459,6 +504,42 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
                the whole tab scrolls as one. From `sm` up the filters stay put
                and only the model list scrolls. */
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain sm:overflow-hidden sm:flex sm:flex-col">
+              {/* Downloading was limited to this app's catalogue, so anything
+                  Ollama published that the catalogue did not list - glm4,
+                  qwen3, deepseek-r1, and everything released after the
+                  catalogue was written - could not be installed from here at
+                  all. Ollama takes any name, so this passes one through. */}
+              <div className="p-5 border-b border-zinc-800/80 bg-zinc-900/20 shrink-0">
+                <p className="text-xs font-black text-white">Install any Ollama model by name</p>
+                <p className="mt-0.5 text-[10px] leading-4 text-zinc-500">
+                  Anything at ollama.com/library, whether or not it is in the catalogue below.
+                  Try <code className="text-zinc-400">glm4:9b</code>, <code className="text-zinc-400">qwen3:8b</code> or <code className="text-zinc-400">deepseek-r1:7b</code>.
+                  Large models need memory you may not have - a 9B fits in about 6 GB once quantised, a 700B does not fit at all.
+                </p>
+                <div className="mt-2.5 flex gap-2">
+                  <input
+                    value={pullName}
+                    onChange={(e) => setPullName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') pullByName(); }}
+                    placeholder="glm4:9b"
+                    className="min-w-0 flex-1 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-mono text-white outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={pullByName}
+                    disabled={!pullName.trim()}
+                    className="shrink-0 rounded-xl bg-indigo-600 px-3.5 py-2 text-[11px] font-black text-white transition hover:bg-indigo-500 disabled:opacity-40"
+                  >
+                    Install
+                  </button>
+                </div>
+                {pullNote && (
+                  <p className={`mt-2 text-[11px] ${pullNote.startsWith('Could not') || pullNote.includes('failed') ? 'text-rose-400' : 'text-indigo-300'}`}>
+                    {pullNote}
+                  </p>
+                )}
+              </div>
+
               {/* Filter & Search Bar */}
               <div className="p-5 border-b border-zinc-800/80 bg-zinc-900/20 space-y-4 shrink-0">
                 <div className="flex flex-wrap items-center justify-between gap-2">

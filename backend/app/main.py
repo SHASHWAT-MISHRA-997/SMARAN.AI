@@ -6426,6 +6426,83 @@ async def cancel_download_endpoint(
     }
 
 
+@app.post("/api/models/pull")
+async def pull_any_model_endpoint(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """Pull any model Ollama publishes, by name.
+
+    Downloading was limited to the 63 entries in this app's catalogue, so a
+    model Ollama had but the catalogue did not - glm4, qwen3, deepseek-r1 and
+    everything released after the catalogue was written - could not be
+    installed from here at all. Ollama's own /api/pull takes any name, so this
+    passes one through and reports what it says.
+
+    No size check before starting: Ollama does not say how big a tag is until
+    it begins, and guessing would be inventing a number. The progress it
+    streams carries the real total.
+    """
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name or len(name) > 120 or any(c in name for c in ' \t\n"\''):
+        raise HTTPException(status_code=400, detail="Give a single model name, for example glm4:9b")
+
+    base = settings.OLLAMA_URL.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=3.0)) as probe:
+            if (await probe.get(f"{base}/api/tags")).status_code != 200:
+                raise HTTPException(status_code=503, detail="The local model server is not answering. Start Ollama and try again.")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="The local model server could not be reached. Start Ollama and try again.")
+
+    _download_progress[name] = {"status": "starting", "percent": 0}
+    _model_download_in_progress.add(name)
+
+    async def run_pull():
+        try:
+            # A large model takes a long time; the timeout is on inactivity,
+            # not on the whole download.
+            async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0, read=300.0)) as client:
+                async with client.stream("POST", f"{base}/api/pull",
+                                         json={"model": name, "stream": True}) as response:
+                    if response.status_code != 200:
+                        _download_progress[name] = {"status": "error",
+                                                    "error": f"Ollama returned HTTP {response.status_code}"}
+                        return
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            event = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if event.get("error"):
+                            # Ollama's own words: an unknown tag and a full disk
+                            # read very differently.
+                            _download_progress[name] = {"status": "error", "error": event["error"]}
+                            return
+                        total = event.get("total") or 0
+                        done = event.get("completed") or 0
+                        _download_progress[name] = {
+                            "status": event.get("status") or "pulling",
+                            "percent": round(done / total * 100, 1) if total else 0,
+                            "downloaded_gb": round(done / 1e9, 2) if done else 0,
+                            "total_gb": round(total / 1e9, 2) if total else None,
+                        }
+            _download_progress[name] = {"status": "complete", "percent": 100}
+        except Exception as exc:
+            _download_progress[name] = {"status": "error", "error": str(exc)[:200]}
+        finally:
+            _model_download_in_progress.discard(name)
+
+    asyncio.create_task(run_pull())
+    return {"started": True, "name": name,
+            "detail": "Pulling. Watch /api/models/download-status for progress."}
+
+
 @app.get("/api/models/download-status")
 async def download_status_endpoint(
     current_user: User = Depends(get_current_user)
