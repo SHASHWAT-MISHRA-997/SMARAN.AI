@@ -135,27 +135,27 @@ async def install_plugin_from_repo(request: PluginInstallRequest):
     try:
         # The clone is blocking, so it runs off the event loop rather than
         # stalling every other request while it downloads.
-        ok = await asyncio.to_thread(
+        found = await asyncio.to_thread(
             plugin_manager.install_plugin_from_repo, url, request.install_path
         )
     except Exception as exc:
         logger.exception("plugin install failed for %s", url)
         raise HTTPException(status_code=502, detail="Could not install: %s" % exc)
 
-    if not ok:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Cloned nothing usable from %s. A plugin repository needs a "
-                "plugin.json or smaran_plugin.json at its root." % url
-            ),
-        )
+    if found.get("error"):
+        raise HTTPException(status_code=502, detail=found["error"])
 
-    logger.info("installed plugin from %s", url)
+    if not found.get("kind"):
+        # It cloned; there was simply nothing in it to install. That is a
+        # different answer from a clone that failed, and it says which.
+        raise HTTPException(status_code=422, detail=found.get(
+            "detail", "Nothing installable was found in %s." % url))
+
+    logger.info("installed %s from %s", found["kind"], url)
     return PluginInstallResponse(
         success=True,
-        message="Installed %s. Enable it to load its tools." % name,
-        plugin_name=name,
+        message=found.get("detail", "Installed %s." % name),
+        plugin_name=found.get("name", name),
     )
 
 @router.post("/{plugin_name}/enable")

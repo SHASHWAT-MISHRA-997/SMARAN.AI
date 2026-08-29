@@ -11,6 +11,7 @@ import importlib.util
 import inspect
 import logging
 import os
+import shutil
 import sys
 import json
 import subprocess
@@ -448,41 +449,147 @@ class PluginManager:
             + "\n".join(lines)
         )
 
-    def install_plugin_from_repo(self, repo_url: str, install_path: Optional[str] = None) -> bool:
-        """Install a plugin from a git repository"""
+    def install_plugin_from_repo(self, repo_url: str, install_path: Optional[str] = None) -> Dict[str, Any]:
+        """Install a plugin or a skill collection from a git repository.
+
+        This only accepted repositories with a plugin.json at the root, and
+        most of what people actually want to install is not shaped like that.
+        A skill is prose - a SKILL.md, or a folder of markdown agent
+        definitions - and every one of those was refused with "cloned nothing
+        usable" despite having cloned something perfectly usable.
+
+        It also used to json.load the manifest, throw the result away and
+        return True, so "installed" meant "cloned" and nothing more.
+
+        Returns what was found rather than a bare boolean, because "no such
+        repository", "cloned but empty" and "found nine skills" are three
+        different answers and the caller has to tell them apart.
+        """
         try:
-            if install_path is None:
-                install_path = Path.home() / ".smaran" / "plugins"
-            
-            install_path = Path(install_path)
-            install_path.mkdir(parents=True, exist_ok=True)
-            
-            # Clone or pull the repo
+            root = Path(install_path) if install_path else Path.home() / ".smaran"
             repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
-            repo_path = install_path / repo_name
-            
-            if repo_path.exists():
-                # Pull latest
-                subprocess.run(['git', '-C', str(repo_path), 'pull'], check=True, capture_output=True)
+
+            # Skills and plugins are kept apart: one is prose the model reads,
+            # the other is code this process imports, and mixing them would
+            # make it unclear which is which.
+            skills_root = root / "skills"
+            plugins_root = root / "plugins"
+
+            # Cloned into skills first; moved if it turns out to be a plugin.
+            probe_path = skills_root / repo_name
+            probe_path.parent.mkdir(parents=True, exist_ok=True)
+
+            if probe_path.exists():
+                subprocess.run(['git', '-C', str(probe_path), 'pull'],
+                               check=True, capture_output=True, timeout=300)
             else:
-                subprocess.run(['git', 'clone', repo_url, str(repo_path)], check=True, capture_output=True)
-            
-            # Look for plugin manifest
-            manifest_path = repo_path / 'plugin.json'
-            if not manifest_path.exists():
-                manifest_path = repo_path / 'smaran_plugin.json'
-            
-            if manifest_path.exists():
-                with open(manifest_path) as f:
-                    manifest = json.load(f)
-                return True
-            
-            logger.warning(f"No plugin manifest found in {repo_url}")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed to install plugin from {repo_url}: {e}")
-            return False
+                subprocess.run(['git', 'clone', '--depth', '1', repo_url, str(probe_path)],
+                               check=True, capture_output=True, timeout=600)
+
+            manifest_path = next(
+                (probe_path / name for name in ('plugin.json', 'smaran_plugin.json')
+                 if (probe_path / name).is_file()), None)
+
+            if manifest_path:
+                with open(manifest_path, encoding='utf-8') as handle:
+                    manifest = json.load(handle)
+                plugins_root.mkdir(parents=True, exist_ok=True)
+                final = plugins_root / repo_name
+                if final.exists():
+                    shutil.rmtree(final, ignore_errors=True)
+                shutil.move(str(probe_path), str(final))
+                return {
+                    "kind": "plugin",
+                    "name": manifest.get("name", repo_name),
+                    "path": str(final),
+                    "detail": "Cloned. Restart SMARAN.AI to load it.",
+                }
+
+            skills = self._index_skills(probe_path)
+            if skills:
+                return {
+                    "kind": "skill",
+                    "name": repo_name,
+                    "path": str(probe_path),
+                    "skills": skills,
+                    "count": len(skills),
+                    "detail": "%d skill%s installed from %s."
+                              % (len(skills), "" if len(skills) == 1 else "s", repo_name),
+                }
+
+            shutil.rmtree(probe_path, ignore_errors=True)
+            return {
+                "kind": None,
+                "detail": ("Cloned %s, but found neither a plugin.json nor any "
+                           "markdown skill files in it, so there was nothing to "
+                           "install. Removed the copy." % repo_name),
+            }
+
+        except subprocess.CalledProcessError as exc:
+            # git's own words: a private repository, a wrong URL and no network
+            # read very differently.
+            message = (exc.stderr or b"").decode("utf-8", "replace").strip()
+            logger.warning("git failed for %s: %s", repo_url, message[:200])
+            return {"kind": None, "error": message[-300:] or "git failed."}
+        except subprocess.TimeoutExpired:
+            return {"kind": None, "error": "The clone took too long and was stopped."}
+        except Exception as exc:
+            logger.exception("Failed to install from %s", repo_url)
+            return {"kind": None, "error": str(exc)[:200]}
+
+    @staticmethod
+    def _index_skills(path: Path) -> List[Dict[str, str]]:
+        """The skills in a checkout.
+
+        A skill is a markdown file that describes itself - SKILL.md at the
+        root, or the .md files a collection keeps in agents/ or skills/. The
+        README is not one of them, and neither is a licence.
+        """
+        import re
+
+        SKIP = {"readme.md", "license.md", "licence.md", "contributing.md",
+                "changelog.md", "code_of_conduct.md", "security.md",
+                "pull_request_template.md", "issue_template.md"}
+        found: List[Dict[str, str]] = []
+
+        for file in sorted(path.rglob("*.md")):
+            # Repository furniture is not a skill. Indexing agency-agents
+            # listed its PULL_REQUEST_TEMPLATE among the agents, and .github
+            # holds nothing anyone would want to run.
+            if (file.name.lower() in SKIP or ".git" in file.parts
+                    or ".github" in file.parts or "docs" in file.parts[:1]):
+                continue
+            try:
+                text = file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if len(text) < 200:
+                continue
+
+            # Prefer the name and description a skill states about itself in
+            # YAML frontmatter; fall back to its first heading.
+            name = description = ""
+            front = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
+            if front:
+                for line in front.group(1).splitlines():
+                    key, _, value = line.partition(":")
+                    if key.strip() == "name":
+                        name = value.strip().strip('"\'')
+                    elif key.strip() == "description":
+                        description = value.strip().strip('"\'')
+            if not name:
+                heading = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+                name = heading.group(1).strip() if heading else file.stem
+            if not description:
+                body = re.sub(r"^---.*?---", "", text, flags=re.DOTALL)
+                body = re.sub(r"^#.*$", "", body, flags=re.MULTILINE).strip()
+                description = " ".join(body.split())[:180]
+
+            found.append({"name": name[:80], "description": description,
+                          "file": str(file.relative_to(path))})
+            if len(found) >= 400:
+                break
+        return found
 
 # Global plugin manager instance
 plugin_manager = PluginManager()
