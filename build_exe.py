@@ -64,6 +64,7 @@ HIDDEN_IMPORTS = [
     "app.updates",
     "app.desktop_agent",
     "app.plugin_routes",
+    "app.sites_routes",
     "app.local_engine",
     # MCP is registered inside a try, so a static scan does not follow it.
     # Without these the packaged build silently has no MCP support at all.

@@ -989,17 +989,9 @@ input:-webkit-autofill:active {
     /* On mobile, increase text sizes for readability (was 8-9px, now 11-12px minimum) */
     .performance-copy { font-size:11px !important; }
     .performance-panel h2 { font-size:13px !important; }
-    /* Scrollable content must be able to scroll on touch devices */
-    .performance-scroll {
-      flex:1 1 0;
-      min-height:0;
-      -webkit-overflow-scrolling:touch;
-      overscroll-behavior:contain;
-      padding:0.75rem !important;
-    }
     /* Cards get more padding on mobile for touch comfort */
-    .performance-glass-card { padding:0.75rem !important; }
-    .performance-metric-card { padding:0.625rem !important; min-height:44px; }
+    .performance-glass-card { padding:0.75rem !important; overflow:hidden; overflow-wrap:anywhere; word-break:break-word; }
+    .performance-metric-card { padding:0.625rem !important; min-height:44px; overflow:hidden; }
     /* StatCard text needs to be larger - target by element type */
     .performance-glass-card span[style*="font-size: 8px"],
     .performance-glass-card span[style*="font-size: 9px"],
@@ -1008,6 +1000,14 @@ input:-webkit-autofill:active {
     .performance-glass-card .text-\[8px\],
     .performance-glass-card .text-\[9px\],
     .performance-glass-card .text-\[10px\] { font-size:11px !important; }
+    /* Scrollable content must be able to scroll on touch devices */
+    .performance-scroll {
+      flex:1 1 0;
+      min-height:0;
+      -webkit-overflow-scrolling:touch;
+      overscroll-behavior:contain;
+      padding:0.75rem !important;
+    }
   }
 
 /* Very small phones (<359px) — hide mini charts, tighten layout */
@@ -1205,6 +1205,12 @@ body.sidebar-open { overflow:hidden; overscroll-behavior:none; }
   50%      { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
 }
 .live-dot { animation: live-pulse 2s ease-in-out infinite; }
+
+@keyframes pet-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-8px) rotate(2deg); }
+}
+.pet-float { animation: pet-float 2.8s ease-in-out infinite; }
 
 /* Sidebar rows: neon rail that fills in from the left on hover. */
 .nav-neon {

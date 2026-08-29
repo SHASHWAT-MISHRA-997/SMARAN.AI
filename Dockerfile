@@ -9,7 +9,7 @@ FROM python:3.11-slim AS production
 
 LABEL org.opencontainers.image.title="SMARAN.AI"
 LABEL org.opencontainers.image.description="Local AI workspace with responsive chat, source-labelled telemetry, uploaded-file RAG, web search, local voice, and user-configured model routing."
-LABEL org.opencontainers.image.version="2.8.2"
+LABEL org.opencontainers.image.version="2.8.5"
 LABEL org.opencontainers.image.vendor="SMARAN AI"
 LABEL maintainer="shashwatmishra062"
 LABEL org.opencontainers.image.docker.cmd="docker run -p 3003:3003 shashwatmishra062/smaran-ai:latest"

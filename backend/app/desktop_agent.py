@@ -771,30 +771,69 @@ class DesktopAgent:
         if not name:
             return {"success": False, "error": "No application name provided."}
 
+        # Direct Windows known app execution for instant reliable launch
+        if sys.platform == "win32":
+            try:
+                if name in ("notepad", "notepad.exe"):
+                    subprocess.Popen(["notepad.exe"])
+                    return {"success": True, "message": "Launched Notepad.", "app": "Notepad"}
+                elif name in ("calculator", "calc", "calc.exe"):
+                    subprocess.Popen(["calc.exe"])
+                    return {"success": True, "message": "Launched Calculator.", "app": "Calculator"}
+                elif name in ("paint", "mspaint", "mspaint.exe"):
+                    subprocess.Popen(["mspaint.exe"])
+                    return {"success": True, "message": "Launched Paint.", "app": "Paint"}
+                elif name in ("task manager", "taskmgr", "taskmgr.exe"):
+                    subprocess.Popen(["taskmgr.exe"])
+                    return {"success": True, "message": "Launched Task Manager.", "app": "Task Manager"}
+                elif name in ("file explorer", "explorer", "my computer"):
+                    subprocess.Popen(["explorer.exe"])
+                    return {"success": True, "message": "Launched File Explorer.", "app": "File Explorer"}
+                elif name in ("settings", "windows settings"):
+                    os.system("start ms-settings:")
+                    return {"success": True, "message": "Opened Windows Settings.", "app": "Settings"}
+                elif name in ("terminal", "windows terminal", "wt"):
+                    subprocess.Popen(["wt.exe"])
+                    return {"success": True, "message": "Launched Windows Terminal.", "app": "Terminal"}
+                elif name in ("cmd", "command prompt"):
+                    subprocess.Popen(["cmd.exe"])
+                    return {"success": True, "message": "Launched Command Prompt.", "app": "Command Prompt"}
+                elif name in ("powershell", "ps"):
+                    subprocess.Popen(["powershell.exe"])
+                    return {"success": True, "message": "Launched PowerShell.", "app": "PowerShell"}
+                elif name in ("vscode", "vs code", "code", "visual studio code"):
+                    subprocess.Popen("code", shell=True)
+                    return {"success": True, "message": "Launched VS Code.", "app": "VS Code"}
+                elif name in ("chrome", "google chrome"):
+                    subprocess.Popen("start chrome", shell=True)
+                    return {"success": True, "message": "Launched Google Chrome.", "app": "Chrome"}
+                elif name in ("brave", "brave browser"):
+                    subprocess.Popen("start brave", shell=True)
+                    return {"success": True, "message": "Launched Brave Browser.", "app": "Brave"}
+                elif name in ("edge", "microsoft edge"):
+                    subprocess.Popen("start msedge", shell=True)
+                    return {"success": True, "message": "Launched Microsoft Edge.", "app": "Edge"}
+                elif name in ("spotify",):
+                    subprocess.Popen("start spotify:", shell=True)
+                    return {"success": True, "message": "Launched Spotify.", "app": "Spotify"}
+                elif name in ("snipping tool", "snip"):
+                    subprocess.Popen("start ms-screenclip:", shell=True)
+                    return {"success": True, "message": "Opened Snipping Tool.", "app": "Snipping Tool"}
+            except Exception as e:
+                logger.warning(f"Direct app launch exception for {name}: {e}")
+
         # Check app registry
         cmd = APP_REGISTRY.get(name)
         if cmd:
             try:
-                subprocess.Popen(
-                    cmd,
-                    shell=True,
-                    creationflags=WIN_NO_WINDOW if sys.platform == "win32" else 0,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+                subprocess.Popen(cmd, shell=True)
                 return {"success": True, "message": f"Launched {name}.", "app": name}
             except Exception as e:
                 return {"success": False, "error": f"Failed to launch {name}: {e}"}
 
         # Try launching by name directly
         try:
-            subprocess.Popen(
-                ["start", "", name],
-                shell=True,
-                creationflags=WIN_NO_WINDOW if sys.platform == "win32" else 0,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            subprocess.Popen(["start", "", name], shell=True)
             return {"success": True, "message": f"Launched {name}.", "app": name}
         except Exception as e:
             return {"success": False, "error": f"Could not find or launch '{name}': {e}"}

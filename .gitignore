@@ -1,96 +1,76 @@
-# Security & Secrets Protection
-# `.env*` rather than `.env` and `*.env`: those two miss anything with a
-# suffix, so a `.env.backup` or `.env.old` sitting in the tree would have been
-# committable. A template is the one thing worth tracking, so it is excepted.
-.env*
+# Secrets — NEVER commit
+.env
+.env.*
 !.env.example
-*.env
-litellm_config.yaml
 *.pem
 *.key
-*.secret
+*-key.txt
+ingest-key.txt
+manifest-key.txt
+extension-key.pem
 
-# Runtime Data, Uploads, DBs & Embeddings
-backend/data/
-data/
-*.db
-*.db-shm
-*.db-wal
-*.sqlite
-*.sqlite3
-chroma/
-uploads/
-
-# Dependencies & Build Artefacts
-frontend/node_modules/
-frontend/dist/
-backend/venv/
-.venv/
-node_modules/
-dist/
-build/
-*.egg-info/
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Packaged Binaries, Installers & Large Archives
-*.zip
-*.tar
-*.gz
-*.7z
-*.rar
-*.bin
-*.safetensors
-*.gguf
-*.pt
-*.onnx
+# Build artifacts
+build/
+dist/
+*.spec.bak
 *.exe
-SMARAN_AI.spec
+*.app
+*.deb
+*.rpm
 
-# Personal / Non-Software Data
-GMRPL AI/
-Attendance_Report/
-
-# OS & Workspace Files
+# IDE / OS
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
-.vscode/
-.idea/
 
-# Logs & System Test Traces
+# Node (if used by extension tooling)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Cache
+.cache/
+.huggingface/
+.localpycs/
+
+# Logs
 *.log
-.tempmediaStorage/
-.user_uploaded/
-.system_generated/
-test-results/
-playwright-report/
-
-# Android release signing. The keystore identifies every build as coming
-# from the same source; anyone holding it could sign an APK that Android
-# accepts as an update to this app. It never belongs in the repository,
-# public or otherwise.
+logs/
+# Android release signing. The keystore signs every APK that claims to be
+# SMARAN.AI, and keystore.properties holds its passwords in plain text.
+# Neither belongs in a repository - anyone holding them can publish an
+# update that Android accepts as genuinely yours.
 frontend/android/keystore/
+frontend/android/keystore.properties
 *.jks
 *.keystore
-keystore.properties
 
-# Built installers. These are attached to GitHub Releases instead, which
-# is where large binaries belong.
-dist-release/
-
-# Generated at build time; carries the analytics ingest key.
-backend/app/analytics_config.py
-
-# The saved Google client id. Not a secret, but it is per-installation
-# configuration rather than source.
-backend/data/google_oauth.json
-
-# CLI build artefacts
-cli/build/
-cli/dist/
-cli/*.egg-info/
+# Build and tool output, not source.
+.netlify/
+frontend/playwright-report/
+frontend/android/.gradle-user/
+cli/build-exe/
 cli/smaran_cli.egg-info/
+*.apk.idsig
+
+# Downloaded models, vector stores and the local database. data/ alone is
+# about 6 GB and backend/data/ another 1.6 GB - machine state, not source,
+# and past GitHub's 100 MB per-file limit either way. `git add -A` was
+# silently staging nothing because it choked walking these.
+data/
+backend/data/
+dist-release/
+.pet-work/

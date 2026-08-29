@@ -20,6 +20,10 @@ from typing import Optional
 
 APP_DIR_NAME = "SMARAN.AI"
 DEFAULT_PORT = 3003
+# `uvicorn app.main:app` is the documented source-development command.  Its
+# port is deliberately tried too so the CLI remains useful when VS Code runs
+# the backend directly instead of launching the packaged desktop application.
+SOURCE_PORT = 8000
 
 
 def _data_dirs() -> list[str]:
@@ -99,8 +103,9 @@ def find_backend() -> Optional[str]:
             return record.get("url") or f"http://127.0.0.1:{port}"
 
     # Nothing advertised, but the app may be running from source without
-    # having written the file. The usual port is worth one probe.
-    if _port_open(DEFAULT_PORT):
-        return f"http://127.0.0.1:{DEFAULT_PORT}"
+    # having written the file. Probe both supported local defaults.
+    for port in (DEFAULT_PORT, SOURCE_PORT):
+        if _port_open(port):
+            return f"http://127.0.0.1:{port}"
 
     return None

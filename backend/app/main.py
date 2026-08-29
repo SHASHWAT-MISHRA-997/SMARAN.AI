@@ -266,6 +266,8 @@ async def _warm_speech_recognition() -> None:
 from app.plugin_routes import router as plugin_router
 from app.plugin_system import plugin_manager, PluginConfig
 app.include_router(plugin_router)
+from app.sites_routes import router as sites_router
+app.include_router(sites_router)
 
 @app.get("/api/updates/check")
 def check_for_updates(force: bool = False):

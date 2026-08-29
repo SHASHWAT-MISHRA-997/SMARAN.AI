@@ -20,6 +20,7 @@ import urllib.request
 import uuid
 
 from .discovery import find_backend
+from . import __version__
 
 
 TIMEOUT = 300  # A local model on a slow machine can take minutes to answer.
@@ -276,6 +277,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="smaran",
         description="Talk to the SMARAN.AI running on this machine.",
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show the CLI version and exit",
+    )
     subs = parser.add_subparsers(dest="command")
 
     status = subs.add_parser("status", help="Check that the app is running")
@@ -302,12 +309,20 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):
-        parser.print_help()
-        return 0
+        # When double-clicked or run without subcommands, enter interactive chat directly!
+        setattr(args, "model", None)
+        setattr(args, "session", None)
+        setattr(args, "func", cmd_chat)
+
     try:
         return args.func(args)
     except Problem as exc:
-        print(str(exc), file=sys.stderr)
+        print(f"\n[!] {exc}", file=sys.stderr)
+        if sys.stdin.isatty():
+            try:
+                input("\nPress Enter to exit...")
+            except (EOFError, KeyboardInterrupt):
+                pass
         return 1
     except KeyboardInterrupt:
         print()

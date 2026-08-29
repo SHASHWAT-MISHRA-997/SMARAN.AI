@@ -473,12 +473,12 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
               </div>
 
               {/* Search */}
-              <div className="relative mt-6">
+              <div className="relative mt-6 min-w-0 overflow-hidden">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder={`Search ${primaryTab} by name, capabilities, or tools…`}
+                  placeholder={primaryTab === 'skills' ? 'Search skills…' : 'Search plugins & MCP servers…'}
                   className="w-full rounded-full border border-zinc-700/80 bg-zinc-900/80 py-3 pl-11 pr-4 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-indigo-500"
                 />
               </div>

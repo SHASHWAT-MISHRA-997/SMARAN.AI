@@ -6,7 +6,7 @@ name: smaran-ai
 # without an explicit host-side bridge.
 services:
   host-telemetry:
-    image: ${SMARAN_IMAGE:-shashwatmishra062/smaran-ai:2.8.2}
+    image: ${SMARAN_IMAGE:-shashwatmishra062/smaran-ai:2.8.5}
     container_name: smaran-host-telemetry
     restart: unless-stopped
     entrypoint: ["python", "/opt/smaran/host_telemetry_bridge.py", "--output", "/app/data/host_stats.json"]
@@ -59,7 +59,7 @@ services:
 
   app:
     build: .
-    image: ${SMARAN_IMAGE:-shashwatmishra062/smaran-ai:2.8.2}
+    image: ${SMARAN_IMAGE:-shashwatmishra062/smaran-ai:2.8.5}
     container_name: smaran-ai
     restart: unless-stopped
     ports:
@@ -73,7 +73,7 @@ services:
       ACTIVE_MODEL: qwen2.5:1.5b
       MAX_MODEL_LEN: "4096"
       SMARAN_AUTO_PULL_MODEL: "0"
-      SMARAN_IMAGE: ${SMARAN_IMAGE:-shashwatmishra062/smaran-ai:2.8.2}
+      SMARAN_IMAGE: ${SMARAN_IMAGE:-shashwatmishra062/smaran-ai:2.8.5}
     volumes:
       - smaran_data:/app/data
     networks:

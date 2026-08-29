@@ -139,6 +139,24 @@ const AvatarVideo = ({
       } transition-opacity duration-500`,
   };
 
+  // If the video clips cannot be loaded (files missing), render nothing
+  // instead of showing a broken native video player with a giant play button.
+  if (loadError) {
+    return (
+      <div className={`relative w-full h-full overflow-hidden flex flex-col items-center justify-center ${className}`}>
+        <div className="relative flex items-center justify-center">
+          <div className={`w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-gradient-to-tr from-purple-600/30 via-indigo-500/20 to-pink-500/30 border border-purple-400/40 backdrop-blur-xl flex items-center justify-center shadow-[0_0_50px_rgba(168,85,247,0.35)] ${isSpeaking ? 'scale-110 animate-pulse' : isThinking ? 'animate-spin' : ''}`}>
+            <span className="text-3xl sm:text-4xl select-none">✨</span>
+          </div>
+          <div className="absolute -inset-2 rounded-full border border-pink-400/20 animate-ping pointer-events-none" />
+        </div>
+        <p className="mt-4 text-xs font-black text-zinc-200 font-mono tracking-wider uppercase">
+          {character.name || 'AI Assistant'} · Active
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className={`relative w-full h-full overflow-hidden ${className}`}>
       <video ref={playerA} {...sharedVideoProps} style={{ opacity: frontIsA ? 1 : 0 }} />
@@ -146,14 +164,6 @@ const AvatarVideo = ({
 
       {/* Soft vignette so the clip sits inside the dark interface. */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(0,0,0,0.65)_100%)]" />
-
-      {loadError && (
-        <div className="absolute inset-0 flex items-center justify-center px-4 text-center">
-          <span className="font-mono text-[10px] text-rose-400/90">
-            Character animation could not be loaded.
-          </span>
-        </div>
-      )}
     </div>
   );
 };

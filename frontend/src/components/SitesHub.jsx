@@ -35,6 +35,14 @@ const PRESET_TEMPLATES = [
 const generateSiteHTML = (name, prompt, version = 1) => {
   const safeName = (name || 'SMARAN Project').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const safePrompt = (prompt || 'A modern digital experience').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const brief = `${name} ${prompt}`.toLowerCase();
+  const profile = brief.includes('store') || brief.includes('commerce') || brief.includes('product')
+    ? { accent: '#f97316', accent2: '#facc15', eyebrow: 'CURATED COLLECTION', cta: 'Shop the collection', features: ['Featured products', 'Fast secure checkout', 'Loved by customers'] }
+    : brief.includes('portfolio') || brief.includes('developer')
+      ? { accent: '#22d3ee', accent2: '#8b5cf6', eyebrow: 'SELECTED WORK', cta: 'Explore projects', features: ['Case-study projects', 'Technical expertise', 'Start a conversation'] }
+      : brief.includes('agency') || brief.includes('studio') || brief.includes('creative')
+        ? { accent: '#ec4899', accent2: '#fb7185', eyebrow: 'INDEPENDENT CREATIVE STUDIO', cta: 'View our work', features: ['Strategy & identity', 'Digital experiences', 'Measured impact'] }
+        : { accent: '#6366f1', accent2: '#d946ef', eyebrow: 'A BETTER WAY TO BUILD', cta: 'Start free today', features: ['Powerful automation', 'Simple collaboration', 'Enterprise ready'] };
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -49,11 +57,14 @@ const generateSiteHTML = (name, prompt, version = 1) => {
   <style>
     body { font-family: 'Plus Jakarta Sans', sans-serif; }
     .mono { font-family: 'JetBrains Mono', monospace; }
+    :root { --accent: ${profile.accent}; --accent-two: ${profile.accent2}; }
     .glow-radial {
-      background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.18) 0%, transparent 60%),
-                  radial-gradient(circle at 85% 85%, rgba(236, 72, 153, 0.12) 0%, transparent 50%),
+      background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--accent) 22%, transparent) 0%, transparent 60%),
+                  radial-gradient(circle at 85% 85%, color-mix(in srgb, var(--accent-two) 16%, transparent) 0%, transparent 50%),
                   #09090b;
     }
+    .brand-gradient { background: linear-gradient(135deg, var(--accent), var(--accent-two)); }
+    .accent-button { background: var(--accent); box-shadow: 0 18px 45px color-mix(in srgb, var(--accent) 30%, transparent); }
   </style>
 </head>
 <body class="glow-radial min-h-screen text-zinc-100 antialiased selection:bg-indigo-500 selection:text-white flex flex-col justify-between">
@@ -62,7 +73,7 @@ const generateSiteHTML = (name, prompt, version = 1) => {
   <header class="border-b border-zinc-800/80 bg-zinc-950/70 backdrop-blur-xl sticky top-0 z-50">
     <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center font-black text-white shadow-lg shadow-indigo-500/25">
+        <div class="brand-gradient w-8 h-8 rounded-xl flex items-center justify-center font-black text-white shadow-lg">
           ${safeName.slice(0, 1).toUpperCase()}
         </div>
         <span class="font-extrabold tracking-tight text-lg text-white">${safeName}</span>
@@ -88,7 +99,7 @@ const generateSiteHTML = (name, prompt, version = 1) => {
     <div class="max-w-3xl mx-auto text-center space-y-6">
       <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/90 border border-zinc-700/80 text-xs font-semibold text-zinc-300 shadow-inner">
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        Built with SMARAN.AI Sites Engine
+        ${profile.eyebrow}
       </div>
       
       <h1 class="text-4xl sm:text-6xl font-black tracking-tight text-white leading-tight">
@@ -100,8 +111,8 @@ const generateSiteHTML = (name, prompt, version = 1) => {
       </p>
 
       <div class="pt-4 flex flex-wrap items-center justify-center gap-4">
-        <button onclick="document.getElementById('features').scrollIntoView({ behavior: 'smooth' })" class="px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition shadow-xl shadow-indigo-600/30 flex items-center gap-2">
-          Explore Features &rarr;
+        <button onclick="document.getElementById('features').scrollIntoView({ behavior: 'smooth' })" class="accent-button px-6 py-3.5 rounded-2xl text-white font-bold text-sm transition flex items-center gap-2">
+          ${profile.cta} &rarr;
         </button>
         <button onclick="alert('Prompt: ${safePrompt}')" class="px-6 py-3.5 rounded-2xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-200 font-semibold text-sm transition">
           View Blueprint
@@ -115,7 +126,7 @@ const generateSiteHTML = (name, prompt, version = 1) => {
         <div class="w-10 h-10 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold">
           01
         </div>
-        <h3 class="text-lg font-bold text-white">Full Local Generation</h3>
+        <h3 class="text-lg font-bold text-white">${profile.features[0]}</h3>
         <p class="text-sm text-zinc-400 leading-relaxed">
           Structured directly from your prompt brief, zero external runtime dependencies.
         </p>
@@ -125,7 +136,7 @@ const generateSiteHTML = (name, prompt, version = 1) => {
         <div class="w-10 h-10 rounded-2xl bg-pink-500/10 border border-pink-500/30 flex items-center justify-center text-pink-400 font-bold">
           02
         </div>
-        <h3 class="text-lg font-bold text-white">Fluid Responsive Design</h3>
+        <h3 class="text-lg font-bold text-white">${profile.features[1]}</h3>
         <p class="text-sm text-zinc-400 leading-relaxed">
           Clean mobile-first viewport layout with modern typography and sleek dark UI aesthetics.
         </p>
@@ -135,7 +146,7 @@ const generateSiteHTML = (name, prompt, version = 1) => {
         <div class="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">
           03
         </div>
-        <h3 class="text-lg font-bold text-white">Instant Iteration</h3>
+        <h3 class="text-lg font-bold text-white">${profile.features[2]}</h3>
         <p class="text-sm text-zinc-400 leading-relaxed">
           Refine prompts to create instant version increments (v1, v2, v3) in real-time.
         </p>

@@ -422,7 +422,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
           </div>
 
           {/* Primary View Navigation Tabs */}
-          <div className="px-6 pt-3 pb-0 bg-zinc-900/30 border-b border-zinc-800/80 flex items-center gap-2 shrink-0 overflow-x-auto">
+          <div className="px-3 sm:px-6 pt-3 pb-0 bg-zinc-900/30 border-b border-zinc-800/80 flex items-center gap-2 shrink-0 overflow-x-auto">
             <button
               onClick={() => setActiveTab('local')}
               className={`hidden md:flex items-center gap-2 px-4 py-2.5 rounded-t-2xl text-xs font-black transition-all border-t border-x cursor-pointer ${
@@ -437,16 +437,16 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
 
             <button
               onClick={() => setActiveTab('cloud')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-t-2xl text-xs font-black transition-all border-t border-x cursor-pointer ${
+              className={`flex min-w-0 items-center gap-2 px-3 sm:px-4 py-2.5 rounded-t-2xl text-xs font-black transition-all border-t border-x cursor-pointer ${
                 activeTab === 'cloud'
                   ? 'bg-zinc-950 border-zinc-800 text-amber-400 shadow-md'
                   : 'bg-zinc-900/40 border-transparent text-zinc-400 hover:text-zinc-200'
               }`}
             >
               <Zap className="w-4 h-4 text-amber-400 animate-pulse" />
-              <span className="flex items-center gap-1.5">
+              <span className="flex min-w-0 items-center gap-1.5">
                 <span>Cloud Provider Keys</span>
-                <span className="px-2 py-0.5 text-[9px] font-black rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-black uppercase tracking-wider shadow-sm">
+                <span className="hidden sm:inline px-2 py-0.5 text-[9px] font-black rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-black uppercase tracking-wider shadow-sm">
                   Live model probe
                 </span>
               </span>

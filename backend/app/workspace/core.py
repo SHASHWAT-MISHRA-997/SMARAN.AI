@@ -24,6 +24,7 @@ import difflib
 import hashlib
 import logging
 import os
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -151,14 +152,34 @@ class Workspace:
 
     def describe(self) -> dict:
         if not self.root:
-            return {"open": False, "root": None, "pending": []}
+            return {"open": False, "root": None, "pending": [], "git": None}
         return {
             "open": True,
             "root": str(self.root),
             "name": self.root.name,
             "pending": [c.as_dict() for c in self._pending.values()],
             "applied_count": len(self._applied),
+            "git": self._git_status(),
         }
+
+    def _git_status(self) -> Optional[dict]:
+        """Read the selected folder's real Git context without changing it."""
+        if not self.root:
+            return None
+        try:
+            def git(*args: str) -> str:
+                return subprocess.check_output(
+                    ["git", "-C", str(self.root), *args],
+                    stderr=subprocess.DEVNULL, text=True, timeout=2,
+                ).strip()
+            if git("rev-parse", "--is-inside-work-tree") != "true":
+                return None
+            branch = git("rev-parse", "--abbrev-ref", "HEAD")
+            git_dir = Path(git("rev-parse", "--git-dir")).resolve()
+            common_dir = Path(git("rev-parse", "--git-common-dir")).resolve()
+            return {"branch": branch if branch != "HEAD" else "detached HEAD", "worktree": git_dir != common_dir}
+        except (OSError, subprocess.SubprocessError):
+            return None
 
     # ── path safety ────────────────────────────────────────────────────
 
@@ -205,15 +226,23 @@ class Workspace:
         the root is the point. It lists directory names only - no file
         contents, no sizes - so it cannot be used to read anything.
         """
+        user_profile = Path(os.environ.get("USERPROFILE", ""))
         if path:
             here = Path(path).expanduser()
         else:
-            here = Path.home()
+            # The profile root can be non-enumerable on Windows. Open an
+            # ordinary user-visible directory instead of Path.home().
+            candidates = [
+                user_profile / "Desktop",
+                Path.cwd(),
+                user_profile / "Documents",
+            ]
+            here = next((candidate for candidate in candidates if candidate.is_dir()), Path.cwd())
 
         try:
             here = here.resolve(strict=True)
         except (FileNotFoundError, OSError):
-            raise WorkspaceError("There is no folder at %s." % path)
+            raise WorkspaceError("There is no folder at %s." % (path or here))
         if not here.is_dir():
             raise WorkspaceError("%s is not a folder." % here)
 
@@ -237,11 +266,11 @@ class Workspace:
             # Somewhere to start rather than the filesystem root.
             "shortcuts": [
                 {"name": n, "path": str(p)} for n, p in (
-                    ("Home", Path.home()),
-                    ("Desktop", Path.home() / "Desktop"),
-                    ("Documents", Path.home() / "Documents"),
-                    ("Downloads", Path.home() / "Downloads"),
-                ) if p.exists()
+                    ("Desktop", user_profile / "Desktop"),
+                    ("Documents", user_profile / "Documents"),
+                    ("Downloads", user_profile / "Downloads"),
+                    ("SMARAN.AI", Path.cwd().parent if Path.cwd().name == "backend" else Path.cwd()),
+                ) if p.is_dir()
             ],
         }
 

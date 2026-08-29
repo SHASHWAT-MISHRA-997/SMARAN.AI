@@ -325,8 +325,8 @@ const PhonePairing = ({ onPaired }) => {
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-cyan-400/20 bg-black/30 p-4">
-        <div className="relative overflow-hidden rounded-xl bg-black" style={{ aspectRatio: '1 / 1' }}>
-          <video ref={videoRef} muted playsInline className="h-full w-full object-cover" />
+        <div className="relative overflow-hidden rounded-xl bg-zinc-950" style={{ aspectRatio: '1 / 1' }}>
+          {scanning && <video ref={videoRef} muted playsInline className="absolute inset-0 h-full w-full object-cover" />}
           {!scanning && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
               <QrCode className="h-8 w-8 text-cyan-300/70" />

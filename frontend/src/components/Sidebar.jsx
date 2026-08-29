@@ -711,7 +711,7 @@ const Sidebar = ({
         </div>
 
         <div className="p-3 shrink-0">
-          <button onClick={() => { onCreateSession(); onNavigate('chat'); setMobileOpen(false); }}
+          <button onClick={async () => { setMobileOpen(false); onNavigate('chat'); await onCreateSession(); }}
             className="w-full flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800/60 hover:bg-zinc-200 dark:hover:bg-zinc-700/70 text-zinc-800 dark:text-zinc-200 font-bold text-xs uppercase tracking-wider rounded-full py-2.5 border border-zinc-200 dark:border-zinc-700/40 transition-all cursor-pointer">
             <Plus className="w-4 h-4 text-indigo-400" /> New Conversation
           </button>

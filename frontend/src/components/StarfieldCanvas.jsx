@@ -15,7 +15,7 @@ const StarfieldCanvas = () => {
   }, []);
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none">
+    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none opacity-20 dark:opacity-100 transition-opacity duration-300">
       {/* Sci-Fi Nebula Background Glows */}
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-gradient-to-br from-indigo-600/15 via-purple-600/10 to-transparent blur-[120px] animate-nebula" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] rounded-full bg-gradient-to-tl from-amber-500/12 via-orange-600/10 to-transparent blur-[140px] animate-nebula" style={{ animationDelay: '-5s' }} />

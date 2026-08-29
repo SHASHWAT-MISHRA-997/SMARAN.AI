@@ -342,16 +342,10 @@
 
   /* -------------------------------------------------- platform default */
 
-  /* Lead with the download that matches the visitor's device, rather than
-     making an Android user hunt past a Windows installer. */
+  /* All download buttons maintain rich, prominent red primary styling across all platforms. */
   const ua = navigator.userAgent;
   if (/Android/i.test(ua)) {
     document.body.classList.add('is-android');
-    const win = $('#dlWin'), apk = $('#dlApk');
-    if (win && apk) {
-      apk.classList.remove('btn-ghost'); apk.classList.add('btn-primary');
-      win.classList.remove('btn-primary'); win.classList.add('btn-ghost');
-    }
   }
 
   /* ------------------------------------------------------------- misc */

@@ -137,10 +137,20 @@ const App = () => {
         setSessions((prev) => [data, ...(Array.isArray(prev) ? prev : [])]);
         setActiveSessionId(data.id);
         setActiveView('chat');
+        return data;
       }
     } catch (err) {
       console.error(err);
     }
+    const localSession = {
+      id: `local-${Date.now()}`,
+      title: 'New Conversation',
+      created_at: new Date().toISOString(),
+    };
+    setSessions((prev) => [localSession, ...(Array.isArray(prev) ? prev : [])]);
+    setActiveSessionId(localSession.id);
+    setActiveView('chat');
+    return localSession;
   }
 
   const handleDeleteSession = async (id) => {

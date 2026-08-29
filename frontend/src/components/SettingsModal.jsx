@@ -604,8 +604,8 @@ const SettingsModal = ({
                   </p>
                 </div>
 
-                <div className="flex items-center justify-between p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
-                  <div>
+                <div className="flex items-center justify-between gap-3 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 overflow-hidden">
+                  <div className="min-w-0 flex-1">
                     <span className="block text-xs font-extrabold text-zinc-900 dark:text-white">Show {isMobile ? "Mobile" : "Desktop"} Pet</span>
                     <span className="block text-[11px] text-zinc-500">Live SVG animated facial reactions in the bottom corner</span>
                   </div>
@@ -616,7 +616,7 @@ const SettingsModal = ({
                       localStorage.setItem("sm_pet_visible", String(next));
                       window.dispatchEvent(new CustomEvent("smaran:pet-change", { detail: { visible: next } }));
                     }}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+                    className={`shrink-0 max-w-[42%] px-3 py-1.5 rounded-xl text-[11px] font-bold transition ${
                       petVisible ? "bg-indigo-600 text-white" : "bg-zinc-300 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
                     }`}
                   >

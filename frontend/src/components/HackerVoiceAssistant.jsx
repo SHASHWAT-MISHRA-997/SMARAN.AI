@@ -937,6 +937,15 @@ export const HackerVoiceAssistant = ({
     if (!isOpen || isMutedRef.current) return;
     stopRecognition();
 
+    // Android WebView repeatedly tears down its hosted SpeechRecognition
+    // service, producing the audible mic on/off loop. Mobile already has the
+    // local MediaRecorder + VAD + Whisper path below, which is more reliable.
+    if (isMobileVoiceDevice()) {
+      setRecognizerStatus('local');
+      setRecognizerIssue('Using stable on-device recorded dictation.');
+      return;
+    }
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setRecognizerStatus('unavailable');
@@ -1394,7 +1403,7 @@ export const HackerVoiceAssistant = ({
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled) setLiveAvailable(Boolean(data?.available));
+        if (!cancelled) setLiveAvailable(Boolean(data?.available) && !isMobileVoiceDevice());
       } catch (_) {
         /* leave real-time voice switched off */
       }
@@ -1413,7 +1422,7 @@ export const HackerVoiceAssistant = ({
   // Which engine serves a live call. Remembered, because someone running
   // without a key wants local every time, not once.
   const [voiceEngine, setVoiceEngine] = useState(
-    () => localStorage.getItem('sm_voice_engine') || 'gemini',
+    () => localStorage.getItem('sm_voice_engine') || 'local',
   );
   useEffect(() => { localStorage.setItem('sm_voice_engine', voiceEngine); }, [voiceEngine]);
 
@@ -1462,6 +1471,12 @@ export const HackerVoiceAssistant = ({
           setVoiceState('speaking');
         } else if (state === 'listening') {
           setVoiceState('listening');
+        } else if (state === 'closed' || state === 'error') {
+          liveSessionRef.current = null;
+          setLiveActive(false);
+          setVoiceState('idle');
+          voiceStateRef.current = 'idle';
+          window.setTimeout(() => resumeListeningRef.current(), 250);
         }
       },
       onLevel: (level) => setMicVolume(level),
@@ -1477,6 +1492,9 @@ export const HackerVoiceAssistant = ({
       onError: (message) => {
         setVoiceIssue(message);
         setLiveState('error');
+        liveSessionRef.current = null;
+        setLiveActive(false);
+        window.setTimeout(() => resumeListeningRef.current(), 250);
       },
       onSpeechBus: (busNode, busContext) => setSpeechBus({ node: busNode, context: busContext }),
       onVisionChange: (mode) => setVisionMode(mode),
@@ -1779,10 +1797,10 @@ export const HackerVoiceAssistant = ({
           <div>
             <h2 className="text-xs sm:text-base font-black text-white tracking-widest flex items-center gap-1.5 sm:gap-2 uppercase">
               <span className="text-emerald-400 drop-shadow-[0_0_10px_rgba(0,255,65,0.5)]">
-                SMARAN VOICE
+                SMARAN.AI Voice Assistant
               </span>
               <span className="text-[8px] sm:text-[9px] font-black px-1.5 sm:px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 uppercase tracking-widest font-mono">
-                Neural Assistant
+                Real-Time Conversation
               </span>
             </h2>
             <p className="text-[9px] sm:text-[10px] text-zinc-400 font-mono flex items-center gap-1.5 mt-0.5">
@@ -2005,21 +2023,25 @@ export const HackerVoiceAssistant = ({
           {/* The one control that is not a toggle: answer or hang up. */}
           <button
             type="button"
-            onClick={() => (liveActive ? stopLiveSession() : startLiveSession())}
+            onClick={() => {
+              if (isMobileVoiceDevice()) toggleMute();
+              else if (liveActive) stopLiveSession();
+              else startLiveSession();
+            }}
             className={`group relative -mb-1 flex h-16 w-16 items-center justify-center rounded-full
               transition-all duration-300 active:scale-95 sm:h-[72px] sm:w-[72px] ${
-              liveActive
+              (isMobileVoiceDevice() ? !isMuted : liveActive)
                 ? 'bg-rose-600 shadow-[0_0_28px_rgba(225,29,72,.55)] hover:bg-rose-500'
                 : 'bg-emerald-500 shadow-[0_0_28px_rgba(16,185,129,.5)] hover:bg-emerald-400'
             }`}
-            title={liveActive ? 'End the conversation' : 'Start talking'}
+            title={isMobileVoiceDevice() ? (isMuted ? 'Resume listening' : 'Pause listening') : (liveActive ? 'End the conversation' : 'Start talking')}
           >
             {/* A ring that breathes while the call is live. */}
-            {liveActive && (
+            {(isMobileVoiceDevice() ? !isMuted : liveActive) && (
               <span className="absolute inset-0 animate-ping rounded-full bg-rose-500/40" aria-hidden="true" />
             )}
             <PhoneIcon className={`relative h-7 w-7 text-white transition-transform duration-300 ${
-              liveActive ? 'rotate-[135deg]' : 'group-hover:scale-110'
+              (isMobileVoiceDevice() ? !isMuted : liveActive) ? 'rotate-[135deg]' : 'group-hover:scale-110'
             }`} />
           </button>
 
