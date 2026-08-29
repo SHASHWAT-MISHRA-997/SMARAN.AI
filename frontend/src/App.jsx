@@ -223,6 +223,18 @@ const App = () => {
     }
   };
 
+  // Tracked live rather than read once, so rotating the phone or resizing a
+  // window mounts and unmounts the desktop-only panels correctly.
+  const [isWideScreen, setIsWideScreen] = useState(
+    () => typeof window === 'undefined' || window.matchMedia('(min-width: 768px)').matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 768px)');
+    const update = (event) => setIsWideScreen(event.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
   const [settingsTab, setSettingsTab] = useState('general');
 
   // The views that actually have a branch in the render below. Kept next to
@@ -315,7 +327,12 @@ const App = () => {
       </main>
 
       {/* Right side Task Manager / Brand panel — desktop only */}
-      {activeView === 'chat' && showRightPanel && <div className="hidden md:contents"><RightPanel selectedModel={selectedModel} showPanel={showRightPanel && performancePosition !== 'hidden'} position={performancePosition} onClose={() => setShowRightPanel(false)} /></div>}
+      {/* Gated on isWideScreen rather than only on a "hidden md:contents"
+          wrapper. That wrapper hid the panel on a phone but still mounted it,
+          so the telemetry WebSocket, its four-second reconnect and its polling
+          all kept running for a panel nobody could see - constant radio and
+          CPU work on the device least able to spare it. */}
+      {activeView === 'chat' && showRightPanel && isWideScreen && <div className="hidden md:contents"><RightPanel selectedModel={selectedModel} showPanel={showRightPanel && performancePosition !== 'hidden'} position={performancePosition} onClose={() => setShowRightPanel(false)} /></div>}
 
       {/* Settings Dialog Overlay */}
       <ErrorBoundary>
