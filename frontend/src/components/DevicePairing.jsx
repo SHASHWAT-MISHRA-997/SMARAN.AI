@@ -398,7 +398,16 @@ const displayName = (url) => {
 };
 
 const DevicePairing = ({ isOpen, onClose }) => {
-  const onPhone = isNativeApp();
+  // Which side of the pairing this device is on.
+  //
+  // This asked isNativeApp() alone, which is true only inside the Android
+  // build. So opening SMARAN.AI in a phone's browser showed the host view -
+  // "Link your phone", with a QR code and instructions to scan it with your
+  // phone, while you were holding the phone. A phone cannot be the computer
+  // in this arrangement whichever way you arrived at the page, so a small
+  // screen counts as the phone side too.
+  const onPhone = isNativeApp()
+    || (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
   // Scanning the QR with a phone camera opens this workspace with the code
   // in the address. Pair straight away rather than making the person read a
   // number off one screen and type it into another.
