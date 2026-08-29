@@ -663,6 +663,9 @@ export const HackerVoiceAssistant = ({
   const [micVolume, setMicVolume] = useState(0);
   const [theme, setTheme] = useState('jarvis'); // 'jarvis' | 'cyberpunk' | 'quantum'
   const [micStatus, setMicStatus] = useState('idle');
+  // Bumped by the "Try again" button so the microphone effect below runs
+  // a second time. Nothing else reads it.
+  const [micRetry, setMicRetry] = useState(0);
   const [recognizerStatus, setRecognizerStatus] = useState('idle');
   const [recorderStatus, setRecorderStatus] = useState('idle');
   const [vadStatus, setVadStatus] = useState('idle');
@@ -1409,7 +1412,7 @@ export const HackerVoiceAssistant = ({
       }
     })();
     return () => { cancelled = true; };
-  }, [isOpen, API_BASE, token]);
+  }, [isOpen, API_BASE, token, micRetry]);
 
   // Set when the person hangs up, cleared when the panel is opened again.
    // Without it there is no way to tell "no session yet" from "deliberately
@@ -1968,6 +1971,21 @@ export const HackerVoiceAssistant = ({
             <span className="max-w-[70vw] truncate" title={currentVoiceStatus.detail}>
               {currentVoiceStatus.label}
             </span>
+            {/* A refused microphone used to be a dead end: the message sat
+                there and the only way out was to close and reopen. On Windows
+                the refusal is often a race rather than a decision - the
+                desktop shell grants WebView2 the microphone a second or two
+                after the window appears, and a request made before that is
+                denied by default. Asking again usually just works. */}
+            {(micStatus === 'denied' || micStatus === 'error' || micStatus === 'unavailable') && (
+              <button
+                type="button"
+                onClick={() => setMicRetry((n) => n + 1)}
+                className="ml-1 shrink-0 rounded-md border border-white/25 px-2 py-0.5 text-[10px] font-bold text-white/90 transition hover:bg-white/10"
+              >
+                Try again
+              </button>
+            )}
           </span>
         </div>
 
