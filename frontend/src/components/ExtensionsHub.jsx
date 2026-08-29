@@ -63,6 +63,21 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     }
   });
 
+  // Browsing, adding and starting MCP servers for real. The backend has had
+  // a working MCP client all along - stdio JSON-RPC, initialize, tools/list -
+  // and this screen was showing a hardcoded list instead of using it.
+  const [showCatalogue, setShowCatalogue] = useState(false);
+  const [catalogue, setCatalogue] = useState([]);
+  const [busyServer, setBusyServer] = useState('');
+  const [serverNote, setServerNote] = useState('');
+
+  const loadCatalogue = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/mcp/catalogue`, { credentials: 'include' });
+      if (res.ok) setCatalogue((await res.json()).servers || []);
+    } catch (_) { /* leave it empty rather than invent entries */ }
+  }, []);
+
   const [primaryTab, setPrimaryTab] = useState('plugins');
   const [section, setSection] = useState('plugin');
   const [query, setQuery] = useState('');
@@ -125,6 +140,67 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
   }, []);
 
   useEffect(() => { if (isOpen) load(); }, [isOpen, load]);
+  useEffect(() => { if (isOpen) loadCatalogue(); }, [isOpen, loadCatalogue]);
+
+  // Starting a server actually runs its package, which npx or uvx downloads on
+  // first use - so this can take a minute and needs a network. Saying so beats
+  // a spinner that looks stuck.
+  const probeServer = useCallback(async (name) => {
+    setBusyServer(name);
+    setServerNote(`Starting ${name}… the package is downloaded on first use, so this can take a minute.`);
+    try {
+      const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}/probe`, {
+        method: 'POST', credentials: 'include',
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.state === 'connected') {
+        const count = (data.tools || []).length;
+        setServerNote(`${name} started: ${data.server?.name || 'server'} ${data.server?.version || ''}, ${count} tool${count === 1 ? '' : 's'}.`);
+      } else {
+        setServerNote(`${name} did not start. ${data?.detail || data?.error || ''}`.trim());
+      }
+    } catch (err) {
+      setServerNote(`${name} could not be reached: ${String(err).slice(0, 90)}`);
+    } finally {
+      setBusyServer('');
+      load();
+    }
+  }, [load]);
+
+  const setServerEnabled = useCallback(async (name, enabled) => {
+    setBusyServer(name);
+    try {
+      const res = await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(name)}/enabled`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await res.json().catch(() => null);
+      setServerNote(data?.detail || '');
+    } catch (_) {
+      setServerNote('That could not be saved.');
+    } finally {
+      setBusyServer('');
+      load();
+    }
+  }, [load]);
+
+  const addFromCatalogue = useCallback(async (entry) => {
+    setBusyServer(entry.name);
+    try {
+      await fetch(`${API_BASE}/api/mcp/servers`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: entry.name, target: entry.target }),
+      });
+      await loadCatalogue();
+      await probeServer(entry.name);
+    } finally {
+      setBusyServer('');
+    }
+  }, [loadCatalogue, probeServer]);
 
   useEffect(() => {
     localStorage.setItem('sm_custom_mcps', JSON.stringify(custom));
@@ -205,15 +281,27 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
       ];
     } else if (section === 'mcp') {
       const safeMcps = Array.isArray(custom) ? custom : [];
+      // The state map used to end in `: 'active'`, so a server that had never
+      // been started - the normal state after adding one - was shown as
+      // Running. Only 'connected' means the process is up and answered the
+      // handshake; everything else says what it really is.
+      const MCP_STATE = {
+        connected: 'active',
+        off: 'disabled',
+        disabled: 'disabled',
+        error: 'error',
+        failed: 'error',
+      };
       source = safeMcps.map((c) => ({
         name: c.name,
         description: c.description || c.target,
-        author: c.author || 'Custom MCP',
+        author: (c.server && c.server.name) ? `${c.server.name} ${c.server.version || ''}`.trim() : 'MCP server',
         type: 'mcp',
-        runtime_status: c.state === 'connected' ? 'active' : c.state === 'off' ? 'disabled' : 'active',
-        status_detail: c.detail || 'Standard Model Context Protocol server.',
+        runtime_status: MCP_STATE[c.state] || 'setup_required',
+        status_detail: c.detail || 'Saved but not started yet. Probe it to connect.',
         capabilities: (c.tools || []).map((t) => (typeof t === 'string' ? t : t.name)),
         is_custom: true,
+        target: c.target,
         id: c.name,
       }));
     } else if (section === 'connector') {
@@ -299,6 +387,9 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
                     </button>
                     <button type="button" onClick={() => { setAdding('mcp'); setShowAddMenu(false); }} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-200 hover:bg-zinc-800">
                       <Wrench className="h-3.5 w-3.5 text-amber-400" /> Add MCP Server
+                    </button>
+                    <button type="button" onClick={() => { setShowCatalogue(true); setShowAddMenu(false); }} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-200 hover:bg-zinc-800">
+                      <Blocks className="h-3.5 w-3.5 text-cyan-400" /> Browse MCP servers
                     </button>
                     <button type="button" onClick={() => { setAdding('repo'); setShowAddMenu(false); }} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-200 hover:bg-zinc-800">
                       <FolderGit2 className="h-3.5 w-3.5 text-emerald-400" /> Install from Git Repository
@@ -463,9 +554,22 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
             </div>
           </div>
 
+          {/* This said "{visible.length} extensions active & registered" using
+              the filtered list rather than the running ones - it read "2
+              active" while one of the two was switched off - and beside it a
+              permanently green "MCP & Skills Ready" that was printed whatever
+              the state was. Both now count what is actually running. */}
           <footer className="flex items-center justify-between border-t border-zinc-800 px-5 py-3 text-[11px] text-zinc-500 bg-zinc-950">
-            <span>{visible.length} extensions active & registered</span>
-            <span className="font-semibold text-emerald-400">● MCP & Skills Ready</span>
+            <span>
+              {visible.filter((r) => r.runtime_status === 'active').length} of {visible.length} running
+            </span>
+            {(() => {
+              const waiting = visible.filter((r) => r.runtime_status === 'setup_required').length;
+              const broken = visible.filter((r) => r.runtime_status === 'error').length;
+              if (broken) return <span className="font-semibold text-rose-400">● {broken} failed</span>;
+              if (waiting) return <span className="font-semibold text-amber-400">● {waiting} need setup</span>;
+              return <span className="font-semibold text-emerald-400">● all running</span>;
+            })()}
           </footer>
         </div>
       </div>
@@ -474,6 +578,63 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
       {adding === 'create' && <CreateStudio onClose={() => setAdding(null)} onCreated={handleCreateCustom} />}
       {adding === 'mcp' && <AddServer onClose={() => setAdding(null)} onSaved={handleCreateCustom} />}
       {adding === 'repo' && <AddFromRepo onClose={() => setAdding(null)} onSaved={() => { setAdding(null); load(); }} />}
+
+      {showCatalogue && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm">
+          <div className="w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl flex flex-col">
+            <div className="flex items-start justify-between gap-3 border-b border-zinc-800 p-4">
+              <div>
+                <h3 className="text-sm font-black text-white">MCP servers</h3>
+                <p className="mt-0.5 text-[11px] leading-5 text-zinc-400">
+                  Adding one saves it and then runs it. Each is downloaded on
+                  first use, so the first start takes a minute and needs a
+                  network. Nothing here is bundled with SMARAN.AI.
+                </p>
+              </div>
+              <button type="button" onClick={() => { setShowCatalogue(false); setServerNote(''); }} className="p-1.5 text-zinc-400 hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {serverNote && (
+              <p className="mx-4 mt-3 rounded-lg border border-indigo-800/60 bg-indigo-950/40 px-3 py-2 text-[11px] text-indigo-200">
+                {serverNote}
+              </p>
+            )}
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+              {catalogue.length === 0 && (
+                <p className="text-[11px] text-zinc-500">The catalogue could not be loaded.</p>
+              )}
+              {catalogue.map((entry) => (
+                <div key={entry.name} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="block text-xs font-extrabold text-white">{entry.title}</span>
+                      <span className="mt-0.5 block text-[11px] leading-5 text-zinc-400">{entry.description}</span>
+                      <code className="mt-1.5 block truncate text-[10px] text-zinc-500">{entry.target}</code>
+                      {entry.needs && (
+                        <span className="mt-1 block text-[10px] font-semibold text-amber-400">Needs {entry.needs}</span>
+                      )}
+                      {entry.verified && (
+                        <span className="mt-1 block text-[10px] text-emerald-400">{entry.verified}</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busyServer === entry.name || entry.already_added}
+                      onClick={() => addFromCatalogue(entry)}
+                      className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-[11px] font-black text-white transition hover:bg-indigo-500 disabled:opacity-40"
+                    >
+                      {busyServer === entry.name ? 'Starting…' : entry.already_added ? 'Added' : 'Add & start'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

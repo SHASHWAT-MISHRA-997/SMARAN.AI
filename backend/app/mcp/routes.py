@@ -37,6 +37,79 @@ class CallTool(BaseModel):
     arguments: Optional[Dict[str, Any]] = None
 
 
+# Servers that genuinely exist and genuinely start. Every target here is a
+# published package; adding one and probing it runs that package and reads
+# the tools it really offers, rather than showing a name with a tool list
+# written beside it. Where a server needs a key to do anything, that is said
+# here rather than discovered after it fails.
+#
+# Deliberately short. A long catalogue of names that do not start would be
+# the same mistake as the ten "connected" servers this replaced.
+CATALOGUE = [
+    {
+        "name": "filesystem",
+        "title": "Filesystem",
+        "description": "Read, write and search files in a directory you name.",
+        "target": "npx -y @modelcontextprotocol/server-filesystem .",
+        "publisher": "Model Context Protocol",
+        "needs": None,
+        "verified": "Started here: secure-filesystem-server 0.2.0, 14 tools.",
+    },
+    {
+        "name": "memory",
+        "title": "Memory graph",
+        "description": "A knowledge graph the model can add to and search across sessions.",
+        "target": "npx -y @modelcontextprotocol/server-memory",
+        "publisher": "Model Context Protocol",
+        "needs": None,
+        "verified": "Started here: memory-server 0.6.3, 9 tools.",
+    },
+    {
+        "name": "sequential-thinking",
+        "title": "Sequential thinking",
+        "description": "Lets the model work a problem in explicit numbered steps.",
+        "target": "npx -y @modelcontextprotocol/server-sequential-thinking",
+        "publisher": "Model Context Protocol",
+        "needs": None,
+        "verified": None,
+    },
+    {
+        "name": "git",
+        "title": "Git",
+        "description": "Read a local repository: log, diff, branches, file history.",
+        "target": "uvx mcp-server-git",
+        "publisher": "Model Context Protocol",
+        "needs": "uv installed (pip install uv)",
+        "verified": None,
+    },
+    {
+        "name": "fetch",
+        "title": "Fetch",
+        "description": "Fetch a URL and hand back its content as text.",
+        "target": "uvx mcp-server-fetch",
+        "publisher": "Model Context Protocol",
+        "needs": "uv installed (pip install uv)",
+        "verified": None,
+    },
+]
+
+
+@router.get("/catalogue")
+async def catalogue():
+    """Servers worth adding, and whether each is already configured."""
+    configured = manager.load()
+    return {
+        "servers": [{**entry, "already_added": entry["name"] in configured}
+                    for entry in CATALOGUE],
+        "note": (
+            "Adding one saves it; probing it actually runs the package and "
+            "reads the tools it offers. Nothing here is bundled - each is "
+            "downloaded by npx or uvx on first use, so the first probe is "
+            "slow and needs a network."
+        ),
+    }
+
+
 @router.get("/servers")
 async def list_servers():
     """Configured servers and what is known about each, without starting any."""
@@ -72,6 +145,35 @@ async def probe_server(name: str):
     if status.get("state") == "unknown":
         raise HTTPException(status_code=404, detail="No server named %r." % name)
     return status
+
+
+class SetEnabled(BaseModel):
+    enabled: bool
+
+
+@router.post("/servers/{name}/enabled")
+async def set_enabled(name: str, req: SetEnabled):
+    """Turn a server on or off without forgetting how to reach it.
+
+    Switching one off also drops its running process, so the toggle means
+    what it says rather than only hiding the row.
+    """
+    servers = manager.load()
+    record = servers.get(name)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No server named %r." % name)
+
+    record["enabled"] = bool(req.enabled)
+    manager.save(servers)
+    if not req.enabled:
+        await manager.disconnect(name)
+
+    return {
+        "name": name,
+        "enabled": record["enabled"],
+        "detail": ("Enabled. Probe it to start it."
+                   if req.enabled else "Disabled and its process stopped."),
+    }
 
 
 @router.delete("/servers/{name}")
