@@ -352,8 +352,20 @@ def _open_window(url: str) -> bool:
         import webview  # pywebview: native window, no browser chrome
 
         _grant_webview2_media_permissions()
-        webview.create_window(APP_NAME, url, width=1440, height=900,
-                              min_size=(900, 600), confirm_close=False)
+        window = webview.create_window(APP_NAME, url, width=1440, height=900,
+                                       min_size=(360, 480), confirm_close=False)
+        # Hand the window to the backend, which runs in this same process, so
+        # picture-in-picture can shrink and pin the real window rather than
+        # only shrinking a panel inside the page. A panel floats over the page;
+        # the window floats over everything else, which is the point.
+        #
+        # min_size was (900, 600) - larger than the 420x560 picture-in-picture
+        # size, so the resize would have been refused.
+        try:
+            from app.host_window import register as register_window
+            register_window(window)
+        except Exception:
+            logger.info("Picture-in-picture is unavailable: the window could not be registered.")
         webview.start()
         return True
     except Exception:

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import {
   Mic,
   MicOff,
+  PictureInPicture2,
   Volume2,
   VolumeX,
   X,
@@ -662,6 +663,57 @@ export const HackerVoiceAssistant = ({
   const [textInput, setTextInput] = useState('');
   const [micVolume, setMicVolume] = useState(0);
   const [theme, setTheme] = useState('jarvis'); // 'jarvis' | 'cyberpunk' | 'quantum'
+  // Picture-in-picture shrinks and pins the real desktop window, so you can
+  // use another application while this keeps listening. A panel drawn inside
+  // the page would only float over the page, which helps nobody trying to
+  // work elsewhere. Asked of the backend rather than assumed: in a browser
+  // there is no window to pin and the control is not offered.
+  const [pipAvailable, setPipAvailable] = useState(false);
+  const [pipOn, setPipOn] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/window/status`, { credentials: 'include' });
+        const data = res.ok ? await res.json() : null;
+        if (!cancelled) {
+          setPipAvailable(Boolean(data?.available));
+          setPipOn(Boolean(data?.pinned));
+        }
+      } catch (_) { /* leave the control hidden */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Spoken "turn on camera" and "share my screen" arrive here. The live
+  // session owns the video sources, and it is in this component, so the
+  // command is carried the last step by an event rather than by reaching
+  // across from the chat.
+  useEffect(() => {
+    const apply = (event) => {
+      const { mode, on } = event.detail || {};
+      const session = liveSessionRef.current;
+      if (!session) return;
+      if (on) session.startVision(mode);
+      else session.stopVision();
+    };
+    window.addEventListener('smaran:vision', apply);
+    return () => window.removeEventListener('smaran:vision', apply);
+  }, []);
+
+  const togglePip = useCallback(async () => {
+    const next = !pipOn;
+    try {
+      const res = await fetch(`${API_BASE}/api/window/pip`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ on: next }),
+      });
+      if (res.ok) setPipOn(next);
+    } catch (_) { /* the window stays as it is */ }
+  }, [pipOn]);
+
   const [micStatus, setMicStatus] = useState('idle');
   // Bumped by the "Try again" button so the microphone effect below runs
   // a second time. Nothing else reads it.
@@ -1862,6 +1914,26 @@ export const HackerVoiceAssistant = ({
               <option value="core" className="bg-zinc-900 text-white font-bold">✦ Energy core</option>
             </select>
           </div>
+
+          {/* Picture-in-picture. Only offered where there is a real window to
+              pin: in a browser this cannot float over other applications and
+              the button would be a promise nothing could keep. */}
+          {pipAvailable && (
+            <button
+              type="button"
+              onClick={togglePip}
+              className={`p-1.5 sm:p-2 rounded-xl border transition-colors cursor-pointer ${
+                pipOn
+                  ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40'
+                  : 'text-zinc-400 hover:text-white bg-zinc-900/80 hover:bg-zinc-800 border-zinc-800'
+              }`}
+              title={pipOn
+                ? 'Back to the full window'
+                : 'Shrink and pin above other apps, so you can work while it listens'}
+            >
+              <PictureInPicture2 className="w-4 h-4" />
+            </button>
+          )}
 
           {/* Close / End Session */}
           <button

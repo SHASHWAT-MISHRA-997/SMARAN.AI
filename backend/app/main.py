@@ -6536,6 +6536,31 @@ async def pull_any_model_endpoint(
             "detail": "Pulling. Watch /api/models/download-status for progress."}
 
 
+@app.get("/api/window/status")
+async def window_status_endpoint():
+    """Whether this window can be pinned above other applications."""
+    from app import host_window
+
+    return host_window.status()
+
+
+@app.post("/api/window/pip")
+async def window_pip_endpoint(request: Request):
+    """Shrink and pin the desktop window, or put it back.
+
+    A floating panel drawn inside the page floats over the page and nothing
+    else, so it does not help anyone trying to work in another application.
+    Resizing and pinning the real window does.
+    """
+    from app import host_window
+
+    body = await request.json()
+    result = host_window.enter_pip() if body.get("on", True) else host_window.exit_pip()
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("error", "Not available."))
+    return result
+
+
 @app.get("/api/models/download-status")
 async def download_status_endpoint(
     current_user: User = Depends(get_current_user)
@@ -6739,6 +6764,45 @@ _UI_COMMAND_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
      "clear_chat", "Chat cleared."),
     (re.compile(r"\b(new|start|begin)\s+(a\s+)?(chat|conversation|session)\b|\bnayi\s+chat\b|\bnaya\s+chat\b", re.I),
      "new_chat", "Started a new chat."),
+
+    # Camera and screen. The browser will not open either without a click from
+    # the person - a page cannot start a camera or pick a window on its own,
+    # and no amount of asking changes that. So these open the picker and the
+    # permission prompt; the last step is always yours. Saying "sharing your
+    # screen now" and then showing a prompt would be describing something
+    # that had not happened.
+    # Stopping comes before starting in each pair. These are tried in order,
+    # and the starting patterns contain the bare words "camera" and "screen
+    # sharing", so with them first "stop screen sharing" matched the one that
+    # starts it.
+    (re.compile(r"\b(turn off|stop|close|disable|switch off)\s+(the\s+|my\s+)?(camera|webcam)\b"
+                r"|\bcamera\s*(off|band|bandh)\b", re.I),
+     "camera_off", "Camera off."),
+    (re.compile(r"\b(turn on|start|open|enable|switch on)\s+(the\s+|my\s+)?(camera|webcam)\b"
+                r"|\bcamera\s*(on|chalu|chaalu|start)\b", re.I),
+     "camera_on", "Opening the camera. Your browser will ask you to allow it."),
+    (re.compile(r"\b(stop|end|close|disable|turn off)\s+(the\s+|my\s+)?screen\s*shar(e|ing)\b"
+                r"|\bscreen\s*shar(e|ing)\s*(off|band|bandh)\b", re.I),
+     "screen_share_off", "Screen sharing stopped."),
+    (re.compile(r"\b(share|show)\s+(my\s+|the\s+)?screen\b|\bscreen\s*shar(e|ing)\b"
+                r"|\b(turn on|start|enable)\s+screen\s*share\b|\bscreen\s*(share\s*)?(chalu|chaalu)\b", re.I),
+     "screen_share_on", "Opening the screen picker. Choose what to share, including Entire Screen."),
+    (re.compile(r"\bentire\s+screen\b|\bwhole\s+screen\b|\bfull\s+screen\s+shar", re.I),
+     "screen_share_on", "Opening the screen picker - pick Entire Screen there. "
+                        "A page cannot choose it for you."),
+
+    # Picture-in-picture, which shrinks and pins the real window.
+    #
+    # Leaving comes first. These patterns are tried in order and the "on" one
+    # contains "picture in picture", so with it first "exit picture in
+    # picture" matched it and pinned the window instead of releasing it.
+    (re.compile(r"\b(exit|leave|stop|close|end|turn off)\s+(the\s+)?(picture[\s-]?in[\s-]?picture|pip|floating( window)?)\b"
+                r"|\b(full|normal|big)\s+window\b|\brestore\s+(the\s+)?window\b", re.I),
+     "pip_off", "Back to the full window."),
+    (re.compile(r"\b(picture[\s-]?in[\s-]?picture|pip|floating window|float)\b"
+                r"|\b(shrink|minimi[sz]e)\s+(the\s+)?window\b"
+                r"|\b(stay|keep)\s+on\s+top\b", re.I),
+     "pip_on", "Pinned above your other windows."),
 ]
 
 

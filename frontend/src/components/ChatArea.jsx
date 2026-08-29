@@ -2928,6 +2928,33 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       case 'web_off':
         setIsWebSearchEnabled(false);
         break;
+      // Camera and screen live inside the voice session, which is a sibling
+      // component, so it is told rather than reached into. The browser will
+      // not open either without your click - a page cannot start a camera or
+      // choose a window on its own - so these open the picker and the
+      // permission prompt, and the last step stays yours.
+      case 'camera_on':
+      case 'camera_off':
+      case 'screen_share_on':
+      case 'screen_share_off':
+        window.dispatchEvent(new CustomEvent('smaran:vision', {
+          detail: {
+            mode: action.startsWith('camera') ? 'camera' : 'screen',
+            on: action.endsWith('_on'),
+          },
+        }));
+        break;
+      // Picture-in-picture shrinks and pins the real desktop window, so you
+      // can work in another application while this keeps listening.
+      case 'pip_on':
+      case 'pip_off':
+        fetch(`${API_BASE}/api/window/pip`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ on: action === 'pip_on' }),
+        }).catch(() => {});
+        break;
       case 'clear_chat':
         handleClearCurrentChat();
         break;
