@@ -17,6 +17,7 @@ import UpdateNotice from './components/UpdateNotice';
 import ExtensionsHub from './components/ExtensionsHub';
 import SitesHub from './components/SitesHub';
 import DesktopPet from './components/DesktopPet';
+import TerminalPanel from './components/TerminalPanel';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 
 
@@ -36,6 +37,10 @@ const App = () => {
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
   const [isPairingOpen, setIsPairingOpen] = useState(false);
+  // Opened from the sidebar, or by asking for it. There was no terminal
+  // before this; what looked like one on the extensions screen was a name
+  // in an array with nothing behind it.
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
@@ -240,7 +245,10 @@ const App = () => {
   // behind the menu. There was no way out of them at all. They ask to go home
   // through this.
   useEffect(() => {
-    const goHome = (event) => setActiveView(event.detail?.view || 'chat');
+    const goHome = (event) => {
+      if (event.detail?.view === 'terminal') { setIsTerminalOpen(true); return; }
+      setActiveView(event.detail?.view || 'chat');
+    };
     window.addEventListener('smaran:navigate', goHome);
     return () => window.removeEventListener('smaran:navigate', goHome);
   }, []);
@@ -258,6 +266,11 @@ const App = () => {
     } else if (view === 'updates') {
       setSettingsTab('updates');
       setIsSettingsOpen(true);
+    } else if (view === 'terminal') {
+      // Not a view - a panel over whatever you were doing. Without this the
+      // guard below would have swallowed it silently, which is exactly the
+      // failure that guard exists to prevent.
+      setIsTerminalOpen(true);
     } else if (view === 'account') {
       // The PRO badge sends 'account', which used to fall through to
       // setActiveView('account') - and nothing below renders that view, so
@@ -421,6 +434,8 @@ const App = () => {
           feature. It is back, and now positions itself above the composer
           rather than over it. */}
       <DesktopPet />
+
+      <TerminalPanel isOpen={isTerminalOpen} onClose={() => setIsTerminalOpen(false)} />
     </div>
     </PinLock>
   );

@@ -6609,6 +6609,43 @@ async def ask_screen_endpoint(request: Request,
             "note": "Answered from a screenshot taken just now."}
 
 
+@app.post("/api/terminal/run")
+async def terminal_run_endpoint(request: Request,
+                                current_user: User = Depends(get_current_user)):
+    """Run a command and stream its output.
+
+    `source` decides how it is treated. "user" runs it: your machine, your
+    shell, no allowlist. "model" does not run anything - it returns the
+    command for you to read and approve, because a model can be wrong and it
+    reads pages and documents that can carry instructions written to be
+    obeyed.
+    """
+    from app import terminal
+
+    body = await request.json()
+    command = body.get("command") or ""
+    source = body.get("source") or "model"
+
+    async def stream():
+        async for event in terminal.run(command, source=source,
+                                        cwd=body.get("cwd"),
+                                        timeout=int(body.get("timeout") or terminal.DEFAULT_TIMEOUT)):
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@app.get("/api/terminal/context")
+async def terminal_context_endpoint(current_user: User = Depends(get_current_user)):
+    """Where commands will run, and in which shell."""
+    from app import terminal
+
+    shell = terminal.default_shell()
+    return {"cwd": terminal.working_directory(),
+            "shell": os.path.basename(shell[0]),
+            "timeout": terminal.DEFAULT_TIMEOUT}
+
+
 @app.get("/api/gesture/legend")
 async def gesture_legend_endpoint():
     """What each gesture does to the desktop."""

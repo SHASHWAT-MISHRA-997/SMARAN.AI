@@ -4,7 +4,7 @@ import {
   MessageSquare, Plus, Trash2, X,
   Settings, Pencil, Check, Brain, Sparkles,
   ChevronLeft, ChevronDown, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, User,
-  Activity, LayoutDashboard, QrCode, LogIn, Blocks, FolderOpen, Globe2, Volume2, ArrowDownToLine
+  Activity, LayoutDashboard, QrCode, LogIn, Blocks, FolderOpen, Globe2, Volume2, ArrowDownToLine, Terminal
 } from 'lucide-react';
 import ModelHubModal from './ModelHubModal';
 import { SmaranLogo } from './SmaranLogo';
@@ -459,11 +459,13 @@ const Sidebar = ({
         {expanded ? <>
           <button onClick={() => onNavigate('sites')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'sites' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Globe2 className="h-4 w-4"/> Sites</button>
           <button onClick={() => onNavigate('plugins')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'plugins' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Blocks className="h-4 w-4"/> Plugins</button>
+          <button onClick={() => onNavigate('terminal')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Terminal className="h-4 w-4"/> Terminal</button>
           <p className="px-3 pb-1 pt-4 text-xs font-medium text-zinc-500">Projects</p>
           <button onClick={() => onNavigate('chat')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'chat' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><FolderOpen className="h-4 w-4"/><span className="truncate">SMARAN.AI</span></button>
         </> : <>
           <RailBtn icon={<Globe2 className="h-5 w-5"/>} label="Sites" active={activeView === 'sites'} onClick={() => onNavigate('sites')}/>
           <RailBtn icon={<Blocks className="h-5 w-5"/>} label="Plugins & Skills" active={activeView === 'plugins'} onClick={() => onNavigate('plugins')}/>
+          <RailBtn icon={<Terminal className="h-5 w-5"/>} label="Terminal" onClick={() => onNavigate('terminal')}/>
         </>}
       </div>
 
