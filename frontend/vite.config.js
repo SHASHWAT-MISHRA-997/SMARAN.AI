@@ -2,8 +2,14 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-// Change this version to force new asset hashes and bust browser caches.
-const BUILD_VERSION = 'v2.8.6';
+import pkg from './package.json' with { type: 'json' };
+
+// Stamped into every asset filename so a release cannot be served from a
+// stale browser cache. This used to be its own hardcoded string, which meant
+// remembering to change it in two places; bumping package.json to 2.8.7 and
+// building produced assets still named v2.8.6, so the new build would have
+// gone out under the old names. Read from the one place the version lives.
+const BUILD_VERSION = `v${pkg.version}`;
 
 // https://vite.dev/config/
 export default defineConfig({
