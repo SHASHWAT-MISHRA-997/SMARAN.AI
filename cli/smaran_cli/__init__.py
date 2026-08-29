@@ -1,3 +1,3 @@
 """The SMARAN.AI command line."""
 
-__version__ = "2.8.7"
+__version__ = "2.8.8"
