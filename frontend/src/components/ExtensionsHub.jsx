@@ -12,210 +12,54 @@ const MANAGE_FILTERS = [
   { id: 'connector', label: 'Connectors', icon: Plug },
 ];
 
-const STANDARD_MCPS = [
-  {
-    name: 'Filesystem MCP',
-    description: 'Local workspace file inspection, editing, and semantic discovery.',
-    target: 'npx -y @modelcontextprotocol/server-filesystem .',
-    author: 'Anthropic / MCP Core',
-    type: 'mcp',
-    state: 'connected',
-    detail: 'Active & ready to serve file operations to SMARAN.AI.',
-    tools: [{ name: 'read_file' }, { name: 'write_file' }, { name: 'list_dir' }, { name: 'grep_search' }],
-    category: 'system'
-  },
-  {
-    name: 'GitHub MCP',
-    description: 'Direct GitHub repository management, pull requests, issue tracking, and commits.',
-    target: 'npx -y @modelcontextprotocol/server-github',
-    author: 'GitHub MCP Team',
-    type: 'mcp',
-    state: 'connected',
-    detail: 'Integrated with local Git workspace.',
-    tools: [{ name: 'get_repository' }, { name: 'create_issue' }, { name: 'list_pull_requests' }, { name: 'push_commits' }],
-    category: 'developer'
-  },
-  {
-    name: 'SQLite Database MCP',
-    description: 'High-speed local database querying, schema analysis, and table inspection.',
-    target: 'npx -y @modelcontextprotocol/server-sqlite --db data/smaran.db',
-    author: 'ModelContextProtocol',
-    type: 'mcp',
-    state: 'connected',
-    detail: 'Connected to local structured database.',
-    tools: [{ name: 'read_query' }, { name: 'write_query' }, { name: 'describe_table' }],
-    category: 'database'
-  },
-  {
-    name: 'Brave Search & Web MCP',
-    description: 'Live real-time web search citations, news, and deep link retrieval.',
-    target: 'npx -y @modelcontextprotocol/server-brave-search',
-    author: 'Brave Software',
-    type: 'mcp',
-    state: 'connected',
-    detail: 'Live web search endpoint enabled.',
-    tools: [{ name: 'brave_web_search' }, { name: 'brave_local_search' }, { name: 'fetch_page' }],
-    category: 'search'
-  },
-  {
-    name: 'Memory Graph MCP',
-    description: 'Persistent long-term conversational memory, entity relations, and knowledge graph.',
-    target: 'npx -y @modelcontextprotocol/server-memory',
-    author: 'SMARAN Cognitive Core',
-    type: 'mcp',
-    state: 'connected',
-    detail: 'Persistent memory graph active across sessions.',
-    tools: [{ name: 'create_node' }, { name: 'create_relation' }, { name: 'search_graph' }],
-    category: 'cognitive'
-  },
-  {
-    name: 'Puppeteer Browser MCP',
-    description: 'Full headless and visual browser automation, web scraping, and UI testing.',
-    target: 'npx -y @modelcontextprotocol/server-puppeteer',
-    author: 'MCP Team',
-    type: 'mcp',
-    state: 'connected',
-    detail: 'Sandboxed browser execution environment ready.',
-    tools: [{ name: 'navigate_page' }, { name: 'take_screenshot' }, { name: 'click_element' }],
-    category: 'automation'
-  },
-  {
-    name: 'Python Code Sandbox MCP',
-    description: 'Local sandboxed Python execution for data science, charting, and script execution.',
-    target: 'python -m mcp_server_python',
-    author: 'SMARAN Runtime',
-    type: 'mcp',
-    state: 'connected',
-    detail: 'Python 3.x virtual runtime environment.',
-    tools: [{ name: 'execute_python' }, { name: 'render_plot' }, { name: 'pip_install' }],
-    category: 'runtime'
-  }
-];
 
-const STANDARD_SKILLS = [
-  {
-    id: 'skill_code_architect',
-    name: 'Code Architect & Refactor',
-    description: 'Advanced multi-file codebase analysis, architectural planning, and clean design patterns.',
-    type: 'skill',
-    author: 'SMARAN Core',
-    runtime_status: 'active',
-    capabilities: ['AST Parsing', 'Dependency Graph', 'Refactor Engine']
-  },
-  {
-    id: 'skill_web_generator',
-    name: 'Sites & Web UI Builder',
-    description: 'Generates responsive, production-ready HTML5, CSS, and modern interactive web apps.',
-    type: 'skill',
-    author: 'SMARAN Studio',
-    runtime_status: 'active',
-    capabilities: ['HTML5 Generator', 'CSS Tailwind & Glassmorphism', 'Component Synthesis']
-  },
-  {
-    id: 'skill_voice_commander',
-    name: 'Voice & Wake Word Commander',
-    description: 'Hands-free voice recognition, natural speech synthesis, and audio execution.',
-    type: 'skill',
-    author: 'SMARAN Audio',
-    runtime_status: 'active',
-    capabilities: ['Wake Word Detection', 'Speech-to-Text', 'TTS Voice Engine']
-  }
-];
+
+// Four arrays lived here: STANDARD_MCPS, STANDARD_SKILLS, GENUINE_PLUGINS
+// and GENUINE_CONNECTORS. Every entry carried state: 'connected' or
+// runtime_status: 'active' typed straight into the source, along with a list
+// of tools it claimed to expose. Ten MCP servers announced themselves as
+// running on a machine where /api/mcp/servers returns an empty list and a
+// note saying a saved server is not a connected one. None of them had been
+// started, and the counts above the list - "7 available, 7 active" - were
+// counting these. They are deleted. This screen shows what the backend
+// reports, and an empty list where there is nothing.
 
 const STATE = {
   active:         { label: 'Running',  tone: 'text-emerald-400', dot: 'bg-emerald-400' },
   connected:      { label: 'Running',  tone: 'text-emerald-400', dot: 'bg-emerald-400' },
-  setup_required: { label: 'Ready',    tone: 'text-amber-400',   dot: 'bg-amber-400' },
+  // "Ready" was the wrong word: setup_required means the backend could not
+  // start it, usually because a tool it drives is not installed. Calling that
+  // ready reads as working.
+  setup_required: { label: 'Needs setup', tone: 'text-amber-400', dot: 'bg-amber-400' },
   error:          { label: 'Failed',   tone: 'text-rose-400',    dot: 'bg-rose-400' },
   disabled:       { label: 'Off',      tone: 'text-zinc-500',    dot: 'bg-zinc-600' },
 };
 
-const GENUINE_PLUGINS = [
-  {
-    name: 'Filesystem & Codebase Engine',
-    description: 'Direct workspace inspection, file editing, multi-line refactoring, and directory structure indexing.',
-    type: 'plugin',
-    runtime_status: 'active',
-    author: 'SMARAN Core',
-    capabilities: ['read_file', 'write_to_file', 'replace_content', 'list_dir']
-  },
-  {
-    name: 'PowerShell & Terminal Executor',
-    description: 'Local shell runner for package managers, build tools, background tasks, and dev server lifecycle.',
-    type: 'plugin',
-    runtime_status: 'active',
-    author: 'SMARAN Core',
-    capabilities: ['powershell', 'subagents', 'manage_tasks', 'process_io']
-  },
-  {
-    name: 'Deep RAG Document Intelligence',
-    description: 'Document parser and vector indexer for technical manuals, PDF invoices, and spreadsheets.',
-    type: 'plugin',
-    runtime_status: 'active',
-    author: 'SMARAN AI',
-    capabilities: ['pdf_extract', 'table_parser', 'semantic_chunks', 'vector_search']
-  },
-  {
-    name: 'Live Web Scraper & Search',
-    description: 'Real-time URL content extractor, markdown converter, and live internet search citation engine.',
-    type: 'plugin',
-    runtime_status: 'active',
-    author: 'SMARAN AI',
-    capabilities: ['fetch_markdown', 'web_search', 'citation_graph']
-  },
-  {
-    name: 'Voice & Speech Synthesis',
-    description: 'Hands-free voice recognition, natural speech synthesis, and live audio execution feedback.',
-    type: 'plugin',
-    runtime_status: 'active',
-    author: 'SMARAN Audio',
-    capabilities: ['wake_word', 'stt_dictation', 'tts_speech', 'chime_synthesis']
-  }
-];
 
-const GENUINE_CONNECTORS = [
-  {
-    name: 'Ollama & vLLM Local Engine',
-    description: 'High-speed local GGUF/vLLM inference runner connecting to GPU DirectML and CPU threads.',
-    type: 'connector',
-    runtime_status: 'active',
-    author: 'Localhost Bridge',
-    capabilities: ['GGUF Loader', 'DirectML GPU', 'Smart Auto-Router']
-  },
-  {
-    name: 'SQLite & Vector Memory Store',
-    description: 'Zero-telemetry encrypted local database for durable chat sessions and user memory facts.',
-    type: 'connector',
-    runtime_status: 'active',
-    author: 'Local Storage Engine',
-    capabilities: ['SQLite Core', 'ChromaDB Local', 'Zero Leak Privacy']
-  },
-  {
-    name: 'Cloud API Multi-Provider Gateway',
-    description: 'Direct HTTPS connectors for Claude 3.7, Gemini 2.0 Flash, OpenAI, Groq, and OpenRouter.',
-    type: 'connector',
-    runtime_status: 'active',
-    author: 'Remote API Gateway',
-    capabilities: ['Claude 3.7 Sonnet', 'Gemini 2.0', 'Groq LPU', 'OpenAI API']
-  }
-];
 
 const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
-  const [rows, setRows] = useState(() => [...GENUINE_PLUGINS, ...GENUINE_CONNECTORS]);
+  // These three lists used to be seeded from STANDARD_MCPS, STANDARD_SKILLS
+  // and GENUINE_PLUGINS - arrays written into this file with state:
+  // 'connected' and runtime_status: 'active' typed in beside every entry.
+  // Ten MCP servers reported themselves connected, each with a list of tools,
+  // on a machine where /api/mcp/servers returns an empty list and says so.
+  // Nothing was ever started. They are gone; what the backend reports is what
+  // is shown, and nothing is what nothing looks like.
+  const [rows, setRows] = useState([]);
   const [custom, setCustom] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('sm_custom_mcps') || '[]');
-      return Array.isArray(saved) && saved.length > 0 ? saved : STANDARD_MCPS;
+      return Array.isArray(saved) ? saved : [];
     } catch (_) {
-      return STANDARD_MCPS;
+      return [];
     }
   });
   const [customSkills, setCustomSkills] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('sm_custom_skills') || '[]');
-      return Array.isArray(saved) && saved.length > 0 ? saved : STANDARD_SKILLS;
+      return Array.isArray(saved) ? saved : [];
     } catch (_) {
-      return STANDARD_SKILLS;
+      return [];
     }
   });
 
@@ -252,7 +96,13 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
           description: item.description || 'SMARAN.AI integrated extension module.',
           type: itemType === 'skill' ? 'skill' : itemType === 'connector' ? 'connector' : 'plugin',
           author: item.author || 'SMARAN Workspace',
-          runtime_status: item.enabled ? 'active' : item.runtime_status || 'setup_required',
+          // This read `item.enabled ? 'active' : ...`, which painted anything
+          // not switched off as Running. enabled only means configuration has
+          // not disabled it; the backend separately reports whether the thing
+          // actually started, and that answer was being thrown away. Plugins
+          // waiting on a tool that is not installed were showing green.
+          runtime_status: item.runtime_status || (item.enabled === false ? 'disabled' : 'setup_required'),
+          status_detail: item.status_detail || '',
           capabilities: Array.isArray(item.capabilities) && item.capabilities.length > 0
             ? item.capabilities
             : item.tags || ['Core Module'],
@@ -260,13 +110,15 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
         };
       });
 
-      setRows(normalizedPlugins.length > 0 ? normalizedPlugins : [...GENUINE_PLUGINS, ...GENUINE_CONNECTORS]);
+      setRows(normalizedPlugins);
 
       if (Array.isArray(mine) && mine.length > 0) {
         setCustom(mine);
       }
     } catch (_) {
-      setRows([...GENUINE_PLUGINS, ...GENUINE_CONNECTORS]);
+      // The backend could not be reached. That is not a reason to show a
+      // list of extensions as though they were running.
+      setRows([]);
     } finally {
       setLoading(false);
     }
