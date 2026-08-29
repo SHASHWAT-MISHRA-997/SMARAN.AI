@@ -1247,7 +1247,7 @@ const voiceGender = (name = '') => {
   return '';
 };
 
-const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenDeveloper, onOpenWorkspace }) => {
+const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenDeveloper, onOpenWorkspace, onEnsureSession }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const inputValueRef = useRef('');
@@ -2547,10 +2547,16 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     // Spoken turns are answered conversationally, without web/document grounding.
     const isVoiceTurn = Boolean(isVoicePrompt || isVoiceModeOpenRef.current);
 
+    // setActiveSessionId was called here and was never defined - not a prop,
+    // not local state - so this line threw a ReferenceError and killed the
+    // send. It also invented a session id the server had never heard of.
+    // Ask the parent for a real one instead, and only fall back to a local id
+    // if that fails too.
     let targetSessionId = activeSessionId;
     if (!targetSessionId) {
-      targetSessionId = 'session_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
-      setActiveSessionId(targetSessionId);
+      const created = await onEnsureSession?.();
+      targetSessionId = created?.id
+        || ('session_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
     }
 
     if (translateTimerRef.current) {
@@ -3338,6 +3344,13 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             </button>
           </div>
 
+          {/* The textarea and the send buttons are deliberately not gated on
+              activeSessionId. The placeholder invites you to start a
+              conversation, so refusing keystrokes until one already existed
+              was the box contradicting itself - that was the dead composer on
+              mobile. handleSend creates the session when there is none. The
+              attach and upload buttons stay gated, because a file genuinely
+              has to be attached to something. */}
           {/* Main Textarea Area */}
           <div className="composer-input w-full sm:flex-1 relative min-w-0 flex items-center gap-1.5 order-first sm:order-none">
             <textarea
@@ -3360,7 +3373,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                   ? isWebSearchEnabled ? 'Search the live web...' : isRagEnabled ? 'Ask from uploaded files...' : 'Ask SMARAN.AI directly...'
                   : 'Start a new conversation'
               }
-              disabled={!activeSessionId || streaming || directUploading}
+              disabled={streaming || directUploading}
               rows={1}
               className="w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 font-semibold resize-none min-h-[38px] max-h-32 py-2 px-1 sm:px-2 leading-relaxed"
             />
@@ -3371,7 +3384,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             {/* Mobile Send Button */}
             <button
               type="submit"
-              disabled={!activeSessionId || !input.trim() || streaming || directUploading}
+              disabled={!input.trim() || streaming || directUploading}
               className="composer-compact-send sm:hidden w-8 h-8 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-500/30 transition-all cursor-pointer disabled:opacity-30 disabled:shadow-none"
               title="Send Message"
             >
@@ -3568,7 +3581,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             {/* Send */}
             <button
               type="submit"
-              disabled={!activeSessionId || !input.trim() || streaming || directUploading}
+              disabled={!input.trim() || streaming || directUploading}
               className="w-8 h-8 flex items-center justify-center text-white bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 disabled:from-zinc-300 disabled:to-zinc-400 dark:disabled:from-zinc-700 dark:disabled:to-zinc-800 rounded-xl shadow-[0_0_14px_rgba(139,92,246,0.35)] hover:shadow-[0_0_24px_rgba(139,92,246,0.6)] hover:scale-105 active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none shrink-0"
               title="Send Message"
             >

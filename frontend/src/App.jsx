@@ -102,7 +102,13 @@ const App = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Fetch user chat sessions
+  // Every control in the composer - the text box, Speak, RAG, Web, attach
+  // and send - is disabled while activeSessionId is null. So if this function
+  // ends without a session, the app opens looking perfectly normal and
+  // accepts nothing at all. That was the "Start a new conversation" box that
+  // would not take typing: an empty session list was handled, but a request
+  // that simply failed was not, and that left the id null. On a phone talking
+  // to a paired computer, a failed request is the common case.
   async function fetchSessions() {
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions`);
@@ -114,12 +120,17 @@ const App = () => {
           if (!activeSessionId) {
             setActiveSessionId(sessionList[0].id);
           }
-        } else {
-          await handleCreateSession();
+          return;
         }
       }
     } catch (err) {
       console.error(err);
+    }
+    // Reached when the server said no, or could not be reached at all.
+    // handleCreateSession keeps a local fallback of its own, so this always
+    // leaves the user something they can actually type into.
+    if (!activeSessionId) {
+      await handleCreateSession();
     }
   }
 
@@ -214,6 +225,10 @@ const App = () => {
 
   const [settingsTab, setSettingsTab] = useState('general');
 
+  // The views that actually have a branch in the render below. Kept next to
+  // handleNavigate so the two cannot drift apart again.
+  const RENDERABLE_VIEWS = new Set(['chat', 'collections', 'sites', 'plugins']);
+
   const handleNavigate = (view) => {
     if (view === 'settings') {
       setSettingsTab('general');
@@ -221,10 +236,20 @@ const App = () => {
     } else if (view === 'updates') {
       setSettingsTab('updates');
       setIsSettingsOpen(true);
-    } else if (view !== 'login') {
-      // 'login' is intentionally inert: this build has no accounts.
+    } else if (view === 'account') {
+      // The PRO badge sends 'account', which used to fall through to
+      // setActiveView('account') - and nothing below renders that view, so
+      // the whole workspace went blank. The settings modal has had an
+      // "Account & Profile" tab all along; this opens it.
+      setSettingsTab('account');
+      setIsSettingsOpen(true);
+    } else if (RENDERABLE_VIEWS.has(view)) {
       setActiveView(view);
     }
+    // Anything else is ignored on purpose. 'login' is inert - this build has
+    // no accounts - and setting activeView to a name nothing renders empties
+    // the workspace, which is how the PRO badge came to show a blank screen.
+    // Staying put is always better than going blank.
   };
 
   return (
@@ -278,6 +303,7 @@ const App = () => {
             onOpenModelHub={() => setIsModelHubOpen(true)}
             onOpenAnalytics={() => setIsAnalyticsOpen(true)}
             onOpenWorkspace={() => setIsWorkspaceOpen(true)}
+            onEnsureSession={handleCreateSession}
           />
         )}
         
