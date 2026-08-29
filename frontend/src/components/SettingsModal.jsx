@@ -170,6 +170,27 @@ const SettingsModal = ({
   };
 
   const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+
+  // What is genuinely installed, asked of the machine rather than assumed.
+  // null means the answer has not come back yet, which is different from an
+  // empty list and is shown differently.
+  const [localModels, setLocalModels] = useState(null);
+  const [localState, setLocalState] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/models/local-status`, { credentials: 'include' });
+        const data = res.ok ? await res.json() : null;
+        if (cancelled) return;
+        setLocalState(data);
+        setLocalModels(Array.isArray(data?.models) ? data.models : []);
+      } catch (_) {
+        if (!cancelled) { setLocalModels([]); setLocalState({ detail: 'The local model server could not be reached.' }); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const TABS = [
     { id: "general", label: "General & Theme", icon: SlidersHorizontal },
     { id: "account", label: "Account & Profile", icon: UserRound },
@@ -320,10 +341,23 @@ const SettingsModal = ({
                     className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-xs font-bold text-zinc-900 dark:text-white outline-none focus:border-indigo-500"
                   >
                     <option value="auto">Auto (Smart Routing - Fastest available)</option>
-                    {!isMobile && <option value="deepseek-coder:6.7b">DeepSeek Coder 6.7B (Local Optimized)</option>}
-                    {!isMobile && <option value="llama3.2:3b">Llama 3.2 3B Instruct (Ultra Fast)</option>}
-                    {!isMobile && <option value="qwen2.5-coder:7b">Qwen 2.5 Coder 7B (Full Precision)</option>}
+                    {/* These were three fixed names - deepseek-coder:6.7b,
+                        llama3.2:3b, qwen2.5-coder:7b - offered whether or not
+                        they were installed. Picking one you did not have was
+                        a request that could only fail. The list is now what is
+                        actually on the machine, and stays empty on a phone,
+                        which cannot run any of them. */}
+                    {!isMobile && (localModels || [])
+                      .filter((m) => !/embed/i.test(m))
+                      .map((m) => <option key={m} value={m}>{m} (local)</option>)}
                   </select>
+                  {isMobile && (
+                    <p className="mt-1.5 text-[10px] text-zinc-500">
+                      Local models are not offered on a phone - they need several
+                      gigabytes of memory and a GPU. Auto routes to the cloud
+                      models you have keys for, or to your paired computer.
+                    </p>
+                  )}
                 </div>
 
                 {/* Workspace Layout Positions */}
@@ -426,25 +460,33 @@ const SettingsModal = ({
                   )}
                 </div>
 
+                {/* This list used to be five hardcoded rows. It reported
+                    DeepSeek Coder 6.7B, Llama 3.2 3B and Qwen 2.5 Coder 7B as
+                    "Installed" with 42ms, 18ms and 45ms beside them, and two
+                    cloud models as "Connected" at 120ms and 85ms - on any
+                    machine, including a phone that cannot hold a 4.8 GB model
+                    and had none of them. Nothing was installed, nothing was
+                    connected and nothing was timed. It now shows what
+                    /api/models/local-status actually reports. */}
                 <div className="space-y-2.5">
-                  {[
-                    { name: "DeepSeek Coder 6.7B", type: "Local GGUF", vram: "4.8 GB VRAM", status: "Installed", latency: "42ms" },
-                    { name: "Llama 3.2 3B Instruct", type: "Local GGUF", vram: "2.1 GB VRAM", status: "Installed", latency: "18ms" },
-                    { name: "Qwen 2.5 Coder 7B", type: "Local GGUF", vram: "5.2 GB VRAM", status: "Installed", latency: "45ms" },
-                    { name: "Claude 3.7 Sonnet (Hybrid)", type: "Cloud API", vram: "0 MB (Remote)", status: "Connected", latency: "120ms" },
-                    { name: "Gemini 2.0 Flash Pro", type: "Cloud API", vram: "0 MB (Remote)", status: "Connected", latency: "85ms" },
-                  ].map((m) => (
-                    <div key={m.name} className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
-                      <div>
-                        <span className="block text-xs font-extrabold text-zinc-900 dark:text-white">{m.name}</span>
-                        <span className="block text-[10px] text-zinc-500">{m.type} · {m.vram}</span>
+                  {localModels === null && (
+                    <p className="text-[11px] text-zinc-500">Checking which models are on this machine…</p>
+                  )}
+                  {localModels?.length === 0 && (
+                    <p className="text-[11px] text-zinc-500">
+                      {localState?.detail || 'No local models are installed.'}
+                      {localState?.fix ? ` ${localState.fix}` : ''}
+                    </p>
+                  )}
+                  {(localModels || []).map((m) => (
+                    <div key={m} className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
+                      <div className="min-w-0">
+                        <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate">{m}</span>
+                        <span className="block text-[10px] text-zinc-500">Local · served by Ollama</span>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-[10px] font-mono text-zinc-400">{m.latency}</span>
-                        <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                          {m.status}
-                        </span>
-                      </div>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
+                        Installed
+                      </span>
                     </div>
                   ))}
                 </div>
