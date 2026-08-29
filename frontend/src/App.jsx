@@ -388,7 +388,12 @@ const App = () => {
       </ErrorBoundary>
 
       <WorkspacePanel isOpen={isWorkspaceOpen} onClose={() => setIsWorkspaceOpen(false)} />
-      <div className="hidden md:contents"><DesktopPet /></div>
+      {/* The pet used to be wrapped in "hidden md:contents", which hid it on
+          every phone. It was showing on mobile before that and sitting on top
+          of the input bar; hiding it answered the nuisance by removing the
+          feature. It is back, and now positions itself above the composer
+          rather than over it. */}
+      <DesktopPet />
     </div>
     </PinLock>
   );

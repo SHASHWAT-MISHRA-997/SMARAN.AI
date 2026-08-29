@@ -1770,3 +1770,16 @@ body.sidebar-open { overflow:hidden; overscroll-behavior:none; }
   filter: drop-shadow(0 0 10px rgba(239,68,68,.35));
 }
 @media (prefers-reduced-motion: reduce) { .auth-title { animation: none; } }
+
+/* The pet floats above the composer. Its offset used to be a fixed
+   bottom-28, which on a phone landed on top of the input bar - the reason it
+   was eventually hidden on mobile altogether. ChatArea measures the composer
+   and publishes --sm-composer-h, so the pet clears whatever height it
+   actually is, including when it stacks into two rows or the text box grows. */
+.sm-pet {
+  bottom: calc(var(--sm-composer-h, 92px) + 1.25rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 768px) {
+  /* On a desktop the composer is one row and well clear of the corner. */
+  .sm-pet { bottom: calc(var(--sm-composer-h, 76px) + 1.5rem); }
+}

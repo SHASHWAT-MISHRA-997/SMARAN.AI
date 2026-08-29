@@ -1731,8 +1731,23 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         }
         setInput([startingText, finalText, interimText].filter(Boolean).join(' ').trim());
       };
+      // Web Speech is a cloud service wearing a browser API. In an Android
+      // WebView and in the desktop WebView2, window.webkitSpeechRecognition
+      // usually exists, so the check above hands it the job - and then it
+      // fails here with 'network' or 'service-not-allowed' because no speech
+      // service is bound. Dictation simply stopped with an error and never
+      // reached the local recorder, which is why Speak did nothing on the
+      // phone. These errors mean the service is unusable, not that the
+      // microphone is; fall through to recording and this app's own
+      // transcription, which runs locally and needs nobody's cloud.
+      const SERVICE_UNAVAILABLE = ['network', 'service-not-allowed', 'language-not-supported'];
       recognition.onerror = (event) => {
-        const message = event.error === 'not-allowed' || event.error === 'service-not-allowed'
+        if (SERVICE_UNAVAILABLE.includes(event.error)) {
+          stop();
+          startRecordedDictation();
+          return;
+        }
+        const message = event.error === 'not-allowed'
           ? 'Microphone permission was denied. Allow it in the app or browser settings, then try again.'
           : event.error === 'aborted' ? '' : `Voice dictation stopped: ${event.error || 'unknown error'}.`;
         if (message) window.dispatchEvent(new CustomEvent('smaran:dictation-error', { detail: { message } }));
@@ -1750,6 +1765,24 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     window.addEventListener('smaran:toggle-dictation', toggle);
     return () => { window.removeEventListener('smaran:toggle-dictation', toggle); stop(); };
   }, [selectedLanguage]);
+
+  // The pet sits above the composer, and the composer changes height - it
+  // stacks into two rows on a phone and grows as the text box fills. A fixed
+  // offset is what put the pet on top of the input bar. Publish the real
+  // height so anything anchored above it can follow.
+  const composerShellRef = useRef(null);
+  useEffect(() => {
+    const shell = composerShellRef.current;
+    if (!shell || typeof ResizeObserver === 'undefined') return undefined;
+    const publish = () => {
+      document.documentElement.style.setProperty(
+        '--sm-composer-h', `${Math.round(shell.getBoundingClientRect().height)}px`);
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, []);
 
   const composerRef = useRef(null);
   const [clientDevice, setClientDevice] = useState(null);
@@ -3314,7 +3347,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             <GitBranch className="h-3.5 w-3.5 text-emerald-400" /> {workspaceStatus?.git?.branch || 'main'}
           </span>
         </div>
-        <form data-testid="chat-composer" onSubmit={handleSend} className="composer-shell max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 bg-gradient-to-b from-white/95 to-zinc-50/90 dark:from-zinc-900/95 dark:to-zinc-950/95 border border-indigo-300/60 dark:border-indigo-500/35 rounded-2xl sm:rounded-3xl p-2.5 sm:p-2.5 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.55)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all w-full overflow-hidden">
+        <form data-testid="chat-composer" ref={composerShellRef} onSubmit={handleSend} className="composer-shell max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 bg-gradient-to-b from-white/95 to-zinc-50/90 dark:from-zinc-900/95 dark:to-zinc-950/95 border border-indigo-300/60 dark:border-indigo-500/35 rounded-2xl sm:rounded-3xl p-2.5 sm:p-2.5 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.55)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all w-full overflow-hidden">
           {/* Hidden file inputs */}
           <input
             type="file"
