@@ -78,15 +78,21 @@ const buildMatcher = (phrase) => {
 };
 
 export class WakeWordListener {
-  constructor({ phrase = DEFAULT_PHRASE, onWake, onError } = {}) {
+  constructor({ phrase = DEFAULT_PHRASE, onWake, onError, apiBase = '' } = {}) {
     this.phrase = phrase;
     this.onWake = onWake;
     this.onError = onError;
+    this.apiBase = apiBase;
     this.recognition = null;
     this.running = false;
     this.matches = buildMatcher(phrase);
     this.restartTimer = null;
     this.retryCount = 0;
+    // The local path, used when Web Speech is absent or refuses.
+    this.localRunning = false;
+    this.stream = null;
+    this.audioCtx = null;
+    this.levelTimer = null;
   }
 
   static isSupported() {
@@ -124,7 +130,19 @@ export class WakeWordListener {
       };
 
       recognition.onerror = (event) => {
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        // Web Speech is a cloud service wearing a browser API. In the desktop
+        // WebView2 and in an Android WebView the object exists, so
+        // isSupported() said yes, and then every attempt failed here with
+        // 'network' or 'service-not-allowed'. Nothing handled those: the
+        // listener just restarted itself every 350ms, for ever, listening to
+        // a service that was never going to answer. Switch to the local
+        // recogniser instead, which needs nobody's cloud.
+        if (event.error === 'network' || event.error === 'service-not-allowed'
+            || event.error === 'language-not-supported') {
+          this._startLocal();
+          return;
+        }
+        if (event.error === 'not-allowed') {
           this.running = false;
           this.onError?.('Microphone permission is needed for the wake phrase.');
         }
@@ -168,23 +186,135 @@ export class WakeWordListener {
     }
   }
 
+  /** Listen for the phrase without any cloud service.
+   *
+   * Transcribing continuously would keep a GPU busy for nothing, so the
+   * microphone is only listened to; a short clip is sent for transcription
+   * when the level rises above the room, and only then. Quiet rooms cost
+   * nothing.
+   */
+  async _startLocal() {
+    if (this.localRunning || !this.running) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      this.onError?.('This build cannot listen for the wake phrase without a speech service.');
+      return;
+    }
+    this.localRunning = true;
+    try { this.recognition?.abort(); } catch (_) {}
+    this.recognition = null;
+
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      this.localRunning = false;
+      this.running = false;
+      this.onError?.(err?.name === 'NotAllowedError'
+        ? 'Microphone permission is needed for the wake phrase.'
+        : 'The microphone could not be opened for the wake phrase.');
+      return;
+    }
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    this.audioCtx = new AudioCtx();
+    const source = this.audioCtx.createMediaStreamSource(this.stream);
+    const analyser = this.audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const buffer = new Uint8Array(analyser.frequencyBinCount);
+
+    let capturing = false;
+    const listen = () => {
+      if (!this.running || !this.localRunning) return;
+      analyser.getByteFrequencyData(buffer);
+      const level = buffer.reduce((a, b) => a + b, 0) / buffer.length;
+      // Above the noise floor of a normal room. Speech sits well above this;
+      // a fan or a fridge does not.
+      if (level > 18 && !capturing) {
+        capturing = true;
+        this._captureClip().finally(() => { capturing = false; });
+      }
+      this.levelTimer = window.setTimeout(listen, 200);
+    };
+    listen();
+  }
+
+  /** Record a short clip and ask this app's own transcription about it. */
+  async _captureClip() {
+    if (!this.stream) return;
+    return new Promise((resolve) => {
+      let recorder;
+      try {
+        recorder = new MediaRecorder(this.stream, {
+          mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus' : 'audio/webm',
+        });
+      } catch (_) { resolve(); return; }
+
+      const chunks = [];
+      recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: recorder.mimeType });
+        if (blob.size < 1200) { resolve(); return; }
+        try {
+          const form = new FormData();
+          form.append('file', blob, 'wake.webm');
+          form.append('language', 'auto');
+          const res = await fetch(`${this.apiBase}/api/voice/transcribe`, {
+            method: 'POST', credentials: 'include', body: form,
+          });
+          const heard = res.ok ? ((await res.json())?.text || '') : '';
+          if (heard && this.matches(heard)) {
+            playWakeChime();
+            this.onWake?.(heard.trim());
+          }
+        } catch (_) { /* a missed wake is not worth reporting */ }
+        resolve();
+      };
+
+      recorder.start();
+      // Long enough for "hey smaran", short enough not to lag behind.
+      window.setTimeout(() => { try { recorder.stop(); } catch (_) { resolve(); } }, 2200);
+    });
+  }
+
   start() {
-    if (this.running || !WakeWordListener.isSupported()) return false;
+    if (this.running) return false;
     this.running = true;
     this.retryCount = 0;
-    this._startInstance();
+    if (WakeWordListener.isSupported()) {
+      this._startInstance();
+    } else {
+      // No Web Speech at all - go straight to the local path rather than
+      // refusing, which is what start() used to do.
+      this._startLocal();
+    }
     return true;
   }
 
   stop() {
     this.running = false;
+    this.localRunning = false;
     if (this.restartTimer) {
       window.clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
+    if (this.levelTimer) {
+      window.clearTimeout(this.levelTimer);
+      this.levelTimer = null;
+    }
     if (this.recognition) {
       try { this.recognition.abort(); } catch (_) {}
       this.recognition = null;
+    }
+    // Release the microphone. Leaving the tracks live keeps the recording
+    // indicator on and holds the device against everything else.
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => { try { track.stop(); } catch (_) {} });
+      this.stream = null;
+    }
+    if (this.audioCtx) {
+      try { this.audioCtx.close(); } catch (_) {}
+      this.audioCtx = null;
     }
   }
 }

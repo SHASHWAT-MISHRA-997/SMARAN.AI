@@ -1325,16 +1325,17 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
   // Always-listening wake phrase. Off by default: it holds the microphone, so
   // it is the user's choice to switch on.
+  // On by default. It used to be off until you found the Wake button and
+  // pressed it every session; the point of a wake phrase is that you do not
+  // have to ask for it. Still switchable off in settings, and it stops the
+  // moment the voice screen opens - it does not listen over itself.
   const [wakeWordEnabled, setWakeWordEnabled] = useState(
-    () => localStorage.getItem('sm_wake_enabled') === 'true',
+    () => localStorage.getItem('sm_wake_enabled') !== 'false',
   );
   const [wakePhrase, setWakePhrase] = useState(
     () => localStorage.getItem('sm_wake_phrase') || WAKE_PHRASE_DEFAULT,
   );
   const wakeListenerRef = useRef(null);
-  // Whether the browser has a recogniser at all. Without this the toggle
-  // would offer something that silently never fires.
-  const wakeWordSupported = WakeWordListener.isSupported();
   const [isDictating, setIsDictating] = useState(false);
   const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'thinking' | 'speaking'
   const [voiceTranscript, setVoiceTranscript] = useState('');
@@ -1797,10 +1798,15 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       wakeListenerRef.current = null;
       return undefined;
     }
-    if (!WakeWordListener.isSupported()) return undefined;
-
+    // This used to bail out here when Web Speech was missing, and in the
+    // desktop WebView the object is present but the service behind it is not,
+    // so it started and failed silently for ever. The listener has a local
+    // path now - it watches the microphone level and asks this app's own
+    // transcription only when someone actually speaks - so it is worth
+    // starting either way.
     const listener = new WakeWordListener({
       phrase: wakePhrase,
+      apiBase: API_BASE,
       onWake: () => {
         listener.stop();
         openVoiceMode();
@@ -3568,26 +3574,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               <span>{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
             </button>
 
-            {/* Wake phrase. Sits here rather than inside voice mode because
-                the point of it is to work while you are typing: it listens
-                only for the phrase, and only when voice mode is closed. */}
-            {wakeWordSupported && (
-              <button
-                type="button"
-                onClick={() => setWakeWordEnabled((value) => !value)}
-                className={`h-8 px-2.5 rounded-xl transition-all cursor-pointer shrink-0 flex items-center gap-1 text-xs font-bold ${
-                  wakeWordEnabled
-                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-                }`}
-                title={wakeWordEnabled
-                  ? `Listening for "${wakePhrase}" while you type. Click to stop.`
-                  : `Listen for "${wakePhrase}" in the background`}
-              >
-                <Ear className={`w-3.5 h-3.5 ${wakeWordEnabled ? 'animate-pulse text-amber-500' : ''}`} />
-                <span>{wakeWordEnabled ? 'Wake ON' : 'Wake OFF'}</span>
-              </button>
-            )}
+            {/* The Wake button stood here. It defaulted to off, so the wake
+                phrase only worked if you found the button and pressed it,
+                every session - which is the opposite of what a wake phrase
+                is for. Listening is on by default now and switchable in
+                settings, so the composer does not need a control for it. */}
 
             {/* Compare */}
             <button
