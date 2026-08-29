@@ -197,10 +197,15 @@ const WorkspacePanel = ({ isOpen, onClose }) => {
           ) : (
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
+                {/* "No changes waiting. Nothing has been written." is true,
+                    but it was the only thing here after opening a folder - so
+                    the panel read as though something had failed, when in fact
+                    it was waiting for you to ask for something. Say what to do
+                    next as well as what the state is. */}
                 <p className="text-[11px] text-zinc-400">
                   {pending.length
-                    ? `${pending.length} change${pending.length > 1 ? 's' : ''} waiting for you.`
-                    : 'No changes waiting. Nothing has been written.'}
+                    ? `${pending.length} change${pending.length > 1 ? 's' : ''} waiting for you to approve.`
+                    : 'Folder open. Nothing has been written yet - ask for a change in the chat and it will appear here to approve first.'}
                 </p>
                 <button type="button" onClick={() => { act('/close', {}); setBrowser(null); }}
                   className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1 text-[10px] font-bold text-zinc-400 hover:text-white">

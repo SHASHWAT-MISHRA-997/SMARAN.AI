@@ -385,9 +385,9 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
                 </button>
                 {showAddMenu && (
                   <div className="absolute right-0 top-full z-30 mt-2 w-56 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 p-1.5 shadow-2xl backdrop-blur-md">
-                    <button type="button" onClick={() => { setAdding('create'); setShowAddMenu(false); }} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-indigo-300 hover:bg-indigo-950/40">
-                      <Sparkles className="h-3.5 w-3.5 text-indigo-400" /> Create Custom Skill / MCP
-                    </button>
+                    {/* "Create Custom Skill / MCP" was listed here too,
+                        beside the Create Custom button that opens exactly
+                        the same thing. One of them is enough. */}
                     <button type="button" onClick={() => { setAdding('mcp'); setShowAddMenu(false); }} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-200 hover:bg-zinc-800">
                       <Wrench className="h-3.5 w-3.5 text-amber-400" /> Add MCP Server
                     </button>

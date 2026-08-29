@@ -277,13 +277,23 @@ const AvatarMMD = ({
     };
 
     manager.onLoad = reveal;
-    // A texture the PMX names but that is not on disk never completes, and
-    // onLoad would never fire. Rather than hide her indefinitely, show what
-    // did load and record which file was missing.
+    // A file the PMX names but that is not on disk is worth recording, and it
+    // does not stop the rest: three's LoadingManager still calls onLoad once
+    // every item has either loaded or failed. This used to call reveal() here
+    // as well, which showed her the moment any one texture failed while the
+    // others were still arriving - assembling in pieces from the other end.
     manager.onError = (url) => {
-      console.warn('[AvatarMMD] missing asset, showing the model without it:', url);
-      reveal();
+      console.warn('[AvatarMMD] missing asset, continuing without it:', url);
     };
+
+    // And if something neither loads nor errors, she would stay hidden for
+    // ever. After twenty seconds, show whatever did arrive.
+    const patience = window.setTimeout(() => {
+      if (!disposed && revealTimer !== 'done') {
+        console.warn('[AvatarMMD] assets are taking too long; showing what loaded.');
+        reveal();
+      }
+    }, 20000);
 
     new MMDLoader(manager).load(
       chosen.file,
@@ -379,10 +389,22 @@ const AvatarMMD = ({
         handles.refit?.();
 
         // Reveal is driven by the manager above, not from here: the mesh
-        // being built is not the same as the model being finished. If the
-        // PMX carried no external textures the manager has already gone
-        // quiet, so this covers that case and nothing else.
-        if (manager.itemsTotal === manager.itemsLoaded) reveal();
+        // being built is not the same as the model being finished.
+        //
+        // This used to compare itemsTotal to itemsLoaded on this line, which
+        // is why she still assembled in pieces. At this instant the .pmx
+        // itself has loaded and nothing else has been queued - one of one -
+        // so the two were equal and the reveal fired straight away, before a
+        // single texture had been asked for. She appeared bald and the hair,
+        // skin and clothes landed on her afterwards.
+        //
+        // MMDLoader queues its textures during this callback, so the check
+        // has to happen after it returns. A model that genuinely carries no
+        // external textures still reveals; one that does now waits for
+        // manager.onLoad.
+        setTimeout(() => {
+          if (!disposed && manager.itemsTotal === manager.itemsLoaded) reveal();
+        }, 0);
       },
       undefined,
       (loadError) => {
@@ -392,7 +414,9 @@ const AvatarMMD = ({
       },
     );
 
-    return () => { disposed = true; };
+    // The patience timer must not outlive this effect, or it would reveal
+    // a model that has already been torn down.
+    return () => { disposed = true; window.clearTimeout(patience); };
   }, [characterId]);
 
   // ── View controls ──────────────────────────────────────────────────────
