@@ -353,25 +353,16 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
         : 'flex h-[min(48rem,94vh)] w-full max-w-5xl overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl'}>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 sm:px-5 py-3.5 bg-zinc-950">
-            {/* A Plugins/Skills pair used to sit here, duplicating two of the
-                four category chips below and overriding them - on the Skills
-                tab the chips did nothing. Gone; the chips are the only
-                categories. Its place is taken by a way out, which on a phone
-                there was none of: this screen fills the window and had no
-                close control, so there was no way back to the chat. */}
-            <button
-              type="button"
-              onClick={() => (onClose ? onClose() : window.dispatchEvent(new CustomEvent('smaran:navigate', { detail: { view: 'chat' } })))}
-              className="flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs font-bold text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
-              aria-label="Close extensions"
-            >
-              <X className="h-4 w-4" /> <span>Close</span>
-            </button>
-
-            <div className="flex min-w-0 max-w-full items-center gap-1.5 sm:gap-2">
+          {/* One row that does not wrap. A Plugins/Skills pair used to sit on
+              the left, duplicating two of the four category chips below and
+              overriding them. Removing it left the row wrapping on a phone,
+              with Close on its own line and the refresh icon stranded beside
+              it. Actions are grouped on the left and Close sits on the right,
+              where a close control belongs. */}
+          <header className="flex items-center gap-2 border-b border-zinc-800 px-3 sm:px-5 py-3 bg-zinc-950">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
               <button type="button" onClick={load} title="Refresh runtime state"
-                className="rounded-lg p-2 text-zinc-400 transition hover:bg-zinc-800 hover:text-white border border-zinc-800">
+                className="shrink-0 rounded-lg p-2 text-zinc-400 transition hover:bg-zinc-800 hover:text-white border border-zinc-800">
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
 
@@ -410,12 +401,18 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
                 )}
               </div>
 
-              {!embedded && (
-                <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-white">
-                  <X className="h-4 w-4" />
-                </button>
-              )}
             </div>
+
+            {/* Close, on the right where it belongs. Shown embedded too: that
+                is the only way off this screen on a phone. */}
+            <button
+              type="button"
+              onClick={() => (onClose ? onClose() : window.dispatchEvent(new CustomEvent('smaran:navigate', { detail: { view: 'chat' } })))}
+              aria-label="Close extensions"
+              className="flex shrink-0 items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900/80 px-2.5 sm:px-3 py-2 text-xs font-bold text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
+            >
+              <X className="h-4 w-4" /> <span className="hidden sm:inline">Close</span>
+            </button>
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto">

@@ -19,22 +19,53 @@ class GoogleAgentsCLIPlugin(ToolPlugin):
     def __init__(self, config: PluginConfig, metadata: PluginMetadata):
         super().__init__(config, metadata)
         self.agents_cli_path = None
-        # Check CLI availability without blocking server startup
-        import threading
-        threading.Thread(target=self._check_installation, daemon=True).start()
-    
+        # This used to run in a background thread while initialize() read the
+        # result, which is a race it usually lost: the plugin reported the CLI
+        # missing on a machine that had it. Looking for a file is fast enough
+        # to just do.
+        self._check_installation()
+
+    @staticmethod
+    def _candidates():
+        """Where agents-cli ends up, in the order worth trying.
+
+        Bare "agents-cli" only finds it if the server's PATH happens to
+        include the installer's bin directory, and `uv tool install` puts it
+        in ~/.local/bin, which a service started from elsewhere does not
+        inherit. So the known locations are checked directly.
+        """
+        import shutil
+        from pathlib import Path
+
+        found = shutil.which("agents-cli")
+        if found:
+            yield found
+
+        home = Path.home()
+        for path in (
+            home / ".local" / "bin" / "agents-cli.exe",
+            home / ".local" / "bin" / "agents-cli",
+            home / ".local" / "bin" / "agents-cli.cmd",
+        ):
+            if path.is_file():
+                yield str(path)
+
     def _check_installation(self):
-        """Check if agents-cli is available."""
-        try:
-            result = subprocess.run(["agents-cli", "--version"], 
-                                  capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                logger.info("Google Agents CLI found and ready")
-                self.agents_cli_path = "agents-cli"
-                return
-        except Exception as e:
-            logger.info("Google Agents CLI plugin initialized (external CLI optional)")
-            self.agents_cli_path = None
+        """Whether agents-cli is here, asked of the machine."""
+        for candidate in self._candidates():
+            try:
+                # 5 seconds was tight: a uv-installed tool resolves its
+                # environment on first run and can take longer than that.
+                result = subprocess.run([candidate, "--version"],
+                                        capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    self.agents_cli_path = candidate
+                    logger.info("Google Agents CLI found at %s (%s)",
+                                candidate, (result.stdout or "").strip()[:40])
+                    return
+            except Exception:
+                continue
+        self.agents_cli_path = None
     
     async def initialize(self, app_context: Dict[str, Any]) -> bool:
         """Ready only if the CLI it drives is actually here.

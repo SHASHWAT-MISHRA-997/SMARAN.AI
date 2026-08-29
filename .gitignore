@@ -74,3 +74,8 @@ data/
 backend/data/
 dist-release/
 .pet-work/
+
+# ankitstage21/3D-website, cloned locally so the 3d-website plugin can run.
+# It carries no licence at all, which means all rights reserved: fine to
+# clone and use here, not ours to commit or to ship inside the installer.
+backend/app/plugins/three_d_website_repo/

@@ -22,39 +22,41 @@ class PaperclipPlugin(ToolPlugin):
         self._check_installation()
     
     def _check_installation(self):
-        """Check if paperclip is available and install if needed."""
-        try:
-            # Check if paperclip is available in PATH
-            result = subprocess.run(["paperclipai", "--version"], 
-                                  capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                logger.info("Paperclip CLI found and ready")
-                self.paperclip_path = "paperclipai"
-                return
-            else:
-                logger.warning("Paperclip CLI not found in PATH")
-        except FileNotFoundError:
-            logger.warning("Paperclip CLI not installed")
-        except Exception as e:
-            logger.error(f"Failed to check Paperclip CLI: {e}")
-        
-        # Its own installer puts the CLI under ~/.paperclip/cli, which is not
-        # added to PATH - so looking only at PATH reports "not installed" for
-        # a machine that has it. Checked where it actually lands, the same
-        # mistake this project already made with Ollama.
+        """Whether the Paperclip CLI is on this machine, asked of the machine.
+
+        Two places it hides. Installed from npm it is a .cmd shim on Windows,
+        and subprocess without a shell does not apply PATHEXT - so running
+        ["paperclipai", "--version"] raised FileNotFoundError on a machine
+        where paperclipai runs perfectly from a prompt. shutil.which does
+        apply PATHEXT, so it is asked first. Installed by the project's own
+        install.sh it lands in ~/.paperclip/cli, which is never added to PATH
+        at all, so that is checked directly.
+        """
+        import shutil
         from pathlib import Path
 
-        candidates = [
-            Path.home() / ".paperclip" / "cli" / "paperclipai",
-            Path.home() / ".paperclip" / "cli" / "paperclipai.cmd",
-            Path.home() / ".paperclip" / "cli" / "index.js",
-            Path(os.path.dirname(__file__)) / "paperclip_repo" / "cli",
+        home = Path.home()
+        candidates = [shutil.which("paperclipai")]
+        candidates += [
+            str(p) for p in (
+                home / ".paperclip" / "cli" / "paperclipai.cmd",
+                home / ".paperclip" / "cli" / "paperclipai",
+                home / ".paperclip" / "cli" / "index.js",
+                Path(os.path.dirname(__file__)) / "paperclip_repo" / "cli",
+            ) if p.exists()
         ]
-        for candidate in candidates:
-            if candidate.exists():
-                logger.info("Paperclip CLI found at %s", candidate)
-                self.paperclip_path = str(candidate)
-                return
+
+        for candidate in filter(None, candidates):
+            try:
+                result = subprocess.run([candidate, "--version"],
+                                        capture_output=True, text=True, timeout=60)
+                if result.returncode == 0:
+                    self.paperclip_path = candidate
+                    logger.info("Paperclip CLI found at %s (%s)",
+                                candidate, (result.stdout or "").strip()[:30])
+                    return
+            except Exception:
+                continue
 
         logger.info("Paperclip CLI is not installed; the plugin stays off.")
         self.paperclip_path = None
