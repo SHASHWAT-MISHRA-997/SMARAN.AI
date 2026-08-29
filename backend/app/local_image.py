@@ -93,19 +93,59 @@ def generate_local_image(prompt: str, output_dir: str) -> str:
         return filename
 
 
+# The Hindi entries here were "????? ????" and "?????? ????" - Devanagari that
+# had been through a lossy encoding somewhere and come out as question marks.
+# They matched nothing anybody would ever say, so asking for an image in Hindi
+# never worked. Written back in Devanagari, and the file is UTF-8.
+IMAGE_COMMANDS = (
+    "generate an image", "generate image", "create an image", "create image",
+    "make an image", "draw a", "make a picture", "create a picture",
+    "image generate", "image banao", "image bana", "photo banao", "picture banao",
+    "tasveer banao", "tasvir banao", "chitra banao",
+    "छवि बनाओ", "तस्वीर बनाओ", "फोटो बनाओ", "चित्र बनाओ",
+)
+
+VIDEO_COMMANDS = (
+    "generate a video", "generate video", "create a video", "create video",
+    "make a video", "make me a video", "animate a", "animate this",
+    "video generate", "video banao", "video bana", "vidio banao",
+    "वीडियो बनाओ", "चलचित्र बनाओ",
+)
+
+# A question about how to do something is not a request to do it.
+QUESTION_MARKERS = ("how to", "how do i", "kaise", "कैसे")
+
+
+def _asks_for(text: str, commands) -> bool:
+    text = " ".join(text.lower().split())
+    return (any(command in text for command in commands)
+            and not any(marker in text for marker in QUESTION_MARKERS))
+
+
 def is_image_generation_request(prompt: str) -> bool:
     """Conservative natural-language intent detection for English/Hinglish/Hindi."""
     text = " ".join(prompt.lower().split())
     if text.startswith(("/image", "/txt2img")):
         return True
-    commands = (
-        "generate an image", "generate image", "create an image", "create image",
-        "make an image", "draw a", "make a picture", "create a picture",
-        "image generate", "image banao", "image bana", "photo banao", "picture banao",
-        "tasveer banao", "tasvir banao", "????? ????", "?????? ????",
-    )
-    questions = ("how to", "kaise", "????")
-    return any(command in text for command in commands) and not any(question in text for question in questions)
+    # A video request usually also contains image-ish words; it is not this.
+    if _asks_for(text, VIDEO_COMMANDS):
+        return False
+    return _asks_for(text, IMAGE_COMMANDS)
+
+
+def is_video_generation_request(prompt: str) -> bool:
+    """Whether this asks for a video, in the same three languages."""
+    text = " ".join(prompt.lower().split())
+    if text.startswith("/video"):
+        return True
+    return _asks_for(text, VIDEO_COMMANDS)
+
+
+def clean_video_prompt(prompt: str) -> str:
+    text = prompt.strip()
+    if text.lower().startswith("/video"):
+        return text.split(" ", 1)[1].strip() if " " in text else ""
+    return text
 
 
 def clean_image_prompt(prompt: str) -> str:

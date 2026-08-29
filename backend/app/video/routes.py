@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -154,6 +155,25 @@ async def start(req: GenerateRequest):
 
     threading.Thread(target=_run, args=(job_id, req, out_path), daemon=True).start()
     return {"job_id": job_id, "status": "running", "model": ready["recommended"]}
+
+
+@router.get("/file/{job_id}")
+async def file(job_id: str):
+    """Serve a finished video.
+
+    A job reported "done" and gave a path on disk, and there was nothing that
+    would hand the file to a browser - so a generated video could not be
+    played from the app that made it.
+    """
+    from fastapi.responses import FileResponse
+    from app.config import settings
+
+    if not re.fullmatch(r"[a-f0-9]{12}", job_id):
+        raise HTTPException(status_code=404, detail="No such video.")
+    path = os.path.join(settings.DATA_DIR, "video", "%s.mp4" % job_id)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="That video is not on disk.")
+    return FileResponse(path, media_type="video/mp4")
 
 
 @router.get("/job/{job_id}")

@@ -44,7 +44,9 @@ from app.models_catalog import (
     mark_hf_repository_verified,
 )
 from app.web_search import perform_web_search
-from app.local_image import generate_local_image, is_image_generation_request, clean_image_prompt
+from app.local_image import (generate_local_image, is_image_generation_request,
+                             clean_image_prompt, is_video_generation_request,
+                             clean_video_prompt)
 from app.translator import SUPPORTED_LANGUAGES, INDIAN_LANGUAGES, detect_language, translate_text
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -2059,25 +2061,13 @@ def generate_fallback_image(prompt: str) -> str:
     return f"![Generated Image](/api/static/{filename})"
 
 
-def generate_fallback_video(prompt: str) -> str:
-    import uuid
-    from PIL import Image, ImageDraw
-    frames = []
-    for f_idx in range(8):
-        img = Image.new("RGB", (320, 240), "#11111b")
-        draw = ImageDraw.Draw(img)
-        x = 40 + f_idx * 30
-        draw.ellipse([(x - 20, 100), (x + 20, 140)], fill="#8ab4f8")
-        draw.text((10, 10), "SMARAN.AI VIDEO ENGINE", fill="#a8a8af")
-        draw.text((10, 200), f"Prompt: {prompt[:30]}...", fill="#ffffff")
-        frames.append(img)
-        
-    filename = f"gen_video_{uuid.uuid4().hex[:8]}.gif"
-    filepath = os.path.join(os.getenv("DATA_DIR", "./data"), "uploads", filename)
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    frames[0].save(filepath, save_all=True, append_images=frames[1:], duration=150, loop=0)
-    return f"![Generated Video](/api/static/{filename})"
-
+# generate_fallback_video lived here. It drew eight frames of a blue circle
+# sliding across a dark rectangle, captioned with the prompt, and returned
+# it as a generated video. Deleted; app/video does the real thing.
+VIDEO_TAG_TEMPLATE = (
+    "\n" + '<video controls style="max-width:100%" '
+    'src="/api/video/file/{job_id}"></video>'
+)
 
 def call_sd_txt2img_bridge(prompt: str) -> str:
     service_url = os.getenv("LOCAL_IMAGE_SERVICE_URL", "http://media-generator:8002")
@@ -3506,6 +3496,104 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     # Streaming Response Generator
     async def stream_generator():
         nonlocal selected_model
+        # Image and video are answered here, at the top, before anything
+        # else. The pair of branches that did this sat below the cloud-routing
+        # block, and that block returns as soon as any provider is configured
+        # - so on a machine with a cloud key they were never reached and "make
+        # a video of a sunset" came back as ordinary conversation.
+        if is_image_generation_request(chat_req.prompt):
+            clean_prompt = clean_image_prompt(chat_req.prompt)
+            yield json.dumps({"token": "Creating your image on this device.\n\n"}) + "\n"
+            try:
+                loop = asyncio.get_running_loop()
+                img_tag = await loop.run_in_executor(None, call_sd_txt2img_bridge, clean_prompt)
+            except Exception as image_error:
+                logger.exception("Local image generation failed")
+                yield json.dumps({"token": "Image generation failed: " + str(image_error)}) + "\n"
+                return
+            db_session = SessionLocal()
+            try:
+                db_session.add(ChatMessage(session_id=session.id, role="user",
+                                           content=chat_req.prompt))
+                db_session.add(ChatMessage(session_id=session.id, role="assistant",
+                                           content="Generated image for: " + clean_prompt + "\n\n" + img_tag,
+                                           references="[]"))
+                db_session.commit()
+            except Exception:
+                db_session.rollback()
+            finally:
+                db_session.close()
+            yield json.dumps({"token": img_tag}) + "\n"
+            return
+
+        # This used to call generate_fallback_video, which drew an eight-frame
+        # GIF of a blue circle sliding across a dark rectangle, captioned
+        # "SMARAN.AI VIDEO ENGINE" with your prompt printed under it, and
+        # returned that as "Generated Video". It had nothing to do with what
+        # was asked for. Meanwhile app/video - a real LTX-Video engine with
+        # hardware probing and a job runner - sat unused.
+        if is_video_generation_request(chat_req.prompt):
+            import threading as _threading
+            import uuid as _uuid
+            from app.video.planner import plan as plan_video
+            from app.video.routes import GenerateRequest, _jobs, _jobs_lock, _run
+
+            clean_prompt = clean_video_prompt(chat_req.prompt)
+            ready = plan_video("text-to-video")
+            if not ready.get("recommended"):
+                reason = (ready.get("candidates") or [{}])[0].get(
+                    "reason", "no video model can run on this machine")
+                yield json.dumps({"token": "I cannot make that video here: " + reason}) + "\n"
+                return
+
+            job_id = _uuid.uuid4().hex[:12]
+            out_dir = os.path.join(settings.DATA_DIR, "video")
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, job_id + ".mp4")
+            with _jobs_lock:
+                _jobs[job_id] = {"id": job_id, "status": "running", "messages": [],
+                                 "result": None, "error": None,
+                                 "started": time.time(), "updated": time.time()}
+            _threading.Thread(target=_run,
+                              args=(job_id, GenerateRequest(prompt=clean_prompt), out_path),
+                              daemon=True).start()
+
+            yield json.dumps({"token": "Making this with " + str(ready["recommended"])
+                                       + " on your own GPU. It takes a few minutes.\n\n"}) + "\n"
+
+            seen = 0
+            while True:
+                await asyncio.sleep(2)
+                with _jobs_lock:
+                    record = dict(_jobs.get(job_id) or {})
+                messages = record.get("messages") or []
+                for line in messages[seen:]:
+                    yield json.dumps({"token": str(line) + "\n"}) + "\n"
+                seen = len(messages)
+                # The job reports "completed" and "failed" - not "done" and
+                # "error", which is what I first wrote and would have left this
+                # polling a finished job for ever.
+                if record.get("status") == "completed":
+                    tag = VIDEO_TAG_TEMPLATE.format(job_id=job_id)
+                    db_session = SessionLocal()
+                    try:
+                        db_session.add(ChatMessage(session_id=session.id, role="user",
+                                                   content=chat_req.prompt))
+                        db_session.add(ChatMessage(
+                            session_id=session.id, role="assistant",
+                            content="Generated video for: " + clean_prompt + tag,
+                            references="[]"))
+                        db_session.commit()
+                    except Exception:
+                        db_session.rollback()
+                    finally:
+                        db_session.close()
+                    yield json.dumps({"token": tag}) + "\n"
+                    return
+                if not record or record.get("status") == "failed":
+                    yield json.dumps({"token": "The video failed: "
+                                               + str(record.get("error") or "unknown error")}) + "\n"
+                    return
         start_time = time.time()
         accumulated_response = ""
         measured_completion_tokens = 0
@@ -3809,61 +3897,6 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             return
 
         prompt_lower = chat_req.prompt.lower().strip()
-        if is_image_generation_request(chat_req.prompt):
-            clean_prompt = clean_image_prompt(chat_req.prompt)
-            yield json.dumps({"token": "Creating your image fully on this device...\n\n"}) + "\n"
-            try:
-                loop = asyncio.get_running_loop()
-                img_tag = await loop.run_in_executor(None, call_sd_txt2img_bridge, clean_prompt)
-            except Exception as image_error:
-                logger.exception("Local image generation failed")
-                yield json.dumps({"token": f"Local image generation failed: {str(image_error)}"}) + "\n"
-                return
-            # Log results to SQLite DB
-            db_session = SessionLocal()
-            try:
-                db_session.add(ChatMessage(session_id=session.id, role="user", content=chat_req.prompt))
-                db_session.add(ChatMessage(session_id=session.id, role="assistant", content=f"Generated image for prompt: '{clean_prompt}'\n\n{img_tag}", references="[]"))
-                active_session = db_session.query(ChatSession).filter(ChatSession.id == session.id).first()
-                if active_session: active_session.updated_at = datetime.now()
-                db_session.commit()
-            except Exception:
-                db_session.rollback()
-            yield json.dumps({"token": f"Generating image for prompt: '{clean_prompt}'...\n\n{img_tag}"}) + "\n"
-            yield json.dumps({
-                "token_count": 0,
-                "prompt_tokens": 0,
-                "total_context": 4096,
-                "context_remaining": 4096,
-                "execution_time_sec": round(time.time() - start_time, 2),
-                "local_datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }) + "\n"
-            return
-            
-        elif prompt_lower.startswith("/video") or prompt_lower.startswith("/txt2video"):
-            clean_prompt = chat_req.prompt.split(" ", 1)[1] if " " in chat_req.prompt else chat_req.prompt
-            video_tag = generate_fallback_video(clean_prompt)
-            # Log results to SQLite DB
-            db_session = SessionLocal()
-            try:
-                db_session.add(ChatMessage(session_id=session.id, role="user", content=chat_req.prompt))
-                db_session.add(ChatMessage(session_id=session.id, role="assistant", content=f"Generated video for prompt: '{clean_prompt}'\n\n{video_tag}", references="[]"))
-                active_session = db_session.query(ChatSession).filter(ChatSession.id == session.id).first()
-                if active_session: active_session.updated_at = datetime.now()
-                db_session.commit()
-            except Exception:
-                db_session.rollback()
-            yield json.dumps({"token": f"Generating video for prompt: '{clean_prompt}'...\n\n{video_tag}"}) + "\n"
-            yield json.dumps({
-                "token_count": 0,
-                "prompt_tokens": 0,
-                "total_context": 4096,
-                "context_remaining": 4096,
-                "execution_time_sec": round(time.time() - start_time, 2),
-                "local_datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }) + "\n"
-            return
-
         try:
             async with inference_semaphore:
                 # Determine active inference engine from hardware_config.json
