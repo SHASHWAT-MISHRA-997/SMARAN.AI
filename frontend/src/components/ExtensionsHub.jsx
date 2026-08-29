@@ -78,7 +78,6 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     } catch (_) { /* leave it empty rather than invent entries */ }
   }, []);
 
-  const [primaryTab, setPrimaryTab] = useState('plugins');
   const [section, setSection] = useState('plugin');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -216,11 +215,12 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     setBusy(row.name);
 
     if (row.type === 'mcp') {
-      setCustom((prev) =>
-        prev.map((c) =>
-          c.name === row.name ? { ...c, state: c.state === 'connected' ? 'off' : 'connected' } : c
-        )
-      );
+      // This used to flip the label in local state and tell the backend
+      // nothing, so switching a server "off" left its process running and
+      // switching it "on" started nothing. Turning it on also has to start
+      // it, which is what probe does.
+      await setServerEnabled(row.name, !on);
+      if (!on) await probeServer(row.name);
       setBusy(null);
       return;
     }
@@ -261,7 +261,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
       setSection('mcp');
     } else if (newItem.type === 'skill') {
       setCustomSkills((prev) => [newItem, ...prev.filter((x) => x.name !== newItem.name)]);
-      setPrimaryTab('skills');
+      setSection('skill');
     } else {
       setRows((prev) => [newItem, ...prev.filter((x) => x.name !== newItem.name)]);
       setSection(newItem.type || 'plugin');
@@ -273,7 +273,12 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     const needle = query.trim().toLowerCase();
     let source = [];
 
-    if (primaryTab === 'skills') {
+    // There were two competing tab systems: a Plugins/Skills pair on top and
+    // a Plugins/Skills/MCP/Connectors row of chips below it. "Skills"
+    // appeared in both, and this branch checked the top one first and ignored
+    // the chips entirely - so on the Skills tab, clicking "MCP Servers" did
+    // nothing at all. One row of categories now drives everything.
+    if (section === 'skill') {
       const safeSkills = Array.isArray(customSkills) ? customSkills : [];
       source = [
         ...safeSkills,
@@ -314,7 +319,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     return source.filter((r) =>
       `${r.name} ${r.description || ''} ${r.author || ''}`.toLowerCase().includes(needle)
     );
-  }, [rows, custom, customSkills, section, primaryTab, query]);
+  }, [rows, custom, customSkills, section, query]);
 
   const counts = useMemo(() => {
     const safeSkills = Array.isArray(customSkills) ? customSkills : [];
@@ -330,10 +335,14 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
   if (!isOpen) return null;
 
   const running = visible.filter((r) => r.runtime_status === 'active' || r.state === 'connected').length;
-  const title = primaryTab === 'skills' ? 'Skills' : 'Plugins & MCP Servers';
-  const subtitle = primaryTab === 'skills'
-    ? 'Task-specific AI skills, instructions, and workflows.'
-    : 'Manage installed extensions, custom skills, and Model Context Protocol (MCP) servers.';
+  // One source of truth for the heading, driven by the same chips as the list.
+  const SECTION_LABEL = {
+    plugin: ['Plugins', 'Extensions running inside SMARAN.AI itself.'],
+    skill: ['Skills', 'Task-specific instructions and workflows.'],
+    mcp: ['MCP Servers', 'Separate programs SMARAN.AI starts and talks to over the Model Context Protocol.'],
+    connector: ['Connectors', 'Bridges to services outside this machine.'],
+  };
+  const [title, subtitle] = SECTION_LABEL[section] || SECTION_LABEL.plugin;
 
   return (
     <div className={embedded
@@ -345,17 +354,20 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 sm:px-5 py-3.5 bg-zinc-950">
-            <div className="flex items-center gap-1 rounded-xl bg-zinc-900/80 p-1 border border-zinc-800">
-              {['plugins', 'skills'].map((tab) => (
-                <button key={tab} type="button"
-                  onClick={() => { setPrimaryTab(tab); setQuery(''); setDetail(null); }}
-                  className={`rounded-lg px-3.5 py-1.5 text-xs font-bold capitalize transition ${
-                    primaryTab === tab ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-400 hover:text-zinc-200'
-                  }`}>
-                  {tab}
-                </button>
-              ))}
-            </div>
+            {/* A Plugins/Skills pair used to sit here, duplicating two of the
+                four category chips below and overriding them - on the Skills
+                tab the chips did nothing. Gone; the chips are the only
+                categories. Its place is taken by a way out, which on a phone
+                there was none of: this screen fills the window and had no
+                close control, so there was no way back to the chat. */}
+            <button
+              type="button"
+              onClick={() => (onClose ? onClose() : window.dispatchEvent(new CustomEvent('smaran:navigate', { detail: { view: 'chat' } })))}
+              className="flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs font-bold text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
+              aria-label="Close extensions"
+            >
+              <X className="h-4 w-4" /> <span>Close</span>
+            </button>
 
             <div className="flex min-w-0 max-w-full items-center gap-1.5 sm:gap-2">
               <button type="button" onClick={load} title="Refresh runtime state"
@@ -421,13 +433,13 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder={primaryTab === 'skills' ? 'Search skills…' : 'Search plugins & MCP servers…'}
+                  placeholder={`Search ${title.toLowerCase()}…`}
                   className="w-full rounded-full border border-zinc-700/80 bg-zinc-900/80 py-3 pl-11 pr-4 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-indigo-500"
                 />
               </div>
 
               {/* Tabs for Plugins */}
-              {primaryTab === 'plugins' && (
+              {true && (
                 <div className="mt-6 flex flex-wrap gap-2 border-b border-zinc-800 pb-4">
                   {MANAGE_FILTERS.map(({ id, label, icon: Icon }) => (
                     <button
@@ -456,7 +468,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
               <section className="mt-6">
                 <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">
-                    {primaryTab === 'skills' ? 'Active Skills & Recipes' : `${section.toUpperCase()} Catalog`}
+                    {title}
                   </h3>
                   <span className="text-xs text-zinc-500 font-medium">
                     {visible.length} available · {running} active

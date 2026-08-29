@@ -235,6 +235,16 @@ const App = () => {
     return () => query.removeEventListener('change', update);
   }, []);
 
+  // The full-screen sections - Plugins, Sites - are rendered embedded, with no
+  // close prop, and on a phone the sidebar that would take you back is hidden
+  // behind the menu. There was no way out of them at all. They ask to go home
+  // through this.
+  useEffect(() => {
+    const goHome = (event) => setActiveView(event.detail?.view || 'chat');
+    window.addEventListener('smaran:navigate', goHome);
+    return () => window.removeEventListener('smaran:navigate', goHome);
+  }, []);
+
   const [settingsTab, setSettingsTab] = useState('general');
 
   // The views that actually have a branch in the render below. Kept next to

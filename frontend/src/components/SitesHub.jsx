@@ -258,9 +258,20 @@ const SitesHub = () => {
           <div className="flex items-center gap-2 sm:shrink-0">
             <button
               onClick={() => setCreating(true)}
-              className="flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-600/30"
+              className="flex flex-1 sm:w-auto items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-600/30"
             >
               <Plus className="h-4 w-4" /> Create New Site
+            </button>
+            {/* This screen fills the window and had no close control. On a
+                phone the sidebar that would take you back is behind the menu,
+                so once you opened Sites there was no way out of it. */}
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('smaran:navigate', { detail: { view: 'chat' } }))}
+              aria-label="Close Sites"
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-xs font-bold text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
+            >
+              <X className="h-4 w-4" /> <span className="hidden sm:inline">Close</span>
             </button>
           </div>
         </header>
