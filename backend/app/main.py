@@ -6536,6 +6536,79 @@ async def pull_any_model_endpoint(
             "detail": "Pulling. Watch /api/models/download-status for progress."}
 
 
+#: Ollama names its vision models plainly enough to recognise. Kept short and
+#: checked against what is installed rather than assumed - offering to look at
+#: the screen with a model that is not here would be a promise nothing keeps.
+VISION_MODEL_HINTS = ("llava", "vl", "vision", "moondream", "bakllava", "minicpm-v", "gemma3")
+
+
+@app.post("/api/desktop/ask-screen")
+async def ask_screen_endpoint(request: Request,
+                              current_user: User = Depends(get_current_user)):
+    """Answer a question about what is on screen right now.
+
+    Takes a screenshot and gives it to a vision model with the question. If no
+    model that can see is installed it says so, and says what to install,
+    rather than answering from the question alone - which would read as though
+    it had looked.
+    """
+    body = await request.json()
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Ask something about the screen.")
+
+    base = settings.OLLAMA_URL.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=3.0)) as client:
+            tags = await client.get(f"{base}/api/tags")
+            installed = [m.get("name", "") for m in (tags.json().get("models") or [])]
+    except Exception:
+        raise HTTPException(status_code=503,
+                            detail="The local model server is not answering. Start Ollama and try again.")
+
+    seeing = next((m for m in installed
+                   if any(hint in m.lower() for hint in VISION_MODEL_HINTS)), None)
+    if not seeing:
+        raise HTTPException(
+            status_code=409,
+            detail=("No model that can see is installed, so I cannot look at your "
+                    "screen. Install one from Model Hub - llava:7b needs about 4.7 GB, "
+                    "or moondream about 1.7 GB on a smaller machine."))
+
+    # Imported here rather than relying on the module-level import further
+    # down the file, which lands after this function is defined.
+    from app.desktop_agent import DesktopAgent as _Agent
+
+    shot = _Agent._action_take_screenshot({})
+    if not shot.get("success") or not shot.get("screenshot_base64"):
+        raise HTTPException(status_code=500,
+                            detail="The screen could not be captured: %s"
+                                   % shot.get("error", "unknown reason"))
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=5.0)) as client:
+            response = await client.post(f"{base}/api/chat", json={
+                "model": seeing,
+                "messages": [{
+                    "role": "user",
+                    "content": question,
+                    "images": [shot["screenshot_base64"]],
+                }],
+                "stream": False,
+            })
+        if response.status_code != 200:
+            raise HTTPException(status_code=502,
+                                detail="%s returned HTTP %d" % (seeing, response.status_code))
+        answer = ((response.json().get("message") or {}).get("content") or "").strip()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not ask %s: %s" % (seeing, str(exc)[:120]))
+
+    return {"question": question, "answer": answer, "model": seeing,
+            "note": "Answered from a screenshot taken just now."}
+
+
 @app.get("/api/window/status")
 async def window_status_endpoint():
     """Whether this window can be pinned above other applications."""

@@ -283,6 +283,17 @@ DESKTOP_ACTION_CATALOG: Dict[str, Dict[str, Any]] = {
         "parameters": {},
         "category": "system",
     },
+    "list_open_windows": {
+        "title": "List open windows",
+        "description": "The windows actually on screen and which one is in front. "
+                       "Different from the running-applications list, which counts "
+                       "processes - a machine has hundreds, nearly all invisible.",
+        "risk": "read_only",
+        "changes_system": False,
+        "requires_confirmation": False,
+        "parameters": {},
+        "category": "system",
+    },
     "list_running_apps": {
         "title": "List running applications",
         "description": "Show all currently running applications with CPU and memory usage.",
@@ -1053,6 +1064,76 @@ class DesktopAgent:
         return {"success": False, "error": "Recycle Bin operation only supported on Windows."}
 
     @staticmethod
+    def _action_list_open_windows(params: Dict[str, Any]) -> Dict[str, Any]:
+        """The windows actually on screen, and which one is in front.
+
+        list_running_apps answers a different question: it counts processes,
+        and a machine has a couple of hundred of those, nearly all invisible.
+        Asked "what have I got open", that is not an answer. This walks the
+        visible top-level windows and reads their titles, which is what a
+        person means by what is open.
+        """
+        if sys.platform != "win32":
+            return {"success": False, "error": "Listing windows is only supported on Windows."}
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            windows = []
+            foreground = user32.GetForegroundWindow()
+
+            def visit(hwnd, _lparam):
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length == 0:
+                    return True
+                buffer = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buffer, length + 1)
+                title = buffer.value.strip()
+                if not title:
+                    return True
+
+                # The process behind it, so "Chrome" is distinguishable from a
+                # document that happens to be called Chrome.
+                pid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                app = ""
+                try:
+                    app = psutil.Process(pid.value).name()
+                except Exception:
+                    pass
+
+                windows.append({"title": title, "app": app,
+                                "in_front": hwnd == foreground})
+                return True
+
+            callback = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p,
+                                          ctypes.c_void_p)(visit)
+            user32.EnumWindows(callback, 0)
+
+            # Windows keeps several title-bearing shells around that nobody
+            # thinks of as open - the desktop itself, the input bar. Naming
+            # them as things you have open would be wrong.
+            SHELLS = {"Program Manager", "Windows Input Experience",
+                      "Settings", "Microsoft Text Input Application"}
+            visible = [w for w in windows if w["title"] not in SHELLS]
+            front = next((w for w in visible if w["in_front"]), None)
+
+            return {
+                "success": True,
+                "count": len(visible),
+                "in_front": front,
+                "windows": visible[:40],
+                "message": (
+                    ("You are looking at " + front["title"] + ". ") if front else ""
+                ) + ("%d windows are open." % len(visible)),
+            }
+        except Exception as exc:
+            return {"success": False, "error": "Could not read the window list: %s" % str(exc)[:120]}
+
+    @staticmethod
     def _action_take_screenshot(params: Dict[str, Any]) -> Dict[str, Any]:
         try:
             try:
@@ -1803,6 +1884,16 @@ INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
     (re.compile(r"(?:empty|clear|khali\s+karo|saaf\s+karo)\s+(?:the\s+)?recycle\s*bin", re.I), "empty_recycle_bin", {}),
     (re.compile(r"(?:take|capture|lelo|lo)\s+(?:a\s+)?screenshot", re.I), "take_screenshot", {}),
     (re.compile(r"(?:lock|band\s+karo)\s+(?:my\s+)?(?:computer|pc|laptop|screen)", re.I), "lock_computer", {}),
+    # Asked before the running-processes pattern: "what apps do I have open"
+    # means the windows in front of you, not the two hundred processes behind
+    # them, and the processes pattern would otherwise swallow it.
+    (re.compile(r"(?:what|which|kaun\s*sa|konsa|kaunse)\s+(?:.{0,12}\s+)?"
+                r"(?:window|windows|screen|screens|tab|tabs|app|apps)\s+"
+                r"(?:.{0,14}\s+)?(?:open|khul[ai]|khule)"
+                r"|(?:what|which)(?:'s| is| am i)?\s+(?:.{0,10}\s+)?(?:on|looking at)\s+(?:my\s+)?screen"
+                r"|(?:show|list|batao|dikhao)\s+(?:me\s+)?(?:my\s+|all\s+)?(?:open\s+)?windows?"
+                r"|(?:kya|kaun\s*sa)\s+khula\s+hai", re.I),
+     "list_open_windows", {}),
     (re.compile(r"(?:show|list|batao|dikhao)\s+(?:all\s+)?(?:running|active)\s+(?:apps?|applications?|processes?|programs?)", re.I), "list_running_apps", {}),
     (re.compile(r"(?:close|kill|band\s+karo|hatao)\s+(.+)", re.I), "close_application", {"name": "$1"}),
     (re.compile(r"(?:system|device|computer)\s+(?:info|information|details|status)", re.I), "get_system_info", {}),
