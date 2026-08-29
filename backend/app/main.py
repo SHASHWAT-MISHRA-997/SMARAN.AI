@@ -6908,7 +6908,6 @@ plugin_manager.set_app_context({
 # Plugin registrations
 from app.plugins.google_agents_cli import GoogleAgentsCLIPlugin, metadata as google_agents_cli_metadata
 from app.plugins.paperclip import PaperclipPlugin, metadata as paperclip_metadata
-from app.plugins.three_d_website import ThreeDWebsitePlugin, metadata as three_d_website_metadata
 from app.plugins.ui_ux_pro_max_skill import UIUXProMaxSkill, metadata as ui_ux_pro_max_skill_metadata
 from app.plugins.reverse_skill import ReverseSkill, metadata as reverse_skill_metadata
 from app.plugins.omni_route import OmniRoutePlugin, metadata as omni_route_metadata
@@ -6921,7 +6920,6 @@ from app.plugins.mcp_github import MCPGitHubPlugin, metadata as mcp_github_metad
 
 plugin_manager.register_plugin(GoogleAgentsCLIPlugin, google_agents_cli_metadata, PluginConfig())
 plugin_manager.register_plugin(PaperclipPlugin, paperclip_metadata, PluginConfig())
-plugin_manager.register_plugin(ThreeDWebsitePlugin, three_d_website_metadata, PluginConfig())
 plugin_manager.register_plugin(UIUXProMaxSkill, ui_ux_pro_max_skill_metadata, PluginConfig())
 plugin_manager.register_plugin(ReverseSkill, reverse_skill_metadata, PluginConfig())
 plugin_manager.register_plugin(OmniRoutePlugin, omni_route_metadata, PluginConfig())

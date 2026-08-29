@@ -136,18 +136,15 @@ const SettingsModal = ({
           const data = await res.json();
           setMemoryFacts(Array.isArray(data) ? data : []);
         } else {
-          setMemoryFacts([
-            { id: "mem_1", fact: "User prefers clean modular React and TypeScript architecture." },
-            { id: "mem_2", fact: "Primary working project is SMARAN.AI desktop workstation." },
-            { id: "mem_3", fact: "User name: SHASHWAT MISHRA." },
-          ]);
+          // When the memory request failed, three facts were invented and
+          // shown as though SMARAN.AI had learned them - that it knew your
+          // name, your architecture preferences and what you were working on.
+          // It had learned nothing; the request had simply failed. An empty
+          // list is what an unreachable memory looks like.
+          setMemoryFacts([]);
         }
       } catch (_) {
-        setMemoryFacts([
-          { id: "mem_1", fact: "User prefers clean modular React and TypeScript architecture." },
-          { id: "mem_2", fact: "Primary working project is SMARAN.AI desktop workstation." },
-          { id: "mem_3", fact: "User name: SHASHWAT MISHRA." },
-        ]);
+        setMemoryFacts([]);
       } finally {
         setLoadingMemory(false);
       }
@@ -182,6 +179,23 @@ const SettingsModal = ({
     })();
     return () => { cancelled = true; };
   }, [isOpen]);
+
+  // What you want to be called. There was nowhere to say it, so the sidebar
+  // fell back to the generated account id. Local to this machine.
+  // Above the early return, like the two hooks before it.
+  const [displayName, setDisplayName] = useState(
+    () => localStorage.getItem('sm_display_name') || '',
+  );
+  useEffect(() => {
+    localStorage.setItem('sm_display_name', displayName);
+    // The sidebar is a sibling, not a child, so it is told rather than
+    // re-rendered by a shared parent.
+    window.dispatchEvent(new CustomEvent('smaran:display-name', { detail: { name: displayName } }));
+  }, [displayName]);
+
+  const displayInitials = (displayName.trim() || 'You')
+    .split(/[\s._-]+/).filter(Boolean).slice(0, 2)
+    .map((part) => part[0].toUpperCase()).join('') || 'Y';
 
   if (!isOpen) return null;
 
@@ -408,20 +422,31 @@ const SettingsModal = ({
                   </p>
                 </div>
 
-                <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-lg font-black text-white shadow-lg shrink-0">
-                    SM
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-base font-extrabold text-zinc-900 dark:text-white truncate">SHASHWAT MISHRA</h4>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                        Pro Active
-                      </span>
+                  {/* "SHASHWAT MISHRA" and the initials "SM" were typed into
+                      this card, so every install showed one particular
+                      person as the account holder. Reading the name from the
+                      account record instead gave the generated device id -
+                      "device_device_mteo6v36…" - which is not a name either.
+                      There was nowhere to say what you are called. Now there
+                      is, and it stays on this machine. */}
+                  <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-lg font-black text-white shadow-lg shrink-0">
+                      {displayInitials}
                     </div>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Local Offline Workstation User · SMARAN.AI</p>
+                    <div className="min-w-0 flex-1">
+                      <label className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400">Your name</label>
+                      <input
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.target.value)}
+                        placeholder="What should SMARAN.AI call you?"
+                        maxLength={60}
+                        className="mt-1 w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-extrabold text-zinc-900 dark:text-white outline-none focus:border-indigo-500"
+                      />
+                      <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                        Shown in the sidebar. Kept on this machine and sent nowhere.
+                      </p>
+                    </div>
                   </div>
-                </div>
 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">

@@ -111,9 +111,23 @@ const Sidebar = ({
   // it, so every install of SMARAN.AI showed one particular person's name as
   // the signed-in user. The user record was already being passed in and was
   // simply not read.
-  const profileName = (
-    user?.full_name || user?.name || user?.username || user?.email || 'You'
-  ).toString();
+  // A name you chose beats anything derived. Without one the account's
+  // username was used, and on this build that is a generated device id -
+  // "device_device_mteo6v36…" - which is not a name and should not be shown
+  // as one. Those are recognised and skipped.
+  const [chosenName, setChosenName] = useState(
+    () => (typeof window === 'undefined' ? '' : localStorage.getItem('sm_display_name') || ''),
+  );
+  useEffect(() => {
+    const update = (event) => setChosenName(event.detail?.name || '');
+    window.addEventListener('smaran:display-name', update);
+    return () => window.removeEventListener('smaran:display-name', update);
+  }, []);
+
+  const looksGenerated = (value) => !value || /^(device[_-]|local[_-]|user[_-]?\d)/i.test(value) || /^[0-9a-f]{12,}$/i.test(value);
+  const derived = [user?.full_name, user?.name, user?.username, user?.email]
+    .find((candidate) => candidate && !looksGenerated(candidate));
+  const profileName = (chosenName.trim() || derived || 'You').toString();
   const profileInitials = profileName
     .replace(/@.*$/, '')
     .split(/[\s._-]+/)
@@ -567,10 +581,10 @@ const Sidebar = ({
                 </div>
                 <div className="min-w-0">
                   <span className="block text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                    {voiceOutputEnabled ? 'Jarvis listening…' : 'SMARAN.AI Jarvis'}
+                    {voiceOutputEnabled ? 'Listening…' : 'Voice Dictate'}
                   </span>
                   <span className="block text-[10px] text-zinc-500 dark:text-zinc-400">
-                    {voiceOutputEnabled ? 'Microphone active' : 'Click to activate'}
+                    {voiceOutputEnabled ? 'Speak - it types for you' : 'Speak into the message box'}
                   </span>
                 </div>
               </div>
@@ -639,7 +653,7 @@ const Sidebar = ({
             {/* Voice toggle button in collapsed rail */}
             <RailBtn
               icon={<Volume2 className={`w-5 h-5 ${voiceOutputEnabled ? 'text-emerald-400 animate-pulse' : 'text-indigo-600 dark:text-indigo-400'}`} />}
-              label={voiceOutputEnabled ? 'Jarvis listening' : 'SMARAN.AI Jarvis'}
+              label={voiceOutputEnabled ? 'Dictating' : 'Voice Dictate'}
               active={voiceOutputEnabled}
               onClick={() => {
                 onNavigate('chat');

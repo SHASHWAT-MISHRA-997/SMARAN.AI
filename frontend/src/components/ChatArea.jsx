@@ -3337,15 +3337,29 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           <span className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 px-2.5 text-[11px] font-semibold text-zinc-300">
           <Laptop className="h-3.5 w-3.5 text-indigo-400" /> Local
           </span>
+          {/* Both of these used to state things that were not so. With no
+              folder open - which is what /api/workspace/status reports until
+              you pick one - the middle chip still read "SMARAN Workspace" and
+              its tooltip said "Workspace active". And the branch chip printed
+              `git?.branch || 'main'`, so with git null it showed "main": a
+              branch name nothing had read. Now the first says there is no
+              folder, and the second is not rendered at all unless a branch was
+              actually found. */}
           <button type="button" onClick={onOpenWorkspace}
             className="inline-flex h-8 max-w-[280px] items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 px-2.5 text-[11px] font-semibold text-zinc-200 transition hover:border-indigo-500/60 hover:bg-zinc-800"
-            title={workspaceStatus?.open ? workspaceStatus.root : 'Workspace active'}>
+            title={workspaceStatus?.open ? workspaceStatus.root : 'No folder is open. Click to choose one.'}>
             <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-            <span className="truncate">{workspaceStatus?.open ? String(workspaceStatus.root).split(/[\\/]/).filter(Boolean).pop() : 'SMARAN Workspace'}</span>
+            <span className="truncate">
+              {workspaceStatus?.open
+                ? String(workspaceStatus.root).split(/[\\/]/).filter(Boolean).pop()
+                : 'Open a folder'}
+            </span>
           </button>
-          <span title={`Git branch: ${workspaceStatus?.git?.branch || 'main'}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 px-2.5 text-[11px] font-semibold text-zinc-300">
-            <GitBranch className="h-3.5 w-3.5 text-emerald-400" /> {workspaceStatus?.git?.branch || 'main'}
-          </span>
+          {workspaceStatus?.git?.branch && (
+            <span title={`Git branch: ${workspaceStatus.git.branch}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 px-2.5 text-[11px] font-semibold text-zinc-300">
+              <GitBranch className="h-3.5 w-3.5 text-emerald-400" /> {workspaceStatus.git.branch}
+            </span>
+          )}
         </div>
         <form data-testid="chat-composer" ref={composerShellRef} onSubmit={handleSend} className="composer-shell max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 bg-gradient-to-b from-white/95 to-zinc-50/90 dark:from-zinc-900/95 dark:to-zinc-950/95 border border-indigo-300/60 dark:border-indigo-500/35 rounded-2xl sm:rounded-3xl p-2.5 sm:p-2.5 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.55)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all w-full overflow-hidden">
           {/* Hidden file inputs */}
