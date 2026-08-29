@@ -107,6 +107,21 @@ const Sidebar = ({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showUtilityMenu, setShowUtilityMenu] = useState(false);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(false);
+  // The profile row had "SHASHWAT MISHRA" and the initials "SM" written into
+  // it, so every install of SMARAN.AI showed one particular person's name as
+  // the signed-in user. The user record was already being passed in and was
+  // simply not read.
+  const profileName = (
+    user?.full_name || user?.name || user?.username || user?.email || 'You'
+  ).toString();
+  const profileInitials = profileName
+    .replace(/@.*$/, '')
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('') || 'Y';
+
   const [dictationError, setDictationError] = useState('');
   const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   const isLoggedIn = Boolean(user || token || (typeof window !== 'undefined' && localStorage.getItem('sm_token')));
@@ -584,11 +599,11 @@ const Sidebar = ({
                 className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer group"
               >
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
-                  SM
+                  {profileInitials}
                 </div>
                 <div className="min-w-0 flex-1 truncate">
                   <span className="block text-xs font-extrabold text-zinc-900 dark:text-white tracking-wide truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
-                    SHASHWAT MISHRA
+                    {profileName}
                   </span>
                   <span className="block text-[10px] font-medium text-zinc-500 dark:text-zinc-400">
                     Pro Workspace
@@ -649,10 +664,10 @@ const Sidebar = ({
             />
 
             {/* Profile Avatar button in collapsed rail */}
-            <Tip label="SHASHWAT MISHRA (Pro)">
+            <Tip label={profileName}>
               <button
                 type="button"
-                aria-label="SHASHWAT MISHRA profile"
+                aria-label={`${profileName} profile`}
                 onClick={() => { setExpanded(true); setShowUtilityMenu(true); }}
                 className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center text-xs font-black text-white shadow-md hover:scale-105 transition cursor-pointer border border-indigo-400/30"
               >
@@ -746,10 +761,10 @@ const Sidebar = ({
           <div className="flex w-full items-center justify-between gap-2 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 shadow-xs">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
-                SM
+                {profileInitials}
               </div>
               <span className="text-xs font-black text-zinc-900 dark:text-white truncate">
-                SHASHWAT MISHRA
+                {profileName}
               </span>
             </div>
 
