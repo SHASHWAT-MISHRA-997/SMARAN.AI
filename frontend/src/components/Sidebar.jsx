@@ -567,7 +567,7 @@ const Sidebar = ({
                 </div>
                 <div className="min-w-0">
                   <span className="block text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                    {voiceOutputEnabled ? 'Voice Listening...' : 'Voice Assistant'}
+                    {voiceOutputEnabled ? 'Jarvis listening…' : 'SMARAN.AI Jarvis'}
                   </span>
                   <span className="block text-[10px] text-zinc-500 dark:text-zinc-400">
                     {voiceOutputEnabled ? 'Microphone active' : 'Click to activate'}
@@ -639,7 +639,7 @@ const Sidebar = ({
             {/* Voice toggle button in collapsed rail */}
             <RailBtn
               icon={<Volume2 className={`w-5 h-5 ${voiceOutputEnabled ? 'text-emerald-400 animate-pulse' : 'text-indigo-600 dark:text-indigo-400'}`} />}
-              label={voiceOutputEnabled ? 'Voice Listening (Active)' : 'Voice Assistant'}
+              label={voiceOutputEnabled ? 'Jarvis listening' : 'SMARAN.AI Jarvis'}
               active={voiceOutputEnabled}
               onClick={() => {
                 onNavigate('chat');

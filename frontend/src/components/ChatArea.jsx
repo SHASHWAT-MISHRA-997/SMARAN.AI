@@ -3591,7 +3591,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               type="button"
               onClick={openVoiceMode}
               className="h-8 px-3 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-fuchsia-600 text-white font-black text-xs shadow-[0_0_14px_rgba(139,92,246,0.35)] hover:shadow-[0_0_24px_rgba(139,92,246,0.6)] hover:scale-105 active:scale-95 transition-all cursor-pointer shrink-0 flex items-center gap-1.5"
-              title="Speak — Real-time Voice Assistant (hands-free, controls your PC)"
+              title="Speak — SMARAN.AI Jarvis (hands-free voice)"
             >
               <Volume2 className="w-3.5 h-3.5 animate-pulse" />
               <span>Speak</span>

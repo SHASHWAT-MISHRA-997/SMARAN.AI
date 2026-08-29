@@ -1800,7 +1800,7 @@ export const HackerVoiceAssistant = ({
           <div>
             <h2 className="text-xs sm:text-base font-black text-white tracking-widest flex items-center gap-1.5 sm:gap-2 uppercase">
               <span className="text-emerald-400 drop-shadow-[0_0_10px_rgba(0,255,65,0.5)]">
-                SMARAN.AI Voice Assistant
+                SMARAN.AI Jarvis
               </span>
               <span className="text-[8px] sm:text-[9px] font-black px-1.5 sm:px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 uppercase tracking-widest font-mono">
                 Real-Time Conversation
@@ -1868,7 +1868,7 @@ export const HackerVoiceAssistant = ({
             type="button"
             onClick={onClose}
             className="p-1.5 sm:p-2 rounded-xl text-zinc-400 hover:text-white bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 transition-colors cursor-pointer"
-            title="Close Voice Assistant"
+            title="Close Jarvis"
           >
             <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
