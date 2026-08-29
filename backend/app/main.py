@@ -6609,6 +6609,31 @@ async def ask_screen_endpoint(request: Request,
             "note": "Answered from a screenshot taken just now."}
 
 
+@app.get("/api/gesture/legend")
+async def gesture_legend_endpoint():
+    """What each gesture does to the desktop."""
+    from app import gesture_control
+
+    return {"gestures": gesture_control.legend(),
+            "note": ("These send media and navigation keys, which Windows routes "
+                     "to whatever has focus - so they work in a browser, a player "
+                     "or a document without this knowing which. Nothing here "
+                     "deletes, closes or types.")}
+
+
+@app.post("/api/gesture/perform")
+async def gesture_perform_endpoint(request: Request,
+                                   current_user: User = Depends(get_current_user)):
+    """Carry out the desktop action for a recognised gesture."""
+    from app import gesture_control
+
+    body = await request.json()
+    result = gesture_control.perform((body.get("gesture") or "").strip())
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Unknown gesture."))
+    return result
+
+
 @app.get("/api/window/status")
 async def window_status_endpoint():
     """Whether this window can be pinned above other applications."""

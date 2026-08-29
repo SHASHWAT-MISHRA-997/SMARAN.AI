@@ -41,19 +41,33 @@ export const GESTURES = {
   PINCH: 'pinch',
   SWIPE_LEFT: 'swipe_left',
   SWIPE_RIGHT: 'swipe_right',
+  // Vertical swipes are new. The tracker only watched the horizontal axis, so
+  // a hand moved up or down did nothing at all - and moving your hand up and
+  // down is the obvious way to scroll.
+  SWIPE_UP: 'swipe_up',
+  SWIPE_DOWN: 'swipe_down',
 };
 
-/** What each gesture is for, shown in the on-screen legend. */
+/** What each gesture is for.
+ *
+ * Two meanings per gesture, because there are two jobs: `action` is what it
+ * does inside SMARAN.AI, and `desktop` is the key it sends to whatever has
+ * focus when "Control PC" is switched on. Only the first existed before, so
+ * the legend promised "Previous character" for a swipe that, with desktop
+ * control on, skips a track.
+ */
 export const GESTURE_LEGEND = [
-  { id: GESTURES.OPEN_PALM, glyph: '🖐', label: 'Open palm', action: 'Wake / stop speaking' },
-  { id: GESTURES.FIST, glyph: '✊', label: 'Fist', action: 'End session' },
-  { id: GESTURES.POINT, glyph: '☝', label: 'Point up', action: 'Start listening' },
-  { id: GESTURES.VICTORY, glyph: '✌', label: 'Victory', action: 'Toggle the camera' },
-  { id: GESTURES.THUMB_UP, glyph: '👍', label: 'Thumbs up', action: 'Confirm' },
-  { id: GESTURES.THUMB_DOWN, glyph: '👎', label: 'Thumbs down', action: 'Cancel' },
-  { id: GESTURES.PINCH, glyph: '🤏', label: 'Pinch', action: 'Toggle ambience' },
-  { id: GESTURES.SWIPE_LEFT, glyph: '⇠', label: 'Swipe left', action: 'Previous character' },
-  { id: GESTURES.SWIPE_RIGHT, glyph: '⇢', label: 'Swipe right', action: 'Next character' },
+  { id: GESTURES.OPEN_PALM, glyph: '🖐', label: 'Open palm', action: 'Wake / stop speaking', desktop: 'Play or pause' },
+  { id: GESTURES.FIST, glyph: '✊', label: 'Fist', action: 'End session', desktop: 'Turn PC control off' },
+  { id: GESTURES.THUMB_UP, glyph: '👍', label: 'Thumbs up', action: 'Confirm', desktop: 'Volume up' },
+  { id: GESTURES.THUMB_DOWN, glyph: '👎', label: 'Thumbs down', action: 'Cancel', desktop: 'Volume down' },
+  { id: GESTURES.PINCH, glyph: '🤏', label: 'Pinch', action: 'Toggle ambience', desktop: 'Mute or unmute' },
+  { id: GESTURES.SWIPE_UP, glyph: '↑', label: 'Hand up', action: '—', desktop: 'Scroll up' },
+  { id: GESTURES.SWIPE_DOWN, glyph: '↓', label: 'Hand down', action: '—', desktop: 'Scroll down' },
+  { id: GESTURES.SWIPE_LEFT, glyph: '⇠', label: 'Swipe left', action: 'Previous character', desktop: 'Previous' },
+  { id: GESTURES.SWIPE_RIGHT, glyph: '⇢', label: 'Swipe right', action: 'Next character', desktop: 'Next' },
+  { id: GESTURES.POINT, glyph: '☝', label: 'Point up', action: 'Start listening', desktop: 'Scroll up' },
+  { id: GESTURES.VICTORY, glyph: '✌', label: 'Victory', action: 'Toggle the camera', desktop: 'Scroll down' },
 ];
 
 const MEDIAPIPE_LABELS = {
@@ -205,21 +219,38 @@ export class GestureController {
     this._considerGesture(detected);
   }
 
-  /** Horizontal travel of the wrist over the last handful of frames. */
+  /** Travel of the wrist over the last handful of frames, on either axis.
+   *
+   * Only the horizontal was tracked, so a hand moved up or down did nothing.
+   * Moving your hand up and down is the obvious way to scroll, and it needed
+   * the vertical too. Whichever axis moved further wins, so a diagonal wave
+   * resolves to one gesture instead of firing both.
+   *
+   * The vertical threshold is lower than the horizontal because a camera sees
+   * less vertical room than horizontal - a comfortable up-and-down movement
+   * covers less of the frame than a sideways one.
+   */
   _trackSwipe(landmarks) {
     const now = performance.now();
-    this.trail.push({ x: landmarks[WRIST].x, at: now });
+    this.trail.push({ x: landmarks[WRIST].x, y: landmarks[WRIST].y, at: now });
     this.trail = this.trail.filter((point) => now - point.at < 400);
     if (this.trail.length < 6) return;
 
     const first = this.trail[0];
     const last = this.trail[this.trail.length - 1];
-    const travel = last.x - first.x;
-    if (Math.abs(travel) < 0.28) return;
+    const across = last.x - first.x;
+    const vertical = last.y - first.y;
 
-    // The camera image is mirrored, so a rightward move on screen is the
-    // user's own left.
-    this._fire(travel > 0 ? GESTURES.SWIPE_LEFT : GESTURES.SWIPE_RIGHT);
+    if (Math.abs(across) < 0.28 && Math.abs(vertical) < 0.22) return;
+
+    if (Math.abs(across) >= Math.abs(vertical)) {
+      // The camera image is mirrored, so a rightward move on screen is the
+      // user's own left.
+      this._fire(across > 0 ? GESTURES.SWIPE_LEFT : GESTURES.SWIPE_RIGHT);
+    } else {
+      // y grows downward in the image, so a smaller y means a raised hand.
+      this._fire(vertical < 0 ? GESTURES.SWIPE_UP : GESTURES.SWIPE_DOWN);
+    }
     this.trail = [];
   }
 

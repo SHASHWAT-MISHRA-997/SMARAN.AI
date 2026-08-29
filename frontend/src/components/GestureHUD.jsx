@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Hand, X } from 'lucide-react';
 import { GestureController, GESTURE_LEGEND, GESTURES } from '../utils/gestureControl';
+import { API_BASE } from '../context/AuthContext';
 
 /**
  * Gesture Mode — the Stark-workshop layer.
@@ -38,10 +39,54 @@ const GestureHUD = ({ isOpen, onClose, onAction }) => {
   const [handCount, setHandCount] = useState(0);
   const [legendOpen, setLegendOpen] = useState(false);
 
+  // Gestures only ever moved SMARAN.AI's own interface - they could switch a
+  // character, not pause a video in a browser behind it. With this on, each
+  // recognised gesture also sends a media or navigation key, which Windows
+  // routes to whatever has focus, so it works in a player or a page without
+  // knowing which.
+  //
+  // Off unless asked for, and remembered. This drives the whole machine; it
+  // should not start doing that because you opened a panel.
+  const [desktopControl, setDesktopControl] = useState(
+    () => localStorage.getItem('sm_gesture_desktop') === 'true',
+  );
+  const [desktopNote, setDesktopNote] = useState('');
+  useEffect(() => {
+    localStorage.setItem('sm_gesture_desktop', String(desktopControl));
+  }, [desktopControl]);
+
   const handleGesture = useCallback((gesture) => {
     setLastGesture({ id: gesture, at: Date.now() });
     onAction?.(gesture);
-  }, [onAction]);
+
+    if (!desktopControl) return;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/gesture/perform`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gesture }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          setDesktopNote(data?.detail || 'That gesture did nothing.');
+          return;
+        }
+        // A fist is the way out: a gesture that stops gestures, so you can
+        // switch this off without reaching for the keyboard - which is the
+        // reason you were using your hands.
+        if (data?.stop) {
+          setDesktopControl(false);
+          setDesktopNote('Desktop control off.');
+          return;
+        }
+        setDesktopNote(data?.action || '');
+      } catch (_) {
+        setDesktopNote('The desktop could not be reached.');
+      }
+    })();
+  }, [onAction, desktopControl]);
 
   // Camera + recogniser lifecycle.
   useEffect(() => {
@@ -214,6 +259,25 @@ const GestureHUD = ({ isOpen, onClose, onAction }) => {
             </div>
           )}
 
+          {/* Desktop control. Named plainly and off by default, because it
+              sends keys to whatever has focus - it drives the machine, not
+              this window, and that should be a decision rather than a
+              surprise. */}
+          <button
+            type="button"
+            onClick={() => { setDesktopControl((on) => !on); setDesktopNote(''); }}
+            className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition ${
+              desktopControl
+                ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300'
+                : 'border-white/10 text-slate-400 hover:text-slate-200'
+            }`}
+            title={desktopControl
+              ? 'Gestures are controlling your computer. Make a fist to stop.'
+              : 'Let gestures control your computer - play, volume, scroll'}
+          >
+            {desktopControl ? 'Controlling PC' : 'Control PC'}
+          </button>
+
           <button
             type="button"
             onClick={onClose}
@@ -247,7 +311,7 @@ const GestureHUD = ({ isOpen, onClose, onAction }) => {
                       ? 'border-cyan-300/60 bg-cyan-400/15 scale-105'
                       : 'border-white/8 bg-white/[.03]'
                   }`}
-                  title={item.action}
+                  title={desktopControl ? item.desktop : item.action}
                 >
                   <span className="text-sm leading-none">{item.glyph}</span>
                   <span
@@ -255,7 +319,10 @@ const GestureHUD = ({ isOpen, onClose, onAction }) => {
                       legendOpen ? '' : 'hidden sm:inline'
                     }`}
                   >
-                    {item.action}
+                    {/* With desktop control on, a swipe skips a track rather
+                        than changing a character - so the legend has to say
+                        the one that will actually happen. */}
+                    {desktopControl ? item.desktop : item.action}
                   </span>
                 </div>
               );
