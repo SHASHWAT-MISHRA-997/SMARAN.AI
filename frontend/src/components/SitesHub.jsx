@@ -163,26 +163,12 @@ const generateSiteHTML = (name, prompt, version = 1) => {
 </html>`;
 };
 
-const DEFAULT_INITIAL_SITES = [
-  {
-    id: 'site_cyber_saas',
-    name: 'Smaran Cloud AI SaaS',
-    prompt: 'A futuristic dark mode SaaS web platform with interactive real-time telemetry, model benchmarks, and API documentation.',
-    version: 1,
-    html: generateSiteHTML('Smaran Cloud AI SaaS', 'A futuristic dark mode SaaS web platform with interactive real-time telemetry, model benchmarks, and API documentation.', 1),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'site_developer_hub',
-    name: 'DevStudio 3D Experience',
-    prompt: 'A creative portfolio and interactive playground showcasing modern web applications and AI agent integrations.',
-    version: 1,
-    html: generateSiteHTML('DevStudio 3D Experience', 'A creative portfolio and interactive playground showcasing modern web applications and AI agent integrations.', 1),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }
-];
+// Two sites used to be built in here - "Smaran Cloud AI SaaS" and "DevStudio
+// 3D Experience" - each stamped with the current date, so they appeared in
+// the list as though you had made them that day. Both were produced by the
+// local template above, which is why they looked identical to each other and
+// to every real site. On a machine with no sites, an empty list is the truth.
+const DEFAULT_INITIAL_SITES = [];
 
 const SitesHub = () => {
   const [sites, setSites] = useState(() => {
@@ -208,9 +194,21 @@ const SitesHub = () => {
       const response = await fetch(`${API_BASE}/api/sites`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
-        if (Array.isArray(data) && data.length > 0) {
-          setSites(data);
-          localStorage.setItem('sm_sites_registry', JSON.stringify(data));
+        if (Array.isArray(data)) {
+          // Pull each site's real document. The registry does not carry the
+          // HTML, so the cards used to fall back to a local template that
+          // reads the brief for a few keywords and is otherwise identical
+          // every time - which is why every site looked like every other one.
+          const withHtml = await Promise.all(data.map(async (site) => {
+            try {
+              const page = await fetch(`${API_BASE}/api/sites/${site.id}/preview`, { credentials: 'include' });
+              return page.ok ? { ...site, html: await page.text() } : site;
+            } catch (_) {
+              return site;
+            }
+          }));
+          setSites(withHtml);
+          localStorage.setItem('sm_sites_registry', JSON.stringify(withHtml));
         }
       }
     } catch (_) {
@@ -253,7 +251,8 @@ const SitesHub = () => {
               <Globe2 className="w-8 h-8 text-indigo-400" /> Sites
             </h1>
             <p className="mt-1 text-sm text-zinc-400">
-              Turn any idea into a responsive, full-fledged website with instant preview, code view, and live export.
+              Describe a site and your local model writes it as a single
+              standalone HTML page, which you can preview, read and export.
             </p>
           </div>
           <div className="flex items-center gap-2 sm:shrink-0">
@@ -450,7 +449,9 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
               <Sparkles className="w-5 h-5 text-indigo-400" /> Create a Website
             </h2>
             <p className="mt-0.5 text-xs text-zinc-400">
-              Generates a full responsive HTML5 & Tailwind website preview instantly.
+              Your local model writes a standalone HTML page from this brief.
+              It needs a model installed and takes a minute or two - it is not
+              instant, and there is no Tailwind in the output.
             </p>
           </div>
           <button type="button" onClick={onClose} className="p-1.5 text-zinc-400 hover:text-white">
