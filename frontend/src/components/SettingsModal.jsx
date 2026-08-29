@@ -156,6 +156,33 @@ const SettingsModal = ({
     fetchMemory();
   }, [isOpen]);
 
+  // What is genuinely installed, asked of the machine rather than assumed.
+  // null means the answer has not come back yet, which is different from an
+  // empty list and is shown differently.
+  //
+  // These must stay above the early return below. Putting them after it meant
+  // three hooks ran when the modal was open and none when it was closed, and
+  // React counts hooks: opening Settings threw "Rendered more hooks than
+  // during the previous render" and took the whole app down with it.
+  const [localModels, setLocalModels] = useState(null);
+  const [localState, setLocalState] = useState(null);
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/models/local-status`, { credentials: 'include' });
+        const data = res.ok ? await res.json() : null;
+        if (cancelled) return;
+        setLocalState(data);
+        setLocalModels(Array.isArray(data?.models) ? data.models : []);
+      } catch (_) {
+        if (!cancelled) { setLocalModels([]); setLocalState({ detail: 'The local model server could not be reached.' }); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleAddMemoryFact = () => {
@@ -170,27 +197,6 @@ const SettingsModal = ({
   };
 
   const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
-
-  // What is genuinely installed, asked of the machine rather than assumed.
-  // null means the answer has not come back yet, which is different from an
-  // empty list and is shown differently.
-  const [localModels, setLocalModels] = useState(null);
-  const [localState, setLocalState] = useState(null);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/models/local-status`, { credentials: 'include' });
-        const data = res.ok ? await res.json() : null;
-        if (cancelled) return;
-        setLocalState(data);
-        setLocalModels(Array.isArray(data?.models) ? data.models : []);
-      } catch (_) {
-        if (!cancelled) { setLocalModels([]); setLocalState({ detail: 'The local model server could not be reached.' }); }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
   const TABS = [
     { id: "general", label: "General & Theme", icon: SlidersHorizontal },
     { id: "account", label: "Account & Profile", icon: UserRound },
