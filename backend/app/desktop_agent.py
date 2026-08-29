@@ -1293,28 +1293,55 @@ class DesktopAgent:
         return {"success": False, "error": output or f"{description} failed."}
 
     @staticmethod
+    def _tap_media_key(vk: int, description: str, repeat: int = 1) -> Dict[str, Any]:
+        """Press a media or volume key.
+
+        These were going through SendKeys as "{VOLUME_UP}", "{MEDIA_NEXT_TRACK}"
+        and so on. SendKeys has no such codes - its vocabulary is {TAB}, {F1},
+        %{TAB} and the like - so every one of the six volume and media actions
+        failed with "Value does not fall within the expected range" from
+        PowerShell. They had presumably never worked.
+
+        keybd_event takes the actual virtual key code, which is what these keys
+        are. It also avoids starting a PowerShell process per keypress.
+        """
+        if sys.platform != "win32":
+            return {"success": False, "error": f"{description} is only supported on Windows."}
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            KEYEVENTF_KEYUP = 0x0002
+            for _ in range(max(1, repeat)):
+                user32.keybd_event(vk, 0, 0, 0)
+                user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+            return {"success": True, "message": description}
+        except Exception as exc:
+            return {"success": False, "error": f"{description} failed: {exc}"}
+
+    @staticmethod
     def _action_media_play_pause(params: Dict[str, Any]) -> Dict[str, Any]:
-        return DesktopAgent._send_keys("{MEDIA_PLAY_PAUSE}", "Toggled playback.")
+        return DesktopAgent._tap_media_key(0xB3, "Toggled playback.")
 
     @staticmethod
     def _action_media_next(params: Dict[str, Any]) -> Dict[str, Any]:
-        return DesktopAgent._send_keys("{MEDIA_NEXT_TRACK}", "Skipped to the next track.")
+        return DesktopAgent._tap_media_key(0xB0, "Skipped to the next track.")
 
     @staticmethod
     def _action_media_previous(params: Dict[str, Any]) -> Dict[str, Any]:
-        return DesktopAgent._send_keys("{MEDIA_PREV_TRACK}", "Went back a track.")
+        return DesktopAgent._tap_media_key(0xB1, "Went back a track.")
 
     @staticmethod
     def _action_toggle_mute(params: Dict[str, Any]) -> Dict[str, Any]:
-        return DesktopAgent._send_keys("{VOLUME_MUTE}", "Toggled mute.")
+        return DesktopAgent._tap_media_key(0xAD, "Toggled mute.")
 
     @staticmethod
     def _action_volume_up(params: Dict[str, Any]) -> Dict[str, Any]:
-        return DesktopAgent._send_keys("{VOLUME_UP}{VOLUME_UP}{VOLUME_UP}", "Turned the volume up.")
+        return DesktopAgent._tap_media_key(0xAF, "Turned the volume up.", repeat=3)
 
     @staticmethod
     def _action_volume_down(params: Dict[str, Any]) -> Dict[str, Any]:
-        return DesktopAgent._send_keys("{VOLUME_DOWN}{VOLUME_DOWN}{VOLUME_DOWN}", "Turned the volume down.")
+        return DesktopAgent._tap_media_key(0xAE, "Turned the volume down.", repeat=3)
 
     @staticmethod
     def _action_minimize_all_windows(params: Dict[str, Any]) -> Dict[str, Any]:
