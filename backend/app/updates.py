@@ -29,10 +29,11 @@ from typing import Optional
 
 logger = logging.getLogger("updates")
 
-APP_VERSION = os.getenv("SMARAN_APP_VERSION", "2.9.3")
+APP_VERSION = os.getenv("SMARAN_APP_VERSION", "2.9.4")
 
-# The public repository that holds the released builds. The source is private;
-# only the artefacts are published, and this reads the release metadata.
+# The repository that holds the released builds. Separate from the source
+# repository - which is public, MIT, and carries no binaries - because a
+# 267 MB installer per release does not belong in a git history.
 RELEASES_API = os.getenv(
     "SMARAN_RELEASES_API",
     "https://api.github.com/repos/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest",
