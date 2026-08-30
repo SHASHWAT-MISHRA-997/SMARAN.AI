@@ -34,6 +34,29 @@ def _tags(base: str, timeout: float = 2.5) -> Optional[dict]:
         return None
 
 
+def _openai_served(timeout: float = 1.5) -> tuple[list, Optional[str]]:
+    """Models being served right now by an OpenAI-compatible local server.
+
+    Returns what was actually reported and the address it came from, or an
+    empty list. Imported lazily because main imports this module.
+    """
+    try:
+        from app.main import _openai_compatible_bases
+    except Exception:
+        return [], None
+
+    for base in _openai_compatible_bases():
+        try:
+            with urllib.request.urlopen(base + "/models", timeout=timeout) as res:
+                data = json.loads(res.read().decode("utf-8", "replace"))
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+        names = [m.get("id") for m in data.get("data", []) if m.get("id")]
+        if names:
+            return names, base
+    return [], None
+
+
 def status() -> dict:
     """The state of local inference, with the next step named.
 
@@ -50,6 +73,23 @@ def status() -> dict:
             reachable = base
             models = data.get("models") or []
             break
+
+    # Ollama is not the only thing that runs models on this machine. LM Studio
+    # and vLLM serve an OpenAI-compatible API, and someone using one of them
+    # was told local inference was unavailable and to go and install Ollama -
+    # while a model sat loaded and answering a few ports away. Asked only when
+    # Ollama has nothing to offer, so nothing about the Ollama path changes.
+    if not models:
+        served, where = _openai_served()
+        if served:
+            return {
+                "state": "ready",
+                "url": where,
+                "models": served,
+                "detail": "%d local model%s available, served on %s."
+                          % (len(served), "" if len(served) == 1 else "s", where),
+                "fix": None,
+            }
 
     if reachable and models:
         return {

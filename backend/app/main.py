@@ -1915,6 +1915,43 @@ async def delete_single_memory(memory_id: int, db: Session = Depends(get_db), cu
     return {"message": "Memory fact deleted.", "id": memory_id}
 
 
+def _openai_compatible_bases(api_url: str = "") -> list[str]:
+    """Local servers that speak the OpenAI API, in the order to try them.
+
+    vLLM and LM Studio are not two integrations. Both serve /v1/models and
+    /v1/chat/completions, so the same client reaches both and the only thing
+    that differed was which address it knew to knock on. LM Studio's default
+    is 1234; it was simply never in the list.
+
+    Four copies of this list had drifted apart across the file, each with a
+    different set of addresses, which is why adding a server meant finding
+    all four. There is one now.
+    """
+    bases = []
+    if api_url and "11434" not in api_url:  # 11434 is Ollama, not this shape
+        bases.append(api_url.rstrip("/"))
+    for value in (os.getenv("VLLM_URL", ""), settings.VLLM_URL,
+                  os.getenv("LMSTUDIO_URL", ""), settings.LMSTUDIO_URL):
+        if value:
+            bases.append(value.rstrip("/"))
+
+    bases.extend([
+        "http://127.0.0.1:1234/v1",        # LM Studio's default
+        "http://127.0.0.1:8001/v1",        # vLLM run locally
+        "http://host.docker.internal:8001/v1",
+        "http://smaran-inference:8000/v1",  # the Docker compose names
+        "http://inference-server:8000/v1",
+    ])
+
+    # http://127.0.0.1:8000/v1 used to be in this list. That is the port this
+    # app itself listens on, so it probed itself for models and asked itself
+    # to answer a chat. The Docker names below also use 8000, but they are
+    # other hosts, so only this machine's own 8000 is excluded.
+    ourselves = ("http://127.0.0.1:8000", "http://localhost:8000")
+    return [url for url in dict.fromkeys(bases)
+            if url and not url.startswith(ourselves)]
+
+
 def _installed_ollama_models() -> list[str]:
     try:
         response = requests.get(f"{settings.OLLAMA_URL.rstrip('/')}/api/tags", timeout=3)
@@ -3495,24 +3532,29 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     installed_models = _installed_ollama_models()
     manual_model_selection = raw_model != "auto" and bool(raw_model)
     
-    # Probe what models are actually available right now
+    # Probe what models are actually available right now.
+    #
+    # This loop used to read `vllm_candidates`, which is only ever assigned
+    # inside the nested stream_generator below - a different scope, so the
+    # name was never bound here. Every call raised NameError into the bare
+    # `except Exception: pass` underneath, which means no model served over
+    # the OpenAI-compatible API has ever been discovered: vllm_served was
+    # always empty and available_models only ever held Ollama's list.
     available_models = set()
     vllm_served = set()
     ollama_installed = set(installed_models)
-    
-    try:
-        for vurl in vllm_candidates:
-            try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
-                    res_m = await client.get(f"{vurl}/models")
-                    if res_m.status_code == 200:
-                        vllm_served.update(m["id"] for m in res_m.json().get("data", []) if m.get("id"))
-                        if vllm_served:
-                            break
-            except Exception:
-                continue
-    except Exception:
-        pass
+
+    for vurl in _openai_compatible_bases():
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                res_m = await client.get(f"{vurl}/models")
+            if res_m.status_code == 200:
+                vllm_served.update(m["id"] for m in res_m.json().get("data", [])
+                                   if m.get("id"))
+                if vllm_served:
+                    break
+        except Exception:
+            continue
     
     available_models.update(vllm_served)
     available_models.update(ollama_installed)
@@ -3997,14 +4039,9 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
 
                 inference_success = False
 
-                # Candidate lists for vLLM & Ollama
-                vllm_candidates = []
-                if api_url and "11434" not in api_url:
-                    vllm_candidates.append(api_url.rstrip("/"))
-                if os.getenv("VLLM_URL"):
-                    vllm_candidates.append(os.getenv("VLLM_URL").rstrip("/"))
-                vllm_candidates.append("http://127.0.0.1:8000/v1")
-                vllm_candidates = [u for u in dict.fromkeys(vllm_candidates) if u]
+                # Candidate lists. The first covers every local server that
+                # speaks the OpenAI API - vLLM and LM Studio both do.
+                vllm_candidates = _openai_compatible_bases(api_url)
 
                 ollama_candidates = []
                 if os.getenv("OLLAMA_URL"):
@@ -4014,8 +4051,15 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 ollama_candidates.append("http://127.0.0.1:11434")
                 ollama_candidates = [u for u in dict.fromkeys(ollama_candidates) if u]
 
-                # 1. If engine == "vllm", probe vLLM
-                if engine == "vllm":
+                # 1. Try the OpenAI-compatible servers.
+                #
+                # The gate used to be engine == "vllm" alone, which came from
+                # hardware_config.json. Someone running LM Studio has that set
+                # to "ollama", so picking one of LM Studio's models sent the
+                # request to Ollama, which does not have it. Now the branch
+                # also runs when the chosen model is one an OpenAI-compatible
+                # server actually reported serving.
+                if engine in ("vllm", "lmstudio") or (model_to_use and model_to_use in vllm_served):
                     for vurl in vllm_candidates:
                         if inference_success:
                             break
@@ -5023,12 +5067,7 @@ def get_available_models(current_user: User = Depends(get_current_user)):
     # even when this app container cannot see the inference container's cache
     # mount. Use the live OpenAI-compatible models endpoint as authoritative.
     served_vllm_models = set()
-    vllm_candidates = [
-        os.getenv("VLLM_URL", "").rstrip("/"),
-        settings.VLLM_URL.rstrip("/") if settings.VLLM_URL else "",
-        "http://smaran-inference:8000/v1",
-        "http://inference-server:8000/v1",
-    ]
+    vllm_candidates = _openai_compatible_bases()
     for vurl in dict.fromkeys(url for url in vllm_candidates if url):
         try:
             resp = requests.get(f"{vurl}/models", timeout=3)
@@ -5229,46 +5268,41 @@ def model_status(model: Optional[str] = None):
     except Exception:
         pass
 
-    # If vLLM engine, check if model is actually LOADED (not just server started)
-    if engine == "vllm" or bool(os.getenv("VLLM_URL", "").strip()):
-        vllm_candidates = [
-            os.getenv("VLLM_URL", "").rstrip('/'),
-            settings.VLLM_URL.rstrip('/') if settings.VLLM_URL else "",
-            "http://smaran-inference:8000/v1",
-            "http://inference-server:8000/v1",
-            "http://host.docker.internal:8001/v1",
-            "http://127.0.0.1:8001/v1",
-        ]
-        for vurl in vllm_candidates:
-            if not vurl:
-                continue
-            try:
-                endpoint = f"{vurl}/models"
-                resp = requests.get(endpoint, timeout=1.2)
-                if resp.ok:
-                    served_models = [m.get("id", "") for m in resp.json().get("data", [])]
-                    selected_served = (
-                        served_models[0]
-                        if requested_model == "auto" and served_models
-                        else next((item for item in served_models if _models_equivalent(item, model_id)), "")
-                    )
-                    if selected_served:
-                        # Only an exact selected-model/alias match is ready. A
-                        # different model on the same vLLM server is not proof
-                        # that this selection can be served.
-                        _model_download_in_progress.discard(model_id)
-                        return {
-                            "ready": True,
-                            "downloading": False,
-                            "model_id": selected_served,
-                            "display_name": display_name,
-                            "progress_pct": 100.0,
-                            "status_code": "local_ready",
-                            "runtime_source": "vllm",
-                            "status_msg": "Ready"
-                        }
-            except Exception:
-                continue
+    # Is the model actually loaded, not just the server started? Asked of any
+    # OpenAI-compatible server, unconditionally: gating it on the configured
+    # engine meant someone running LM Studio - whose config says "ollama" -
+    # was never asked, so their loaded model showed as unavailable.
+    vllm_candidates = _openai_compatible_bases()
+    for vurl in vllm_candidates:
+        if not vurl:
+            continue
+        try:
+            endpoint = f"{vurl}/models"
+            resp = requests.get(endpoint, timeout=1.2)
+            if resp.ok:
+                served_models = [m.get("id", "") for m in resp.json().get("data", [])]
+                selected_served = (
+                    served_models[0]
+                    if requested_model == "auto" and served_models
+                    else next((item for item in served_models if _models_equivalent(item, model_id)), "")
+                )
+                if selected_served:
+                    # Only an exact selected-model/alias match is ready. A
+                    # different model on the same vLLM server is not proof
+                    # that this selection can be served.
+                    _model_download_in_progress.discard(model_id)
+                    return {
+                        "ready": True,
+                        "downloading": False,
+                        "model_id": selected_served,
+                        "display_name": display_name,
+                        "progress_pct": 100.0,
+                        "status_code": "local_ready",
+                        "runtime_source": "vllm",
+                        "status_msg": "Ready"
+                    }
+        except Exception:
+            continue
 
     # Check blobs dir for HF-style downloads (vLLM)
     progress_pct = 0.0

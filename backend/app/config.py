@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     # vLLM API (OpenAI-compatible, port 8001)
     VLLM_URL: str = os.getenv("VLLM_URL", "http://vllm:8001/v1")
 
+    # LM Studio serves the same OpenAI-compatible API that vLLM does, on 1234
+    # by default. That is the whole reason it needed almost no new code: the
+    # client that talks to vLLM is not a vLLM client, it is an OpenAI-shaped
+    # one, and LM Studio answers it.
+    LMSTUDIO_URL: str = os.getenv("LMSTUDIO_URL", "http://127.0.0.1:1234/v1")
+
     # Ollama API (used as fallback + always used for embeddings)
     OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 
