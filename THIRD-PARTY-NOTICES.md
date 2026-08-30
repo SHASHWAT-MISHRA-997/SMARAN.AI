@@ -1,8 +1,16 @@
 # Third-party material
 
-SMARAN.AI's own code is MIT licensed — see LICENSE. This file records what
-else travels with it, because a licence file that covered everything in the
-repository would be claiming more than is true.
+SMARAN.AI's own code is MIT licensed — see LICENSE. That file is the MIT text
+and nothing else: a note appended to it, even a true one, stopped GitHub
+recognising the licence and it showed as "Other" instead of MIT. Anything that
+checks for an OSI-approved licence reads that detection, so the qualification
+lives here instead.
+
+The MIT licence covers the code in this repository. It does not cover
+third-party material distributed alongside it, or models downloaded at
+runtime, each of which keeps its own licence. This file records what those
+are, because a licence claiming to cover everything in the repository would be
+claiming more than is true.
 
 ## Bundled in the repository and the installer
 
