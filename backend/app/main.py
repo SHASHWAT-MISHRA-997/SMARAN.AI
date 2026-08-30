@@ -284,6 +284,86 @@ def check_for_updates(force: bool = False):
     return updates.check(force=force)
 
 
+class UpdateDownloadRequest(BaseModel):
+    """Which build to fetch. Chosen here, not sent by the browser.
+
+    The browser names the platform; the address comes from the release feed
+    this process just read. Taking a URL from the page would have made an
+    endpoint that downloads and runs whatever it is handed.
+    """
+    platform: str = "windows"
+
+
+@app.post("/api/updates/download")
+def download_update(req: UpdateDownloadRequest):
+    """Start fetching the published installer, and return straight away.
+
+    Checking only ever told you a newer version existed; this is the part that
+    goes and gets it. It returns immediately because the download runs on its
+    own thread - closing the settings window, or the tab, does not cancel a
+    quarter-gigabyte transfer that is halfway done.
+    """
+    from app import updates
+
+    info = updates.check()
+    if not info.get("update_available"):
+        raise HTTPException(status_code=409,
+                            detail="This is already the latest version.")
+
+    key = "android_url" if req.platform == "android" else "windows_url"
+    url = info.get(key)
+    if not url:
+        raise HTTPException(
+            status_code=404,
+            detail=("Release v%s has no %s build attached to it."
+                    % (info.get("latest_version"), req.platform)))
+
+    return updates.start_download(url, version=info.get("latest_version"))
+
+
+@app.get("/api/updates/download/status")
+def download_update_status():
+    """How the background download is going. Bytes written, not a guess."""
+    from app import updates
+
+    return updates.download_status()
+
+
+class UpdateInstallRequest(BaseModel):
+    path: str
+
+
+@app.post("/api/updates/install")
+def install_update(req: UpdateInstallRequest):
+    """Open the downloaded installer and stand aside.
+
+    The installer replaces the files this process is running from, so the app
+    closes a moment after handing over - the same restart-to-finish step
+    Windows Update ends on. The delay is there so this reply reaches the page
+    before the process serving it goes away.
+    """
+    from app import updates
+
+    result = updates.install(req.path)
+    if not result.get("started"):
+        raise HTTPException(status_code=400,
+                            detail=result.get("error", "The installer did not open."))
+
+    try:
+        from app import host_window
+
+        result["closing"] = host_window.close_app(delay_seconds=2.0)
+    except Exception:
+        result["closing"] = False
+
+    if not result["closing"]:
+        # Running in a browser rather than the desktop window: there is no
+        # window to close, and saying it closed one would be untrue.
+        result["detail"] = ("The installer is opening. Close SMARAN.AI "
+                            "yourself so it can replace the running version.")
+    return result
+
+
 @app.get("/api/usage-reporting")
 def usage_reporting_status():
     """What is reported, and whether it is currently on."""

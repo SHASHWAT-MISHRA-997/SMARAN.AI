@@ -58,19 +58,126 @@ const SettingsModal = ({
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateCheckedAt, setUpdateCheckedAt] = useState(null);
 
+  /* Fetching the new version, rather than only being told one exists.
+     downloaded holds the path the backend saved it to, which is what the
+     install step is given. */
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(null);
+  const [downloaded, setDownloaded] = useState(null);
+  const [updateError, setUpdateError] = useState("");
+
   const checkUpdates = async (force = true) => {
     setCheckingUpdate(true);
+    setUpdateError("");
     try {
       const res = await fetch(`${API_BASE}/api/updates/check?force=${force}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setUpdateInfo(data);
         setUpdateCheckedAt(new Date().toLocaleTimeString());
+
+        // Windows Update's behaviour, and what was asked for: finding an
+        // update starts fetching it. There is no Download button to press,
+        // because being told an update exists and then having to go and get
+        // it is not an update mechanism.
+        //
+        // An installer already on disk is not fetched again - it is simply
+        // ready to install.
+        if (data.update_available && !isMobile) {
+          if (data.downloaded_path) {
+            setDownloaded({ path: data.downloaded_path });
+          } else {
+            downloadUpdate();
+          }
+        }
+      } else {
+        setUpdateError(`The update server answered ${res.status}.`);
       }
     } catch {
-      setUpdateInfo({ current_version: "2.8.6", update_available: false });
+      // This used to claim version 2.8.6 and "no update available" whenever
+      // the check failed - a version number invented by the interface and an
+      // answer nobody had. A check that did not happen says so.
+      setUpdateError("Could not reach the update server. You may be offline.");
     } finally {
       setCheckingUpdate(false);
+    }
+  };
+
+  /* The download runs on the backend, on its own thread. This starts it and
+     then watches it, so closing Settings - or this whole tab - leaves a
+     part-finished transfer running rather than throwing it away. The bar
+     moves against bytes actually written, not against a timer. */
+  const downloadUpdate = async () => {
+    setDownloading(true);
+    setUpdateError("");
+    setDownloaded(null);
+    setDownloadProgress({ written: 0, total: null });
+    try {
+      const res = await fetch(`${API_BASE}/api/updates/download`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: isMobile ? "android" : "windows" }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        throw new Error(detail?.detail || `The server answered ${res.status}.`);
+      }
+    } catch (err) {
+      setDownloading(false);
+      setUpdateError(err.message || "The download could not be started.");
+    }
+  };
+
+  /* Watching it. Polling only while something is actually happening - an
+     interval left running against an idle backend is a request every second
+     for no reason. */
+  useEffect(() => {
+    if (!isOpen || activeTab !== "updates") return undefined;
+
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/updates/download/status`, { credentials: "include" });
+        if (!res.ok || stopped) return;
+        const data = await res.json();
+        if (stopped) return;
+
+        if (data.state === "running") {
+          setDownloading(true);
+          setDownloadProgress({ written: data.written || 0, total: data.total });
+        } else if (data.state === "done") {
+          setDownloading(false);
+          setDownloaded({ path: data.path });
+          setDownloadProgress({ written: data.written, total: data.total });
+        } else if (data.state === "error") {
+          setDownloading(false);
+          setUpdateError(data.error || "The download did not finish.");
+        }
+      } catch {
+        // The backend going quiet for a moment is not worth a message.
+      }
+    };
+
+    tick();
+    const timer = setInterval(tick, 700);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [isOpen, activeTab]);
+
+  const installUpdate = async () => {
+    if (!downloaded?.path) return;
+    setUpdateError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/updates/install`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: downloaded.path }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.detail || `The server answered ${res.status}.`);
+    } catch (err) {
+      setUpdateError(err.message || "The installer did not open.");
     }
   };
 
@@ -756,22 +863,135 @@ const SettingsModal = ({
                           {updateInfo?.update_available ? `Update v${updateInfo.latest_version} Available` : "Up to Date"}
                         </span>
                       </div>
+                      {/* One line that says what is actually happening right
+                          now, rather than a timestamp while 267 MB arrives
+                          with no sign of it. */}
                       <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                        {updateCheckedAt ? `Last checked at ${updateCheckedAt}` : "Connects to official release channels"}
+                        {downloading
+                          ? (downloadProgress?.total
+                              ? `Downloading v${updateInfo?.latest_version} — ${(downloadProgress.written / 1048576).toFixed(0)} of ${(downloadProgress.total / 1048576).toFixed(0)} MB`
+                              : `Downloading v${updateInfo?.latest_version}...`)
+                          : downloaded
+                            ? "Downloaded. Restart to finish installing."
+                            : updateCheckedAt
+                              ? `Last checked at ${updateCheckedAt}`
+                              : "Connects to official release channels"}
                       </p>
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => checkUpdates(true)}
-                    disabled={checkingUpdate}
-                    className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 transition shadow-lg shadow-red-600/25 shrink-0 cursor-pointer"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${checkingUpdate ? 'animate-spin' : ''}`} />
-                    {checkingUpdate ? "Checking..." : "Check for Updates"}
-                  </button>
+                  {/* When there is an update, the thing to offer is the
+                      update. This was only ever a Check button: it told you a
+                      new version existed and then gave you no way to get it,
+                      so pressing it again just said the same thing. The check
+                      already returns the installer's URL - windows_url - and
+                      nothing was using it. */}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {/* The build for the machine you are reading this on. A
+                        phone offered the 267 MB Windows installer would have
+                        downloaded something it cannot open. If the release is
+                        missing the right asset, this says so and opens the
+                        release page rather than linking to nothing. */}
+                    {/* On a phone the APK has to land in the phone's own
+                        downloads for Android to install it, so that stays a
+                        link. On the desktop the app fetches the installer
+                        itself, which is what an update is. */}
+                    {updateInfo?.update_available && isMobile && (
+                      <a
+                        href={updateInfo.android_url || updateInfo.release_page}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center gap-2 transition shadow-lg shadow-red-600/25 cursor-pointer"
+                      >
+                        <ArrowDownToLine className="w-3.5 h-3.5" />
+                        {updateInfo.android_url
+                          ? `Download v${updateInfo.latest_version}`
+                          : "Open release page"}
+                      </a>
+                    )}
+
+                    {/* Once the download has finished, the only thing left is
+                        the restart. This is the one button, and it is the one
+                        Windows ends on too - the installer replaces the files
+                        the app is running from, so the app has to close, and
+                        that should be a moment somebody agrees to rather than
+                        their window vanishing mid-sentence. */}
+                    {downloaded && !isMobile && (
+                      <button
+                        type="button"
+                        onClick={installUpdate}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 transition shadow-lg shadow-emerald-600/25 cursor-pointer"
+                      >
+                        <ArrowDownToLine className="w-3.5 h-3.5" />
+                        Restart &amp; Install v{updateInfo?.latest_version}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => checkUpdates(true)}
+                      disabled={checkingUpdate}
+                      className={`px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
+                        updateInfo?.update_available
+                          ? "border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                          : "bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/25"
+                      }`}
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${checkingUpdate ? 'animate-spin' : ''}`} />
+                      {checkingUpdate ? "Checking..." : "Check for Updates"}
+                    </button>
+                  </div>
                 </div>
+
+                {/* A bar that moves against bytes actually written. When the
+                    server declares no length there is no percentage to show,
+                    so it says so instead of animating against nothing. */}
+                {downloading && (
+                  <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                      <div
+                        className="h-full rounded-full bg-red-500 transition-all duration-200"
+                        style={{
+                          width: downloadProgress?.total
+                            ? `${Math.min(100, (downloadProgress.written / downloadProgress.total) * 100)}%`
+                            : "100%",
+                          opacity: downloadProgress?.total ? 1 : 0.35,
+                        }}
+                      />
+                    </div>
+                    <p className="mt-2 text-[11px] text-zinc-500">
+                      {downloadProgress?.total
+                        ? `${((downloadProgress.written / downloadProgress.total) * 100).toFixed(0)}% — you can keep working; it downloads in the background.`
+                        : "The server did not say how large the file is, so there is no percentage to show."}
+                    </p>
+                  </div>
+                )}
+
+                {updateError && (
+                  <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                    <p className="text-[11px] leading-5 text-amber-600 dark:text-amber-400">
+                      {updateError}
+                    </p>
+                  </div>
+                )}
+
+                {/* What is in it. The check returns the release notes and they
+                    were being thrown away, so an update arrived with no reason
+                    to take it. */}
+                {updateInfo?.update_available && updateInfo?.notes && (
+                  <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4">
+                    <h4 className="text-[11px] font-black uppercase tracking-wider text-zinc-500">
+                      What&apos;s new in v{updateInfo.latest_version}
+                    </h4>
+                    <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-[11px] leading-5 text-zinc-600 dark:text-zinc-400">
+                      {String(updateInfo.notes).replace(/[*#`]/g, '').trim().slice(0, 1200)}
+                    </p>
+                    <p className="mt-2.5 text-[10px] text-zinc-500">
+                      Installing replaces this version. Your chats, documents and
+                      settings stay where they are.
+                    </p>
+                  </div>
+                )}
 
                 {/* Installer downloads live only on the public download page. */}
                 <div className="hidden">

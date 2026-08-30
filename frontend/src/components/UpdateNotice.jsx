@@ -20,6 +20,7 @@ const CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const UpdateNotice = () => {
   const [info, setInfo] = useState(null);
   const [leaving, setLeaving] = useState(false);
+  const [installing, setInstalling] = useState(false);
 
   const look = useCallback(async () => {
     try {
@@ -42,6 +43,23 @@ const UpdateNotice = () => {
     const repeat = setInterval(look, CHECK_INTERVAL_MS);
     return () => { clearTimeout(first); clearInterval(repeat); };
   }, [look]);
+
+  const install = async () => {
+    if (!info?.downloaded_path) return;
+    setInstalling(true);
+    try {
+      await fetch(`${API_BASE}/api/updates/install`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: info.downloaded_path }),
+      });
+      // The app closes a couple of seconds later so the installer can replace
+      // the files it is running from; there is nothing further to do here.
+    } catch {
+      setInstalling(false);
+    }
+  };
 
   const dismiss = () => {
     if (info?.latest_version) localStorage.setItem(DISMISSED_KEY, info.latest_version);
@@ -89,7 +107,7 @@ const UpdateNotice = () => {
 
           <div className="min-w-0 flex-1">
             <p className="text-sm font-black text-white">
-              Version {info.latest_version} is available
+              Version {info.latest_version} {info.downloaded_path ? 'is ready to install' : 'is available'}
             </p>
             <p className="mt-0.5 text-[11px] text-zinc-500">
               You are on {info.current_version}
@@ -113,18 +131,35 @@ const UpdateNotice = () => {
         )}
 
         <div className="mt-3 flex items-center gap-2">
-          <a
-            href={target}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={dismiss}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-3 py-2
-                       text-xs font-black text-white transition hover:bg-red-500
-                       shadow-[0_0_20px_rgba(239,68,68,.3)]"
-          >
-            <ArrowDownToLine className="h-3.5 w-3.5" />
-            Download
-          </a>
+          {/* If the installer is already on disk, asking again to download it
+              is asking for something that has happened. The notice then says
+              what is actually outstanding: the restart. */}
+          {info.downloaded_path ? (
+            <button
+              type="button"
+              onClick={install}
+              disabled={installing}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2
+                         text-xs font-black text-white transition hover:bg-emerald-500 disabled:opacity-60
+                         shadow-[0_0_20px_rgba(16,185,129,.3)]"
+            >
+              <ArrowDownToLine className="h-3.5 w-3.5" />
+              {installing ? 'Opening installer...' : 'Restart & Install'}
+            </button>
+          ) : (
+            <a
+              href={target}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={dismiss}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-3 py-2
+                         text-xs font-black text-white transition hover:bg-red-500
+                         shadow-[0_0_20px_rgba(239,68,68,.3)]"
+            >
+              <ArrowDownToLine className="h-3.5 w-3.5" />
+              Download
+            </a>
+          )}
           <button
             type="button"
             onClick={dismiss}
@@ -136,7 +171,9 @@ const UpdateNotice = () => {
         </div>
 
         <p className="mt-2 text-center text-[10px] text-zinc-600">
-          Downloads open in your browser. Nothing installs on its own.
+          {info.downloaded_path
+            ? 'Already downloaded. SMARAN.AI closes so the installer can replace it.'
+            : 'Downloads open in your browser. Nothing installs on its own.'}
         </p>
       </div>
     </div>

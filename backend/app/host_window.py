@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
+import time
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -142,3 +144,30 @@ def exit_pip() -> Dict[str, Any]:
         return {"ok": True, "pinned": False, "detail": "Back to the full window."}
     except Exception as exc:
         return {"ok": False, "error": "Could not restore the window: %s" % str(exc)[:120]}
+
+
+def close_app(delay_seconds: float = 2.0) -> bool:
+    """Shut the window so an installer can replace the files it is running from.
+
+    Used by the updater and nothing else. The delay exists so the reply to the
+    request that asked for this reaches the page before the process it came
+    from goes away - closing immediately meant the interface saw a dropped
+    connection and reported a failure for something that had worked.
+
+    Returns whether there is a window to close at all. Run from a script
+    rather than the installed app, there is not, and saying so is better than
+    the interface claiming it closed something.
+    """
+    if not available():
+        return False
+
+    def _shut() -> None:
+        time.sleep(delay_seconds)
+        try:
+            _window.destroy()
+        except Exception:
+            # The window may already be gone - which is the outcome wanted.
+            logger.info("The window was already closed.")
+
+    threading.Thread(target=_shut, daemon=True).start()
+    return True
