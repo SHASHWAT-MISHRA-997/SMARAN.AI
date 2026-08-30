@@ -7228,6 +7228,7 @@ from app.plugins.mcp_firecrawl import MCPFirecrawlPlugin, metadata as mcp_firecr
 from app.plugins.mcp_github import MCPGitHubPlugin, metadata as mcp_github_metadata
 from app.plugins.hyperframes import HyperFramesPlugin, metadata as hyperframes_metadata
 from app.plugins.voicebox import VoiceboxPlugin, metadata as voicebox_metadata
+from app.plugins.meetily import MeetilyPlugin, metadata as meetily_metadata
 
 plugin_manager.register_plugin(GoogleAgentsCLIPlugin, google_agents_cli_metadata, PluginConfig())
 plugin_manager.register_plugin(PaperclipPlugin, paperclip_metadata, PluginConfig())
@@ -7242,6 +7243,7 @@ plugin_manager.register_plugin(MCPFirecrawlPlugin, mcp_firecrawl_metadata, Plugi
 plugin_manager.register_plugin(MCPGitHubPlugin, mcp_github_metadata, PluginConfig())
 plugin_manager.register_plugin(HyperFramesPlugin, hyperframes_metadata, PluginConfig())
 plugin_manager.register_plugin(VoiceboxPlugin, voicebox_metadata, PluginConfig())
+plugin_manager.register_plugin(MeetilyPlugin, meetily_metadata, PluginConfig())
 
 # Global Exception Handler (Zero information leakage)
 @app.exception_handler(Exception)
