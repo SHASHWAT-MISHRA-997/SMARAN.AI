@@ -3462,6 +3462,24 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             )}
             
             {/* Mobile Send Button */}
+            {/* Dictation. It types what you say into the box beside it, which
+                is where it belongs - the only way to start it was a row in the
+                sidebar, and on a phone the sidebar is behind the menu. So on a
+                phone you had to open the menu, find Voice, and by then you had
+                lost sight of the box it types into. */}
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('smaran:toggle-dictation'))}
+              className={`h-8 w-8 rounded-xl shrink-0 flex items-center justify-center transition-all cursor-pointer border ${
+                isDictating
+                  ? 'bg-rose-500/20 border-rose-500/50 text-rose-400 animate-pulse'
+                  : 'bg-zinc-200 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:text-indigo-500'
+              }`}
+              title={isDictating ? 'Stop dictating' : 'Dictate — speak and it types for you'}
+              aria-label={isDictating ? 'Stop dictating' : 'Dictate'}
+            >
+              <Mic className="w-3.5 h-3.5" />
+            </button>
             <button
               type="submit"
               disabled={!input.trim() || streaming || directUploading}
@@ -3617,6 +3635,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               <Sparkles className="w-3.5 h-3.5" />
               <span>Compare</span>
             </button>
+
 
             {/* Speak — Real-time J.A.R.V.I.S. Voice Mode (desktop) */}
             <button

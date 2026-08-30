@@ -1783,3 +1783,39 @@ body.sidebar-open { overflow:hidden; overscroll-behavior:none; }
   /* On a desktop the composer is one row and well clear of the corner. */
   .sm-pet { bottom: calc(var(--sm-composer-h, 76px) + 1.5rem); }
 }
+
+/* Picture-in-picture.
+ *
+ * The window shrinks to 420x560 and pins above other applications, but that
+ * alone left the full interface squeezed into a corner rather than adapted to
+ * it - which is why it looked wrong rather than small. This is the layout for
+ * the size it is actually being shown at: the character, what she is saying,
+ * and the controls. Nothing that needs room to be readable.
+ *
+ * Applied to <html> by the voice screen when the window is pinned.
+ */
+html.sm-pip .sm-pet,
+html.sm-pip [data-testid="chat-composer"],
+html.sm-pip .composer-shell {
+  display: none !important;
+}
+
+/* The header keeps the name and the way out, and drops the model pickers -
+   at this width they wrapped onto three lines and pushed the character off
+   the bottom. */
+html.sm-pip .pip-hide {
+  display: none !important;
+}
+
+/* Controls sized for a small window rather than a full screen. */
+html.sm-pip .pip-compact {
+  gap: 0.5rem !important;
+  padding-bottom: 0.75rem !important;
+}
+
+/* The window itself is rounded by Windows; the page behind it has to match or
+   the square corners of the background show through the curve. */
+html.sm-pip,
+html.sm-pip body {
+  background: transparent !important;
+}

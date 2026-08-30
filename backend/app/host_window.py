@@ -13,6 +13,7 @@ plainly rather than pretending it worked.
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,50 @@ def register(window: Any) -> None:
     global _window
     _window = window
     logger.info("Desktop window registered for picture-in-picture")
+
+
+def _handle() -> Optional[int]:
+    """The OS window handle, found by its title.
+
+    pywebview does not hand one out, and the DWM calls below need it. The
+    title is unique enough here - there is one SMARAN.AI window.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        hwnd = ctypes.windll.user32.FindWindowW(None, "SMARAN.AI")
+        return hwnd or None
+    except Exception:
+        return None
+
+
+def _set_corners(rounded: bool) -> bool:
+    """Round the window's corners, or put them back.
+
+    Windows 11 has an attribute for this - DWMWA_WINDOW_CORNER_PREFERENCE,
+    33 - and honours it on build 22000 and later. On Windows 10 the call
+    returns a failure code and the corners stay square, which is the correct
+    outcome there rather than something to report as broken.
+    """
+    hwnd = _handle()
+    if not hwnd:
+        return False
+    try:
+        import ctypes
+
+        DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        DWMWCP_ROUND = 2
+        DWMWCP_DEFAULT = 0
+        value = ctypes.c_int(DWMWCP_ROUND if rounded else DWMWCP_DEFAULT)
+        result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(value), ctypes.sizeof(value))
+        return result == 0
+    except Exception as exc:
+        logger.info("Could not set the corner style: %s", exc)
+        return False
 
 
 def available() -> bool:
@@ -73,8 +118,11 @@ def enter_pip() -> Dict[str, Any]:
         except Exception:
             logger.info("Could not read the screen size; leaving the window where it is.")
         _window.on_top = True
-        return {"ok": True, "pinned": True,
-                "detail": "Pinned above other windows. Drag it by its title bar."}
+        rounded = _set_corners(True)
+        return {"ok": True, "pinned": True, "rounded": rounded,
+                "width": PIP_WIDTH, "height": PIP_HEIGHT,
+                "detail": ("Pinned above your other windows. Drag it by the title "
+                           "bar, and drag any edge to resize it.")}
     except Exception as exc:
         return {"ok": False, "error": "Could not pin the window: %s" % str(exc)[:120]}
 
@@ -86,6 +134,7 @@ def exit_pip() -> Dict[str, Any]:
         return {"ok": False, "error": status()["detail"]}
     try:
         _window.on_top = False
+        _set_corners(False)
         if _previous:
             _window.resize(_previous["width"], _previous["height"])
             _window.move(_previous["x"], _previous["y"])

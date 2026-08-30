@@ -710,8 +710,21 @@ export const HackerVoiceAssistant = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ on: next }),
       });
-      if (res.ok) setPipOn(next);
+      if (res.ok) {
+        setPipOn(next);
+        // Shrinking the window is only half of it. At 420x560 the full
+        // interface is squeezed rather than adapted, which is why it looked
+        // wrong - so the page is told, and lays itself out for the size it is
+        // actually being shown at.
+        document.documentElement.classList.toggle('sm-pip', next);
+      }
     } catch (_) { /* the window stays as it is */ }
+  }, [pipOn]);
+
+  // If the window was already pinned when this mounted - reopened while in
+  // picture-in-picture - the class has to match.
+  useEffect(() => {
+    document.documentElement.classList.toggle('sm-pip', pipOn);
   }, [pipOn]);
 
   const [micStatus, setMicStatus] = useState('idle');
@@ -1843,29 +1856,37 @@ export const HackerVoiceAssistant = ({
 
       {/* Top Cyberpunk JARVIS HUD Header */}
       <div className="relative z-10 flex items-center justify-between px-3 sm:px-8 py-2.5 sm:py-3.5 border-b border-emerald-500/20 bg-zinc-950/80 backdrop-blur-xl">
-        <div className="flex items-center gap-2 sm:gap-3">
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-0.5 shadow-[0_0_18px_rgba(0,255,65,0.2)]">
+        {/* The title used to sit on the same line as a "Real-Time
+            Conversation" badge, both at full size, beside three pickers and
+            two buttons. Below about 1200px there was not room: the name broke
+            across two lines, the badge wrapped under it, and everything
+            collided. min-w-0 and truncate let this side give way instead of
+            pushing, the badge only appears where there is room for it, and
+            the name stays on one line. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-0.5 shadow-[0_0_18px_rgba(0,255,65,0.2)]">
             <div className="w-full h-full bg-black rounded-[10px] flex items-center justify-center">
               <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400 animate-pulse" />
             </div>
           </div>
-          <div>
-            <h2 className="text-xs sm:text-base font-black text-white tracking-widest flex items-center gap-1.5 sm:gap-2 uppercase">
-              <span className="text-emerald-400 drop-shadow-[0_0_10px_rgba(0,255,65,0.5)]">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-xs sm:text-sm font-black uppercase tracking-widest text-white">
+              <span className="truncate whitespace-nowrap text-emerald-400 drop-shadow-[0_0_10px_rgba(0,255,65,0.5)]">
                 SMARAN.AI Jarvis
               </span>
-              <span className="text-[8px] sm:text-[9px] font-black px-1.5 sm:px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 uppercase tracking-widest font-mono">
+              <span className="pip-hide hidden shrink-0 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[9px] font-black uppercase tracking-widest text-emerald-300 xl:inline">
                 Real-Time Conversation
               </span>
             </h2>
-            <p className="text-[9px] sm:text-[10px] text-zinc-400 font-mono flex items-center gap-1.5 mt-0.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${statusDotClasses[currentVoiceStatus.tone]} ${currentVoiceStatus.icon === 'loading' || currentVoiceStatus.icon === 'listening' ? 'animate-pulse' : ''}`} />
-              <span>{currentVoiceStatus.label}</span>
+            <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[9px] text-zinc-400 sm:text-[10px]">
+              <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${statusDotClasses[currentVoiceStatus.tone]} ${currentVoiceStatus.icon === 'loading' || currentVoiceStatus.icon === 'listening' ? 'animate-pulse' : ''}`} />
+              <span className="truncate">{currentVoiceStatus.label}</span>
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Never squeezed: this side keeps its size and the title side gives way. */}
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {/* Active Model */}
           <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900/90 border border-zinc-800 text-[11px] font-bold text-zinc-300 font-mono shadow-inner">
             <Cpu className="w-3.5 h-3.5 text-emerald-400" />
@@ -1875,7 +1896,7 @@ export const HackerVoiceAssistant = ({
           {/* Which engine answers. Local is faster-whisper, Ollama and Kokoro
               on this machine - no key and no network, but no vision either.
               Gemini is the only one that can see a screen or a camera. */}
-          <div className="hidden sm:flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1.5">
+          <div className="pip-hide hidden xl:flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1.5">
             <Cpu className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <select
               value={voiceEngine}
@@ -1890,7 +1911,7 @@ export const HackerVoiceAssistant = ({
           </div>
 
           {/* Character picker */}
-          <div className="flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1 shadow-sm max-w-[130px] sm:max-w-none" title="Choose who you are speaking with">
+          <div className="pip-hide hidden lg:flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1 shadow-sm max-w-[130px] sm:max-w-none" title="Choose who you are speaking with">
             <UserRound className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <select
               value={showAvatar ? avatarId : 'core'}

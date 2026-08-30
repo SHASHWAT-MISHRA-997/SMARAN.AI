@@ -352,13 +352,21 @@ const PhonePairing = ({ onPaired }) => {
         {error && <p className="mt-2 text-center text-[11px] leading-5 text-amber-300">{error}</p>}
       </div>
 
-      {/* Always available, so a device without a barcode reader is not stuck. */}
+      {/* Always available, so a device without a barcode reader is not stuck.
+          The address box used to be prefilled with "http://192.168.1.5:8000",
+          which looks enough like a real address that people took it for their
+          own and worried it was on display. It never was: that was a
+          hardcoded example, and nowhere on this screen is the machine's
+          address shown - the computer's side prints "SMARAN.AI:8000" with the
+          host stripped out, and the real address travels only inside the QR
+          code, which the phone genuinely needs in order to find the computer.
+          The placeholder is written so it cannot be mistaken for anyone's. */}
       <form onSubmit={submitManual} className="space-y-2 rounded-2xl border border-zinc-800 bg-black/25 p-4">
         <p className="text-[11px] font-black text-zinc-300">Or type it in</p>
         <input
           value={manual.url}
           onChange={(event) => setManual((m) => ({ ...m, url: event.target.value }))}
-          placeholder="http://192.168.1.5:8000"
+          placeholder="your computer's address, shown on its screen"
           inputMode="url"
           className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 font-mono text-xs text-zinc-100 outline-none focus:border-cyan-400/60"
         />
