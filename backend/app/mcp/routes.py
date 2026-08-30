@@ -91,6 +91,19 @@ CATALOGUE = [
         "needs": "uv installed (pip install uv)",
         "verified": None,
     },
+    {
+        # Not a command to run: Voicebox publishes its own MCP server over
+        # HTTP while the application is open, so the target is an address
+        # rather than a package. Nothing is downloaded for this one.
+        "name": "voicebox",
+        "title": "Voicebox",
+        "description": "Speak in a cloned voice and transcribe audio, through "
+                       "Voicebox's own MCP server.",
+        "target": "http://127.0.0.1:17493/mcp",
+        "publisher": "jamiepine/voicebox (MIT)",
+        "needs": "Voicebox installed from voicebox.sh and open",
+        "verified": None,
+    },
 ]
 
 

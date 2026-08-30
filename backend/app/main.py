@@ -7227,6 +7227,7 @@ from app.plugins.strix_security import StrixSecurityPlugin, metadata as strix_se
 from app.plugins.mcp_firecrawl import MCPFirecrawlPlugin, metadata as mcp_firecrawl_metadata
 from app.plugins.mcp_github import MCPGitHubPlugin, metadata as mcp_github_metadata
 from app.plugins.hyperframes import HyperFramesPlugin, metadata as hyperframes_metadata
+from app.plugins.voicebox import VoiceboxPlugin, metadata as voicebox_metadata
 
 plugin_manager.register_plugin(GoogleAgentsCLIPlugin, google_agents_cli_metadata, PluginConfig())
 plugin_manager.register_plugin(PaperclipPlugin, paperclip_metadata, PluginConfig())
@@ -7240,6 +7241,7 @@ plugin_manager.register_plugin(StrixSecurityPlugin, strix_security_metadata, Plu
 plugin_manager.register_plugin(MCPFirecrawlPlugin, mcp_firecrawl_metadata, PluginConfig())
 plugin_manager.register_plugin(MCPGitHubPlugin, mcp_github_metadata, PluginConfig())
 plugin_manager.register_plugin(HyperFramesPlugin, hyperframes_metadata, PluginConfig())
+plugin_manager.register_plugin(VoiceboxPlugin, voicebox_metadata, PluginConfig())
 
 # Global Exception Handler (Zero information leakage)
 @app.exception_handler(Exception)
