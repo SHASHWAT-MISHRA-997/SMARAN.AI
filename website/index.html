@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=c73861690b" />
+<link rel="stylesheet" href="styles.css?v=f4928a5585" />
 </head>
 
 <body>
@@ -623,9 +623,15 @@
             <p class="dl-meta">7.0 and newer · 30 MB</p>
           </div>
         </div>
+        <!-- This served /SMARAN.AI-v2.8.6.apk, a copy kept on the site itself
+             that had to be replaced by hand every release and had not been:
+             it still contained 2.8.6 while 2.9.1 was out, so everyone who
+             downloaded the Android app from here got a build five releases
+             old. The Windows installer beside it has always used
+             releases/latest, which cannot go stale. Both do now. -->
         <a class="btn btn-primary block no-lift" id="dlApk"
-           download="SMARAN.AI-v2.8.6.apk"
-           href="/SMARAN.AI-v2.8.6.apk">
+           download="SMARAN.AI.apk"
+           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI.apk">
           Download APK
         </a>
         <ul class="dl-list">
@@ -647,9 +653,11 @@
             <p class="dl-meta">Windows &middot; 9.5 MB &middot; no Python needed</p>
           </div>
         </div>
+        <!-- Same as the APK above: a copy on the site, updated by hand or not
+             at all. Points at the release now. -->
         <a class="btn btn-primary block no-lift" id="dlCli"
            download="smaran.exe"
-           href="/smaran.exe">
+           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran.exe">
           Download smaran.exe
         </a>
         <ul class="dl-list">
@@ -1101,6 +1109,6 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
   </div>
 </footer>
 
-<script src="main.js?v=ff2ad3c900"></script>
+<script src="main.js?v=7019d4ff2c"></script>
 </body>
 </html>

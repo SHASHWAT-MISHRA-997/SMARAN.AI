@@ -157,23 +157,50 @@
 <script>
 const KEY_NAME = 'smaran-analytics-key';
 
+/* The key used to be collected with window.prompt(). Browsers increasingly
+   refuse that call, and when it is refused it throws rather than returning
+   null - so the rejection escaped, and the dashboard stopped dead on
+   "loading…" with every chart empty. /stats was answering 200 the whole
+   time; nothing was able to ask it. A form cannot be blocked. */
 function dashboardKey() {
-  let key = localStorage.getItem(KEY_NAME);
-  if (!key) {
-    key = window.prompt('Dashboard key') || '';
-    if (key) localStorage.setItem(KEY_NAME, key);
-  }
-  return key;
+  return localStorage.getItem(KEY_NAME) || '';
+}
+
+function askForKey(message) {
+  document.body.innerHTML =
+    '<form id="keyForm" style="max-width:380px;margin:14vh auto;padding:0 24px;'
+    + 'font:400 14px/1.6 system-ui,sans-serif;color:#e8e8ea">'
+    + '<h1 style="font-size:19px;font-weight:600;margin:0 0 6px">Dashboard key</h1>'
+    + '<p style="color:#a1a1aa;margin:0 0 16px">' + message + '</p>'
+    + '<input id="keyInput" type="password" autocomplete="current-password" '
+    + 'placeholder="Paste the key" style="width:100%;padding:11px 13px;border-radius:9px;'
+    + 'border:1px solid #3f3f46;background:#18181b;color:#fafafa;font-size:14px;outline:none">'
+    + '<button type="submit" style="margin-top:12px;width:100%;padding:11px;border-radius:9px;'
+    + 'border:0;background:#4f46e5;color:#fff;font-size:14px;font-weight:600;cursor:pointer">'
+    + 'Open dashboard</button></form>';
+  document.getElementById('keyForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = document.getElementById('keyInput').value.trim();
+    if (!value) return;
+    localStorage.setItem(KEY_NAME, value);
+    window.location.reload();
+  });
 }
 
 async function api(path) {
-  const response = await fetch(path, { headers: { 'x-dashboard-key': dashboardKey() } });
+  const key = dashboardKey();
+  if (!key) {
+    // Ask, rather than sending an empty key and reporting the 401 that
+    // inevitably follows as though something had gone wrong.
+    askForKey('This page needs the key to read the statistics.');
+    throw new Error('no key');
+  }
+  const response = await fetch(path, { headers: { 'x-dashboard-key': key } });
   if (response.status === 401) {
     // A wrong key should not be remembered, or every reload fails silently.
+    // The form comes straight back rather than a dead end that says reload.
     localStorage.removeItem(KEY_NAME);
-    document.body.innerHTML =
-      '<p style="font:600 15px system-ui;color:#fca5a5;padding:40px;text-align:center">'
-      + 'That dashboard key was not accepted. Reload to try again.</p>';
+    askForKey('That key was not accepted. Try again.');
     throw new Error('unauthorised');
   }
   return response.json();
@@ -375,8 +402,12 @@ document.getElementById('apply').onclick = () => {
   load();
 };
 
-load();
-setInterval(load, 15000);
+// The no-key and wrong-key paths throw so the rest of load() stops, which is
+// deliberate - but an unhandled rejection reads as a fault in the console
+// when nothing is actually wrong. Caught here, where it is expected.
+const refresh = () => load().catch(() => {});
+refresh();
+setInterval(refresh, 15000);
 </script>
 </body>
 </html>
