@@ -6,10 +6,12 @@ release is, compares that to the version it was built as, and hands the
 answer to the interface, which shows a notice the way an operating system
 would rather than leaving people on an old build indefinitely.
 
-Nothing is downloaded or installed automatically. The check reads a public
-endpoint, sends no identifying information, and the person decides whether to
-act on it. An update that installs itself without asking is a different
-product, and not one anybody asked for.
+Finding an update starts fetching it, on a background thread, the way an
+operating system does. Nothing is *installed* automatically: the installer
+replaces the files the app is running from, so the window has to close, and
+that is a moment somebody agrees to rather than one that happens to them.
+
+The check itself reads a public endpoint and sends no identifying information.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from typing import Optional
 
 logger = logging.getLogger("updates")
 
-APP_VERSION = os.getenv("SMARAN_APP_VERSION", "2.9.2")
+APP_VERSION = os.getenv("SMARAN_APP_VERSION", "2.9.3")
 
 # The public repository that holds the released builds. The source is private;
 # only the artefacts are published, and this reads the release metadata.
@@ -112,6 +114,10 @@ def check(force: bool = False) -> dict:
         entry = assets.get(name)
         return entry.get("browser_download_url") if entry else None
 
+    def asset_size(name: str) -> Optional[int]:
+        entry = assets.get(name)
+        return entry.get("size") if entry else None
+
     payload = {
         "current_version": APP_VERSION,
         "latest_version": tag or None,
@@ -121,6 +127,9 @@ def check(force: bool = False) -> dict:
         "notes": (release.get("body") or "").strip()[:4000],
         "release_page": release.get("html_url") or RELEASES_PAGE,
         "windows_url": asset_url("SMARAN.AI-Setup.exe"),
+        # What the release says the installer weighs, so a part-finished file
+        # on disk can be told apart from a complete one.
+        "windows_size": asset_size("SMARAN.AI-Setup.exe"),
         "android_url": asset_url("SMARAN.AI.apk"),
         "vsix_url": asset_url("smaran-ai-codex.vsix"),
     }
@@ -151,7 +160,15 @@ def _already_downloaded(payload: dict) -> Optional[str]:
 
     name = os.path.basename(url.split("?")[0])
     path = os.path.join(_download_dir(payload.get("latest_version")), name)
-    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+    if not os.path.isfile(path):
+        return None
+
+    expected = payload.get("windows_size")
+    if expected and os.path.getsize(path) != expected:
+        # The right name at the wrong length is an interrupted download.
+        # Offering to install it would be offering a broken install.
+        return None
+    if os.path.getsize(path) == 0:
         return None
     return path
 
