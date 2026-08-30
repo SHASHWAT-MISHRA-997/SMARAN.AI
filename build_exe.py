@@ -158,16 +158,55 @@ def _ensure_frontend_built() -> None:
 def build(onefile: bool = False) -> int:
     _ensure_frontend_built()
 
+    # Windows keeps a handle on a directory that any process has as its
+    # working directory, even after that directory is emptied - a shell left
+    # sitting in dist/SMARAN.AI is enough. rmtree here ignores the failure,
+    # but PyInstaller then tries to remove the same folder itself and does
+    # not, so the whole build ended with WinError 32 and produced nothing.
+    #
+    # Emptying the folder always works even when removing it does not, so the
+    # contents go first. PyInstaller is then given somewhere it can write.
     for stale in ("build", "dist"):
         path = os.path.join(ROOT, stale)
-        if os.path.isdir(path):
-            shutil.rmtree(path, ignore_errors=True)
+        if not os.path.isdir(path):
+            continue
+        for entry in os.listdir(path):
+            target = os.path.join(path, entry)
+            if os.path.isdir(target):
+                shutil.rmtree(target, ignore_errors=True)
+                # A locked subdirectory survives; empty it in place.
+                if os.path.isdir(target):
+                    for inner in os.listdir(target):
+                        inner_path = os.path.join(target, inner)
+                        if os.path.isdir(inner_path):
+                            shutil.rmtree(inner_path, ignore_errors=True)
+                        else:
+                            try:
+                                os.remove(inner_path)
+                            except OSError:
+                                pass
+            else:
+                try:
+                    os.remove(target)
+                except OSError:
+                    pass
+        shutil.rmtree(path, ignore_errors=True)
+
+    # PyInstaller replaces its output directory, and a directory Windows holds
+    # a handle on cannot be replaced - a shell left sitting in dist/SMARAN.AI
+    # is enough to keep that handle open, and the whole build then ends with
+    # WinError 32 having produced nothing. So it is given a scratch folder of
+    # its own and the result is copied into place afterwards: copying into the
+    # locked folder works even though removing it does not.
+    scratch = os.path.join(ROOT, "build", "_dist")
+    shutil.rmtree(scratch, ignore_errors=True)
 
     sep = ";" if os.name == "nt" else ":"
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
         "--clean",
+        "--distpath", scratch,
         "--windowed",                      # no console window
         "--name", APP_NAME,
         "--onefile" if onefile else "--onedir",
@@ -191,6 +230,24 @@ def build(onefile: bool = False) -> int:
     _write_analytics_config()
     print("[build] running PyInstaller...")
     result = subprocess.run(cmd, cwd=ROOT)
+    if result.returncode == 0:
+        # Into the place the installer and everything else expect.
+        produced = os.path.join(scratch, APP_NAME)
+        final = os.path.join(ROOT, "dist", APP_NAME)
+        os.makedirs(final, exist_ok=True)
+        if os.path.isdir(produced):
+            for entry in os.listdir(produced):
+                source = os.path.join(produced, entry)
+                target = os.path.join(final, entry)
+                if os.path.isdir(source):
+                    shutil.copytree(source, target, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(source, target)
+        elif os.path.isfile(produced + ".exe"):
+            shutil.copy2(produced + ".exe",
+                         os.path.join(ROOT, "dist", APP_NAME + ".exe"))
+        shutil.rmtree(scratch, ignore_errors=True)
+
     if result.returncode != 0:
         print("[build] FAILED", file=sys.stderr)
         return result.returncode
