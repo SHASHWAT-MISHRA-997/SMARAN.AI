@@ -716,14 +716,18 @@
       <ol class="install-steps">
         <li>
           <h3>Download the installer</h3>
-          <p>A single <code>.exe</code>, about 233&nbsp;MB. It contains everything the app needs to start.</p>
+          <p>A single <code>.exe</code>, about 265&nbsp;MB. It contains everything the app needs to start.</p>
           <a class="btn btn-ghost" href="#download">Go to downloads</a>
         </li>
         <li>
           <h3>Expect a warning, and read it</h3>
-          <p>Windows will say the publisher is unrecognised. That is accurate: the app is not code-signed, because a
-             certificate costs money this project does not take. Choose <b>More info</b>, then <b>Run anyway</b> &mdash;
-             or do not, if you would rather wait until it is signed.</p>
+          <p>Windows will stop it, because the app is not code-signed yet. If it
+             says <b>&ldquo;Windows protected your PC&rdquo;</b>, that is
+             SmartScreen: choose <b>More info</b>, then <b>Run anyway</b>. If it
+             says <b>&ldquo;An Application Control policy has blocked this
+             file&rdquo;</b>, that is Smart App Control, and there is no button
+             to click past it &mdash; see the note on the download page before
+             you decide what to do about that.</p>
         </li>
         <li>
           <h3>Run it</h3>
