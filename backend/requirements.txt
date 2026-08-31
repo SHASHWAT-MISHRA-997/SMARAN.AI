@@ -26,7 +26,15 @@ PyMuPDF>=1.24.0
 Pillow>=10.0.0
 pynvml>=11.5.0
 slowapi>=0.1.9
-python-magic>=0.4.27
+# These two are alternatives, not companions. python-magic-bin is a
+# self-contained Windows fork that carries both the module and libmagic's
+# DLLs; python-magic is the plain module and expects libmagic to be installed
+# separately. Asking for both on Windows installs magic.py twice, the plain
+# one wins, and it then cannot find the library - which crashed PyInstaller
+# outright with "Isolated subprocess crashed while importing package
+# 'magic'". It never showed up here because this machine happened to have
+# only the -bin one.
+python-magic>=0.4.27; sys_platform != 'win32'
 python-magic-bin>=0.4.14; sys_platform == 'win32'
 qdrant-client>=1.9.0
 psycopg2-binary>=2.9.9
