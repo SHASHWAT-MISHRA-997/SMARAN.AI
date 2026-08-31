@@ -59,6 +59,9 @@ export class LiveVoiceSession {
     this.levelTimer = null;
     this.playbackCursor = 0;
     this.scheduled = [];
+    // Pending "she has stopped speaking", fired when the queued audio runs out
+    // rather than when the server stops sending.
+    this.endOfSpeechTimer = null;
     this.visionStream = null;
     this.visionVideo = null;
     this.visionTimer = null;
@@ -143,6 +146,8 @@ export class LiveVoiceSession {
         this._emit('listening');
         break;
       case 'audio':
+        // More audio arrived, so any pending "she has finished" is wrong.
+        this._cancelEndOfSpeech();
         this._playChunk(payload.data);
         this._emit('speaking');
         break;
@@ -151,11 +156,18 @@ export class LiveVoiceSession {
         break;
       case 'interrupted':
         // The user started talking: drop whatever is still queued.
+        this._cancelEndOfSpeech();
         this._stopPlayback();
         this._emit('listening');
         break;
       case 'turn_complete':
-        this._emit('listening');
+        // turn_complete means the server has finished *sending*, not that she
+        // has finished *speaking*. Chunks are queued back to back and are
+        // still playing when it arrives. Switching to 'listening' here is why
+        // the character said one line and then stood still while the voice
+        // carried on: the animation follows this state, and the state had
+        // already moved on.
+        this._emitWhenPlaybackEnds();
         break;
       case 'error':
         this.handlers.onError?.(payload.message || 'Real-time voice error.');
@@ -195,6 +207,36 @@ export class LiveVoiceSession {
     }, 100);
   }
 
+  _cancelEndOfSpeech() {
+    if (this.endOfSpeechTimer) {
+      clearTimeout(this.endOfSpeechTimer);
+      this.endOfSpeechTimer = null;
+    }
+  }
+
+  /** Report that she has stopped speaking when the sound actually stops. */
+  _emitWhenPlaybackEnds() {
+    this._cancelEndOfSpeech();
+
+    const context = this.outputContext;
+    if (!context) {
+      this._emit('listening');
+      return;
+    }
+
+    // playbackCursor is where the queued audio runs out, on the audio clock.
+    const remaining = (this.playbackCursor || 0) - context.currentTime;
+    if (remaining <= 0.05) {
+      this._emit('listening');
+      return;
+    }
+
+    this.endOfSpeechTimer = setTimeout(() => {
+      this.endOfSpeechTimer = null;
+      if (!this.closed) this._emit('listening');
+    }, remaining * 1000 + 80);
+  }
+
   _playChunk(base64Audio) {
     try {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -232,6 +274,9 @@ export class LiveVoiceSession {
   }
 
   _stopPlayback() {
+    // Whatever was waiting to say "she has finished" is about to be wrong in
+    // the other direction: the sound is being cut short, not left to run out.
+    this._cancelEndOfSpeech();
     this.scheduled.forEach((source) => {
       try { source.stop(); } catch { /* already finished */ }
     });
