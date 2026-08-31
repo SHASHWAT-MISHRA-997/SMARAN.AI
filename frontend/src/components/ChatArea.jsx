@@ -1655,13 +1655,38 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         URL.revokeObjectURL(url);
         if (generatedAudioUrlRef.current === url) generatedAudioUrlRef.current = '';
         if (generatedAudioRef.current === audio) generatedAudioRef.current = null;
-        speakNativeText(clean, langCode);
+        reportSpeechFailure('the audio element rejected the file', clean, langCode);
       };
       await audio.play();
     } catch (error) {
-      console.warn('Local speech fallback note:', error);
-      speakNativeText(clean, langCode);
+      reportSpeechFailure(`${error?.name || 'Error'}: ${error?.message || error}`,
+                          clean, langCode);
     }
+  };
+
+  /* Speaking used to fail in silence.
+     Every failure fell through to speakNativeText, the browser's own
+     speech synthesis - which in the desktop window has no voices installed,
+     so it produced nothing and said nothing about producing nothing. From
+     the outside that is indistinguishable from a broken feature, and it is
+     why "Speak does not work" could not be diagnosed: there was no evidence
+     anywhere, in any log, that anything had gone wrong.
+     The fallback is still tried, because in a real browser it does work. But
+     it is now checked for having a voice at all, and either way the reason is
+     put where a person can read it. */
+  const reportSpeechFailure = (reason, text, langCode) => {
+    setIsSpeakingAudio(false);
+    const voices = window.speechSynthesis?.getVoices?.() || [];
+    if (voices.length > 0) {
+      speakNativeText(text, langCode);
+      return;
+    }
+    const message = `Could not play the voice: ${reason}. `
+      + 'This window has no built-in speech voices to fall back on.';
+    console.warn(message);
+    window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
+      detail: { message },
+    }));
   };
 
   const stopSpeaking = () => {

@@ -866,6 +866,8 @@ export const HackerVoiceAssistant = ({
   /* Where the current conversation starts in the chat history. Captured each
      time the session opens, so nothing said before it can be mistaken for
      something said during it. */
+  /* Set when starting a live call failed, so it is not retried on a loop. */
+  const liveStartFailedRef = useRef(false);
   const sessionHistoryBaseRef = useRef(0);
   useEffect(() => {
     if (isOpen) sessionHistoryBaseRef.current = chatHistory.length;
@@ -1197,6 +1199,11 @@ export const HackerVoiceAssistant = ({
   }, [isOpen, selectedLanguage, stopRecognition, startFreshRecorder]);
 
   resumeListeningRef.current = () => {
+    // The live stream owns the microphone while it is running. Taking it here
+    // is what made "Start talking" end the moment it began: the session
+    // closed, this grabbed the device, the session restarted, could not get
+    // the device, errored, and closed again.
+    if (liveActiveRef.current || liveSessionRef.current) return;
     setUploadStatus('idle');
     const vadReady = Boolean(analyserRef.current && audioContextRef.current?.state !== 'closed');
     setVadStatus(vadReady ? 'ready' : 'unavailable');
@@ -1642,6 +1649,7 @@ export const HackerVoiceAssistant = ({
     liveSessionRef.current = session;
     setLiveActive(true);
     setVoiceIssue('');
+    liveStartFailedRef.current = false;
     const started = await session.start({
       apiBase: API_BASE,
       // No language is forced: the model answers in whatever the user speaks.
@@ -1651,14 +1659,18 @@ export const HackerVoiceAssistant = ({
       // pitch, pacing and manner differ per persona, not just the timbre.
       persona: showAvatar ? (avatarId === 'evelyn' ? 'myraa' : 'myra') : 'core',
     });
-    if (!started) await stopLiveSession();
+    if (!started) {
+      liveStartFailedRef.current = true;
+      await stopLiveSession();
+    }
   }, [API_BASE, selectedLanguage, voiceName, finalizeRecordedAudio, stopRecognition, stopLiveSession, showAvatar, avatarId]);
 
   // Always release the microphone and socket when the panel closes.
   useEffect(() => {
     if (!isOpen && liveSessionRef.current) stopLiveSession();
-    // Reopening is a fresh intent to talk, so the hang-up is forgotten.
-    if (isOpen) endedByUserRef.current = false;
+    // Reopening is a fresh intent to talk, so the hang-up is forgotten, and
+    // so is a previous failure - the microphone may be free this time.
+    if (isOpen) { endedByUserRef.current = false; liveStartFailedRef.current = false; }
   }, [isOpen, stopLiveSession]);
 
   // Opening the panel starts the conversation. Requiring a second click on
@@ -1670,6 +1682,11 @@ export const HackerVoiceAssistant = ({
     // voice change - so ending a call and then changing any of those started
     // it again on its own, and the red button appeared to do nothing.
     if (endedByUserRef.current) return;
+    // A start that already failed will fail again the same way. Retrying it
+    // on a timer produced a call that looked like it ended the instant it
+    // began, over and over, with nothing explaining why. One attempt, and the
+    // reason stays on screen.
+    if (liveStartFailedRef.current) return;
     startLiveSession();
   }, [isOpen, liveAvailable, startLiveSession]);
 
