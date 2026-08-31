@@ -2101,11 +2101,27 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
         complexity_score = 0
     
     # Step 2: Build model scoring function
+    #: Families that only turn text into vectors. They cannot write a reply,
+    #: and one of them answering is indistinguishable from the model being
+    #: broken - which is what "the AI does not respond" turned out to be.
+    EMBEDDING_MARKERS = ("embed", "bge-", "gte-", "e5-", "all-minilm",
+                         "arctic-embed", "text-embedding")
+
+    def _is_embedding_model(model_id: str) -> bool:
+        name = (model_id or "").lower()
+        return any(marker in name for marker in EMBEDDING_MARKERS)
+
     def _score_model(model_id: str) -> float:
         """Score model suitability for this query (higher = better match)."""
         if not model_id:
             return 0.0
-        
+
+        # An embedding model has no chance of answering, whatever else it
+        # scores on. Disqualified outright rather than ranked low, because
+        # ranked low still wins when it is the only thing left.
+        if _is_embedding_model(model_id):
+            return 0.0
+
         score = 50.0  # Base score
         
         # Get model metadata from catalog
@@ -2170,12 +2186,39 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
     
     # Step 3: Rank all available models
     ranked_models = []
-    for model_id in available:
+    for model_id in sorted(available):
         score = _score_model(model_id)
         if score > 0:
             ranked_models.append((score, model_id))
-    
-    ranked_models.sort(key=lambda x: x[0], reverse=True)
+
+    # Almost no locally installed Ollama tag appears in MODELS_CATALOG, so
+    # every candidate scores the same 25 and the whole ranking is a tie. The
+    # tie used to be settled by whatever order a set happened to iterate in,
+    # which differs between processes - the same question reached a different
+    # model on every restart, sometimes one that could not answer at all.
+    #
+    # Two things decide it now, both read from the tag itself because that is
+    # the only information there is:
+    #
+    #   A vision model answering "say hello" is a waste of a vision model and
+    #   usually a worse answer, so one is only preferred when the question
+    #   actually needs to see something.
+    #
+    #   Between the rest, more parameters is the better guess. qwen2.5-coder:3b
+    #   over qwen3:0.6b is not a close call.
+    def _params_in_tag(model_id: str) -> float:
+        found = re.search(r"(\d+(?:\.\d+)?)\s*b", (model_id or "").lower())
+        return float(found.group(1)) if found else 0.0
+
+    def _rank_key(pair):
+        score, model_id = pair
+        wants_vision = "vision" in required_capabilities
+        is_vision = _is_vision_model(model_id)
+        # False sorts before True, so 0 is the preferred bucket.
+        vision_fit = 0 if (is_vision == wants_vision) else 1
+        return (-score, vision_fit, -_params_in_tag(model_id), model_id)
+
+    ranked_models.sort(key=_rank_key)
     
     # Step 4: Select best model with fallback chain
     if ranked_models:

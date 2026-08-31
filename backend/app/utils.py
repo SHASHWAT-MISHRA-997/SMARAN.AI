@@ -8,6 +8,7 @@ import psutil
 import ipaddress
 import socket
 import threading
+from typing import Optional
 from urllib.parse import urljoin, urlparse
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
@@ -84,11 +85,27 @@ def _get_whisper_model(model_name: str):
             return cached
         download_root = os.path.join(settings.DATA_DIR, "models", "faster-whisper")
         os.makedirs(download_root, exist_ok=True)
+        # cpu_threads matters far more than it looks. Left unset, loading the
+        # base model on a sixteen-thread machine took 15.9 seconds; told how
+        # many threads it has, 1.4. Transcription itself is about two seconds
+        # either way, so nearly all of the wait a person felt on their first
+        # dictation was this - the model being loaded slowly, once.
+        #
+        # Read from the machine rather than fixed, and capped: past about
+        # eight threads there is nothing more to gain here, and taking every
+        # core would fight with whatever model is answering the chat.
+        try:
+            import os as _os
+            threads = min(8, max(1, (_os.cpu_count() or 4)))
+        except Exception:
+            threads = 4
+
         model = WhisperModel(
             model_name,
             device=os.getenv("UPLOAD_WHISPER_DEVICE", "cpu"),
             compute_type="int8",
             download_root=download_root,
+            cpu_threads=int(os.getenv("UPLOAD_WHISPER_THREADS", threads)),
         )
         _whisper_models[model_name] = model
         # Keep the historical single-model global pointing at something valid.
