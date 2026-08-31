@@ -228,11 +228,70 @@ def _wait_until_ready(port: int, timeout: float = STARTUP_TIMEOUT_SECONDS,
         try:
             with urllib.request.urlopen(url, timeout=2) as response:
                 if response.status < 500:
+                    # An answer on this port is not proof that *our* server is
+                    # the one answering. Start a second copy while the first
+                    # holds the port and this check passes on the first one's
+                    # reply, so the second opens a window backed by a server
+                    # that never started - which is what a window where
+                    # everything reads "unavailable" actually was.
+                    #
+                    # A bind failure surfaces on the serving thread a moment
+                    # after the attempt, so the reply is confirmed rather than
+                    # trusted immediately.
+                    if server is not None:
+                        time.sleep(0.6)
+                        if server.error is not None:
+                            return False
                     return True
         except (urllib.error.URLError, OSError):
             pass
         time.sleep(0.4)
     return False
+
+
+def _existing_instance() -> "int | None":
+    """The port of a copy that is already running, if one is answering.
+
+    Opening a second copy has no use and one real cost: two windows that look
+    identical, one of which cannot work. Better to raise the one already
+    there.
+    """
+    import json
+
+    try:
+        with open(_runtime_file(), "r", encoding="utf-8") as handle:
+            recorded = json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+    port = recorded.get("port")
+    if not isinstance(port, int):
+        return None
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}{HEALTH_PATH}", timeout=2) as response:
+            if response.status < 500:
+                return port
+    except (urllib.error.URLError, OSError):
+        return None
+    return None
+
+
+def _raise_existing_window() -> bool:
+    """Bring the running copy's window to the front. True if one was found."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        hwnd = ctypes.windll.user32.FindWindowW(None, APP_NAME)
+        if not hwnd:
+            return False
+        ctypes.windll.user32.ShowWindow(hwnd, 9)      # SW_RESTORE
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+        return True
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +536,18 @@ def main() -> int:
         return _run_tts_worker(sys.argv[1:])
 
     _prepare_environment()
+
+    # One copy is enough. Opening a second gives two identical windows, and
+    # the second one cannot work: the first holds the port, so the second's
+    # engine fails to start while its window opens anyway and shows every
+    # feature as unavailable. Double-clicking the shortcut twice was enough
+    # to produce it, and there was nothing on screen to say which window was
+    # the broken one.
+    running = _existing_instance()
+    if running is not None:
+        _raise_existing_window()
+        print(f"{APP_NAME} is already running at http://127.0.0.1:{running}/")
+        return 0
 
     try:
         port = _find_free_port()
