@@ -145,6 +145,17 @@ def check_mapping() -> List[str]:
 
 def phonemise(text: str) -> str:
     """English text to the IPA string Kokoro reads."""
+    # g2p-en reads nltk corpora, and which ones it can see depends on where
+    # nltk decides to look. Pointing it at the app's own copy first makes that
+    # the same on every machine, instead of working here and failing there.
+    try:
+        from app.speech_resources import ensure as _ensure_voice_data
+
+        _ensure_voice_data()
+    except Exception:
+        # If this cannot run, the import below will say what is missing.
+        pass
+
     try:
         from g2p_en import G2p
     except ImportError as exc:

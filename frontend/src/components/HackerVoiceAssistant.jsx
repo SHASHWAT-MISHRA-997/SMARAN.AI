@@ -1655,6 +1655,12 @@ export const HackerVoiceAssistant = ({
       // No language is forced: the model answers in whatever the user speaks.
       language: 'auto',
       voice: voiceName,
+      // The character's own gender, read the same way the rest of the app
+      // reads it. The energy core has no character, and is male.
+      gender: (showAvatar
+        && (MMD_CHARACTERS.find((c) => c.id === avatarId)
+          || AVATAR_CHARACTERS.find((c) => c.id === avatarId))?.gender)
+        || 'male',
       // Which character is on screen decides how the voice is directed:
       // pitch, pacing and manner differ per persona, not just the timbre.
       persona: showAvatar ? (avatarId === 'evelyn' ? 'myraa' : 'myra') : 'core',

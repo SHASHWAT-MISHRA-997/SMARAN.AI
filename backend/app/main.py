@@ -310,6 +310,16 @@ async def _warm_speech_recognition() -> None:
 
     threading.Thread(target=warm_up_speech_models, name="whisper-warmup", daemon=True).start()
 
+    # The offline voice needs nltk corpora that nothing owned. Preparing them
+    # here means a voice call does not discover the gap in the middle of a
+    # sentence, and the reason is recorded if they cannot be fetched.
+    def _prepare_voice() -> None:
+        from app.speech_resources import ensure
+
+        ensure()
+
+    threading.Thread(target=_prepare_voice, name="voice-resources", daemon=True).start()
+
 # Plugin system setup
 from app.plugin_routes import router as plugin_router
 from app.plugin_system import plugin_manager, PluginConfig
@@ -343,7 +353,8 @@ def selftest_flags():
     who did not ask for it.
     """
     wanted = os.getenv("SMARAN_SELFTEST", "").strip().lower()
-    return {"speech": wanted in {"speech", "all"}}
+    return {"speech": wanted in {"speech", "all"},
+            "mic": wanted in {"mic", "all"}}
 
 
 @app.post("/api/client-log")

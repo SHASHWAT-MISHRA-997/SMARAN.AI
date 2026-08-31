@@ -1610,8 +1610,37 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     let cancelled = false;
     fetch(`${API_BASE}/api/selftest`, { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((flags) => {
-        if (cancelled || !flags?.speech) return;
+      .then(async (flags) => {
+        if (cancelled) return;
+        if (flags?.mic) {
+          // Ask the same question the voice screen asks, and write down the
+          // answer. "Voice input unavailable" has four possible causes and the
+          // label does not say which, so the label cannot be diagnosed from it.
+          const md = navigator.mediaDevices;
+          noteForLog(`mic check: secureContext=${window.isSecureContext} `
+            + `origin=${location.origin} mediaDevices=${!!md} `
+            + `getUserMedia=${!!(md && md.getUserMedia)}`);
+          if (md?.getUserMedia) {
+            md.getUserMedia({ audio: true })
+              .then((s) => {
+                const tracks = s.getAudioTracks();
+                noteForLog(`mic granted: tracks=${tracks.length} `
+                  + `label=${tracks[0]?.label || '(none)'} `
+                  + `state=${tracks[0]?.readyState} muted=${tracks[0]?.muted}`);
+                tracks.forEach((x) => x.stop());
+              })
+              .catch((e) => noteForLog(`mic refused: ${e?.name}: ${e?.message}`));
+          }
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const inputs = devices.filter((d) => d.kind === 'audioinput');
+            noteForLog(`audio inputs seen: ${inputs.length} `
+              + inputs.map((d) => d.label || '(unlabelled)').join(' | ').slice(0, 200));
+          } catch (e) {
+            noteForLog(`enumerateDevices failed: ${e?.name}: ${e?.message}`);
+          }
+        }
+        if (!flags?.speech) return;
         noteForLog(`selftest starting: audioEnabled=${audioEnabled} `
           + `autoSpeak=${autoSpeakEnabled} lang=${selectedLanguage} `
           + `voices=${(window.speechSynthesis?.getVoices?.() || []).length} `

@@ -69,7 +69,7 @@ export class LiveVoiceSession {
     this.handlers.onStateChange?.(state);
   }
 
-  async start({ apiBase = '', language = 'en', voice, persona = 'myra' } = {}) {
+  async start({ apiBase = '', language = 'en', voice, gender = 'female', persona = 'myra' } = {}) {
     this.closed = false;
     this._emit('connecting');
 
@@ -111,7 +111,12 @@ export class LiveVoiceSession {
     }
 
     this.socket.onopen = () => {
-      this.socket.send(JSON.stringify({ type: 'start', language, voice, persona }));
+      // gender, not just voice. The local engine speaks through Kokoro, which
+      // has its own voices and has never heard of 'Aoede' or 'Puck' - those
+      // are Gemini's names. It reads `gender`, and the page was not sending
+      // one, so every local call fell back to the default no matter which
+      // character was on screen.
+      this.socket.send(JSON.stringify({ type: 'start', language, voice, gender, persona }));
     };
     this.socket.onmessage = (event) => this._handleServerMessage(event);
     this.socket.onerror = () => {
