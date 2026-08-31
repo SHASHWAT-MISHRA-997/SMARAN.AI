@@ -317,6 +317,38 @@ app.include_router(plugin_router)
 from app.sites_routes import router as sites_router
 app.include_router(sites_router)
 
+class ClientLog(BaseModel):
+    """Something that went wrong in the page, written where it can be read.
+
+    The interface can only report a fault to the person looking at it, and in
+    the desktop window there is no console to open and no log of its own. A
+    failure that shows a message in a collapsed sidebar is a failure nobody
+    ever sees. This puts it in smaran.log beside everything else.
+    """
+    message: str
+    context: str = "client"
+
+
+@app.post("/api/client-log")
+def client_log(entry: ClientLog):
+    # Written straight to a file rather than through the logging config. The
+    # first attempt used logger.warning and nothing arrived: the file handler
+    # is set up conditionally at import time and had quietly not been added,
+    # so the one tool being used to find a silent failure was itself failing
+    # silently. This cannot.
+    logger.warning("[%s] %s", entry.context[:40], entry.message[:600])
+    path = os.path.join(settings.DATA_DIR, "client.log")
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = "%s  [%s] %s%s" % (stamp, entry.context[:40], entry.message[:600], os.linesep)
+    try:
+        os.makedirs(settings.DATA_DIR, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(line)
+    except OSError as exc:
+        return {"recorded": False, "error": str(exc)[:120], "path": path}
+    return {"recorded": True, "path": path}
+
+
 @app.get("/api/updates/check")
 def check_for_updates(force: bool = False):
     """Whether a newer build has been published.

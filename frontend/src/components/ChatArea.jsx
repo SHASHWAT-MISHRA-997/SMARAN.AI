@@ -1600,7 +1600,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
   const speakText = async (text, langCode = selectedLanguage) => {
-    if (!audioEnabled || !text?.trim()) return;
+    if (!audioEnabled || !text?.trim()) {
+      noteForLog(`speak skipped: audioEnabled=${audioEnabled} textLength=${(text || '').trim().length}`);
+      return;
+    }
     const clean = text
       .replace(/```[\s\S]*?```/g, '')
       .replace(/`([^`]+)`/g, '$1')
@@ -1658,6 +1661,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         reportSpeechFailure('the audio element rejected the file', clean, langCode);
       };
       await audio.play();
+      noteForLog(`play() resolved: ${blob.size} bytes, duration=${audio.duration}, `
+        + `muted=${audio.muted}, volume=${audio.volume}, paused=${audio.paused}`);
     } catch (error) {
       reportSpeechFailure(`${error?.name || 'Error'}: ${error?.message || error}`,
                           clean, langCode);
@@ -1674,19 +1679,29 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
      The fallback is still tried, because in a real browser it does work. But
      it is now checked for having a voice at all, and either way the reason is
      put where a person can read it. */
+  const noteForLog = (message) => {
+    try {
+      fetch(`${API_BASE}/api/client-log`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context: 'speech', message: String(message).slice(0, 500) }),
+      }).catch(() => {});
+    } catch { /* logging must never be the thing that breaks */ }
+  };
+
   const reportSpeechFailure = (reason, text, langCode) => {
+    noteForLog(`playback failed: ${reason}`);
     setIsSpeakingAudio(false);
     const voices = window.speechSynthesis?.getVoices?.() || [];
     if (voices.length > 0) {
       speakNativeText(text, langCode);
       return;
     }
-    const message = `Could not play the voice: ${reason}. `
-      + 'This window has no built-in speech voices to fall back on.';
-    console.warn(message);
-    window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
-      detail: { message },
-    }));
+    // Recorded, not shown. Nothing about a playback fault belongs in the
+    // sidebar; it goes to the log where it can be read without cluttering
+    // the screen someone is trying to use.
+    console.warn(`Could not play the voice: ${reason}`);
   };
 
   const stopSpeaking = () => {
