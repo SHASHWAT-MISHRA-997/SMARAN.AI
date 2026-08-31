@@ -862,6 +862,17 @@ export const HackerVoiceAssistant = ({
      webkitSpeechRecognition with nothing behind it, so trying it there only
      ever costs a failed attempt and the flicker that goes with it. */
   const speechServiceUnusableRef = useRef(isDesktopApp());
+
+  /* Where the current conversation starts in the chat history. Captured each
+     time the session opens, so nothing said before it can be mistaken for
+     something said during it. */
+  const sessionHistoryBaseRef = useRef(0);
+  useEffect(() => {
+    if (isOpen) sessionHistoryBaseRef.current = chatHistory.length;
+    // chatHistory is deliberately not a dependency: this records where the
+    // session began, and must not move as the conversation grows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
   const micStreamRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -1875,7 +1886,14 @@ export const HackerVoiceAssistant = ({
 
   // The line shown large over the character: what the assistant last said, or
   // the words being picked up while the user is talking.
-  const lastAssistantLine = [...chatHistory].reverse().find((m) => m.role === 'assistant')?.text || '';
+  // Only lines from this session. Reading the whole history meant the last
+  // thing said in a previous conversation was put back on screen the moment
+  // a new one opened, as though she had just said it - and it stayed there
+  // after the call ended, and came back after closing and reopening.
+  const lastAssistantLine = chatHistory
+    .slice(sessionHistoryBaseRef.current)
+    .filter((m) => m.role === 'assistant')
+    .slice(-1)[0]?.text || '';
   // Only while a conversation is actually running. Once it ends the line
   // is history, and leaving it up made an ended session look live.
   // Listing the resting states rather than the busy ones: 'capturing' and

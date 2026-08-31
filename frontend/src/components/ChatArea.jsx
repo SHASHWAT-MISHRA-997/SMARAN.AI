@@ -1739,6 +1739,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     isVoiceModeOpenRef.current = false;
     stopSpeaking();
     setVoiceState('idle');
+    // Ending a call should end what was on screen with it. These were left
+    // set, so the last thing said stayed up after the call finished and was
+    // still there on the way back in.
+    setVoiceTranscript('');
+    setVoiceAiResponse('');
   };
 
   // Sidebar Voice is continuous dictation into the composer. Speak remains a

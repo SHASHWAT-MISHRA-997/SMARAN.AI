@@ -319,6 +319,17 @@ def _grant_webview2_media_permissions() -> None:
             properties.AdditionalBrowserArguments += (
                 " --autoplay-policy=no-user-gesture-required"
             )
+            # Opens Chromium's debugging port so the page inside this window
+            # can be inspected from outside it. Off unless SMARAN_DEBUG_PORT is
+            # set, because a debugging port left open is a way into the app.
+            # Without it there is no way to see a console error in the packaged
+            # window at all - the only evidence of a fault is a person saying
+            # it did not work.
+            debug_port = os.environ.get("SMARAN_DEBUG_PORT", "").strip()
+            if debug_port.isdigit():
+                properties.AdditionalBrowserArguments += (
+                    f" --remote-debugging-port={debug_port}"
+                )
             _media_log(f"browser args: {self.webview.CreationProperties.AdditionalBrowserArguments}")
         except Exception as exc:
             _media_log(f"could not extend browser args: {exc!r}")
