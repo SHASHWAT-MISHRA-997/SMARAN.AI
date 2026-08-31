@@ -3639,18 +3639,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               <span>Attach file</span>
             </button>
 
-            {/* Folder Attach */}
-            <button
-              type="button"
-              onClick={() => folderInputRef.current?.click()}
-              disabled={!activeSessionId || directUploading}
-              className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold border border-zinc-200 dark:border-zinc-700/60 cursor-pointer disabled:opacity-35 shrink-0"
-              title="Attach a folder of files to this message"
-            >
-              <FolderPlus className="w-3.5 h-3.5" />
-              <span>Attach folder</span>
-            </button>
-
+            {/* Folder upload was offered twice over: this chip and the
+                "Open a folder" button above the composer, which do different
+                things and both said folder. Renaming it was not enough - it
+                is gone. "Attach file" takes multiple files at once, which is
+                what folder upload was mostly used for. */}
             {/* RAG Toggle */}
             <button
               type="button"
