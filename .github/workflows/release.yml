@@ -1,0 +1,239 @@
+# Builds the Windows installer, the CLI and the Android APK on GitHub's
+# machines, and attaches them to a release.
+#
+# Why this exists rather than building on a laptop:
+#
+#   1. Nothing else can check the build. Every installer so far was made by
+#      hand on one machine, and that machine had things installed that were
+#      written down nowhere - onnxruntime, g2p-en, a folder of nltk corpora.
+#      A build from a clean checkout produced an installer whose voice did
+#      not work, and nothing said so. A clean runner is the only honest test
+#      of whether the repository can actually build itself.
+#
+#   2. Code signing needs it. SignPath Foundation signs Open Source builds
+#      for free, and requires the artifact to come from a trusted build
+#      system so its origin can be verified. Unsigned builds are blocked by
+#      Windows Smart App Control, which is why the installer would not start
+#      on the developer's own machine.
+#
+# Triggered by pushing a v* tag, or by hand. Building on every commit would
+# burn half an hour of runner time to produce something nobody asked for.
+
+name: Build release artifacts
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Attach the artifacts to a GitHub release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows installer and CLI
+    runs-on: windows-latest
+    # PyInstaller takes about twenty minutes here and Inno Setup another few.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.14 is what the current builds are made with. Pinning the minor
+      # version matters: PyInstaller bundles a Python of the same version, so
+      # a runner that quietly moved to 3.15 would produce a different binary.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      # The build script fetches the nltk corpora itself, but doing it here
+      # too means a failure shows up as its own red step rather than as a
+      # quiet gap in the finished installer.
+      - name: Fetch nltk data for the offline voice
+        run: |
+          python -c "import nltk; [nltk.download(p, quiet=True) for p in ('cmudict','averaged_perceptron_tagger','averaged_perceptron_tagger_eng')]"
+
+      - name: Build the interface
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the executable
+        run: python build_exe.py
+
+      # The two things whose absence has silently broken the voice before.
+      # Checked here rather than discovered by a person installing the result.
+      - name: Check the build actually contains the voice
+        shell: pwsh
+        run: |
+          $internal = "dist/SMARAN.AI/_internal"
+          $missing = @()
+          if (-not (Test-Path "$internal/onnxruntime/capi/onnxruntime_pybind11_state.pyd")) {
+            $missing += "onnxruntime_pybind11_state.pyd - dictation and the offline voice both need it"
+          }
+          if (-not (Test-Path "$internal/nltk_data/corpora/cmudict")) {
+            $missing += "nltk cmudict - the offline voice cannot start without it"
+          }
+          if (-not (Test-Path "$internal/faster_whisper/assets")) {
+            $missing += "faster-whisper assets - the voice-activity model"
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "This build would ship with a broken voice:"
+            $missing | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+          Write-Host "Voice components are present."
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/SMARAN.AI.iss
+
+      - name: Build the command line tool
+        working-directory: cli
+        run: python -m PyInstaller --noconfirm --clean smaran.spec
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            installer/output/SMARAN.AI-Setup.exe
+            cli/dist/smaran.exe
+          if-no-files-found: error
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # secrets cannot be read from a step's `if:` condition. Lifting it to the
+    # job's environment is the form that works, and keeps the value out of
+    # any log because env values are masked the same way secrets are.
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Build the interface
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      # The signing key is never in the repository - it is a secret, and the
+      # keystore and its passwords are git-ignored for that reason. Without
+      # it this produces an unsigned APK, which Android will refuse to
+      # install, so the step says as much rather than shipping one.
+      - name: Restore the signing key
+        if: env.HAS_SIGNING_KEY == 'true'
+        working-directory: frontend/android
+        run: |
+          mkdir -p keystore
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > keystore/smaran-release.jks
+          cat > keystore.properties <<EOF
+          storeFile=keystore/smaran-release.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+
+      - name: Refuse to build unsigned
+        if: env.HAS_SIGNING_KEY != 'true'
+        run: |
+          echo "No signing key is configured, so this would produce an APK"
+          echo "that Android refuses to install. Add these repository secrets:"
+          echo "  ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,"
+          echo "  ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD"
+          exit 1
+
+      - name: Build the APK
+        working-directory: frontend
+        run: |
+          npx cap sync android
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Check the APK is signed
+        run: |
+          apk=frontend/android/app/build/outputs/apk/release/app-release.apk
+          if grep -qa "APK Sig Block 42" "$apk"; then
+            echo "Signed."
+          else
+            echo "The APK has no v2/v3 signature block; Android would refuse it."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: frontend/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  publish:
+    name: Attach to the release
+    needs: [windows, android]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Name the files as the download page expects
+        run: |
+          mkdir -p release
+          cp artifacts/windows/installer/output/SMARAN.AI-Setup.exe release/
+          cp artifacts/windows/cli/dist/smaran.exe release/
+          cp artifacts/android/app-release.apk release/SMARAN.AI.apk
+          ls -la release
+
+      # The downloads repository is what the website links to. Publishing
+      # needs a token with write access to it; the default GITHUB_TOKEN only
+      # covers this repository.
+      - name: Upload to the downloads repository
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOADS_REPO_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "DOWNLOADS_REPO_TOKEN is not set, so there is nowhere to publish."
+            echo "The artifacts are attached to this run and can be uploaded by hand."
+            exit 1
+          fi
+          tag="${GITHUB_REF_NAME}"
+          gh release create "$tag" release/* \
+            --repo SHASHWAT-MISHRA-997/SMARAN.AI-downloads \
+            --title "SMARAN.AI ${tag#v}" \
+            --generate-notes

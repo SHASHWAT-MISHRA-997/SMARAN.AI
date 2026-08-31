@@ -1,0 +1,7 @@
+# What is needed to *build* the installer, on top of backend/requirements.txt.
+#
+# Kept separate because nobody running the app from source needs PyInstaller,
+# and a build machine needs it before it can produce anything.
+-r backend/requirements.txt
+
+pyinstaller>=6.21.0

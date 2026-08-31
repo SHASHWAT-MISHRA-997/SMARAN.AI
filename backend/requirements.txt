@@ -38,3 +38,15 @@ passlib>=1.7.4
 email-validator>=2.1.0
 edge-tts>=7.0.0
 segno==1.6.6
+
+# The desktop window itself. Without this the app has no window to draw in
+# and falls back to a browser tab.
+pywebview>=6.2.1
+
+# The offline voice, and the voice-activity filter dictation runs through.
+# These were installed on the machine that made the builds and written down
+# nowhere, so anything built from this file alone produced an installer where
+# Speak had no offline voice and dictation returned an empty transcript - the
+# failure being fixed in 2.9.5. Declared so that cannot happen again.
+onnxruntime>=1.28.0
+g2p-en>=2.1.0

@@ -108,6 +108,38 @@ HIDDEN_IMPORTS = [
     "email_validator",
 ]
 
+def _ensure_nltk_data() -> None:
+    r"""Fetch the corpora g2p-en needs, so the build does not depend on luck.
+
+    --collect-all g2p_en gathers whatever nltk data is already on the machine.
+    On the machine these builds were made on, cmudict and the tagger happened
+    to be in %APPDATA%\nltk_data because something had downloaded them once.
+    On a clean machine - a new laptop, a CI runner - they are not there, the
+    build succeeds anyway, and the installer ships an offline voice that
+    cannot start. That is the same class of silent gap as the missing
+    onnxruntime extension, so it is closed the same way: the build fetches
+    what it needs instead of assuming.
+    """
+    try:
+        import nltk
+    except ImportError:
+        print("[build] nltk is not installed; the offline voice will not work "
+              "in this build.")
+        return
+
+    for package, probe in (("cmudict", "corpora/cmudict"),
+                           ("averaged_perceptron_tagger", "taggers/averaged_perceptron_tagger"),
+                           ("averaged_perceptron_tagger_eng", "taggers/averaged_perceptron_tagger_eng")):
+        try:
+            nltk.data.find(probe)
+        except LookupError:
+            print(f"[build] fetching nltk {package}...")
+            try:
+                nltk.download(package, quiet=True)
+            except Exception as exc:
+                print(f"[build] could not fetch {package}: {exc}")
+
+
 def _extra_binaries() -> list:
     """Native modules PyInstaller's own hooks fail to find.
 
@@ -275,6 +307,7 @@ def build(onefile: bool = False) -> int:
     cmd.append(ENTRY)
 
     _write_analytics_config()
+    _ensure_nltk_data()
     print("[build] running PyInstaller...")
     result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode == 0:
