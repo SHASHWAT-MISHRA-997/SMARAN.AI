@@ -326,6 +326,8 @@ from app.plugin_system import plugin_manager, PluginConfig
 app.include_router(plugin_router)
 from app.sites_routes import router as sites_router
 app.include_router(sites_router)
+from app.agent.routes import router as agent_router
+app.include_router(agent_router)
 
 class ClientLog(BaseModel):
     """Something that went wrong in the page, written where it can be read.
