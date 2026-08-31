@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch, PictureInPicture2,} from 'lucide-react';
+import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch,} from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { parseJsonResponse } from '../utils/api';
 import { downloadProjectZip, downloadSingleFile } from '../utils/zip';
@@ -9,7 +9,7 @@ import HackerVoiceAssistant from './HackerVoiceAssistant';
 import HeroLogo3D from './HeroLogo3D';
 
 import { WakeWordListener, WAKE_PHRASE_DEFAULT } from '../utils/wakeWord';
-import { detectClientDevice, isDesktopApp } from './RightPanel';
+import { detectClientDevice } from './RightPanel';
 import { Maya3DCanvas } from './CodePreviewVisualizer';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
@@ -1348,72 +1348,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const micStreamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  // Why the last transcription came back empty, so the failure can be named
-  // rather than blamed on the microphone.
-  const lastTranscribeErrorRef = useRef('');
-  /* Set when the browser's hosted speech service proves unusable.
-
-     It starts true in the packaged desktop window, because there it is always
-     unusable: WebView2 exposes webkitSpeechRecognition with no speech service
-     behind it. Discovering that by trying is what produced the flash - the
-     button turned red, the service failed, the button turned back - on every
-     single click, since nothing remembered the previous failure. */
-  const speechServiceDeadRef = useRef(isDesktopApp());
-
-  /* Floating the whole app above other windows. Separate from the assistant's
-     picture-in-picture: that one shows her alone, this one shows everything.
-     windowPinnable is false in a browser, where a page cannot float over
-     other applications and the button would be a promise nothing can keep. */
-  const [windowPinnable, setWindowPinnable] = useState(false);
-  const [floatingOn, setFloatingOn] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_BASE}/api/window/status`, { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled || !d) return;
-        setWindowPinnable(Boolean(d.available));
-        setFloatingOn(d.mode === 'float');
-      })
-      .catch(() => { /* no window to pin; the button stays hidden */ });
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!floatingOn) return undefined;
-    const onResize = () => {
-      // Comfortably wider than the floating size means it has been pulled
-      // back out by hand - maximised, or dragged large - and the app should
-      // agree rather than keep claiming to float.
-      if (window.innerWidth >= 1100) {
-        fetch(`${API_BASE}/api/window/pip`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ on: false }),
-        }).catch(() => {});
-        setFloatingOn(false);
-      }
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [floatingOn]);
-
-  const toggleFloating = async () => {
-    const next = !floatingOn;
-    try {
-      const res = await fetch(`${API_BASE}/api/window/pip`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ on: next, mode: 'float' }),
-      });
-      if (res.ok) setFloatingOn(next);
-    } catch {
-      /* the window stays as it is */
-    }
-  };
   // Refs to avoid stale closures in RAF loops and recognition callbacks
   const isVoiceModeOpenRef = useRef(false);
   const isDictatingRef = useRef(false);
@@ -1706,16 +1640,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       });
       if (res.ok) {
         const data = await res.json();
-        // The backend now says why it produced nothing. Carrying that up
-        // matters because the caller's only message was about microphone
-        // permission, which is the wrong thing to tell someone whose
-        // microphone is working and whose speech engine is not.
-        lastTranscribeErrorRef.current = data?.error || '';
         return (data?.transcript || '').trim();
       }
-      lastTranscribeErrorRef.current = `The server answered ${res.status}.`;
     } catch (e) {
-      lastTranscribeErrorRef.current = e?.message || 'The request did not complete.';
       console.warn('Backend voice transcribe error:', e);
     }
     return '';
@@ -1770,22 +1697,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         recorder.ondataavailable = (event) => { if (event.data?.size) audioChunksRef.current.push(event.data); };
         recorder.onstop = async () => {
           const transcript = await transcribeRecordedAudio();
-          if (transcript) {
-            setInput([startingText, transcript].filter(Boolean).join(' ').trim());
-            return;
-          }
-          // Two different situations were reported with one sentence about
-          // microphone permission: the engine heard nothing, and the engine
-          // did not run. The second is not the microphone's fault and the
-          // advice was sending people to check a setting that was fine.
-          const failure = lastTranscribeErrorRef.current;
-          window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
-            detail: {
-              message: failure
-                ? `Speech recognition could not run: ${failure}`
-                : 'No speech was heard. The microphone is working; try speaking closer to it.',
-            },
-          }));
+          if (transcript) setInput([startingText, transcript].filter(Boolean).join(' ').trim());
+          else window.dispatchEvent(new CustomEvent('smaran:dictation-error', { detail: { message: 'No speech was recognized. Check microphone permission, then try again.' } }));
         };
         sidebarDictationRef.current = { kind: 'recording', recorder, stream };
         recorder.start(250);
@@ -1802,11 +1715,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     const toggle = async () => {
       if (sidebarDictationRef.current) { stop(); return; }
       const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      // Once the browser's speech service has failed, it fails every time.
-      // Trying it first on each click meant the button lit up, the service
-      // died, and the button went out again before the recorder that actually
-      // works had a chance - which is the flash of red people were seeing.
-      if (!Recognition || speechServiceDeadRef.current) {
+      if (!Recognition) {
         await startRecordedDictation();
         return;
       }
@@ -1835,8 +1744,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       const SERVICE_UNAVAILABLE = ['network', 'service-not-allowed', 'language-not-supported'];
       recognition.onerror = (event) => {
         if (SERVICE_UNAVAILABLE.includes(event.error)) {
-          // Remembered, so the next click goes straight to the recorder.
-          speechServiceDeadRef.current = true;
           stop();
           startRecordedDictation();
           return;
@@ -3046,13 +2953,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ on: action === 'pip_on' }),
-        }).then(() => {
-          // A pinned 420x560 window showing the full workspace is unusable -
-          // there is no room for a sidebar, a chat and a telemetry panel. The
-          // small window is the assistant, so entering it opens her and
-          // leaving it puts everything back.
-          document.documentElement.classList.toggle('sm-pip', action === 'pip_on');
-          if (action === 'pip_on') openVoiceMode();
         }).catch(() => {});
         break;
       case 'clear_chat':
@@ -3194,29 +3094,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             >
               <LayoutDashboard className="w-4 h-4" />
               <span className="hidden md:inline text-[11px]">Performance</span>
-            </button>
-          )}
-
-          {/* Float the whole app above your other windows. This is not
-              picture-in-picture and does not pretend to be: everything stays -
-              sidebar, chat, panels - the window is just smaller and on top.
-              Picture-in-picture is the assistant alone, and lives inside her.
-              Only offered where there is a real window to pin; in a browser a
-              page cannot float over other applications. */}
-          {windowPinnable && (
-            <button
-              onClick={toggleFloating}
-              title={floatingOn
-                ? 'Back to the normal window'
-                : 'Keep SMARAN.AI above your other windows'}
-              className={`flex p-2 rounded-xl border shadow-xs hover:scale-105 transition-all cursor-pointer items-center gap-1.5 font-bold text-xs ${
-                floatingOn
-                  ? 'bg-indigo-600 border-indigo-500 text-white'
-                  : 'bg-indigo-50 dark:bg-zinc-900 hover:bg-indigo-100 dark:hover:bg-indigo-950/50 border-indigo-200 dark:border-zinc-800 text-indigo-600 dark:text-indigo-400'
-              }`}
-            >
-              <PictureInPicture2 className="w-4 h-4" />
-              <span className="hidden lg:inline text-[11px]">{floatingOn ? 'Dock' : 'Float'}</span>
             </button>
           )}
         </div>
@@ -3542,10 +3419,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={!activeSessionId || directUploading} className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors cursor-pointer disabled:opacity-35" title="Attach Files">
               <Upload className="w-4 h-4" />
             </button>
-            {/* The folder icon that stood here did the same thing as the
-                "Folder" chip in the row below - same ref, same handler - so
-                the composer offered folder upload twice, once labelled and
-                once not. The labelled one stays. */}
+            <button type="button" onClick={() => folderInputRef.current?.click()} disabled={!activeSessionId || directUploading} className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl transition-colors cursor-pointer disabled:opacity-35" title="Upload Folder">
+              <FolderPlus className="w-4 h-4" />
+            </button>
           </div>
 
           {/* The textarea and the send buttons are deliberately not gated on
@@ -3636,7 +3512,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               title="Attach Files"
             >
               <Upload className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Attach file</span>
+              <span>File</span>
             </button>
 
             {/* Folder Attach */}
@@ -3645,10 +3521,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               onClick={() => folderInputRef.current?.click()}
               disabled={!activeSessionId || directUploading}
               className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold border border-zinc-200 dark:border-zinc-700/60 cursor-pointer disabled:opacity-35 shrink-0"
-              title="Attach a folder of files to this message"
+              title="Upload Folder"
             >
               <FolderPlus className="w-3.5 h-3.5" />
-              <span>Attach folder</span>
+              <span>Folder</span>
             </button>
 
             {/* RAG Toggle */}

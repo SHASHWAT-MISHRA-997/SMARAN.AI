@@ -27,8 +27,30 @@ _window: Optional[Any] = None
 #: restoring returns the window you had and not a guess at a default.
 _previous: Optional[Dict[str, int]] = None
 
-PIP_WIDTH = 420
-PIP_HEIGHT = 560
+#: Which pinned mode is active - "pip", "float" or None. The page needs to
+#: know which, because the two show different things.
+_mode: Optional[str] = None
+
+# Two different things, which had been one.
+#
+# Picture-in-picture is the assistant and nothing else - a small pane you
+# glance at and talk to while you work in another application. It is
+# deliberately too small to hold a workspace, because it is not meant to.
+#
+# A floating window is the whole app, kept above your other windows. Chat,
+# sidebar, everything - just not buried behind the browser you are reading.
+#
+# One button did both and the result satisfied neither: too big to be a
+# picture-in-picture, too small and too stripped to be the app.
+PIP_WIDTH = 300
+PIP_HEIGHT = 420
+# 480 wide was tried and was wrong for a reason worth writing down: below
+# 768px the interface switches to its phone layout, so a "floating window
+# showing the whole app" became a drawer covering a single column. The width
+# is therefore fixed just past that breakpoint - it is the narrowest the real
+# layout exists at - and the size came out of the height instead.
+FLOAT_WIDTH = 800
+FLOAT_HEIGHT = 600
 EDGE_GAP = 24
 
 
@@ -90,6 +112,7 @@ def status() -> Dict[str, Any]:
     return {
         "available": available(),
         "pinned": _previous is not None,
+        "mode": _mode,
         "detail": (
             "The desktop window can be shrunk and pinned above other apps."
             if available() else
@@ -99,39 +122,64 @@ def status() -> Dict[str, Any]:
     }
 
 
-def enter_pip() -> Dict[str, Any]:
-    """Shrink to a corner and stay above other windows."""
-    global _previous
+def enter_pip(mode: str = "pip") -> Dict[str, Any]:
+    """Pin the window above the others, either as the assistant or as the app.
+
+    mode "pip"   - small, the assistant alone.
+    mode "float" - the whole app, kept on top.
+    """
+    global _previous, _mode
     if not available():
         return {"ok": False, "error": status()["detail"]}
+
+    width, height = (FLOAT_WIDTH, FLOAT_HEIGHT) if mode == "float" else (PIP_WIDTH, PIP_HEIGHT)
+
+    # Never taller or wider than the screen it has to fit on. A fixed size
+    # that happens to suit this monitor runs off the bottom of a shorter one,
+    # and the part that goes missing is the bottom - which is where the
+    # composer and the call controls are. The margin leaves room for the
+    # taskbar rather than hiding behind it.
+    try:
+        screen = __import__("webview").screens[0]
+        width = min(width, max(240, int(screen.width) - 80))
+        height = min(height, max(320, int(screen.height) - 120))
+    except Exception:
+        logger.info("Could not read the screen size; using the requested size.")
+
     try:
         if _previous is None:
             _previous = {"width": int(_window.width), "height": int(_window.height),
                          "x": int(_window.x), "y": int(_window.y)}
-        _window.resize(PIP_WIDTH, PIP_HEIGHT)
-        # Bottom right, which is where a picture-in-picture is expected and
-        # where it covers least. Screen size is read rather than assumed;
-        # a hardcoded 1920x1080 would land off-screen on a smaller display.
+        _mode = mode
+        _window.resize(width, height)
+        # Centred. It used to go to the bottom right corner, which is the
+        # convention for a video thumbnail you glance at - but this is a
+        # character you talk to and look at, and in the corner it read as
+        # something that had been shoved out of the way. Screen size is read
+        # rather than assumed; a hardcoded 1920x1080 would land off-screen on
+        # a smaller display.
         try:
             screens = __import__("webview").screens
             screen = screens[0]
-            _window.move(int(screen.width) - PIP_WIDTH - EDGE_GAP,
-                         int(screen.height) - PIP_HEIGHT - EDGE_GAP * 4)
+            _window.move(max(0, (int(screen.width) - width) // 2),
+                         max(0, (int(screen.height) - height) // 2))
         except Exception:
             logger.info("Could not read the screen size; leaving the window where it is.")
         _window.on_top = True
         rounded = _set_corners(True)
-        return {"ok": True, "pinned": True, "rounded": rounded,
-                "width": PIP_WIDTH, "height": PIP_HEIGHT,
-                "detail": ("Pinned above your other windows. Drag it by the title "
-                           "bar, and drag any edge to resize it.")}
+        return {"ok": True, "pinned": True, "rounded": rounded, "mode": mode,
+                "width": width, "height": height,
+                "detail": ("The assistant, pinned above your other windows."
+                           if mode != "float" else
+                           "The whole app, kept above your other windows. "
+                           "Drag any edge to resize it.")}
     except Exception as exc:
         return {"ok": False, "error": "Could not pin the window: %s" % str(exc)[:120]}
 
 
 def exit_pip() -> Dict[str, Any]:
     """Back to the size and place it was before."""
-    global _previous
+    global _previous, _mode
     if not available():
         return {"ok": False, "error": status()["detail"]}
     try:
@@ -141,7 +189,9 @@ def exit_pip() -> Dict[str, Any]:
             _window.resize(_previous["width"], _previous["height"])
             _window.move(_previous["x"], _previous["y"])
             _previous = None
-        return {"ok": True, "pinned": False, "detail": "Back to the full window."}
+        _mode = None
+        return {"ok": True, "pinned": False, "mode": None,
+                "detail": "Back to the full window."}
     except Exception as exc:
         return {"ok": False, "error": "Could not restore the window: %s" % str(exc)[:120]}
 

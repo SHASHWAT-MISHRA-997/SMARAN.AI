@@ -137,6 +137,28 @@ const Sidebar = ({
     .join('') || 'Y';
 
   const [dictationError, setDictationError] = useState('');
+  /* The folder actually open, or null. Read rather than assumed: the list
+     used to be one hardcoded name. */
+  const [openProject, setOpenProject] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const read = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/workspace/status`, { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setOpenProject(data?.open ? data : null);
+      } catch {
+        // No workspace to show is a normal state, not an error to report.
+      }
+    };
+    read();
+    // Opening a folder happens elsewhere in the app, so this listens rather
+    // than polling.
+    window.addEventListener('smaran:workspace-changed', read);
+    return () => { cancelled = true; window.removeEventListener('smaran:workspace-changed', read); };
+  }, []);
   const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   const isLoggedIn = Boolean(user || token || (typeof window !== 'undefined' && localStorage.getItem('sm_token')));
 
@@ -460,8 +482,25 @@ const Sidebar = ({
           <button onClick={() => onNavigate('sites')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'sites' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Globe2 className="h-4 w-4"/> Sites</button>
           <button onClick={() => onNavigate('plugins')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'plugins' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Blocks className="h-4 w-4"/> Plugins</button>
           <button onClick={() => onNavigate('terminal')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Terminal className="h-4 w-4"/> Terminal</button>
-          <p className="px-3 pb-1 pt-4 text-xs font-medium text-zinc-500">Projects</p>
-          <button onClick={() => onNavigate('chat')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'chat' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><FolderOpen className="h-4 w-4"/><span className="truncate">SMARAN.AI</span></button>
+          {/* This said SMARAN.AI under a "Projects" heading on every install,
+              for everyone, whatever they had open - the app's own name written
+              into the markup, not a project. There is a real workspace: a
+              folder you open, which the backend reports at
+              /api/workspace/status. That folder is the project, so that is
+              what is listed, and when none is open the heading does not appear
+              claiming otherwise. */}
+          {openProject && (
+            <>
+              <p className="px-3 pb-1 pt-4 text-xs font-medium text-zinc-500">Project</p>
+              <button
+                onClick={() => onOpenWorkspace?.()}
+                title={openProject.root}
+                className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'chat' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}
+              >
+                <FolderOpen className="h-4 w-4"/><span className="truncate">{openProject.name}</span>
+              </button>
+            </>
+          )}
         </> : <>
           <RailBtn icon={<Globe2 className="h-5 w-5"/>} label="Sites" active={activeView === 'sites'} onClick={() => onNavigate('sites')}/>
           <RailBtn icon={<Blocks className="h-5 w-5"/>} label="Plugins & Skills" active={activeView === 'plugins'} onClick={() => onNavigate('plugins')}/>
@@ -538,7 +577,13 @@ const Sidebar = ({
         {expanded ? (
           <>
             {showUtilityMenu && (
-              <div className="absolute bottom-[110px] left-2 right-2 rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-2 shadow-2xl z-50 backdrop-blur-md">
+              /* bottom-[110px] was measured against the old contents of this
+                 block. Remove a row from it and the menu floats away from the
+                 button that opens it, which is what left Settings and Clear
+                 sitting high up in the middle of the sidebar. Anchored to the
+                 block instead, so it sits just above the button whatever else
+                 is in here. */
+              <div className="absolute bottom-full mb-2 left-2 right-2 rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-2 shadow-2xl z-50 backdrop-blur-md">
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
                     onClick={() => { onNavigate('settings'); setShowUtilityMenu(false); }}
@@ -570,42 +615,6 @@ const Sidebar = ({
                 <button type="button" onClick={() => setDictationError('')} className="ml-1 font-bold underline text-indigo-600 dark:text-white">Dismiss</button>
               </div>
             )}
-
-            {/* Distinct Voice Control Card */}
-            <div className="flex items-center justify-between p-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 shadow-xs">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${
-                  voiceOutputEnabled
-                    ? 'bg-emerald-500 text-white animate-pulse'
-                    : 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400'
-                }`}>
-                  <Volume2 className="w-3.5 h-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <span className="block text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                    {voiceOutputEnabled ? 'Listening…' : 'Voice Dictate'}
-                  </span>
-                  <span className="block text-[10px] text-zinc-500 dark:text-zinc-400">
-                    {voiceOutputEnabled ? 'Speak - it types for you' : 'Speak into the message box'}
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  onNavigate('chat');
-                  window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:toggle-dictation')), 120);
-                }}
-                className={`px-2.5 py-1 text-xs font-black rounded-lg transition border cursor-pointer ${
-                  voiceOutputEnabled
-                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
-                    : 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700'
-                }`}
-              >
-                {voiceOutputEnabled ? 'Stop' : 'Speak'}
-              </button>
-            </div>
 
             {/* Distinct User Profile & Sign In Row */}
             <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-2 shadow-xs">
@@ -652,16 +661,6 @@ const Sidebar = ({
           </>
         ) : (
           <>
-            {/* Voice toggle button in collapsed rail */}
-            <RailBtn
-              icon={<Volume2 className={`w-5 h-5 ${voiceOutputEnabled ? 'text-emerald-400 animate-pulse' : 'text-indigo-600 dark:text-indigo-400'}`} />}
-              label={voiceOutputEnabled ? 'Dictating' : 'Voice Dictate'}
-              active={voiceOutputEnabled}
-              onClick={() => {
-                onNavigate('chat');
-                window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:toggle-dictation')), 120);
-              }}
-            />
 
             {/* Sign in button in collapsed rail — only if not logged in */}
             {!isLoggedIn && (
@@ -699,7 +698,9 @@ const Sidebar = ({
   /* Mobile sidebar */
   const mobileSidebar = (
     <>
-      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-white/95 dark:bg-[#1a1b1e] border-b border-zinc-200 dark:border-zinc-800 shrink-0 z-30 mobile-px-4 mobile-py-3">
+      {/* pip-hide: pinned at 420 wide this narrow-window bar sat above the
+          assistant and offered a menu there is no room to use. */}
+      <div className="pip-hide md:hidden flex items-center justify-between px-4 py-3 bg-white/95 dark:bg-[#1a1b1e] border-b border-zinc-200 dark:border-zinc-800 shrink-0 z-30 mobile-px-4 mobile-py-3">
         <div className="flex items-center gap-2">
           <Logo3DMotion size="sm" />
           <span className="font-black text-sm tracking-wide select-none flex items-center ml-1">
@@ -784,22 +785,6 @@ const Sidebar = ({
               </span>
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                onNavigate('chat');
-                setMobileOpen(false);
-                window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:toggle-dictation')), 120);
-              }}
-              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-black transition border shadow-xs ${
-                voiceOutputEnabled
-                  ? 'bg-emerald-600 text-white border-emerald-500'
-                  : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-300 dark:border-zinc-700'
-              }`}
-            >
-              <Volume2 className="h-3.5 w-3.5 text-white" />
-              <span className="text-white font-bold">{voiceOutputEnabled ? 'Listening' : 'Voice'}</span>
-            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-2">

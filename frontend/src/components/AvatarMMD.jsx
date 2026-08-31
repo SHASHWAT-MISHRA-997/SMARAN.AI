@@ -717,7 +717,7 @@ const AvatarMMD = ({
         const gw = gesture.weight;
         const beat = loud * gw;
 
-        const armDrift = 0.03 + energy * 0.06;
+        const armDrift = 0.05 + energy * 0.11;
         const armPhase = fractalNoise(time * 0.21 + 3);
         const armPhaseB = fractalNoise(time * 0.21 + 71);
         let liftL = 0;
@@ -725,15 +725,15 @@ const AvatarMMD = ({
         let openL = 0;
         let openR = 0;
         if (gesture.shape === 0) {          // both hands open outward
-          liftL = 0.30; liftR = 0.30; openL = 0.16; openR = 0.16;
+          liftL = 0.52; liftR = 0.52; openL = 0.30; openR = 0.30;
         } else if (gesture.shape === 1) {   // one hand leads
-          if (gesture.side < 0) { liftL = 0.46; openL = 0.22; liftR = 0.08; }
-          else { liftR = 0.46; openR = 0.22; liftL = 0.08; }
+          if (gesture.side < 0) { liftL = 0.78; openL = 0.38; liftR = 0.14; }
+          else { liftR = 0.78; openR = 0.38; liftL = 0.14; }
         } else {                            // small contained beats
-          liftL = 0.16; liftR = 0.16; openL = 0.06; openR = 0.06;
+          liftL = 0.28; liftR = 0.28; openL = 0.12; openR = 0.12;
         }
         // The beat rides on top, so the arms punctuate loud syllables.
-        const pulse = Math.sin(time * 5.2) * 0.06 * beat;
+        const pulse = Math.sin(time * 5.2) * 0.11 * beat;
 
         if (bones.armL) {
           bones.armL.rotation.z = -0.62 - (armPhase * 0.5 + 0.5) * armDrift + (liftL + pulse) * gw;
@@ -746,6 +746,25 @@ const AvatarMMD = ({
         // Elbows bend with the lift, otherwise the arms swing as stiff poles.
         if (bones.elbowL) bones.elbowL.rotation.z = -0.20 - Math.abs(armPhase) * armDrift * 0.8 - liftL * gw * 0.8;
         if (bones.elbowR) bones.elbowR.rotation.z = 0.20 + Math.abs(armPhaseB) * armDrift * 0.8 + liftR * gw * 0.8;
+
+        // Arms alone are not what makes someone look like they are talking.
+        // People nod into their own sentences, turn slightly on a phrase and
+        // lean a little with emphasis, and with the head and torso perfectly
+        // still the whole thing read as a puppet with moving arms. These are
+        // added on top of the idle motion already there, so she keeps
+        // breathing and drifting underneath.
+        if (bones.head && gw > 0.001) {
+          const nod = Math.sin(time * 4.3) * 0.055 * beat
+            + fractalNoise(time * 0.7 + 11) * 0.045 * gw;
+          const turn = fractalNoise(time * 0.45 + 23) * 0.075 * gw;
+          bones.head.rotation.x += nod;
+          bones.head.rotation.y += turn;
+          bones.head.rotation.z += fractalNoise(time * 0.38 + 91) * 0.035 * gw;
+        }
+        if (bones.chest && gw > 0.001) {
+          bones.chest.rotation.x += Math.sin(time * 3.1) * 0.022 * beat;
+          bones.chest.rotation.y += fractalNoise(time * 0.33 + 47) * 0.05 * gw;
+        }
       }
 
       handles.renderer.render(handles.scene, handles.camera);

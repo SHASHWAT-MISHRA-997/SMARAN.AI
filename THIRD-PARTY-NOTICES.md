@@ -48,7 +48,6 @@ None of their code is here.
 | Project | Licence | Reached by |
 |---|---|---|
 | [Ollama](https://ollama.com) and the models you pull | MIT (Ollama); models vary — check each | Local HTTP API |
-| [Voicebox](https://github.com/jamiepine/voicebox) | MIT | Local REST API and its MCP server |
 | [HyperFrames](https://github.com/heygen-com/hyperframes) | Apache-2.0 | Its command line |
 | [Meetily](https://github.com/Zackriya-Solutions/meetily) | MIT | Files it exports |
 | [Paperclip](https://github.com/paperclipai/paperclip) | MIT | Its command line |

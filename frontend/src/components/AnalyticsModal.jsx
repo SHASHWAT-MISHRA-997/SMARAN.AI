@@ -68,7 +68,7 @@ export default function AnalyticsModal({ isOpen, onClose, token, apiBase }) {
   useEffect(() => {
     if (!isOpen) return undefined;
     fetchAnalytics(false);
-    if (autoRefresh) refreshRef.current = window.setInterval(() => fetchAnalytics(true), 5000);
+    if (autoRefresh) refreshRef.current = window.setInterval(() => fetchAnalytics(true), 2000);
     return () => {
       if (refreshRef.current) window.clearInterval(refreshRef.current);
     };
@@ -223,7 +223,7 @@ export default function AnalyticsModal({ isOpen, onClose, token, apiBase }) {
               }`}
             >
               <span className={`w-2 h-2 rounded-full ${autoRefresh ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-              {autoRefresh ? 'AUTO REFRESH 5s' : 'PAUSED'}
+              {autoRefresh ? 'AUTO REFRESH 2s' : 'PAUSED'}
             </button>
             <button type="button" onClick={() => fetchAnalytics(false)} disabled={loading} className="p-2 text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 rounded-xl disabled:opacity-40" aria-label="Refresh saved logs">
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />

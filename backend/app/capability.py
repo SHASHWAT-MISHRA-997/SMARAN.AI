@@ -32,12 +32,44 @@ def _tool_present(name: str) -> bool:
 
 
 def _module_present(name: str) -> bool:
-    import importlib.util
+    """Whether the module can actually be imported.
+
+    This used to ask find_spec, which only answers whether something is
+    findable - and a package whose native extension is missing is perfectly
+    findable and still fails on import. That is exactly what happened to
+    onnxruntime in the packaged build: its .pyd had been dropped, find_spec
+    said yes, and this reported the offline voice and dictation as available
+    while both failed the moment they were used.
+
+    Importing costs more than a spec lookup, so the answer is remembered.
+    """
+    cached = _import_cache.get(name)
+    if cached is not None:
+        return cached
+
+    import importlib
 
     try:
-        return importlib.util.find_spec(name) is not None
-    except (ImportError, ValueError):
-        return False
+        importlib.import_module(name)
+        ok = True
+    except Exception as exc:
+        # Any failure means it cannot be used, which is the question asked -
+        # but the reason is recorded rather than dropped. A package that is
+        # present and will not import is the hardest kind of problem to find
+        # from the outside, and this was silent about exactly that.
+        _import_errors[name] = "%s: %s" % (type(exc).__name__, exc)
+        logging.getLogger(__name__).warning(
+            "%s is present but could not be imported: %s", name, exc)
+        ok = False
+
+    _import_cache[name] = ok
+    return ok
+
+
+_import_cache: dict = {}
+#: Why an import failed, by module name. Read by the capability report so a
+#: bundle that is missing a native piece says which piece.
+_import_errors: dict = {}
 
 
 def _requirement(need_gb: Optional[float], have_gb: float, label: str) -> dict:
@@ -98,8 +130,13 @@ def scan(force: bool = False) -> dict:
                   "only: the phonemiser here reads the Latin alphabet, so the "
                   "model's Hindi voices are refused rather than mispronounced."
                   if (onnx and g2p) else
-                  "Needs onnxruntime and g2p-en. Without them only the online "
-                  "voice works.",
+                  # Which one, and why. "Needs onnxruntime and g2p-en" was true
+                  # and useless: both were installed and one of them would not
+                  # import, and this said nothing about which or what happened.
+                  "Cannot use the offline voice. " + "; ".join(
+                      "%s - %s" % (mod, _import_errors.get(mod, "not installed"))
+                      for mod, ok in (("onnxruntime", onnx), ("g2p_en", g2p))
+                      if not ok),
         "engine": "kokoro",
     }
     caps["speech-to-text"] = {

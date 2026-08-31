@@ -91,22 +91,6 @@ CATALOGUE = [
         "needs": "uv installed (pip install uv)",
         "verified": None,
     },
-    {
-        # Voicebox ships two MCP surfaces. Its HTTP one at :17493/mcp speaks
-        # StreamableHTTP, which answers in server-sent events - the client
-        # here reads JSON and rejected it with "reply was not JSON". The
-        # binary beside it speaks plain stdio, which the client does handle,
-        # so that is what is offered. Nothing is downloaded for this one; it
-        # comes with Voicebox.
-        "name": "voicebox",
-        "title": "Voicebox",
-        "description": "Speak in a cloned voice and transcribe audio, through "
-                       "Voicebox's own MCP server.",
-        "target": "%LOCALAPPDATA%\\Programs\\Voicebox\\voicebox-mcp.exe",
-        "publisher": "jamiepine/voicebox (MIT)",
-        "needs": "Voicebox installed from voicebox.sh",
-        "verified": "Connected here: voicebox 3.2.4, 4 tools.",
-    },
 ]
 
 

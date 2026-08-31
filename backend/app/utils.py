@@ -111,8 +111,25 @@ def warm_up_speech_models() -> None:
             logger.warning(f"Speech model '{model_name}' warm-up skipped: {exc}")
 
 
+#: Why the last transcription produced nothing, or None if it succeeded.
+#:
+#: Failures here used to vanish into a logger.warning and an empty string,
+#: and the interface turned that silence into "No speech was recognized.
+#: Check microphone permission" - blaming the microphone for something that
+#: had nothing to do with it. Several callers depend on the empty string, so
+#: the reason is recorded beside it rather than raised.
+_last_transcription_error: Optional[str] = None
+
+
+def last_transcription_error() -> Optional[str]:
+    """The reason the last transcription returned nothing, if it failed."""
+    return _last_transcription_error
+
+
 def _transcribe_local_media(file_path: str, language: str = "auto") -> str:
     # Local-first and private by default. No hosted speech API is called here.
+    global _last_transcription_error
+    _last_transcription_error = None
     try:
         model = _get_whisper_model(_whisper_model_name_for(language))
         selected_language = (language or "auto").lower().split("-")[0]
@@ -129,8 +146,13 @@ def _transcribe_local_media(file_path: str, language: str = "auto") -> str:
         res = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
         if res:
             return res
+        # Ran fine and heard nothing. That is a real answer, not a fault, and
+        # it is the one case where "check your microphone" is fair advice.
+        _last_transcription_error = None
     except Exception as whisper_err:
-        logger.warning(f"Local faster-whisper transcription note: {whisper_err}")
+        _last_transcription_error = "%s: %s" % (type(whisper_err).__name__, whisper_err)
+        logger.warning("Local faster-whisper transcription failed: %s", whisper_err,
+                       exc_info=True)
     return ""
 
 # --- Ingestion File Parsers ---

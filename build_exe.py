@@ -108,6 +108,42 @@ HIDDEN_IMPORTS = [
     "email_validator",
 ]
 
+def _extra_binaries() -> list:
+    """Native modules PyInstaller's own hooks fail to find.
+
+    onnxruntime's hook asks for onnxruntime.capi.onnxruntime_pybind11_state
+    as a hidden import and the build log answers:
+
+        ERROR: Hidden import 'onnxruntime.capi.onnxruntime_pybind11_state'
+        not found
+
+    It carries on and produces a build with onnxruntime's DLLs but without
+    the .pyd that `import onnxruntime` actually needs, so the import fails at
+    runtime in a way nothing at build time complains about.
+
+    That one missing file was both voice failures. Dictation asks
+    faster-whisper to run with vad_filter=True, and its voice-activity filter
+    needs onnxruntime - so every attempt ended in "Applying the VAD filter
+    requires the onnxruntime package" and came back as an empty transcript.
+    The offline voice needs it too.
+
+    Located rather than hardcoded: a path written down here would be this
+    machine's, and would rot the moment Python moved.
+    """
+    found = []
+    try:
+        import onnxruntime
+
+        capi = os.path.join(os.path.dirname(onnxruntime.__file__), "capi")
+        for name in os.listdir(capi):
+            if name.endswith(".pyd"):
+                found.append((os.path.join(capi, name), os.path.join("onnxruntime", "capi")))
+    except Exception as exc:
+        print(f"[build] onnxruntime binaries not located ({exc}); "
+              "the offline voice and dictation will not work in this build.")
+    return found
+
+
 # Packages that ship data files / metadata they read at runtime.
 COLLECT_ALL = [
     "chromadb",
@@ -115,6 +151,14 @@ COLLECT_ALL = [
     "deep_translator",
     "tokenizers",
     "tiktoken_ext",
+    # The offline voice. Both are installed in the build environment and
+    # neither was being collected, so the packaged app reported
+    # "text-to-speech-offline: needs onnxruntime and g2p-en" and Speak fell
+    # back to the online voice - which is why speaking worked from source and
+    # not from the installer. onnxruntime also carries native libraries that
+    # only --collect-all brings along.
+    "onnxruntime",
+    "g2p_en",
 ]
 
 # Optional heavy dependencies that ChromaDB advertises but SMARAN.AI never uses:
@@ -217,6 +261,9 @@ def build(onefile: bool = False) -> int:
 
     if os.path.isfile(ICON):
         cmd += ["--icon", ICON]
+
+    for source, destination in _extra_binaries():
+        cmd += ["--add-binary", f"{source}{sep}{destination}"]
 
     for module in HIDDEN_IMPORTS:
         cmd += ["--hidden-import", module]

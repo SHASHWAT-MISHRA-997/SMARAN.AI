@@ -92,6 +92,11 @@ const WorkspacePanel = ({ isOpen, onClose }) => {
       await call(path, { method: 'POST', body: JSON.stringify(body) });
       await refresh();
       setError('');
+      // The sidebar lists the open folder, so it needs to hear about a folder
+      // being opened or closed rather than polling for it.
+      if (path === '/open' || path === '/close') {
+        window.dispatchEvent(new CustomEvent('smaran:workspace-changed'));
+      }
     } catch (e) {
       setError(e.message);
     } finally {

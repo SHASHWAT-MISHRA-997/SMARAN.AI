@@ -96,6 +96,16 @@ def _prepare_environment() -> None:
     os.environ.setdefault("HUGGINGFACE_HUB_CACHE", os.path.join(data_dir, "models", "hub"))
 
     bundle = _bundle_dir()
+
+    # nltk looks for its corpora in a fixed set of places, none of which is
+    # inside a frozen bundle. The data is shipped - _internal/nltk_data - and
+    # was simply never pointed at, so g2p-en could not build its tagger and
+    # the offline voice reported itself unavailable while its files sat there.
+    nltk_data = os.path.join(bundle, "nltk_data")
+    if os.path.isdir(nltk_data):
+        existing = os.environ.get("NLTK_DATA", "")
+        os.environ["NLTK_DATA"] = (nltk_data + os.pathsep + existing) if existing else nltk_data
+
     # The backend package lives at <bundle>/backend/app in source checkouts and
     # at <bundle>/app once frozen; make both importable as `app`.
     for candidate in (os.path.join(bundle, "backend"), bundle):
@@ -353,14 +363,18 @@ def _open_window(url: str) -> bool:
 
         _grant_webview2_media_permissions()
         window = webview.create_window(APP_NAME, url, width=1440, height=900,
-                                       min_size=(360, 480), confirm_close=False)
+                                       min_size=(260, 340), confirm_close=False)
         # Hand the window to the backend, which runs in this same process, so
         # picture-in-picture can shrink and pin the real window rather than
         # only shrinking a panel inside the page. A panel floats over the page;
         # the window floats over everything else, which is the point.
         #
-        # min_size was (900, 600) - larger than the 420x560 picture-in-picture
-        # size, so the resize would have been refused.
+        # min_size is the floor the window cannot go below, and it has twice
+        # been the reason picture-in-picture came out bigger than asked for:
+        # (900, 600) refused the resize outright, then (360, 480) silently
+        # clamped a 320x440 request back up to 360x480. It is now below the
+        # smallest mode, so the size that is asked for is the size that
+        # happens.
         try:
             from app.host_window import register as register_window
             register_window(window)
@@ -435,6 +449,18 @@ def _run_tts_worker(argv: list[str]) -> int:
 
 def main() -> int:
     _ensure_standard_streams()
+
+    # Before anything runs a command. This build has no console of its own, so
+    # every child process was given one - a black window opening and closing
+    # wherever the app shelled out. Turning a plugin on produced a burst of
+    # them, because the plugins check for their command line by running it.
+    try:
+        from app.no_console import install as _suppress_consoles
+
+        _suppress_consoles()
+    except Exception:
+        # A cosmetic fix must never be the reason the app fails to start.
+        pass
 
     if len(sys.argv) > 1 and sys.argv[1] == "--tts-worker":
         return _run_tts_worker(sys.argv[1:])

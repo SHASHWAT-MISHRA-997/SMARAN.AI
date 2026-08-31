@@ -63,6 +63,29 @@ const App = () => {
     return ['left', 'right', 'hidden'].includes(saved) ? saved : 'right';
   });
 
+  /* The pinned layout follows the window, not the button.
+
+     sm-pip was only ever applied by the picture-in-picture button, so the
+     page had no idea it was pinned unless it had been told. Enter it any
+     other way - a voice command, a restart while pinned, the window dragged
+     small by hand - and the full workspace stayed laid out inside a 300px
+     window: the phone header, the composer and the desktop pet all drawn
+     over the character.
+
+     Width is the honest signal. A window this narrow is a pinned one
+     whatever put it there, and a window that grows past it is not. */
+  useEffect(() => {
+    const PINNED_MAX_WIDTH = 460;
+    const apply = () => {
+      document.documentElement.classList.toggle(
+        'sm-pip', window.innerWidth <= PINNED_MAX_WIDTH,
+      );
+    };
+    apply();
+    window.addEventListener('resize', apply);
+    return () => window.removeEventListener('resize', apply);
+  }, []);
+
   // Refine the local user from the backend when reachable, but never gate or
   // log the user out — a backend hiccup must never show a login/legal screen.
   useEffect(() => {

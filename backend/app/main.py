@@ -4,6 +4,28 @@ import logging
 import os
 import re
 import sys
+
+# Suppress the console windows that a windowed build gives every child
+# process. Harmless anywhere else: it does nothing when this process already
+# owns a console, which is the case whenever the backend is run from a
+# terminal. Here as well as in desktop_app so it holds however this is
+# started.
+try:
+    from app.no_console import install as _suppress_consoles
+
+    _suppress_consoles()
+except Exception:
+    pass
+
+# Before anything imports inflect, which is to say before the offline voice is
+# asked for. See frozen_compat: a library reading its own source cannot work in
+# a packaged build, and that alone was why Speak had no offline voice.
+try:
+    from app.frozen_compat import install as _allow_frozen_introspection
+
+    _allow_frozen_introspection()
+except Exception:
+    pass
 import uuid
 import time
 import shutil
@@ -88,6 +110,30 @@ from app.password_policy import verify_password_strength  # noqa: E402
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("main")
+
+# The packaged build has no console, so basicConfig writes to nothing and
+# every warning the app has ever logged there was discarded. When something
+# works from source and not in the installed app - which is exactly the case
+# this was added for - there was no way to find out why. Warnings and errors
+# go to a file beside the app's own data, capped so it cannot grow without
+# limit. Nothing is sent anywhere; it is a local file.
+try:
+    if not sys.stderr or not sys.stderr.isatty():
+        from logging.handlers import RotatingFileHandler
+
+        _log_dir = os.getenv("DATA_DIR") or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        os.makedirs(_log_dir, exist_ok=True)
+        _file_handler = RotatingFileHandler(
+            os.path.join(_log_dir, "smaran.log"),
+            maxBytes=2 * 1024 * 1024, backupCount=2, encoding="utf-8")
+        _file_handler.setLevel(logging.WARNING)
+        _file_handler.setFormatter(logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+        logging.getLogger().addHandler(_file_handler)
+except Exception:
+    # Logging that cannot be set up must not stop the app from running.
+    pass
 
 # Rate limiting
 limiter = Limiter(key_func=get_remote_address)
@@ -3121,14 +3167,21 @@ async def transcribe_audio_endpoint(
             
         transcript = ""
         duration_ms = 0.0
+        # Why it produced nothing, when it produced nothing. This used to be
+        # swallowed twice over - once here and once inside the transcriber -
+        # so a broken engine and a silent room were reported identically, and
+        # the interface guessed at the microphone.
+        reason = None
         try:
-            from app.utils import _transcribe_local_media
+            from app.utils import _transcribe_local_media, last_transcription_error
             started = time.perf_counter()
             transcript = await asyncio.to_thread(_transcribe_local_media, temp_path, language)
             duration_ms = round((time.perf_counter() - started) * 1000, 1)
+            reason = last_transcription_error()
         except Exception as e:
-            logger.warning(f"Voice media transcribe fallback: {e}")
-            
+            reason = "%s: %s" % (type(e).__name__, e)
+            logger.warning("Voice transcribe failed: %s", e, exc_info=True)
+
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
@@ -3136,7 +3189,16 @@ async def transcribe_audio_endpoint(
                 pass
                 
         clean_transcript = (transcript or "").strip()
-        return {"ok": bool(clean_transcript), "transcript": clean_transcript, "language": language, "engine": "faster-whisper-local", "duration_ms": duration_ms, "request_id": request_id}
+        return {
+            "ok": bool(clean_transcript),
+            "transcript": clean_transcript,
+            "language": language,
+            "engine": "faster-whisper-local",
+            "duration_ms": duration_ms,
+            "request_id": request_id,
+            # None when the engine ran and simply heard nothing.
+            "error": reason,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -6795,16 +6857,26 @@ async def window_status_endpoint():
 
 @app.post("/api/window/pip")
 async def window_pip_endpoint(request: Request):
-    """Shrink and pin the desktop window, or put it back.
+    """Pin the desktop window above the others, or put it back.
 
     A floating panel drawn inside the page floats over the page and nothing
     else, so it does not help anyone trying to work in another application.
     Resizing and pinning the real window does.
+
+    Two modes, because they are two different things. "pip" is the assistant
+    alone in a small pane. "float" is the whole app kept on top. They were one
+    control doing both, which produced something too big to be the first and
+    too stripped to be the second.
     """
     from app import host_window
 
     body = await request.json()
-    result = host_window.enter_pip() if body.get("on", True) else host_window.exit_pip()
+    mode = str(body.get("mode") or "pip").lower()
+    if mode not in ("pip", "float"):
+        raise HTTPException(status_code=400,
+                            detail="mode must be 'pip' or 'float'.")
+    result = (host_window.enter_pip(mode) if body.get("on", True)
+              else host_window.exit_pip())
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("error", "Not available."))
     return result
@@ -7341,7 +7413,6 @@ from app.plugins.strix_security import StrixSecurityPlugin, metadata as strix_se
 from app.plugins.mcp_firecrawl import MCPFirecrawlPlugin, metadata as mcp_firecrawl_metadata
 from app.plugins.mcp_github import MCPGitHubPlugin, metadata as mcp_github_metadata
 from app.plugins.hyperframes import HyperFramesPlugin, metadata as hyperframes_metadata
-from app.plugins.voicebox import VoiceboxPlugin, metadata as voicebox_metadata
 from app.plugins.meetily import MeetilyPlugin, metadata as meetily_metadata
 
 plugin_manager.register_plugin(GoogleAgentsCLIPlugin, google_agents_cli_metadata, PluginConfig())
@@ -7356,7 +7427,6 @@ plugin_manager.register_plugin(StrixSecurityPlugin, strix_security_metadata, Plu
 plugin_manager.register_plugin(MCPFirecrawlPlugin, mcp_firecrawl_metadata, PluginConfig())
 plugin_manager.register_plugin(MCPGitHubPlugin, mcp_github_metadata, PluginConfig())
 plugin_manager.register_plugin(HyperFramesPlugin, hyperframes_metadata, PluginConfig())
-plugin_manager.register_plugin(VoiceboxPlugin, voicebox_metadata, PluginConfig())
 plugin_manager.register_plugin(MeetilyPlugin, meetily_metadata, PluginConfig())
 
 # Global Exception Handler (Zero information leakage)

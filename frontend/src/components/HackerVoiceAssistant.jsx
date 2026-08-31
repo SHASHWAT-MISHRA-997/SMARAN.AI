@@ -38,6 +38,7 @@ import EnergyCore from './EnergyCore';
 import GestureHUD from './GestureHUD';
 import CyberFX from './CyberFX';
 import { GESTURES } from '../utils/gestureControl';
+import { isDesktopApp } from './RightPanel';
 import AvatarVideo, { AVATAR_CHARACTERS } from './AvatarVideo';
 import AvatarMMD, { MMD_CHARACTERS } from './AvatarMMD';
 import CyberStage from './CyberStage';
@@ -708,7 +709,10 @@ export const HackerVoiceAssistant = ({
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ on: next }),
+        // From here it is always picture-in-picture: this button lives inside
+        // the assistant, and picture-in-picture is the assistant. Floating the
+        // whole app is a different control in the main window.
+        body: JSON.stringify({ on: next, mode: 'pip' }),
       });
       if (res.ok) {
         setPipOn(next);
@@ -725,6 +729,30 @@ export const HackerVoiceAssistant = ({
   // picture-in-picture - the class has to match.
   useEffect(() => {
     document.documentElement.classList.toggle('sm-pip', pipOn);
+  }, [pipOn]);
+
+  /* Maximising the window is a way of saying "give me the whole thing back",
+     and it was being ignored: the window grew and the page stayed in its
+     pinned layout, so a full-screen window showed a picture-in-picture. The
+     pinned size is 320 wide, so anything comfortably past it means the window
+     has been pulled back out by hand, and the app should agree rather than
+     wait to be told twice. */
+  useEffect(() => {
+    if (!pipOn) return undefined;
+    const onResize = () => {
+      if (window.innerWidth > 520) {
+        fetch(`${API_BASE}/api/window/pip`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ on: false }),
+        }).catch(() => {});
+        setPipOn(false);
+        document.documentElement.classList.remove('sm-pip');
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, [pipOn]);
 
   const [micStatus, setMicStatus] = useState('idle');
@@ -826,6 +854,14 @@ export const HackerVoiceAssistant = ({
   const [recognizerIssue, setRecognizerIssue] = useState('');
 
   const recognitionRef = useRef(null);
+  /* Set once the browser's speech service has proved unusable, so it is not
+     tried again for the rest of the session. Without this the error handler
+     restarted it half a second later, forever.
+
+     True from the start in the packaged desktop window: WebView2 exposes
+     webkitSpeechRecognition with nothing behind it, so trying it there only
+     ever costs a failed attempt and the flicker that goes with it. */
+  const speechServiceUnusableRef = useRef(isDesktopApp());
   const micStreamRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -1008,9 +1044,18 @@ export const HackerVoiceAssistant = ({
     // Android WebView repeatedly tears down its hosted SpeechRecognition
     // service, producing the audible mic on/off loop. Mobile already has the
     // local MediaRecorder + VAD + Whisper path below, which is more reliable.
-    if (isMobileVoiceDevice()) {
+    //
+    // The desktop window is the same story and was not covered. WebView2
+    // exposes webkitSpeechRecognition without any speech service behind it,
+    // so it fails with 'network', the handler below restarted it half a
+    // second later, and it failed again - a loop that took the microphone
+    // with it. That is why a voice call went green and dropped straight away
+    // and why nothing spoken ever reached the assistant. Once the service has
+    // shown it cannot work, this session stops asking.
+    if (isMobileVoiceDevice() || speechServiceUnusableRef.current) {
       setRecognizerStatus('local');
-      setRecognizerIssue('Using stable on-device recorded dictation.');
+      setRecognizerIssue('Listening on this device; speech is transcribed locally.');
+      startFreshRecorder();
       return;
     }
 
@@ -1085,10 +1130,22 @@ export const HackerVoiceAssistant = ({
           }
           return;
         }
-        const permissionError = e.error === 'not-allowed' || e.error === 'service-not-allowed';
+        // These three mean the hosted speech service is unusable, not that
+        // the microphone is. Retrying only produced the same failure again.
+        // 'service-not-allowed' was being reported as a denied microphone,
+        // which sent people to check a permission that was already granted.
+        if (['network', 'service-not-allowed', 'language-not-supported'].includes(e.error)) {
+          speechServiceUnusableRef.current = true;
+          setRecognizerStatus('local');
+          setRecognizerIssue('Listening on this device; speech is transcribed locally.');
+          startFreshRecorder();
+          return;
+        }
+
+        const permissionError = e.error === 'not-allowed';
         setRecognizerStatus(permissionError ? 'denied' : 'error');
         setRecognizerIssue(permissionError
-          ? 'Speech recognition permission or service access was denied. Please allow microphone in browser.'
+          ? 'Microphone permission was denied. Allow it, then try again.'
           : `Speech recognition error: ${e.error || 'unknown error'}.`);
         if (permissionError && mediaRecorderRef.current?.state !== 'recording') {
           setVoiceState('error');
@@ -1104,6 +1161,9 @@ export const HackerVoiceAssistant = ({
       };
 
       recognition.onend = () => {
+        // onerror fires first and onend follows it, so without this the
+        // restart it just decided against happened anyway.
+        if (speechServiceUnusableRef.current) return;
         setRecognizerStatus((current) => current === 'denied' || current === 'error' ? current : 'active');
         if (isOpen && !isMutedRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') {
           setTimeout(() => {
@@ -1123,7 +1183,7 @@ export const HackerVoiceAssistant = ({
         if (isOpen && !isMutedRef.current && voiceStateRef.current !== 'thinking' && voiceStateRef.current !== 'speaking') startRecognition();
       }, 500);
     }
-  }, [isOpen, selectedLanguage, stopRecognition]);
+  }, [isOpen, selectedLanguage, stopRecognition, startFreshRecorder]);
 
   resumeListeningRef.current = () => {
     setUploadStatus('idle');
@@ -1874,9 +1934,6 @@ export const HackerVoiceAssistant = ({
               <span className="truncate whitespace-nowrap text-emerald-400 drop-shadow-[0_0_10px_rgba(0,255,65,0.5)]">
                 SMARAN.AI Jarvis
               </span>
-              <span className="pip-hide hidden shrink-0 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[9px] font-black uppercase tracking-widest text-emerald-300 xl:inline">
-                Real-Time Conversation
-              </span>
             </h2>
             <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[9px] text-zinc-400 sm:text-[10px]">
               <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${statusDotClasses[currentVoiceStatus.tone]} ${currentVoiceStatus.icon === 'loading' || currentVoiceStatus.icon === 'listening' ? 'animate-pulse' : ''}`} />
@@ -1893,25 +1950,14 @@ export const HackerVoiceAssistant = ({
             <span>{activeModelDisplay}</span>
           </div>
 
-          {/* Which engine answers. Local is faster-whisper, Ollama and Kokoro
-              on this machine - no key and no network, but no vision either.
-              Gemini is the only one that can see a screen or a camera. */}
-          <div className="pip-hide hidden xl:flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1.5">
-            <Cpu className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <select
-              value={voiceEngine}
-              onChange={(e) => setVoiceEngine(e.target.value)}
-              disabled={liveActive}
-              title={liveActive ? "End the call to change engine." : "Which engine answers during a call"}
-              className="bg-transparent text-[11px] font-black text-zinc-200 outline-none cursor-pointer disabled:opacity-50"
-            >
-              <option value="gemini" className="bg-zinc-900 text-white font-bold">Gemini &middot; sees screen</option>
-              <option value="local" className="bg-zinc-900 text-white font-bold">Local &middot; no key</option>
-            </select>
-          </div>
-
+          {/* The voice-engine picker stood here reading "Local - no key",
+              immediately beside the model chip reading "LOCAL - Auto Router".
+              Two controls, near-identical words, and most people have no
+              Gemini key for the one they were being asked to choose between.
+              voiceEngine still exists and still decides who answers; it is
+              simply not a second badge in this header. */}
           {/* Character picker */}
-          <div className="pip-hide hidden lg:flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1 shadow-sm max-w-[130px] sm:max-w-none" title="Choose who you are speaking with">
+          <div className="flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1 shadow-sm max-w-[130px] sm:max-w-none" title="Choose who you are speaking with">
             <UserRound className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <select
               value={showAvatar ? avatarId : 'core'}
@@ -1956,11 +2002,16 @@ export const HackerVoiceAssistant = ({
             </button>
           )}
 
-          {/* Close / End Session */}
+          {/* Close / End Session. Hidden while pinned: in a 320-wide window
+              the assistant is the whole point of the window, and closing her
+              there left a shrunken, pinned, empty workspace with no obvious
+              way back. The way out of picture-in-picture is to come out of
+              picture-in-picture - the button beside this one, or maximising
+              the window. */}
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 sm:p-2 rounded-xl text-zinc-400 hover:text-white bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 transition-colors cursor-pointer"
+            className="pip-hide p-1.5 sm:p-2 rounded-xl text-zinc-400 hover:text-white bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 transition-colors cursor-pointer"
             title="Close Jarvis"
           >
             <X className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -2022,8 +2073,10 @@ export const HackerVoiceAssistant = ({
           </span>
         </div>
 
-        {/* Message box, centred under the character. */}
-        <div className="absolute inset-x-0 bottom-14 sm:bottom-16 px-4 flex justify-center">
+        {/* Message box, centred under the character. Hidden while pinned:
+            at 300 wide it covered her completely, and typing is what the full
+            window is for - the small one is for talking. */}
+        <div className="pip-hide absolute inset-x-0 bottom-14 sm:bottom-16 px-4 flex justify-center">
           <form onSubmit={handleManualTextSubmit} className="w-full max-w-2xl flex items-center gap-2">
             <input
               type="text"
@@ -2156,9 +2209,14 @@ export const HackerVoiceAssistant = ({
             }`} />
           </button>
 
-          <span className="hidden md:contents"><CallToggle icon={Hand} label="Gesture" active={gestureMode} onClick={() => setGestureMode((v) => !v)} /></span>
+          {/* Pinned above everything at 420x560 there is room for the
+              character, what she says, and talking to her. Gesture, ambience
+              and the vision picker are hidden there - not disabled, hidden -
+              so the small window is one thing you can use rather than six
+              you cannot. They all come back at full size. */}
+          <span className="contents"><CallToggle icon={Hand} label="Gesture" active={gestureMode} onClick={() => setGestureMode((v) => !v)} /></span>
           {Ambience.isSupported() && (
-            <CallToggle icon={Music2} label="Ambience" active={ambienceOn} onClick={() => setAmbienceOn((v) => !v)} />
+            <span className="contents"><CallToggle icon={Music2} label="Ambience" active={ambienceOn} onClick={() => setAmbienceOn((v) => !v)} /></span>
           )}
         </div>
       </div>

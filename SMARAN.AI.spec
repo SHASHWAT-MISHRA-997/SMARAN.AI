@@ -2,7 +2,7 @@
 from PyInstaller.utils.hooks import collect_all
 
 datas = [('C:\\Users\\shash\\Desktop\\SMARAN.AI\\backend\\frontend_dist', 'frontend_dist')]
-binaries = []
+binaries = [('C:\\Users\\shash\\AppData\\Local\\Programs\\Python\\Python314\\Lib\\site-packages\\onnxruntime\\capi\\onnxruntime_pybind11_state.pyd', 'onnxruntime\\capi')]
 hiddenimports = ['app.main', 'app.companion', 'app.app_lock', 'app.web_intents', 'app.analytics_config', 'app.password_policy', 'app.updates', 'app.desktop_agent', 'app.plugin_routes', 'app.sites_routes', 'app.local_engine', 'app.mcp', 'app.mcp.client', 'app.mcp.manager', 'app.mcp.routes', 'app.video', 'app.video.hardware', 'app.video.registry', 'app.video.planner', 'app.video.routes', 'app.video.install', 'app.capability', 'app.tts', 'app.tts.kokoro', 'app.imaging', 'app.imaging.registry', 'app.imaging.engine', 'app.imaging.routes', 'app.media', 'app.media.extract', 'app.media.routes', 'segno', 'uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan.on', 'webview', 'webview.platforms.winforms', 'edge_tts', 'passlib.handlers.bcrypt', 'sqlalchemy.dialects.sqlite', 'email_validator']
 tmp_ret = collect_all('chromadb')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
@@ -13,6 +13,10 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('tokenizers')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('tiktoken_ext')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('onnxruntime')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('g2p_en')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
