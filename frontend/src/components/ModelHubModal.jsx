@@ -267,7 +267,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
 
   const [progressMap, setProgressMap] = useState({});
 
-  const handleDownload = async (modelId) => {
+  const handleDownload = async (modelId, acceptHardwareLimits = false) => {
     setDownloadingMap((prev) => ({ ...prev, [modelId]: true }));
     setProgressMap((prev) => ({ ...prev, [modelId]: { percent: 0, speed_mbps: 0, downloaded_mb: 0, total_mb: 0, eta_secs: 0, status: 'starting' } }));
     try {
@@ -276,8 +276,30 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ model_id: modelId, hf_token: apiKeys.huggingface || '' }),
+        body: JSON.stringify({
+          model_id: modelId,
+          hf_token: apiKeys.huggingface || '',
+          accept_hardware_limits: acceptHardwareLimits,
+        }),
       });
+
+      // 412: the model is larger than this machine can hold. The backend says
+      // exactly what will happen - slower, or will not load at all - and this
+      // asks rather than deciding. Several gigabytes are about to be fetched;
+      // that is worth one question.
+      if (res.status === 412) {
+        const detail = (await res.json().catch(() => null))?.detail
+          || 'This model is larger than this machine can hold.';
+        setDownloadingMap((prev) => ({ ...prev, [modelId]: false }));
+        setProgressMap((prev) => { const next = { ...prev }; delete next[modelId]; return next; });
+        if (window.confirm(`${detail}
+
+Download it anyway?`)) {
+          handleDownload(modelId, true);
+        }
+        return;
+      }
+
       if (res.ok) {
         const pollInterval = setInterval(async () => {
           try {

@@ -2112,6 +2112,22 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
     """
     p = prompt.lower().strip()
     available = set(installed)
+
+    # What this machine can actually hold. The router read vram_gb_req and
+    # never compared it to anything, while its own description called itself
+    # "hardware-aware" - so on a small card it would happily pick the largest
+    # model installed, because size scores well, and then answer at a crawl or
+    # not at all. Measured once per call rather than assumed.
+    try:
+        import psutil as _psutil
+
+        from app.video.hardware import probe as _probe
+
+        _machine_vram = float(_probe().vram_free_gb or 0.0)
+        _machine_ram = _psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        _machine_vram = 0.0
+        _machine_ram = 0.0
     
     # Step 1: Detect query intent and complexity
     complexity_score = 0  # 0=simple, 1=medium, 2=complex, 3=very complex
@@ -2192,6 +2208,20 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
         caps = set(entry.get("capabilities", []))
         params = entry.get("param_count_num", 0)
         vram_req = entry.get("vram_gb_req", 999)
+
+        # Will not load at all: more than the machine's whole memory. Picking
+        # it produces no answer, which is indistinguishable from the assistant
+        # being broken.
+        needs_ram = float(entry.get("ram_gb_req") or 0)
+        if _machine_ram and needs_ram and needs_ram > _machine_ram:
+            return 0.0
+
+        # Will load, but spills out of video memory into system memory and
+        # answers slowly. Still usable, and still the right choice if it is
+        # the only thing installed - so it is pushed down the order rather
+        # than removed.
+        if _machine_vram and vram_req and vram_req > _machine_vram:
+            score -= 35
         
         # Capability match bonus
         if "vision" in required_capabilities and "vision" not in caps:
@@ -6620,6 +6650,51 @@ def _run_bg_download(model_id: str, hf_token: str | None = None):
         _cancel_events.pop(model_id, None)
 
 
+def _hardware_verdict_for(model_entry: dict) -> Optional[str]:
+    """What this machine will actually do with a model, or None if it fits.
+
+    Returned as a sentence to show someone, not a code to branch on. The
+    numbers are measured here and now - the card's free VRAM and the system
+    RAM - rather than a tier the catalogue guessed at.
+    """
+    try:
+        import psutil
+
+        from app.video.hardware import probe
+
+        hardware = probe()
+        vram = float(hardware.vram_free_gb or 0.0)
+        ram = psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        # If the machine cannot be measured, do not invent a verdict about it.
+        return None
+
+    needs_vram = float(model_entry.get("vram_gb_req") or 0)
+    needs_ram = float(model_entry.get("ram_gb_req") or 0)
+    name = model_entry.get("name") or model_entry.get("id") or "This model"
+
+    if needs_ram and needs_ram > ram:
+        return (
+            "%s needs about %.1f GB of system memory and this machine has "
+            "%.1f GB. It will download, and then fail to load - Ollama refuses "
+            "a model it cannot fit in memory. Nothing is damaged; the download "
+            "is wasted. Download it anyway only if you are moving it to "
+            "another machine." % (name, needs_ram, ram)
+        )
+
+    if needs_vram and vram and needs_vram > vram:
+        return (
+            "%s is built for about %.1f GB of video memory and this card has "
+            "%.1f GB free. It will still run: Ollama keeps what fits on the "
+            "card and puts the rest in system memory. That works, and it is "
+            "much slower - expect several seconds per sentence rather than "
+            "under one. Nothing will crash."
+            % (name, needs_vram, vram)
+        )
+
+    return None
+
+
 @app.post("/api/models/download")
 async def download_model_endpoint(
     request: Request,
@@ -6646,6 +6721,21 @@ async def download_model_endpoint(
         raise HTTPException(status_code=404, detail="Model is not present in the catalog exposed by this build.")
     if model_id in _model_download_in_progress:
         raise HTTPException(status_code=409, detail="This model download is already running.")
+
+    # A model larger than the machine can hold is worth a second look before
+    # several gigabytes are downloaded. The catalogue already says it does not
+    # fit - "Needs at least 22.5 GB VRAM; measured GPU VRAM is 6.0 GB" - but
+    # the download started regardless, and what happens next is not obvious:
+    # Ollama splits the layers between GPU and RAM, so a model that overflows
+    # VRAM still runs, very slowly, and one that overflows RAM as well simply
+    # refuses to load. Neither breaks anything; both waste the download.
+    #
+    # This does not refuse. It asks once, says what will happen, and proceeds
+    # when the person says so - it is their disk and their decision.
+    if not body.get("accept_hardware_limits"):
+        verdict = _hardware_verdict_for(model_entry)
+        if verdict is not None:
+            raise HTTPException(status_code=412, detail=verdict)
 
     hf_repo = str(model_entry.get("hf_repo") or "").strip().strip("/")
     try:
