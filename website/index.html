@@ -608,9 +608,30 @@
           <li>Ollama runs local models; the app can install it for you</li>
         </ul>
         <p class="dl-note">
-          Windows may warn about an unrecognised publisher — the app is not
-          code-signed yet, because a certificate costs money this project does
-          not take. Choose <b>More info → Run anyway</b> if you are happy to.
+          The app is not code-signed yet, so Windows will stop it. What you see
+          depends on which check you have, and only one of them can be clicked
+          past:
+        </p>
+        <ul class="dl-note">
+          <li>
+            <b>&ldquo;Windows protected your PC&rdquo;</b> — this is SmartScreen.
+            Choose <b>More info</b>, then <b>Run anyway</b>.
+          </li>
+          <li>
+            <b>&ldquo;An Application Control policy has blocked this file&rdquo;</b>
+            — this is Smart App Control, which is on by default on newer
+            Windows 11 machines. There is no &ldquo;run anyway&rdquo; for it.
+            The only way past is to turn Smart App Control off in
+            <b>Windows Security &rarr; App &amp; browser control</b>, and that
+            cannot be switched back on afterwards without reinstalling Windows.
+            That is a real decision, so it is worth knowing before you make it.
+          </li>
+        </ul>
+        <p class="dl-note">
+          A signing certificate removes both warnings. This project is applying
+          for a free one through the SignPath Foundation, which signs open
+          source software at no cost. Until that is in place, the honest
+          position is the one above.
         </p>
       </article>
 
