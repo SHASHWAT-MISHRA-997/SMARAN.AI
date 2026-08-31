@@ -868,6 +868,9 @@ export const HackerVoiceAssistant = ({
      something said during it. */
   /* Set when starting a live call failed, so it is not retried on a loop. */
   const liveStartFailedRef = useRef(false);
+  /* Whether the panel was open on the previous run, so "it just opened"
+     can be told apart from "this effect ran again". */
+  const wasOpenRef = useRef(false);
   const sessionHistoryBaseRef = useRef(0);
   useEffect(() => {
     if (isOpen) sessionHistoryBaseRef.current = chatHistory.length;
@@ -1674,9 +1677,16 @@ export const HackerVoiceAssistant = ({
   // Always release the microphone and socket when the panel closes.
   useEffect(() => {
     if (!isOpen && liveSessionRef.current) stopLiveSession();
-    // Reopening is a fresh intent to talk, so the hang-up is forgotten, and
-    // so is a previous failure - the microphone may be free this time.
-    if (isOpen) { endedByUserRef.current = false; liveStartFailedRef.current = false; }
+    // Only when the panel actually opens - not every time this effect runs.
+    // stopLiveSession is a dependency and is rebuilt when hanging up, so this
+    // re-ran immediately after a hang-up and cleared the very flag that
+    // records the hang-up. The auto-start effect then started the call again,
+    // which is why pressing the red button appeared to do nothing at all.
+    if (isOpen && !wasOpenRef.current) {
+      endedByUserRef.current = false;
+      liveStartFailedRef.current = false;
+    }
+    wasOpenRef.current = isOpen;
   }, [isOpen, stopLiveSession]);
 
   // Opening the panel starts the conversation. Requiring a second click on
@@ -2249,6 +2259,15 @@ export const HackerVoiceAssistant = ({
               (isMobileVoiceDevice() ? !isMuted : liveActive) ? 'rotate-[135deg]' : 'group-hover:scale-110'
             }`} />
           </button>
+
+          {/* Every other control here has a word under it; this one, the only
+              one that changes meaning, had nothing but a colour. Red and green
+              do not say whether they describe the state or the action, so
+              there was no way to tell "the call is running" from "press to
+              start". The word does. */}
+          <span className="pointer-events-none absolute translate-y-[3.1rem] text-[10px] font-bold uppercase tracking-wider text-white/70">
+            {isMobileVoiceDevice() ? (isMuted ? 'Resume' : 'Pause') : (liveActive ? 'End' : 'Start')}
+          </span>
 
           {/* Pinned above everything at 420x560 there is room for the
               character, what she says, and talking to her. Gesture, ambience

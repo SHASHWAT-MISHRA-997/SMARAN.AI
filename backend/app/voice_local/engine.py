@@ -67,6 +67,34 @@ def _rms(pcm: bytes) -> float:
     return math.sqrt(total / len(samples)) / 32768.0
 
 
+#: Which language a reply is written in, read from the script it uses.
+#:
+#: The online voice needs to be told. Asked for "auto" it picks an English
+#: voice, which cannot read Devanagari and returns no audio at all - so a
+#: Hindi answer stayed silent even with a working fallback behind it.
+#: Measured: the same sentence returns nothing for "auto" and 26,208 bytes
+#: for "hi".
+_SCRIPTS = (
+    ("hi", 0x0900, 0x097F),   # Devanagari - Hindi, Marathi
+    ("bn", 0x0980, 0x09FF),   # Bengali
+    ("gu", 0x0A80, 0x0AFF),   # Gujarati
+    ("ta", 0x0B80, 0x0BFF),   # Tamil
+    ("te", 0x0C00, 0x0C7F),   # Telugu
+    ("kn", 0x0C80, 0x0CFF),   # Kannada
+    ("ml", 0x0D00, 0x0D7F),   # Malayalam
+)
+
+
+def _language_of(text: str) -> str:
+    """The language of a piece of text, by the script it is written in."""
+    for character in text or "":
+        code = ord(character)
+        for language, start, end in _SCRIPTS:
+            if start <= code <= end:
+                return language
+    return "en"
+
+
 class LocalVoiceSession:
     """One call. Feed it audio; it calls back with text and speech."""
 
@@ -218,9 +246,29 @@ class LocalVoiceSession:
                         kokoro.synthesize, piece, "en", self.gender, 1.0
                     )
                 except Exception as exc:
-                    await self.send({"type": "error",
-                                     "message": "Speech failed: %s" % str(exc)[:120]})
-                    return
+                    # Kokoro reads the Latin alphabet and nothing else, so a
+                    # Hindi answer produced no sound at all and said nothing
+                    # about why - the assistant simply wrote and did not
+                    # speak. The online voice does have these languages, so
+                    # it is asked before giving up.
+                    wav = None
+                    try:
+                        from app.main import _synthesize_neural_speech
+
+                        wav = await _synthesize_neural_speech(
+                            piece, _language_of(piece), 1.0, self.gender)
+                    except Exception:
+                        wav = None
+
+                    if not wav:
+                        await self.send({
+                            "type": "error",
+                            "message": ("Speech failed: %s. The offline voice "
+                                        "speaks English only, and the online "
+                                        "one could not be reached."
+                                        % str(exc)[:90]),
+                        })
+                        return
                 if self._cancel:
                     break
                 import base64
