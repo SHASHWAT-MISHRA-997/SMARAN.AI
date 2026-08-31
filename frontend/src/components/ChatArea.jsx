@@ -1599,6 +1599,30 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     }
   };
 
+  /* Ask the assistant to speak, on its own, and write down what happened.
+
+     A fault that makes no sound and shows no message cannot be investigated
+     from outside the window: there is nothing to click from here and no
+     console to read. So when the backend says a speech self-test is wanted,
+     the page runs one itself on load and records the result. Off unless
+     SMARAN_SELFTEST asks for it. */
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/api/selftest`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((flags) => {
+        if (cancelled || !flags?.speech) return;
+        noteForLog(`selftest starting: audioEnabled=${audioEnabled} `
+          + `autoSpeak=${autoSpeakEnabled} lang=${selectedLanguage} `
+          + `voices=${(window.speechSynthesis?.getVoices?.() || []).length} `
+          + `AudioContext=${typeof window.AudioContext !== 'undefined'}`);
+        window.setTimeout(() => speakText('This is a speech self test.', 'en'), 2500);
+      })
+      .catch(() => { /* no self-test wanted */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const speakText = async (text, langCode = selectedLanguage) => {
     if (!audioEnabled || !text?.trim()) {
       noteForLog(`speak skipped: audioEnabled=${audioEnabled} textLength=${(text || '').trim().length}`);

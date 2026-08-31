@@ -329,6 +329,23 @@ class ClientLog(BaseModel):
     context: str = "client"
 
 
+@app.get("/api/selftest")
+def selftest_flags():
+    """Whether the page should test itself on load, and report what happened.
+
+    There is no way to click a button inside the packaged window from
+    outside it, and no console to read. So when this is switched on the
+    interface performs the thing being investigated by itself and records
+    the outcome, which is the only way to observe a fault that produces
+    neither a sound nor a message.
+
+    Off unless SMARAN_SELFTEST names a check, so it never runs for anybody
+    who did not ask for it.
+    """
+    wanted = os.getenv("SMARAN_SELFTEST", "").strip().lower()
+    return {"speech": wanted in {"speech", "all"}}
+
+
 @app.post("/api/client-log")
 def client_log(entry: ClientLog):
     # Written straight to a file rather than through the logging config. The
