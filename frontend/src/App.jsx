@@ -208,6 +208,34 @@ const App = () => {
     }
   }
 
+  /* How tall the window really is.
+   *
+   * The CSS viewport lies in an Android WebView: 100dvh, and height:100% from
+   * html, are both the whole screen including the strip the gesture bar sits
+   * over. visualViewport.height is what is actually visible, and it also
+   * shrinks when the keyboard opens - so publishing it keeps the composer on
+   * screen in both cases with one measurement.
+   *
+   * Written to the document so CSS can use it; see .sm-app-shell. */
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const publish = () => {
+      const height = Math.round(viewport?.height || window.innerHeight);
+      if (height > 0) {
+        document.documentElement.style.setProperty('--sm-vh', `${height}px`);
+      }
+    };
+    publish();
+    viewport?.addEventListener('resize', publish);
+    window.addEventListener('resize', publish);
+    window.addEventListener('orientationchange', publish);
+    return () => {
+      viewport?.removeEventListener('resize', publish);
+      window.removeEventListener('resize', publish);
+      window.removeEventListener('orientationchange', publish);
+    };
+  }, []);
+
   useEffect(() => {
     fetchSessions();
   }, []);

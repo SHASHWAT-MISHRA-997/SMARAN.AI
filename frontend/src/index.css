@@ -319,7 +319,6 @@ pre {
  */
 html, body, #root {
   height: 100%;
-  max-height: 100%;
 }
 
 body {
@@ -329,8 +328,22 @@ body {
   overscroll-behavior: none;
 }
 
+/* Sized from a measurement, not from the CSS viewport.
+ *
+ * 100dvh was the whole screen in an Android WebView, gesture bar included, so
+ * the composer was drawn underneath it. Chaining height:100% from html did the
+ * same thing - html is that full height too - and because body is overflow
+ * hidden the composer went from "below the fold" to "unreachable". That was
+ * worse than the bug it replaced.
+ *
+ * --sm-vh is written by App.jsx from visualViewport.height, which is the only
+ * number that says what is actually visible: it excludes the system bars, and
+ * it shrinks when the keyboard opens, which keeps the box being typed into on
+ * screen for free. The fallbacks matter only until the first frame runs.
+ */
 .sm-app-shell {
-  height: 100%;
+  height: var(--sm-vh, 100dvh);
+  max-height: var(--sm-vh, 100dvh);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
