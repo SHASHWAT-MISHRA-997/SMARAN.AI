@@ -210,7 +210,14 @@ async function api(path) {
 const fmt = n => (n ?? 0).toLocaleString();
 const ago = iso => {
   if (!iso) return '—';
-  const s = (Date.now() - new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).getTime()) / 1000;
+  /* The API sends "2026-08-27T15:12:54+00:00". That already carries a zone,
+     and the old check only looked for a trailing "Z" - so a second one was
+     appended, giving "...+00:00Z", which is not a date. Every row in both
+     tables read "NaN d". */
+  const zoned = /(Z|[+-]\d{2}:?\d{2})$/.test(iso);
+  const at = new Date(zoned ? iso : iso + 'Z').getTime();
+  if (!Number.isFinite(at)) return '—';
+  const s = (Date.now() - at) / 1000;
   if (s < 90) return 'just now';
   if (s < 5400) return Math.round(s / 60) + ' min';
   if (s < 172800) return Math.round(s / 3600) + ' h';
@@ -299,15 +306,30 @@ async function load() {
   ]);
 
   const t = s.trend || {};
+  /* An install that has been launched more than once came back at least once.
+     A blunt measure, and the only retention this data can honestly support. */
+  const rows = (installs.installs || []);
+  const returning = rows.filter(i => (i.launches || 0) > 1).length;
+  const perInstall = rows.length
+    ? Math.round(rows.reduce((sum, i) => sum + (i.launches || 0), 0) / rows.length * 10) / 10
+    : 0;
+
   document.getElementById('cards').innerHTML = [
     ['Total installations', s.total_installs, true, null],
     ['Active — 24 h', s.active_24h, true, null],
     ['Active — 7 days', s.active_7d, false, null],
     ['New installs', s.new_installs, false, t.new_installs],
     ['Launches', s.launches, false, t.launches],
-    ['Sign-ups', s.signups, false, t.signups],
-    ['Logins', s.logins, false, t.logins],
-    ['Google sign-ins', s.google_signins, false, t.google_signins],
+    /* Sign-ups, logins and Google sign-ins used to sit here. This app has no
+       accounts - there is nothing to sign up to - so all three were zero on
+       every dashboard that has ever been drawn, and three permanent zeroes
+       beside four real numbers make the real ones look broken too.
+
+       These are computed from the install list, which is already loaded, and
+       are the two questions a stranger actually asks: does anyone come back,
+       and how much do they use it. */
+    ['Came back', returning, false, null],
+    ['Launches per install', perInstall, false, null],
   ].map(([label, value, accent, pct]) => `
     <div class="card">
       <div class="label">${label}</div>
