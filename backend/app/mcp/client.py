@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = "2025-06-18"
-CLIENT_INFO = {"name": "SMARAN.AI", "version": "2.9.7"}
+CLIENT_INFO = {"name": "SMARAN.AI", "version": "2.9.8"}
 
 # What this client can do for a server. Declaring a capability it does not
 # implement would have servers send requests that are never answered, so this
