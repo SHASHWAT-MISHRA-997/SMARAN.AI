@@ -1,11 +1,28 @@
-# SMARAN.AI Codex
+<div align="center">
 
-A coding agent in your sidebar. You give it a task; it reads your project,
+# ⬢ SMARAN.AI CODEX
+
+### `ask → run the tool → read the result → ask again`
+
+**A coding agent in your sidebar.** You give it a task; it reads your project,
 changes files, runs commands, reads what they printed, and keeps going until
-the work is done — with every step on screen and under a mode you choose.
+the work is done — every step on screen, under a mode you choose.
 
-Nothing else has to be installed and nothing has to be left running. Bring an
-API key, or a model in Ollama, and that is the whole setup.
+Nothing else has to be installed and nothing has to be left running.
+Bring an API key, or a model in Ollama, and that is the whole setup.
+
+[![Marketplace](https://img.shields.io/visual-studio-marketplace/v/ShashwatMishra.smaran-ai-codex?style=for-the-badge&label=MARKETPLACE&labelColor=0d1117&color=00E5FF&logo=visualstudiocode&logoColor=00E5FF)](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/ShashwatMishra.smaran-ai-codex?style=for-the-badge&label=INSTALLS&labelColor=0d1117&color=FF2D95)](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)
+[![License](https://img.shields.io/badge/MIT-8B5CF6?style=for-the-badge&label=LICENSE&labelColor=0d1117)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/blob/main/LICENSE)
+
+<br>
+
+**Built by Shashwat Mishra**
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white&labelColor=0A66C2)](https://www.linkedin.com/in/sm980/)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white&labelColor=FFFFFF&color=FF0000)](https://www.youtube.com/@ShashwatMishra-997)
+
+</div>
 
 ---
 
@@ -93,5 +110,16 @@ problems in this file. Each writes a sentence and hands it to the same agent —
 | `smaran.model` | Model name. Chosen from the Setup tab. |
 | `smaran.ollamaUrl` | Where Ollama is. Only used when no provider is set. |
 
-MIT licensed. Part of [SMARAN.AI](https://smaran-ai.netlify.app/) — which you
-do not need in order to use this.
+---
+
+<div align="center">
+
+### Made by Shashwat Mishra
+
+[![LinkedIn](https://img.shields.io/badge/Connect_on_LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white&labelColor=0A66C2)](https://www.linkedin.com/in/sm980/)
+[![YouTube](https://img.shields.io/badge/Watch_on_YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=FF0000&labelColor=FFFFFF&color=FFFFFF)](https://www.youtube.com/@ShashwatMishra-997)
+
+**MIT licensed.** Part of [SMARAN.AI](https://smaran-ai.netlify.app/) —
+which you do not need in order to use this.
+
+</div>

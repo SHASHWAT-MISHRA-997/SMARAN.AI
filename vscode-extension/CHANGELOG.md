@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.3.0
+
+**A look of its own.**
+
+The panel used the editor's own colours, which made it correct and forgettable
+— a grey box among grey boxes. It has its own now: neon on deep blue, glass
+panels over a drifting wash of colour, a perspective grid, a slow scanline, and
+a glow on whatever you are touching.
+
+Every state has a colour that means something. Your message is violet, a tool
+call is magenta, its output is dimmed because it is the longest thing on screen
+and the least often read in full, a finished run is green, and anything waiting
+for your approval is amber. A run in flight draws a light along the top, so
+"is it doing anything" is never answered by watching for text to appear.
+
+It is all CSS. There is no canvas and no timer — a panel that sits open all day
+should not spend a core on its own wallpaper — and every animation stops when
+your operating system says you do not want motion.
+
 ## 2.2.0
 
 **A panel you can actually use, and four modes that are real.**

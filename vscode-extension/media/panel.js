@@ -116,6 +116,7 @@
         $('send').disabled = on;
         $('stop').hidden = !on;
         $('attach').disabled = on;
+        $('beam').hidden = !on;
     }
 
     // ── screens ───────────────────────────────────────────────────────────
@@ -270,7 +271,7 @@
                         vscode.postMessage({ type: 'saveKey', provider: p.id, key: '' })));
                 }
                 if (p.keyUrl) {
-                    keyRow.appendChild(button('Get a key', 'tiny link', () =>
+                    keyRow.appendChild(button('Get key', 'tiny link', () =>
                         vscode.postMessage({ type: 'openLink', url: p.keyUrl })));
                 }
                 row.appendChild(keyRow);

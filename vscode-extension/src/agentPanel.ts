@@ -487,13 +487,24 @@ export class AgentPanel implements vscode.WebviewViewProvider {
 <link href="${asset('panel.css')}" rel="stylesheet">
 </head>
 <body>
+  <!-- Three fixed layers behind everything: a slow colour wash, a perspective
+       grid, and a scanline. All CSS, no canvas and no timers - a panel that
+       sits open all day should not be spending a core on its own wallpaper. -->
+  <div class="fx fx-wash" aria-hidden="true"></div>
+  <div class="fx fx-grid" aria-hidden="true"></div>
+  <div class="fx fx-scan" aria-hidden="true"></div>
+
   <header>
+    <span class="brand" aria-hidden="true"></span>
     <span id="folder" title="The folder the agent works in">—</span>
     <span class="spacer"></span>
     <button id="tabHistory" class="icon" title="Past conversations">History</button>
     <button id="tabSetup" class="icon" title="Model and keys">Setup</button>
     <button id="newSession" class="icon" title="Start a new conversation">New</button>
   </header>
+  <!-- Shown only while a run is in flight, so "is it doing anything" never
+       has to be answered by watching for new text to appear. -->
+  <div id="beam" class="beam" hidden aria-hidden="true"></div>
 
   <main id="log" class="screen"></main>
   <section id="history" class="screen" hidden></section>

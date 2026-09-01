@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<!--
+  The panel, outside VS Code, so its look can be checked without guessing.
+
+  It loads the real panel.css and panel.js and stands in for the extension:
+  acquireVsCodeApi is stubbed, and the same messages the extension sends are
+  replayed. Nothing here ships - it is in .vscodeignore - but a redesign that
+  has never been looked at is not a redesign, it is a hope.
+
+  Open test/preview.html in a browser.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SMARAN.AI Codex — panel preview</title>
+<link href="../media/panel.css" rel="stylesheet">
+</head>
+<body>
+  <div class="fx fx-wash" aria-hidden="true"></div>
+  <div class="fx fx-grid" aria-hidden="true"></div>
+  <div class="fx fx-scan" aria-hidden="true"></div>
+
+  <header>
+    <span class="brand" aria-hidden="true"></span>
+    <span id="folder" title="The folder the agent works in">—</span>
+    <span class="spacer"></span>
+    <button id="tabHistory" class="icon" title="Past conversations">History</button>
+    <button id="tabSetup" class="icon" title="Model and keys">Setup</button>
+    <button id="newSession" class="icon" title="Start a new conversation">New</button>
+  </header>
+  <div id="beam" class="beam" hidden aria-hidden="true"></div>
+
+  <main id="log" class="screen"></main>
+  <section id="history" class="screen" hidden></section>
+  <section id="setup" class="screen" hidden></section>
+
+  <footer id="composer">
+    <div id="attachments" class="chips"></div>
+    <textarea id="task" rows="3"
+      placeholder="What should it do?  It can read the project, change files and run commands."></textarea>
+    <div class="row">
+      <button id="attach" class="ghost" title="Attach a file">+</button>
+      <button id="modeChip" class="ghost mode" title="How much it may do without asking">Manual</button>
+      <span class="spacer"></span>
+      <button id="modelChip" class="ghost model" title="Provider and model">no model</button>
+      <button id="send" title="Ctrl+Enter">Send</button>
+      <button id="stop" class="ghost" hidden>Stop</button>
+    </div>
+    <div id="modeMenu" class="menu" hidden></div>
+  </footer>
+
+<script>
+  // Stand-in for the editor's bridge. Posted messages are logged, never sent.
+  const outbound = [];
+  window.acquireVsCodeApi = () => ({ postMessage: (m) => outbound.push(m) });
+</script>
+<script src="../media/panel.js"></script>
+<script>
+  const send = (m) => window.dispatchEvent(new MessageEvent('message', { data: m }));
+
+  window.preview = {
+    /** A conversation mid-flight, with every kind of entry in it. */
+    chat() {
+      send({ type: 'ready', folder: 'C:\\Users\\dev\\projects\\payments', folderName: 'payments',
+             provider: 'OpenRouter', model: 'minimax/minimax-m3:free',
+             mode: 'manual', modes: window.previewModes });
+      send({ type: 'entry', entry: { kind: 'you', title: 'You',
+             body: 'test_stats.py is failing. Find out why and fix it.' } });
+      send({ type: 'entry', entry: { kind: 'says',
+             body: "I'll look at the project first.\n\n```python\nmedian([4, 1, 2, 3])  # returns 3, should be 2.5\n```" } });
+      send({ type: 'entry', entry: { kind: 'note', title: 'Working in C:\\Users\\dev\\projects\\payments' } });
+      send({ type: 'entry', entry: { kind: 'tool', title: 'Step 1 · read_file', body: 'path: stats.py' } });
+      send({ type: 'entry', entry: { kind: 'result',
+             body: '    1  def median(values):\n    2      ordered = sorted(values)\n    3      return ordered[len(ordered) // 2]' } });
+      send({ type: 'entry', entry: { kind: 'tool', title: 'Step 2 · run_command', body: 'command: python test_stats.py' } });
+      send({ type: 'entry', entry: { kind: 'result', body: 'exit code 1\nAssertionError' } });
+      send({ type: 'confirm', name: 'edit_file', what: 'stats.py', detail: 'replacing 3 line(s)' });
+      send({ type: 'entry', entry: { kind: 'done', title: 'Finished in 7 steps',
+             body: 'Tools that actually ran: list_files, read_file, run_command, edit_file, run_command' } });
+      send({ type: 'attachments', files: ['src/stats.py', 'notes.md'] });
+      send({ type: 'started' });
+    },
+
+    risky() {
+      send({ type: 'confirm', name: 'run_command', what: 'git push --force origin main',
+             because: 'force-pushes over history that is already published' });
+    },
+
+    history() {
+      document.getElementById('tabHistory').click();
+      send({ type: 'sessions', sessions: [
+        { id: '1', title: 'Fix the failing median test', updatedAt: Date.now() - 4 * 60000 },
+        { id: '2', title: 'Add a --json flag to the export command', updatedAt: Date.now() - 5 * 3600000 },
+        { id: '3', title: 'Write tests for the invoice parser', updatedAt: Date.now() - 3 * 86400000 },
+      ] });
+    },
+
+    setup() {
+      document.getElementById('tabSetup').click();
+      send({ type: 'setup', provider: 'openrouter', model: 'minimax/minimax-m3:free',
+        mode: 'manual', modes: window.previewModes,
+        configured: { groq: true, gemini: true, openrouter: true, nvidia: false,
+                      anthropic: false, openai: false, deepseek: false },
+        providers: window.previewProviders });
+      send({ type: 'models', provider: 'openrouter', loading: false, models: [
+        { id: 'bytedance-seed/seed-2.0-code' },
+        { id: 'cohere/north-mini-code:free', free: true },
+        { id: 'minimax/minimax-m3:free', free: true },
+        { id: 'qwen/qwen2.5-coder-32b-instruct' },
+        { id: 'anthropic/claude-sonnet-4' },
+        { id: 'google/gemini-flash-latest' },
+      ] });
+    },
+
+    modeMenu() { document.getElementById('modeChip').click(); },
+  };
+
+  window.previewModes = [
+    { id: 'plan', label: 'Plan', description: 'Explores the code and tells you what it would do. Changes nothing at all.' },
+    { id: 'manual', label: 'Manual', description: 'Asks before every change and every command.' },
+    { id: 'autoEdit', label: 'Edit automatically', description: 'Changes files on its own. Still asks before running a command.' },
+    { id: 'auto', label: 'Auto', description: 'Works on its own, and pauses for anything that looks risky.' },
+  ];
+
+  window.previewProviders = [
+    { id: '', label: 'Ollama (on this machine)', hint: 'No key, nothing leaves your computer. Needs Ollama installed.' },
+    { id: 'groq', label: 'Groq', keyUrl: '#', free: true, hint: 'Free tier. Fast.' },
+    { id: 'gemini', label: 'Google Gemini', keyUrl: '#', free: true, hint: 'Free tier.' },
+    { id: 'openrouter', label: 'OpenRouter', keyUrl: '#', free: true, hint: 'Many models behind one key, several free.' },
+    { id: 'nvidia', label: 'NVIDIA NIM', keyUrl: '#', free: true, hint: 'Free developer tier.' },
+    { id: 'anthropic', label: 'Anthropic Claude', keyUrl: '#', hint: 'Paid.' },
+    { id: 'openai', label: 'OpenAI', keyUrl: '#', hint: 'Paid.' },
+    { id: 'deepseek', label: 'DeepSeek', keyUrl: '#', hint: 'Paid, inexpensive.' },
+  ];
+
+  window.preview.chat();
+</script>
+</body>
+</html>

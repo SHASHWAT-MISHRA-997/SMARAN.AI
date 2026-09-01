@@ -1,212 +1,453 @@
-/* Editor colours throughout, so the panel belongs to whatever theme is on
-   rather than insisting on its own. */
+/* SMARAN.AI Codex — the panel.
+ *
+ * Deliberately not theme-coloured. This has its own look, the way a terminal
+ * or a game launcher does, and it stays the same whichever editor theme is on.
+ * The one thing inherited is the font, so code still lines up with the editor.
+ *
+ * Everything moving is CSS. A panel that sits open all day should not spend a
+ * core drawing its own background, so there is no canvas and no timer: three
+ * fixed layers, GPU-composited transforms, and animations that stop entirely
+ * when the operating system says the person does not want motion.
+ */
+
+:root {
+    --cyan:     #00e5ff;
+    --magenta:  #ff2d95;
+    --violet:   #8b5cf6;
+    --lime:     #4ade80;
+    --amber:    #fbbf24;
+    --red:      #ff4d6d;
+
+    --ink:      #e8f4ff;
+    --ink-dim:  #8ba3c7;
+    --ink-far:  #5b6f92;
+
+    --void:     #04060f;
+    --panel:    rgba(14, 22, 46, 0.55);
+    --panel-up: rgba(22, 33, 64, 0.72);
+    --edge:     rgba(0, 229, 255, 0.16);
+    --edge-hot: rgba(0, 229, 255, 0.55);
+
+    --glow-cyan: 0 0 12px rgba(0, 229, 255, .45);
+    --glow-mag:  0 0 12px rgba(255, 45, 149, .45);
+}
 
 * { box-sizing: border-box; }
+
+html, body { height: 100%; }
 
 body {
     display: flex;
     flex-direction: column;
-    height: 100vh;
     margin: 0;
     padding: 0;
     font-family: var(--vscode-font-family);
-    font-size: var(--vscode-font-size);
-    color: var(--vscode-foreground);
-    background: var(--vscode-sideBar-background);
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--void);
+    overflow: hidden;
+}
+
+/* ── the three background layers ──────────────────────────────────────── */
+
+.fx {
+    position: fixed;
+    inset: -20%;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* A slow wash of colour. Large blurred blobs rather than a gradient sweep,
+   because a sweep across a tall narrow panel reads as banding. */
+.fx-wash {
+    background:
+        radial-gradient(40% 30% at 15% 10%, rgba(0, 229, 255, .16), transparent 70%),
+        radial-gradient(35% 28% at 85% 30%, rgba(255, 45, 149, .13), transparent 70%),
+        radial-gradient(45% 35% at 50% 95%, rgba(139, 92, 246, .14), transparent 70%);
+    animation: drift 34s ease-in-out infinite alternate;
+    will-change: transform;
+}
+
+@keyframes drift {
+    from { transform: translate3d(-2%, -1%, 0) scale(1); }
+    to   { transform: translate3d(3%, 2%, 0) scale(1.12); }
+}
+
+/* The grid, laid back in perspective so it reads as a floor going away. */
+.fx-grid {
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(0, 229, 255, .07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 229, 255, .07) 1px, transparent 1px);
+    background-size: 34px 34px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,.85), transparent 60%);
+    -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.85), transparent 60%);
+    opacity: .8;
+}
+
+/* One faint band travelling down. Slow and low-contrast on purpose: a fast
+   scanline over text is unreadable and, for some people, genuinely unpleasant. */
+.fx-scan {
+    inset: 0;
+    background: linear-gradient(
+        to bottom,
+        transparent 0%,
+        rgba(0, 229, 255, .05) 48%,
+        rgba(0, 229, 255, .09) 50%,
+        rgba(0, 229, 255, .05) 52%,
+        transparent 100%);
+    background-size: 100% 240px;
+    background-repeat: no-repeat;
+    animation: sweep 7s linear infinite;
+    will-change: background-position;
+}
+
+@keyframes sweep {
+    from { background-position: 0 -240px; }
+    to   { background-position: 0 100%; }
+}
+
+/* Motion is decoration here and nothing depends on it. */
+@media (prefers-reduced-motion: reduce) {
+    .fx-wash, .fx-scan, .spin, .pulse { animation: none !important; }
+    * { transition: none !important; }
 }
 
 /* ── header ───────────────────────────────────────────────────────────── */
 
 header {
+    position: relative;
+    z-index: 2;
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
-    border-bottom: 1px solid var(--vscode-panel-border);
+    gap: 8px;
+    padding: 8px 10px;
     font-size: 11px;
+    background: rgba(6, 10, 24, .55);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border-bottom: 1px solid var(--edge);
+    box-shadow: 0 1px 0 rgba(0, 229, 255, .08), 0 6px 18px rgba(0, 0, 0, .45);
+}
+
+.brand {
+    width: 9px;
+    height: 9px;
+    flex: none;
+    border-radius: 2px;
+    background: linear-gradient(135deg, var(--cyan), var(--magenta));
+    box-shadow: var(--glow-cyan);
+    animation: pulse 3.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1;   box-shadow: 0 0 10px rgba(0, 229, 255, .5); }
+    50%      { opacity: .55; box-shadow: 0 0 18px rgba(255, 45, 149, .5); }
 }
 
 .spacer { flex: 1; }
 
 #folder {
-    color: var(--vscode-descriptionForeground);
+    color: var(--ink-dim);
+    font-family: var(--vscode-editor-font-family);
+    letter-spacing: .02em;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    max-width: 45%;
+    max-width: 42%;
 }
 
 button.icon {
     background: none;
-    border: none;
-    color: var(--vscode-descriptionForeground);
-    font-size: 11px;
-    padding: 2px 6px;
-    border-radius: 3px;
+    border: 1px solid transparent;
+    color: var(--ink-far);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    padding: 3px 8px;
+    border-radius: 4px;
     cursor: pointer;
+    transition: color .18s ease, border-color .18s ease, box-shadow .18s ease, background .18s ease;
 }
 button.icon:hover {
-    color: var(--vscode-foreground);
-    background: var(--vscode-toolbar-hoverBackground);
+    color: var(--cyan);
+    border-color: var(--edge-hot);
+    background: rgba(0, 229, 255, .07);
+    box-shadow: var(--glow-cyan);
+}
+
+/* A running task, said without words. */
+.beam {
+    position: relative;
+    z-index: 3;
+    height: 2px;
+    overflow: hidden;
+    background: rgba(0, 229, 255, .08);
+}
+.beam::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 42%;
+    background: linear-gradient(90deg, transparent, var(--cyan), var(--magenta), transparent);
+    box-shadow: 0 0 14px rgba(0, 229, 255, .7);
+    animation: run 1.4s ease-in-out infinite;
+}
+
+@keyframes run {
+    from { transform: translateX(-110%); }
+    to   { transform: translateX(340%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .beam::after { animation: none; width: 100%; opacity: .5; }
 }
 
 /* ── screens ──────────────────────────────────────────────────────────── */
 
 .screen {
+    position: relative;
+    z-index: 1;
     flex: 1;
     overflow-y: auto;
-    padding: 8px;
+    padding: 10px;
 }
 
 .screen h3 {
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: .05em;
-    color: var(--vscode-descriptionForeground);
-    margin: 14px 0 6px;
+    letter-spacing: .16em;
+    color: var(--cyan);
+    text-shadow: 0 0 10px rgba(0, 229, 255, .35);
+    margin: 18px 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--edge);
 }
 .screen h3:first-child { margin-top: 2px; }
 
 .screen-head { display: flex; align-items: center; gap: 8px; }
-.screen-head h3 { flex: 1; margin: 2px 0 6px; }
+.screen-head h3 { flex: 1; margin: 2px 0 8px; }
 
 .empty, .foot {
-    color: var(--vscode-descriptionForeground);
+    color: var(--ink-far);
     font-size: 11px;
-    line-height: 1.5;
+    line-height: 1.6;
 }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(var(--cyan), var(--violet));
+    border-radius: 4px;
+    opacity: .5;
+}
+::-webkit-scrollbar-thumb:hover { box-shadow: var(--glow-cyan); }
 
 /* ── composer ─────────────────────────────────────────────────────────── */
 
 footer {
     position: relative;
-    border-top: 1px solid var(--vscode-panel-border);
-    padding: 8px;
+    z-index: 2;
+    padding: 10px;
+    background: rgba(6, 10, 24, .6);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border-top: 1px solid var(--edge);
+    box-shadow: 0 -1px 0 rgba(0, 229, 255, .08), 0 -8px 24px rgba(0, 0, 0, .5);
 }
 
 textarea, input {
     width: 100%;
     font-family: inherit;
-    font-size: inherit;
-    color: var(--vscode-input-foreground);
-    background: var(--vscode-input-background);
-    border: 1px solid var(--vscode-input-border, transparent);
-    border-radius: 4px;
-    padding: 6px;
+    font-size: 12.5px;
+    color: var(--ink);
+    background: rgba(8, 14, 32, .75);
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+    padding: 9px 10px;
+    transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
 }
-textarea { resize: vertical; }
-input { font-size: 12px; margin: 4px 0; }
+textarea { resize: vertical; line-height: 1.5; }
+input { font-size: 12px; margin: 5px 0; }
 
-.row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+textarea::placeholder, input::placeholder { color: var(--ink-far); }
+
+textarea:focus, input:focus {
+    outline: none;
+    border-color: var(--edge-hot);
+    background: rgba(10, 18, 40, .9);
+    box-shadow: 0 0 0 1px rgba(0, 229, 255, .25), 0 0 22px rgba(0, 229, 255, .18);
+}
+
+.row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 
 button {
+    position: relative;
     font-family: inherit;
     font-size: 12px;
-    padding: 4px 12px;
-    border: none;
-    border-radius: 4px;
+    padding: 6px 14px;
+    border: 1px solid transparent;
+    border-radius: 7px;
     cursor: pointer;
-    color: var(--vscode-button-foreground);
-    background: var(--vscode-button-background);
+    color: #041018;
+    background: linear-gradient(135deg, var(--cyan), #37d5ff);
+    font-weight: 600;
+    letter-spacing: .02em;
+    transition: transform .14s ease, box-shadow .2s ease, filter .2s ease;
+    box-shadow: 0 0 14px rgba(0, 229, 255, .3);
 }
-button:hover { background: var(--vscode-button-hoverBackground); }
-button:disabled { opacity: .5; cursor: default; }
+button:hover { filter: brightness(1.12); box-shadow: 0 0 22px rgba(0, 229, 255, .55); }
+button:active { transform: translateY(1px); }
+button:disabled { opacity: .4; filter: grayscale(.6); box-shadow: none; cursor: default; }
 
 button.ghost {
-    color: var(--vscode-button-secondaryForeground);
-    background: var(--vscode-button-secondaryBackground);
+    color: var(--ink-dim);
+    background: rgba(20, 30, 58, .6);
+    border-color: var(--edge);
+    font-weight: 500;
+    box-shadow: none;
 }
+button.ghost:hover {
+    color: var(--cyan);
+    border-color: var(--edge-hot);
+    box-shadow: var(--glow-cyan);
+}
+
 button.mode, button.model {
     font-size: 11px;
-    padding: 3px 8px;
-    max-width: 45%;
+    padding: 5px 10px;
+    font-family: var(--vscode-editor-font-family);
+    max-width: 44%;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
+button.mode { border-color: rgba(255, 45, 149, .35); color: var(--magenta); }
+button.mode:hover { box-shadow: var(--glow-mag); border-color: var(--magenta); color: var(--magenta); }
 
 button.tiny {
-    font-size: 10px;
-    padding: 1px 6px;
-    color: var(--vscode-descriptionForeground);
-    background: var(--vscode-button-secondaryBackground);
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    white-space: nowrap;   /* two-word labels were breaking across lines */
+    flex: none;
+    padding: 3px 8px;
+    font-weight: 600;
+    color: var(--ink-far);
+    background: rgba(20, 30, 58, .6);
+    border-color: var(--edge);
+    box-shadow: none;
 }
-button.tiny:hover { color: var(--vscode-foreground); }
+button.tiny:hover { color: var(--cyan); border-color: var(--edge-hot); box-shadow: var(--glow-cyan); }
 button.tiny.link {
     background: none;
-    color: var(--vscode-textLink-foreground);
-    text-decoration: underline;
+    border-color: transparent;
+    color: var(--cyan);
+    text-decoration: none;
 }
+button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
 
-.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
 .chip {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     font-size: 10px;
-    padding: 2px 4px 2px 7px;
-    border-radius: 10px;
-    background: var(--vscode-badge-background);
-    color: var(--vscode-badge-foreground);
+    font-family: var(--vscode-editor-font-family);
+    padding: 3px 5px 3px 9px;
+    border-radius: 12px;
+    color: var(--cyan);
+    background: rgba(0, 229, 255, .08);
+    border: 1px solid var(--edge);
+    animation: rise .25s ease both;
 }
 
 /* ── the mode menu ────────────────────────────────────────────────────── */
 
 .menu {
     position: absolute;
-    bottom: 46px;
-    left: 8px;
-    right: 8px;
-    z-index: 10;
-    padding: 6px;
-    border: 1px solid var(--vscode-panel-border);
-    border-radius: 6px;
-    background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
-    box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
+    bottom: 56px;
+    left: 10px;
+    right: 10px;
+    z-index: 20;
+    padding: 8px;
+    border: 1px solid var(--edge-hot);
+    border-radius: 12px;
+    /* Nearly opaque, not merely translucent. A menu you can read the
+       conversation through is a nice effect and an unreadable menu. */
+    background: rgba(8, 13, 30, .985);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    box-shadow: 0 0 30px rgba(0, 229, 255, .2), 0 18px 40px rgba(0, 0, 0, .6);
+    animation: rise .18s ease both;
+}
+
+@keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
 .menu-title {
-    font-size: 10px;
+    font-size: 9.5px;
     text-transform: uppercase;
-    letter-spacing: .05em;
-    color: var(--vscode-descriptionForeground);
-    padding: 2px 6px 6px;
+    letter-spacing: .16em;
+    color: var(--ink-far);
+    padding: 2px 8px 8px;
 }
 
 .menu-item {
     display: block;
     width: 100%;
     text-align: left;
-    background: none;
-    color: var(--vscode-foreground);
-    padding: 6px;
-    border-radius: 4px;
+    background: rgba(255, 255, 255, .02);
+    border: 1px solid transparent;
+    color: var(--ink);
+    font-weight: 400;
+    padding: 8px 10px;
+    border-radius: 8px;
+    margin-bottom: 4px;
+    box-shadow: none;
 }
-.menu-item:hover { background: var(--vscode-list-hoverBackground); }
-.menu-item.on { background: var(--vscode-list-activeSelectionBackground); }
+.menu-item:hover {
+    background: rgba(0, 229, 255, .07);
+    border-color: var(--edge);
+    box-shadow: none;
+    filter: none;
+}
+.menu-item.on {
+    background: linear-gradient(90deg, rgba(0, 229, 255, .14), rgba(139, 92, 246, .1));
+    border-color: var(--edge-hot);
+    box-shadow: inset 2px 0 0 var(--cyan), 0 0 16px rgba(0, 229, 255, .15);
+}
 
-.menu-line { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.menu-line { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.menu-line strong { font-weight: 600; letter-spacing: .01em; }
 .menu-note {
     font-size: 11px;
-    line-height: 1.4;
-    color: var(--vscode-descriptionForeground);
-    margin-top: 2px;
+    line-height: 1.5;
+    color: var(--ink-far);
+    margin-top: 3px;
 }
 
-.tick { margin-left: auto; opacity: .8; }
+.tick { margin-left: auto; color: var(--cyan); text-shadow: var(--glow-cyan); }
 
 .badge {
-    font-size: 9px;
+    font-size: 8.5px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: .04em;
-    padding: 1px 5px;
-    border-radius: 8px;
-    background: var(--vscode-badge-background);
-    color: var(--vscode-badge-foreground);
+    letter-spacing: .1em;
+    padding: 2px 6px;
+    border-radius: 10px;
+    color: var(--violet);
+    background: rgba(139, 92, 246, .14);
+    border: 1px solid rgba(139, 92, 246, .35);
 }
 .badge.ok {
-    background: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
-    color: var(--vscode-editor-background);
+    color: var(--lime);
+    background: rgba(74, 222, 128, .12);
+    border-color: rgba(74, 222, 128, .4);
+    box-shadow: 0 0 10px rgba(74, 222, 128, .2);
 }
 
 /* ── history ──────────────────────────────────────────────────────────── */
@@ -215,82 +456,136 @@ button.tiny.link {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 2px 0;
+    margin-bottom: 4px;
+    animation: rise .22s ease both;
 }
 .session-open {
     flex: 1;
     text-align: left;
-    background: none;
-    color: var(--vscode-foreground);
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    color: var(--ink-dim);
     font-size: 12px;
-    padding: 5px 6px;
-    border-radius: 4px;
+    font-weight: 400;
+    padding: 8px 10px;
+    border-radius: 8px;
+    box-shadow: none;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
-.session-open:hover { background: var(--vscode-list-hoverBackground); }
-.session-meta { font-size: 10px; color: var(--vscode-descriptionForeground); }
+.session-open:hover {
+    color: var(--ink);
+    border-color: var(--edge-hot);
+    background: var(--panel-up);
+    box-shadow: var(--glow-cyan);
+    filter: none;
+}
+.session-meta {
+    font-size: 10px;
+    font-family: var(--vscode-editor-font-family);
+    color: var(--ink-far);
+}
 
 /* ── setup ────────────────────────────────────────────────────────────── */
 
 .provider {
-    border: 1px solid transparent;
-    border-radius: 6px;
-    padding: 2px;
-    margin-bottom: 2px;
+    border: 1px solid var(--edge);
+    border-radius: 10px;
+    padding: 3px;
+    margin-bottom: 6px;
+    background: var(--panel);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+    animation: rise .24s ease both;
 }
+.provider:hover { border-color: rgba(0, 229, 255, .3); }
 .provider.on {
-    border-color: var(--vscode-focusBorder);
-    background: var(--vscode-list-activeSelectionBackground);
+    border-color: var(--edge-hot);
+    background: linear-gradient(135deg, rgba(0, 229, 255, .1), rgba(139, 92, 246, .07));
+    box-shadow: 0 0 22px rgba(0, 229, 255, .16);
 }
 .provider-pick {
     display: block;
     width: 100%;
     text-align: left;
     background: none;
-    color: var(--vscode-foreground);
-    padding: 6px;
+    border: none;
+    color: var(--ink);
+    font-weight: 400;
+    padding: 8px 10px;
+    box-shadow: none;
 }
-.key-row { display: flex; align-items: center; gap: 4px; padding: 0 6px 6px; }
-.key-row input { margin: 0; }
+.provider-pick:hover { background: none; box-shadow: none; filter: none; }
 
-.model-list { max-height: 260px; overflow-y: auto; margin-top: 4px; }
+.key-row { display: flex; align-items: center; gap: 5px; padding: 0 10px 9px; }
+.key-row input { margin: 0; min-width: 0; }   /* so the buttons keep their width */
+
+.model-list {
+    max-height: 280px;
+    overflow-y: auto;
+    margin-top: 6px;
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+    background: rgba(6, 11, 26, .5);
+    padding: 4px;
+}
 .model {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     width: 100%;
     text-align: left;
     background: none;
-    color: var(--vscode-foreground);
+    border: 1px solid transparent;
+    color: var(--ink-dim);
     font-size: 11px;
+    font-weight: 400;
     font-family: var(--vscode-editor-font-family);
-    padding: 4px 6px;
-    border-radius: 3px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    box-shadow: none;
 }
-.model:hover { background: var(--vscode-list-hoverBackground); }
-.model.on { background: var(--vscode-list-activeSelectionBackground); }
+.model:hover {
+    color: var(--ink);
+    background: rgba(0, 229, 255, .07);
+    border-color: var(--edge);
+    box-shadow: none;
+    filter: none;
+}
+.model.on {
+    color: var(--cyan);
+    background: rgba(0, 229, 255, .12);
+    border-color: var(--edge-hot);
+    box-shadow: inset 2px 0 0 var(--cyan);
+}
 
-/* ── conversation items ───────────────────────────────────────────────── */
+/* ── conversation ─────────────────────────────────────────────────────── */
 
 .item {
-    margin-bottom: 8px;
-    padding: 6px 8px;
-    border-radius: 4px;
-    border-left: 2px solid transparent;
+    position: relative;
+    margin-bottom: 10px;
+    padding: 9px 11px;
+    border-radius: 10px;
+    border: 1px solid var(--edge);
+    border-left-width: 2px;
+    background: var(--panel);
+    backdrop-filter: blur(10px) saturate(130%);
+    -webkit-backdrop-filter: blur(10px) saturate(130%);
+    animation: rise .26s ease both;
 }
 
 .item .title {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 600;
+    gap: 7px;
+    font-size: 9.5px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: .04em;
-    color: var(--vscode-descriptionForeground);
-    margin-bottom: 3px;
+    letter-spacing: .14em;
+    color: var(--ink-far);
+    margin-bottom: 5px;
 }
 
 .item pre {
@@ -299,45 +594,96 @@ button.tiny.link {
     word-break: break-word;
     font-family: var(--vscode-editor-font-family);
     font-size: 12px;
+    line-height: 1.55;
 }
-.item pre.prose { font-family: inherit; line-height: 1.5; }
+.item pre.prose { font-family: inherit; font-size: 12.5px; line-height: 1.6; }
 
 .code {
     position: relative;
-    margin: 6px 0;
-    padding: 8px;
-    border-radius: 4px;
-    background: var(--vscode-textCodeBlock-background);
+    margin: 8px 0;
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(3, 7, 18, .75);
+    border: 1px solid var(--edge);
+    box-shadow: inset 0 0 24px rgba(0, 229, 255, .05);
     overflow-x: auto;
 }
-.code .tiny { position: absolute; top: 4px; right: 4px; }
-.code pre { font-size: 11px; }
+.code .tiny { position: absolute; top: 5px; right: 5px; }
+.code pre { font-size: 11.5px; color: #b8e6ff; }
 
-.you      { background: var(--vscode-textBlockQuote-background); }
-.plan     { border-left-color: var(--vscode-charts-blue); }
-.tool     { border-left-color: var(--vscode-charts-purple); }
-.done     { border-left-color: var(--vscode-charts-green); }
-.error    { border-left-color: var(--vscode-errorForeground); }
-.error .title { color: var(--vscode-errorForeground); }
-.confirm  {
-    border-left-color: var(--vscode-charts-orange, var(--vscode-editorWarning-foreground));
-    background: var(--vscode-inputValidation-warningBackground, transparent);
+.you {
+    border-left-color: var(--violet);
+    background: linear-gradient(135deg, rgba(139, 92, 246, .12), rgba(14, 22, 46, .5));
+    box-shadow: 0 0 18px rgba(139, 92, 246, .12);
 }
+.you .title { color: var(--violet); }
+
+.plan { border-left-color: var(--cyan); box-shadow: 0 0 18px rgba(0, 229, 255, .1); }
+.plan .title { color: var(--cyan); }
+
+.tool { border-left-color: var(--magenta); }
+.tool .title { color: var(--magenta); text-shadow: 0 0 10px rgba(255, 45, 149, .3); }
+.tool pre { color: var(--ink-dim); font-size: 11.5px; }
+
+.done {
+    border-left-color: var(--lime);
+    background: linear-gradient(135deg, rgba(74, 222, 128, .1), rgba(14, 22, 46, .5));
+    box-shadow: 0 0 20px rgba(74, 222, 128, .12);
+}
+.done .title { color: var(--lime); text-shadow: 0 0 10px rgba(74, 222, 128, .35); }
+
+.error { border-left-color: var(--red); background: rgba(255, 77, 109, .07); }
+.error .title { color: var(--red); text-shadow: 0 0 10px rgba(255, 77, 109, .35); }
+
+.confirm {
+    border-color: rgba(251, 191, 36, .45);
+    border-left-color: var(--amber);
+    background: linear-gradient(135deg, rgba(251, 191, 36, .1), rgba(14, 22, 46, .55));
+    box-shadow: 0 0 24px rgba(251, 191, 36, .15);
+}
+.confirm .title { color: var(--amber); text-shadow: 0 0 10px rgba(251, 191, 36, .35); }
 .risk {
     font-size: 11px;
-    margin-top: 4px;
-    color: var(--vscode-editorWarning-foreground);
+    margin-top: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    color: var(--amber);
+    background: rgba(251, 191, 36, .09);
+    border: 1px solid rgba(251, 191, 36, .3);
 }
-.answered { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.answered {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: var(--ink-far);
+}
 
 /* A tool's output is the largest thing on screen and the least often read in
    full, so it is quieter and capped. */
+.result {
+    border-left-color: rgba(139, 92, 246, .4);
+    background: rgba(8, 13, 30, .45);
+}
 .result pre {
     max-height: 220px;
     overflow: auto;
-    color: var(--vscode-descriptionForeground);
+    color: var(--ink-far);
     font-size: 11px;
 }
 
-.note { color: var(--vscode-descriptionForeground); font-size: 11px; }
-.note .title { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.note {
+    border-color: transparent;
+    background: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    padding: 4px 6px;
+    color: var(--ink-far);
+    font-size: 11px;
+}
+.note .title {
+    text-transform: none;
+    letter-spacing: .01em;
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--ink-far);
+}
