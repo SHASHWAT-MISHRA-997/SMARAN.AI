@@ -16,6 +16,13 @@ Nothing here reaches outside the folder the user opened. The workspace
 resolves every path against that root and refuses anything that climbs out of
 it, so a wrong path fails as a message rather than as a file somewhere else on
 the disk.
+
+Which folder that is has to be decided by the caller, not assumed. The desktop
+app has one open folder and a single Workspace to match. An editor extension
+has whatever project the person is looking at, which is frequently not the
+same one - and an agent that took the app's folder would have written the
+editor's changes into somebody else's project. So every tool is given the
+workspace to act in, and the caller says which.
 """
 
 from __future__ import annotations
@@ -49,11 +56,30 @@ def _clip(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 # The tools
 # ---------------------------------------------------------------------------
 
-def _workspace():
+def workspace_for(root: str = ""):
+    """The folder this run works in.
+
+    With a root, a Workspace of its own opened there - which is how the editor
+    extension gets the project the person is actually looking at rather than
+    whatever the desktop app happens to have open. Without one, the app's
+    single open folder, unchanged.
+
+    Opening enforces the same refusals either way: not a drive root, not a home
+    directory, and every path resolved back inside the root afterwards.
+    """
+    if (root or "").strip():
+        from app.workspace.core import Workspace, WorkspaceError
+
+        own = Workspace()
+        try:
+            own.open(root)
+        except WorkspaceError as exc:
+            raise ToolError(str(exc)) from exc
+        return own
+
     from app.workspace.core import workspace
 
-    described = workspace.describe()
-    if not described.get("open"):
+    if not workspace.describe().get("open"):
         raise ToolError(
             "No folder is open, so there is nothing to work in. Open one first "
             "- the interface has 'Open a folder' above the message box."
@@ -61,9 +87,8 @@ def _workspace():
     return workspace
 
 
-def list_files(path: str = "") -> str:
+def list_files(workspace, path: str = "") -> str:
     """Everything in the workspace, or under one directory of it."""
-    workspace = _workspace()
     tree = workspace.tree()
     entries = tree.get("entries") or tree.get("tree") or []
     if path:
@@ -77,24 +102,27 @@ def list_files(path: str = "") -> str:
     return _clip("\n".join(lines))
 
 
-def read_file(path: str) -> str:
+def read_file(workspace, path: str) -> str:
     """The contents of one file, with line numbers so edits can refer to them."""
-    workspace = _workspace()
     result = workspace.read(path)
-    text = result.get("content", "")
+    # The workspace calls this "text". Reading a key that is not there returned
+    # the empty string, so every file looked empty and edit_file could never
+    # find anything to replace. Watching a run is what caught it: the model
+    # read two files, was told both were empty, and went round the problem by
+    # printing them with a shell command.
+    text = result["text"]
     numbered = "\n".join("%5d  %s" % (i, line)
                          for i, line in enumerate(text.splitlines(), start=1))
     return _clip(numbered) or "(the file is empty)"
 
 
-def write_file(path: str, content: str) -> str:
+def write_file(workspace, path: str, content: str) -> str:
     """Create or replace a file.
 
     Goes through the workspace's proposal mechanism and is then applied, so the
     change is recorded and reversible rather than written straight over
     somebody's work with no trace.
     """
-    workspace = _workspace()
     proposal = workspace.propose_write(path, content, summary="written by the agent")
     change_id = proposal.get("id") or proposal.get("change_id")
     if not change_id:
@@ -104,15 +132,14 @@ def write_file(path: str, content: str) -> str:
     return "Wrote %s (%d lines)." % (path, lines)
 
 
-def edit_file(path: str, find: str, replace: str) -> str:
+def edit_file(workspace, path: str, find: str, replace: str) -> str:
     """Replace an exact piece of text in a file.
 
     Exact rather than fuzzy, and it refuses when the text appears more than
     once. A model that is slightly wrong about the surrounding lines should be
     told so, not have its guess applied to whichever match came first.
     """
-    workspace = _workspace()
-    current = workspace.read(path).get("content", "")
+    current = workspace.read(path)["text"]
     occurrences = current.count(find)
     if occurrences == 0:
         return ("That exact text is not in %s. Read the file again and copy the "
@@ -121,12 +148,11 @@ def edit_file(path: str, find: str, replace: str) -> str:
         return ("That text appears %d times in %s, so it is not clear which one "
                 "you mean. Include more surrounding lines to make it unique."
                 % (occurrences, path))
-    return write_file(path, current.replace(find, replace, 1))
+    return write_file(workspace, path, current.replace(find, replace, 1))
 
 
-def search(query: str, path: str = "") -> str:
+def search(workspace, query: str, path: str = "") -> str:
     """Find which files contain a piece of text."""
-    workspace = _workspace()
     root = workspace.resolve(path or ".")
     found: List[str] = []
     for base, dirs, files in os.walk(root):
@@ -149,14 +175,13 @@ def search(query: str, path: str = "") -> str:
     return _clip("\n".join(found)) if found else "No file contains %r." % query
 
 
-def run_command(command: str) -> str:
+def run_command(workspace, command: str) -> str:
     """Run a shell command in the workspace and return what it printed.
 
     The output is the point. A command whose result the model never sees is a
     command it cannot learn from - it would write a test, run it, and never
     find out whether it passed.
     """
-    workspace = _workspace()
     root = str(workspace.root)
     try:
         finished = subprocess.run(
@@ -172,14 +197,14 @@ def run_command(command: str) -> str:
     return _clip("exit code %d\n%s" % (finished.returncode, output.strip() or "(no output)"))
 
 
-def git(subcommand: str) -> str:
+def git(workspace, subcommand: str) -> str:
     """Run one git command in the workspace.
 
     Separate from run_command so that version control is something the agent
     can be given or refused on its own, and so "commit and push" is a thing it
     knows how to do rather than a shell command it has to guess at.
     """
-    return run_command("git " + subcommand)
+    return run_command(workspace, "git " + subcommand)
 
 
 # ---------------------------------------------------------------------------
@@ -220,8 +245,8 @@ def describe_tools() -> str:
     return "\n".join(lines)
 
 
-def execute(name: str, arguments: Dict[str, Any]) -> str:
-    """Run one tool and return what the model should be shown."""
+def execute(name: str, arguments: Dict[str, Any], workspace) -> str:
+    """Run one tool in the given workspace, and return what the model sees."""
     entry = TOOLS.get(name)
     if entry is None:
         return ("There is no tool called %r. The ones that exist are: %s."
@@ -232,9 +257,10 @@ def execute(name: str, arguments: Dict[str, Any]) -> str:
     if missing:
         return "%s needs %s." % (name, " and ".join(missing))
 
+    accepted = function.__code__.co_varnames[:function.__code__.co_argcount]
     try:
-        return function(**{k: v for k, v in arguments.items()
-                           if k in function.__code__.co_varnames})
+        return function(workspace, **{k: v for k, v in arguments.items()
+                                      if k in accepted and k != "workspace"})
     except ToolError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001 - the model is shown the failure

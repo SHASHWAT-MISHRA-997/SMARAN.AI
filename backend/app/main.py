@@ -555,8 +555,15 @@ app.include_router(local_voice_router)
 @app.get("/api/ping")
 @app.get("/health")
 def healthcheck_ping():
-    """Ultra-fast instant healthcheck endpoint for Docker, Launcher, and Extensions."""
-    return {"status": "ok", "app": "SMARAN.AI", "version": "2.8.5"}
+    """Ultra-fast instant healthcheck endpoint for Docker, Launcher, and Extensions.
+
+    The version is read from the one place that holds it rather than written
+    here. Typed in, it said 2.8.5 while the app was 2.9.6 - four releases of
+    anything asking this endpoint being told the wrong thing.
+    """
+    from app.updates import APP_VERSION
+
+    return {"status": "ok", "app": "SMARAN.AI", "version": APP_VERSION}
 
 
 # CORS: local and private-network clients only.

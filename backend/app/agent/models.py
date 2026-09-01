@@ -31,11 +31,15 @@ logger = logging.getLogger("agent.models")
 
 TIMEOUT = 300
 
-#: Where each provider's OpenAI-compatible endpoint lives.
+#: Where each provider's OpenAI-compatible endpoint lives. DeepSeek and NVIDIA
+#: are here because the editor extension has always offered keys for them, and
+#: a key the agent cannot use is worse than no field at all.
 OPENAI_COMPATIBLE = {
     "openai": "https://api.openai.com/v1",
     "groq": "https://api.groq.com/openai/v1",
     "openrouter": "https://openrouter.ai/api/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
 }
 
 

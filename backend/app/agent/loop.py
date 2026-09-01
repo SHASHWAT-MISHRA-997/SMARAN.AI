@@ -148,13 +148,25 @@ async def plan(task: str, model: str = "", provider: str = "",
 
 async def run(task: str, model: str = "",
               history: Optional[List[Dict]] = None,
-              provider: str = "", api_key: str = "") -> AsyncIterator[Dict]:
+              provider: str = "", api_key: str = "",
+              root: str = "") -> AsyncIterator[Dict]:
     """Carry out a task, reporting each step as it happens.
 
     Yields dicts the caller can show: 'message' when the agent says something,
     'tool_call' when it is about to act, 'tool_result' with what came back,
     'done' at the end, 'error' when something stopped it.
+
+    `root` is the folder to work in. The editor extension passes the project
+    the person has open; the desktop app passes nothing and gets its own.
     """
+    try:
+        workspace = toolbox.workspace_for(root)
+    except toolbox.ToolError as exc:
+        yield {"type": "error", "message": str(exc)}
+        return
+
+    yield {"type": "workspace", "root": str(workspace.root)}
+
     messages: List[Dict] = [
         {"role": "system", "content": SYSTEM % toolbox.describe_tools()},
     ]
@@ -188,7 +200,7 @@ async def run(task: str, model: str = "",
         yield {"type": "tool_call", "name": call["name"],
                "arguments": call["arguments"], "step": step}
 
-        result = toolbox.execute(call["name"], call["arguments"])
+        result = toolbox.execute(call["name"], call["arguments"], workspace)
         performed.append(call["name"])
         yield {"type": "tool_result", "name": call["name"],
                "result": result, "step": step}

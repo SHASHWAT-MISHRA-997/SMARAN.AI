@@ -37,6 +37,10 @@ class AgentRequest(BaseModel):
     #: for small edits and measurably not enough for real work.
     provider: str = ""
     api_key: str = ""
+    #: The folder to work in. The editor extension sends the project it has
+    #: open; without it the agent uses the folder the desktop app has open.
+    #: Guessing here would mean writing one project's changes into another.
+    root: str = ""
 
 
 @router.get("/tools")
@@ -73,7 +77,8 @@ async def agent_run(request: AgentRequest):
     async def stream():
         try:
             async for event in loop.run(request.task, request.model, request.history,
-                                    request.provider, request.api_key):
+                                        request.provider, request.api_key,
+                                        request.root):
                 yield json.dumps(event) + "\n"
         except Exception as exc:  # noqa: BLE001 - the client is told, not left waiting
             logger.exception("agent run failed")
