@@ -14,8 +14,12 @@ import { MODES } from './agent/modes';
 import { AgentPanel } from './agentPanel';
 import { SessionStore } from './sessions';
 import { Keys } from './settings';
+import { reportStartup } from './usage';
 
 export function activate(context: vscode.ExtensionContext): void {
+    // One install, then one launch per session. Nothing is waited for.
+    void reportStartup(context);
+
     const keys = new Keys(context.secrets);
     // Keys typed into settings.json by earlier versions are moved into the
     // keychain the first time this runs, and the setting is emptied.

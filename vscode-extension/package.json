@@ -205,13 +205,18 @@
           "type": "string",
           "default": "http://127.0.0.1:1234/v1",
           "markdownDescription": "Where LM Studio's local server is. Start it from LM Studio's Developer tab. Only used when `#smaran.provider#` is `lmstudio`."
+        },
+        "smaran.usageReporting": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Send a count of installs and launches. Four fields: a random id for this installation, the word `install` or `launch`, the word `vscode`, and the version. No file, task, project name, path or key is ever sent. Turn it off and nothing is sent at all."
         }
       }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "compile": "node bake-analytics.js && tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "npx --yes @vscode/vsce package --no-dependencies"
   },

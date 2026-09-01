@@ -35,7 +35,22 @@ export const ALLOWED_EVENTS = [
   'install', 'launch', 'heartbeat', 'signup', 'login', 'google_signin',
 ];
 
-export const ALLOWED_PLATFORMS = ['windows', 'macos', 'linux', 'android', 'unknown'];
+/* What sent the event, not merely which operating system it ran on.
+ *
+ * Only the desktop app reported anything, so the dashboard could only ever
+ * say "windows" - the phone, the command line and the editor extension were
+ * invisible however many people used them. Reporting the surface separately
+ * is the difference between "3 installs" and knowing where they are.
+ *
+ * The three desktop values stay as they were so existing rows keep meaning
+ * what they meant. */
+export const ALLOWED_PLATFORMS = [
+  'windows', 'macos', 'linux',   // the desktop app
+  'android',                     // the phone app
+  'cli',                         // smaran.exe
+  'vscode',                      // the editor extension
+  'unknown',
+];
 
 /* Events from the marketing site, which is a different thing from an install.
    `visit` is counted once per browsing session, so it is a count of visits and

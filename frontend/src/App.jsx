@@ -23,6 +23,10 @@ import { isNativeApp, loadLink } from './utils/hostLink';
 import { useBackClose } from './utils/backStack';
 import * as standalone from './utils/standalone';
 import * as localChat from './utils/localChat';
+import * as usage from './utils/usage';
+
+/** Written in at build time, so the count says which version it came from. */
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'unknown';
 
 /** No computer linked, in the packaged phone app: nothing behind /api. */
 const noBackendHere = () => isNativeApp() && !loadLink()?.url;
@@ -206,6 +210,14 @@ const App = () => {
 
   useEffect(() => {
     fetchSessions();
+  }, []);
+
+  /* Counted once per start, and only from the packaged phone app - the
+     desktop build has the backend's own reporter and would otherwise be
+     counted twice. */
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    usage.reportStartup({ platform: 'android', appVersion: APP_VERSION });
   }, []);
 
   async function handleCreateSession() {

@@ -107,6 +107,26 @@
 
   <section class="cards" id="cards"></section>
 
+  <!-- The measures a product is normally judged by. Every one of them comes
+       out of the counters already collected; none of them needed anything new
+       to be sent from anyone's machine. -->
+  <section class="panel" style="margin-bottom:18px">
+    <h2>Engagement</h2>
+    <p class="sub">Active installations, and how often they come back</p>
+    <div id="engagement" class="cards" style="margin:12px 0 0"></div>
+    <p class="sub" id="stickyNote" style="margin-top:10px"></p>
+  </section>
+
+  <section class="panel" style="margin-bottom:18px">
+    <h2>Retention by joining week</h2>
+    <p class="sub">
+      Of the installations first seen in a week, how many were still in use a
+      week and a month later. A week is only counted once it is old enough for
+      the question to have an answer.
+    </p>
+    <div id="retention" style="margin-top:12px"></div>
+  </section>
+
   <section class="grid g-2">
     <div class="panel">
       <h2>Activity over time</h2>
@@ -126,20 +146,31 @@
   <section class="grid g-2b">
     <div class="panel">
       <h2>Installations</h2>
-      <p class="sub">Random ids — these are devices, not people</p>
+      <!-- "Install 1" on its own means nothing either. One row is one copy of
+           the software on one device; the numbers are just the order they
+           first appeared, so a row can be pointed at in conversation. Hover to
+           see the random id it actually reports. -->
+      <p class="sub">
+        One row = one copy of the app on one device. Numbered in the order it
+        first appeared. Hover a row to see its random id — there are no names
+        or accounts here.
+      </p>
       <div class="scroll">
         <table>
-          <thead><tr><th>Install</th><th>Platform</th><th>Version</th><th>Launches</th><th>Last seen</th></tr></thead>
+          <thead><tr><th>Which copy</th><th>Where</th><th>Version</th><th>Launches</th><th>Last seen</th></tr></thead>
           <tbody id="installs"></tbody>
         </table>
       </div>
     </div>
     <div class="panel">
       <h2>Live event feed</h2>
-      <p class="sub">Newest first, refreshed every 15 seconds</p>
+      <p class="sub">
+        Newest first, refreshed every 15 seconds. <b>install</b> is the first
+        time a copy ever reported; <b>launch</b> is every start after that.
+      </p>
       <div class="scroll">
         <table>
-          <thead><tr><th>Event</th><th>Install</th><th>Platform</th><th>When</th></tr></thead>
+          <thead><tr><th>Event</th><th>Which copy</th><th>Where</th><th>When</th></tr></thead>
           <tbody id="recent"></tbody>
         </table>
       </div>
@@ -270,14 +301,14 @@ function lineChart(el, series, labels) {
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">${grid}${ticks}${paths}</svg><div style="margin-top:8px">${legend}</div>`;
 }
 
-function bars(id, data) {
+function bars(id, data, rename) {
   const el = document.getElementById(id);
   const entries = Object.entries(data || {});
   if (!entries.length) { el.innerHTML = '<div class="empty">No data yet.</div>'; return; }
   const max = Math.max(...entries.map(([, v]) => v)) || 1;
   el.innerHTML = entries.sort((a, b) => b[1] - a[1]).map(([k, v]) => `
     <div class="bar-row">
-      <span>${esc(k)}</span>
+      <span>${esc(rename ? rename(k) : k)}</span>
       <span class="bar"><i style="width:${Math.round(v / max * 100)}%"></i></span>
       <span class="count">${fmt(v)}</span>
     </div>`).join('');
@@ -349,14 +380,66 @@ async function load() {
     daily.map(d => d.day),
   );
 
-  bars('platforms', s.platforms);
+  /* "windows" is what the app reports; these are what a person reads. */
+  const WHERE = {
+    windows: 'Windows app', macos: 'macOS app', linux: 'Linux app',
+    android: 'Phone app', cli: 'Command line', vscode: 'VS Code extension',
+    unknown: 'Unknown',
+  };
+  const where = p => WHERE[p] || p;
+
+  const eng = s.engagement || {};
+  document.getElementById('engagement').innerHTML = [
+    ['Daily active', eng.dau],
+    ['Weekly active', eng.wau],
+    ['Monthly active', eng.mau],
+    ['Stickiness', eng.stickiness === null || eng.stickiness === undefined ? '—' : eng.stickiness + '%'],
+    ['Dormant — 30 d+', eng.dormant],
+    ['Launches, all time', eng.total_launches],
+  ].map(([label, value]) => `
+    <div class="card">
+      <div class="label">${label}</div>
+      <div class="value">${typeof value === 'number' ? fmt(value) : esc(String(value ?? '—'))}</div>
+    </div>`).join('');
+
+  /* Said in words, because a percentage on its own means nothing to somebody
+     who has not spent a year reading these. */
+  document.getElementById('stickyNote').textContent = eng.stickiness === null || eng.stickiness === undefined
+    ? 'Stickiness needs at least one installation active in the last month.'
+    : `Stickiness is daily active divided by monthly active — of everyone who used it `
+      + `this month, ${eng.stickiness}% used it today. Sequoia's published range for `
+      + `software is 10–20%; above 50% is rare and belongs to chat and social apps.`;
+
+  const cohorts = s.retention || [];
+  document.getElementById('retention').innerHTML = cohorts.length
+    ? `<table class="table"><thead><tr><th>Week beginning</th><th>New installs</th>`
+      + `<th>Still in use after a week</th><th>After a month</th></tr></thead><tbody>`
+      + cohorts.map(c => `
+        <tr>
+          <td class="mono">${esc(c.week)}</td>
+          <td>${fmt(c.installs)}</td>
+          <td>${c.mature_week1 ? `${fmt(c.week1)} of ${fmt(c.installs)}` : '<span class="empty">too recent</span>'}</td>
+          <td>${c.mature_month1 ? `${fmt(c.month1)} of ${fmt(c.installs)}` : '<span class="empty">too recent</span>'}</td>
+        </tr>`).join('')
+      + '</tbody></table>'
+    : '<div class="empty">No installation has reported yet.</div>';
+
+  bars('platforms', s.platforms, where);
   bars('versions', s.versions);
 
-  document.getElementById('installs').innerHTML = (installs.installs || []).length
-    ? installs.installs.map(i => `
+  /* A random hex id tells a person nothing, and it is the first column of
+     both tables. Numbering them in the order they arrived gives every row a
+     name a human can hold on to and follow between the two tables; the id is
+     still there on hover, which is what it is actually for. */
+  const ordered = [...rows].sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
+  const nameOf = new Map(ordered.map((i, n) => [i.install_id, `Install ${n + 1}`]));
+  const label = id => nameOf.get(id) || `Install ${String(id).slice(0, 6)}`;
+
+  document.getElementById('installs').innerHTML = rows.length
+    ? ordered.slice().reverse().map(i => `
       <tr>
-        <td class="mono">${esc(i.install_id.slice(0, 12))}…</td>
-        <td>${esc(i.platform)}</td>
+        <td title="${esc(i.install_id)}">${esc(label(i.install_id))}</td>
+        <td>${esc(where(i.platform))}</td>
         <td class="mono">${esc(i.app_version)}</td>
         <td>${fmt(i.launches)}</td>
         <td class="mono">${ago(i.last_seen)}</td>
@@ -367,8 +450,8 @@ async function load() {
     ? recent.events.map(e => `
       <tr>
         <td><span class="pill ${esc(e.event)}">${esc(e.event)}</span></td>
-        <td class="mono">${esc(e.install_id.slice(0, 10))}…</td>
-        <td>${esc(e.platform)}</td>
+        <td title="${esc(e.install_id)}">${esc(label(e.install_id))}</td>
+        <td>${esc(where(e.platform))}</td>
         <td class="mono">${ago(e.received_at)}</td>
       </tr>`).join('')
     : '<tr><td colspan="4" class="empty">No events yet.</td></tr>';

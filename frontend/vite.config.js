@@ -20,6 +20,10 @@ export default defineConfig({
   define: {
     // Inject the build version so each release gets a distinct asset hash.
     __BUILD_VERSION__: JSON.stringify(BUILD_VERSION),
+    // The phone app counts its own installs, and the count is worth nothing
+    // without knowing which version it came from. Read from package.json, the
+    // one place the version lives, rather than passed in and forgotten.
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
   },
   build: {
     outDir: '../backend/frontend_dist',

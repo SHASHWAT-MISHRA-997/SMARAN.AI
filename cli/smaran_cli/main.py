@@ -308,6 +308,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Counted here rather than per subcommand: one run is one launch,
+    # whichever command it was. Never waited for, never able to fail loudly.
+    from . import usage
+    usage.report_startup()
+
     if not getattr(args, "func", None):
         # When double-clicked or run without subcommands, enter interactive chat directly!
         setattr(args, "model", None)

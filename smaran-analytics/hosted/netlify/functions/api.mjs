@@ -84,6 +84,65 @@ const summary = async (url) => {
     Object.entries(countBy(known, 'app_version')).sort((a, b) => b[1] - a[1]).slice(0, 12),
   );
 
+  /* The metrics every product dashboard is expected to carry, computed from
+   * the counters that are already collected. Nothing new is asked of anyone's
+   * machine to produce them.
+   *
+   *   DAU / WAU / MAU   installations seen in the last 1, 7 and 30 days
+   *   stickiness        DAU ÷ MAU, the usual measure of how often people come
+   *                     back. Sequoia's published range is 10-20%; above 50%
+   *                     is rare and belongs to chat and social products.
+   *   dormant           installed, and not seen for a month
+   *   retention         of the installations that first appeared in a week,
+   *                     how many were still being used a week and a month
+   *                     later
+   *
+   * Retention here is measured from last_seen, so it answers "is this
+   * installation still in use" rather than "was it used in exactly week 4".
+   * That is the honest reading of the data actually held, and it is stated
+   * on the dashboard in those words.
+   */
+  const activeSince = (days) => known.filter((i) => i.last_seen >= since(days)).length;
+  const mau = activeSince(30);
+
+  const weekOf = (iso) => {
+    const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+    return d.toISOString().slice(0, 10);
+  };
+
+  const cohorts = {};
+  for (const install of known) {
+    const week = weekOf(install.first_seen);
+    const bucket = cohorts[week] || (cohorts[week] = { week, installs: 0, week1: 0, month1: 0 });
+    bucket.installs += 1;
+    const age = (Date.now() - new Date(install.first_seen).getTime()) / 86400000;
+    const alive = (Date.now() - new Date(install.last_seen).getTime()) / 86400000;
+    // Only counted once the cohort is old enough for the question to mean
+    // anything; a cohort three days old cannot have a week-one number.
+    if (age >= 7 && alive <= age - 7 + 7) bucket.week1 += 1;
+    if (age >= 30 && alive <= age - 30 + 30) bucket.month1 += 1;
+  }
+
+  const retention = Object.values(cohorts)
+    .sort((a, b) => b.week.localeCompare(a.week))
+    .slice(0, 12)
+    .map((c) => ({
+      ...c,
+      mature_week1: (Date.now() - new Date(`${c.week}T00:00:00Z`).getTime()) / 86400000 >= 7,
+      mature_month1: (Date.now() - new Date(`${c.week}T00:00:00Z`).getTime()) / 86400000 >= 30,
+    }));
+
+  const engagement = {
+    dau: activeSince(1),
+    wau: activeSince(7),
+    mau,
+    // A ratio of nothing is not zero, it is unanswerable.
+    stickiness: mau ? Math.round((activeSince(1) / mau) * 1000) / 10 : null,
+    dormant: known.filter((i) => i.last_seen < since(30)).length,
+    total_launches: known.reduce((sum, i) => sum + (i.launches || 0), 0),
+  };
+
   return json({
     window_days: span,
     window_start: from,
@@ -106,6 +165,8 @@ const summary = async (url) => {
     platforms: countBy(known, 'platform'),
     versions,
     daily,
+    engagement,
+    retention,
   });
 };
 
