@@ -85,8 +85,15 @@ export async function reportStartup(context: vscode.ExtensionContext): Promise<v
         await context.globalState.update(ID, installId);
     }
 
-    const version = vscode.extensions.getExtension('ShashwatMishra.smaran-ai-codex')
-        ?.packageJSON?.version || 'unknown';
+    /* Read from the context, not looked up by id.
+     *
+     * getExtension('ShashwatMishra.smaran-ai-codex') returned nothing: the
+     * resolved id is lower-cased, and at activation the registry may not have
+     * this extension yet either. So every install reported its version as
+     * "unknown" - a wrong number is worse than no number, and this one made
+     * it onto the live dashboard. context.extension is this extension, always,
+     * with no name to get wrong. */
+    const version = String(context.extension?.packageJSON?.version || 'unknown');
 
     if (context.globalState.get<boolean>(SEEN)) {
         send('launch', installId, version);
