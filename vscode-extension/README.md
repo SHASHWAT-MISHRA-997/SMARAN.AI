@@ -1,88 +1,97 @@
 # SMARAN.AI Codex
 
-A coding agent inside VS Code. You give it a task; it reads your project,
+A coding agent in your sidebar. You give it a task; it reads your project,
 changes files, runs commands, reads what they printed, and keeps going until
-the work is done — with every step on screen.
+the work is done — with every step on screen and under a mode you choose.
 
-## What changed in 2.0.0
+Nothing else has to be installed and nothing has to be left running. Bring an
+API key, or a model in Ollama, and that is the whole setup.
 
-Version 1.5.0 was not an agent, and this is worth being plain about. It sent
-your question, took the one reply, scanned it with two regular expressions for
-a `create_file` or a `run_command`, did whatever matched, and stopped. The
-model never found out whether the file was written, whether the command
-failed, or whether the test it had just written passes. One guess, and nothing
-to correct it if the guess was wrong.
+---
 
-2.0.0 is the other shape:
+## The four modes
 
-    ask the model
-      -> it asks for a tool
-      -> run the tool
-      -> give it the result
-      -> ask again
+The mode decides how much it may do without asking. It is enforced where the
+tool would run, not asked of the model — in Plan mode the tools that change
+things refuse, whatever the model tries.
 
-Because the result goes back, it can read a file, notice the function is not
-where it assumed, search for it, edit the right place, run the tests, see one
-fail, and fix it.
+| Mode | What happens |
+| --- | --- |
+| **Plan** | Explores the real code and tells you what it would do. Changes nothing at all. |
+| **Manual** | Asks before every change and every command. |
+| **Edit automatically** | Changes files on its own. Still asks before running a command. |
+| **Auto** | Works on its own, and pauses for anything that looks risky. |
+
+Reading is never gated — listing, reading and searching change nothing, and a
+confirmation on each one only teaches people to click through confirmations.
+
+"Risky" is a short list of things that are hard to undo: deleting recursively,
+force-pushing over published history, piping a download into a shell,
+overwriting a disk, publishing a package. It is not a sandbox, and this does
+not pretend it is one. A shell is a shell.
 
 ## What it can do
 
 `list_files` · `read_file` · `write_file` · `edit_file` · `search` ·
 `run_command` · `git`
 
-Everything is confined to the folder you have open in VS Code. Paths are
-resolved and checked to still be inside it, so `../` and a symlink pointing
-out of the tree both fail as a message rather than as a file somewhere else on
-your disk.
+Everything is confined to the folder you have open. Paths are resolved and
+then checked to still be inside it, so `../` and a symlink pointing out of the
+tree both fail as a message rather than as a file somewhere else on your disk.
 
-## Before it changes anything
+## In the panel
 
-By default it tells you what it intends to do and waits. Approve, and it
-works; every step appears as it happens and **Stop** ends the run where it is.
+* **Setup** — pick a provider, paste a key, and choose from the models that
+  provider actually has. The list is fetched from the provider, never
+  hardcoded: two models this was tested against were retired within a day of
+  each other, and a typed-in list would still be offering them.
+* **History** — every conversation, saved per project, on your machine.
+  Reopen one and carry on where it stopped.
+* **Attach** — pull in a file. One inside the project is named for the agent
+  to read; one from outside is included, because no tool can reach it.
+* **Every step, with its result.** Not a summary — the command that ran and
+  what it printed. If it goes wrong, you can see the step it went wrong on.
+* **The tools that actually ran**, listed at the end beside the agent's own
+  account of what it did. A small model will write one file and report three.
 
-Turn off `smaran.planFirst` if you would rather it started straight away.
+## Where the model comes from
 
-## What it needs
+**Ollama, on your machine.** `ollama pull qwen2.5-coder:7b`, leave the
+provider empty. Nothing leaves the computer.
 
-**A model. That is the whole list.** The agent runs inside this extension.
-Nothing else has to be installed, nothing has to be left open, and no server
-of ours sits in between — your key goes straight to the provider you chose.
-
-Either:
-
-* a model in [Ollama](https://ollama.com) on your machine — `ollama pull
-  qwen2.5-coder:7b` and leave `smaran.provider` empty. Nothing leaves the
-  machine; or
-* a provider key in `smaran.apiKeys` with `smaran.provider` set. Groq, Google
-  Gemini, OpenRouter and NVIDIA all have free tiers.
+**Or a provider key.** Groq, Google Gemini, OpenRouter and NVIDIA all have
+free tiers; Anthropic, OpenAI and DeepSeek are paid. Paste it into Setup — it
+goes into your operating system's keychain, not settings.json, and is sent to
+that provider and nowhere else. There is no server of ours in between.
 
 If you happen to have the SMARAN.AI desktop app installed, keys you entered
-there are picked up so you do not type them twice. The app does not need to be
-running, and you do not need it at all.
-
-*In 2.0.0 the app did have to be running — the agent lived in it. That made a
-266 MB install the price of using the editor, which was the wrong trade.
-2.1.0 carries its own.*
+there are picked up so you do not type them twice. It never has to be running.
 
 ## About the model
 
 This matters more than any setting here. A small local model will follow the
 loop and still lose track of what it has done — a three-billion-parameter
 model, given a two-file task, wrote one file and reported that it had written
-two. The loop cannot make up the difference.
+two. The loop cannot make up that difference, and this extension will not
+pretend otherwise. A 7B coding model is a reasonable floor; the free tiers
+above are better.
 
-Which is why the panel lists, at the end of every run, the tools that
-**actually ran**. If the agent says it wrote three files and one write is
-listed, you can see that without opening anything.
+## Commands
+
+`SMARAN.AI: Open Console` · `Give the agent a task` · `Switch mode`
+
+And in the editor's right-click menu: explain, refactor, write tests, fix the
+problems in this file. Each writes a sentence and hands it to the same agent —
+"write tests for this file" writes them, runs them, and fixes what fails.
 
 ## Settings
 
 | Setting | What it does |
 | --- | --- |
+| `smaran.mode` | How much it may do without asking. Also in the panel. |
 | `smaran.provider` | Which provider runs the agent. Empty means local Ollama. |
-| `smaran.model` | Model name. Empty picks an installed Ollama model. |
-| `smaran.apiKeys` | Your keys. They go to the provider you chose and nowhere else. |
+| `smaran.model` | Model name. Chosen from the Setup tab. |
 | `smaran.ollamaUrl` | Where Ollama is. Only used when no provider is set. |
-| `smaran.planFirst` | Ask before acting. On by default. |
 
-MIT licensed. Part of [SMARAN.AI](https://smaran-ai.netlify.app/).
+MIT licensed. Part of [SMARAN.AI](https://smaran-ai.netlify.app/) — which you
+do not need in order to use this.

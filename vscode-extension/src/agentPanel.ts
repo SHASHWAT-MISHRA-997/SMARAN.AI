@@ -1,26 +1,42 @@
 /**
- * The panel: a task goes in, and every step the agent takes comes out.
+ * The panel.
  *
- * What is on screen is the whole point. 1.5.0 showed a reply. This shows the
- * work - which file is being read, which command is running, what that command
- * printed, and what the agent did with the answer. If it goes wrong you can
- * see the step it went wrong on.
+ * Three screens behind one view: the conversation, the past ones, and the
+ * setup. Setup is in here rather than in settings.json because a person who
+ * has just installed this has no key, no model and no idea which of the eight
+ * providers to pick - and telling them to open a JSON file is how they stop.
  *
- * Two things are deliberately visible and not summarised away:
+ * The conversation shows the work, not a summary of it: which file is being
+ * read, which command is running, what that command printed. If it goes wrong
+ * you can see the step it went wrong on.
  *
- *   the folder it is working in, because an agent that can write files should
+ * Two things are deliberately visible and never summarised away:
+ *
+ *   the folder it is working in, because an agent that writes files should
  *   never leave you guessing where;
  *
- *   which tools actually ran, listed at the end next to the agent's own
- *   account of what it did. A small model will write one file and say it
- *   wrote three, and you should not have to take its word.
+ *   which tools actually ran, listed at the end beside the agent's own account
+ *   of what it did. A small model will write one file and say it wrote three.
  */
 
+import * as path from 'path';
 import * as vscode from 'vscode';
 
+import { AgentEvent, run, ToolCall } from './agent/loop';
+import { MODES, ModeId } from './agent/modes';
 import { Message } from './agent/models';
-import { AgentEvent, plan, run } from './agent/loop';
-import { resolveChoice } from './settings';
+import { listModels, PROVIDERS } from './providers';
+import { Entry, Session, SessionStore } from './sessions';
+import { Keys, ollamaUrl, resolveChoice } from './settings';
+
+/** Enough of a file to be useful, short enough not to crowd out the task. */
+const ATTACH_LIMIT = 60_000;
+
+interface Attachment {
+    path: string;
+    text: string;
+    truncated: boolean;
+}
 
 export class AgentPanel implements vscode.WebviewViewProvider {
     public static readonly viewId = 'smaran-ai.chatView';
@@ -28,9 +44,16 @@ export class AgentPanel implements vscode.WebviewViewProvider {
     private view?: vscode.WebviewView;
     private stopRequested = false;
     private busy = false;
-    private history: Message[] = [];
+    private session?: Session;
+    private attachments: Attachment[] = [];
+    /** Resolves when the person answers the approval showing in the panel. */
+    private pendingApproval?: (allowed: boolean) => void;
 
-    constructor(private readonly extensionUri: vscode.Uri) {}
+    constructor(
+        private readonly extensionUri: vscode.Uri,
+        private readonly keys: Keys,
+        private readonly sessions: SessionStore,
+    ) {}
 
     resolveWebviewView(view: vscode.WebviewView): void {
         this.view = view;
@@ -39,46 +62,139 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')],
         };
         view.webview.html = this.html(view.webview);
-
-        view.webview.onDidReceiveMessage(async (message) => {
-            switch (message.type) {
-                case 'task':
-                    await this.start(String(message.text || ''));
-                    break;
-                case 'stop':
-                    this.stopRequested = true;
-                    break;
-                case 'approve':
-                    await this.execute(String(message.text || ''));
-                    break;
-                case 'reset':
-                    this.history = [];
-                    this.post({ type: 'cleared' });
-                    break;
-            }
-        });
-
-        void this.announce();
+        view.webview.onDidReceiveMessage((message) => void this.handle(message));
     }
 
-    /** Give the agent a task from somewhere other than the panel. */
+    // ── incoming ──────────────────────────────────────────────────────────
+
+    private async handle(message: { type: string; [key: string]: unknown }): Promise<void> {
+        switch (message.type) {
+            case 'hello': await this.announce(); break;
+            case 'task': await this.start(String(message.text || '')); break;
+            case 'approve': await this.execute(String(message.text || '')); break;
+
+            case 'answer':
+                // The loop is waiting on this. Answering twice would leave the
+                // second answer with nothing to resolve, so it is cleared first.
+                this.pendingApproval?.(Boolean(message.allowed));
+                this.pendingApproval = undefined;
+                break;
+
+            case 'stop':
+                this.stopRequested = true;
+                // A run paused on an approval would otherwise sit there for
+                // ever: stopping has to answer the question it is waiting on.
+                this.pendingApproval?.(false);
+                this.pendingApproval = undefined;
+                break;
+
+            case 'setMode':
+                await vscode.workspace.getConfiguration('smaran')
+                    .update('mode', String(message.mode), vscode.ConfigurationTarget.Global);
+                await this.announce();
+                break;
+
+            case 'newSession':
+                this.session = undefined;
+                this.attachments = [];
+                this.post({ type: 'cleared' });
+                this.post({ type: 'attachments', files: [] });
+                break;
+
+            case 'listSessions':
+                this.post({
+                    type: 'sessions',
+                    sessions: this.sessions.all().map((s) => ({
+                        id: s.id, title: s.title, updatedAt: s.updatedAt, steps: s.entries.length,
+                    })),
+                });
+                break;
+
+            case 'openSession': {
+                const session = this.sessions.get(String(message.id));
+                if (session) {
+                    this.session = session;
+                    this.post({ type: 'restore', entries: session.entries, title: session.title });
+                }
+                break;
+            }
+
+            case 'deleteSession':
+                await this.sessions.remove(String(message.id));
+                if (this.session?.id === message.id) {
+                    this.session = undefined;
+                    this.post({ type: 'cleared' });
+                }
+                void this.handle({ type: 'listSessions' });
+                break;
+
+            case 'clearSessions':
+                await this.sessions.clear();
+                this.session = undefined;
+                this.post({ type: 'cleared' });
+                void this.handle({ type: 'listSessions' });
+                break;
+
+            case 'attach': await this.attach(); break;
+
+            case 'unattach':
+                this.attachments = this.attachments.filter((a) => a.path !== message.path);
+                this.post({ type: 'attachments', files: this.attachments.map((a) => a.path) });
+                break;
+
+            case 'setup': await this.sendSetup(); break;
+
+            case 'saveKey':
+                await this.keys.set(String(message.provider), String(message.key || ''));
+                await this.sendSetup();
+                break;
+
+            case 'chooseProvider': {
+                const config = vscode.workspace.getConfiguration('smaran');
+                await config.update('provider', String(message.provider), vscode.ConfigurationTarget.Global);
+                // The model that was chosen belongs to the old provider and
+                // will 404 against the new one. Clearing it is kinder than
+                // letting that happen and reading as a broken extension.
+                await config.update('model', '', vscode.ConfigurationTarget.Global);
+                await this.sendSetup();
+                await this.announce();
+                break;
+            }
+
+            case 'chooseModel':
+                await vscode.workspace.getConfiguration('smaran')
+                    .update('model', String(message.model), vscode.ConfigurationTarget.Global);
+                await this.sendSetup();
+                await this.announce();
+                break;
+
+            case 'refreshModels': await this.sendModels(String(message.provider)); break;
+
+            case 'openLink':
+                await vscode.env.openExternal(vscode.Uri.parse(String(message.url)));
+                break;
+
+            case 'openFile': {
+                const folder = this.folder();
+                if (folder) {
+                    const uri = vscode.Uri.file(path.resolve(folder, String(message.path)));
+                    await vscode.window.showTextDocument(uri, { preview: false }).then(undefined, () => {
+                        void vscode.window.showWarningMessage(`Could not open ${message.path}.`);
+                    });
+                }
+                break;
+            }
+        }
+    }
+
+    /** Give the agent a task from a command rather than the box. */
     public async submit(task: string): Promise<void> {
         await vscode.commands.executeCommand('smaran-ai.chatView.focus');
-        this.post({ type: 'echo', text: task });
+        this.record({ kind: 'you', title: 'You', body: task });
         await this.start(task);
     }
 
-    private async announce(): Promise<void> {
-        const choice = await resolveChoice();
-        this.post({
-            type: 'ready',
-            folder: this.folder(),
-            model: choice.provider
-                ? `${choice.provider} · ${choice.model || 'no model set'}`
-                : (choice.model ? `local · ${choice.model}` : 'no model'),
-            problem: choice.problem,
-        });
-    }
+    // ── state out ─────────────────────────────────────────────────────────
 
     private folder(): string | undefined {
         return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -88,35 +204,180 @@ export class AgentPanel implements vscode.WebviewViewProvider {
         this.view?.webview.postMessage(message);
     }
 
+    private mode(): ModeId {
+        const set = vscode.workspace.getConfiguration('smaran').get<string>('mode') as ModeId;
+        return MODES.some((m) => m.id === set) ? set : 'manual';
+    }
+
+    private async announce(): Promise<void> {
+        const choice = await resolveChoice(this.keys);
+        const provider = PROVIDERS.find((p) => p.id === choice.provider);
+        this.post({
+            type: 'ready',
+            folder: this.folder(),
+            folderName: this.folder() ? path.basename(this.folder() as string) : undefined,
+            provider: provider?.label || choice.provider,
+            model: choice.model,
+            problem: choice.problem,
+            modes: MODES,
+            mode: this.mode(),
+        });
+    }
+
+    /**
+     * Ask, and wait.
+     *
+     * The run is genuinely paused here - the loop is awaiting this promise, so
+     * nothing is written and no command runs until there is an answer. That is
+     * the difference between a mode and a label.
+     */
+    private ask(call: ToolCall, because: string | undefined): Promise<boolean> {
+        return new Promise((resolve) => {
+            this.pendingApproval = resolve;
+            const command = call.name === 'git'
+                ? `git ${call.args.subcommand ?? ''}`
+                : call.args.command;
+            this.post({
+                type: 'confirm',
+                name: call.name,
+                what: command || call.args.path || '',
+                because,
+                detail: call.name === 'write_file'
+                    ? `${(call.args.content ?? '').split('\n').length} lines`
+                    : call.args.find
+                        ? `replacing ${(call.args.find ?? '').split('\n').length} line(s)`
+                        : undefined,
+            });
+        });
+    }
+
+    private async sendSetup(): Promise<void> {
+        const config = vscode.workspace.getConfiguration('smaran');
+        const provider = (config.get<string>('provider') || '').trim();
+        this.post({
+            type: 'setup',
+            providers: PROVIDERS,
+            configured: await this.keys.configured(),
+            provider,
+            model: (config.get<string>('model') || '').trim(),
+            modes: MODES,
+            mode: this.mode(),
+            ollamaUrl: ollamaUrl(),
+        });
+        await this.sendModels(provider);
+    }
+
+    private async sendModels(provider: string): Promise<void> {
+        this.post({ type: 'models', provider, loading: true, models: [] });
+        try {
+            const models = await listModels(provider, await this.keys.get(provider), ollamaUrl());
+            this.post({ type: 'models', provider, loading: false, models });
+        } catch (error) {
+            this.post({
+                type: 'models', provider, loading: false, models: [],
+                error: provider === ''
+                    ? 'Ollama is not answering. Install it from ollama.com, then run: ollama pull qwen2.5-coder:7b'
+                    : (error as Error).message,
+            });
+        }
+    }
+
+    // ── attachments ───────────────────────────────────────────────────────
+
+    private async attach(): Promise<void> {
+        const folder = this.folder();
+        const picked = await vscode.window.showOpenDialog({
+            canSelectMany: true,
+            openLabel: 'Attach',
+            defaultUri: folder ? vscode.Uri.file(folder) : undefined,
+        });
+        if (!picked?.length) {
+            return;
+        }
+        for (const uri of picked) {
+            const shown = folder ? path.relative(folder, uri.fsPath).split(path.sep).join('/') : uri.fsPath;
+            try {
+                const raw = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+                this.attachments = this.attachments.filter((a) => a.path !== shown);
+                this.attachments.push({
+                    path: shown,
+                    text: raw.slice(0, ATTACH_LIMIT),
+                    truncated: raw.length > ATTACH_LIMIT,
+                });
+            } catch {
+                void vscode.window.showWarningMessage(`${shown} could not be read as text.`);
+            }
+        }
+        this.post({ type: 'attachments', files: this.attachments.map((a) => a.path) });
+    }
+
+    /**
+     * The task, with anything attached put in front of it.
+     *
+     * Files inside the project are named rather than pasted - the agent can
+     * read those itself, and pasting them twice wastes the context it needs.
+     * A file from outside cannot be read by any tool, so its contents are the
+     * only way it can be seen at all.
+     */
+    private compose(task: string): string {
+        if (!this.attachments.length) {
+            return task;
+        }
+        const inside: string[] = [];
+        const pasted: string[] = [];
+        for (const file of this.attachments) {
+            if (file.path.startsWith('..') || path.isAbsolute(file.path)) {
+                pasted.push(
+                    `--- ${file.path}${file.truncated ? ' (first part only)' : ''} ---\n${file.text}`);
+            } else {
+                inside.push(file.path);
+            }
+        }
+        const parts: string[] = [];
+        if (inside.length) {
+            parts.push(`These files are the ones I mean: ${inside.join(', ')}. Read them before you start.`);
+        }
+        if (pasted.length) {
+            parts.push(`Attached, from outside the project:\n\n${pasted.join('\n\n')}`);
+        }
+        parts.push(task);
+        return parts.join('\n\n');
+    }
+
+    // ── running ───────────────────────────────────────────────────────────
+
+    private record(entry: Entry): void {
+        this.post({ type: 'entry', entry });
+        if (!this.session) {
+            this.session = this.sessions.create(entry.kind === 'you' ? entry.body || '' : 'Untitled');
+        }
+        this.session.entries.push(entry);
+        void this.sessions.save(this.session);
+    }
+
     private async start(task: string): Promise<void> {
         if (!task.trim() || this.busy) {
             return;
         }
         if (!this.folder()) {
-            this.post({
-                type: 'error',
-                text: 'Open a folder first. The agent works inside a project, and there is no project here.',
+            this.record({
+                kind: 'error', title: 'No folder open',
+                body: 'The agent works inside a project. Open a folder and try again.',
             });
             return;
         }
 
-        const choice = await resolveChoice();
+        const choice = await resolveChoice(this.keys);
         if (choice.problem) {
-            this.post({ type: 'error', text: choice.problem });
+            this.post({ type: 'needsSetup', reason: choice.problem });
             return;
         }
 
-        if (!vscode.workspace.getConfiguration('smaran').get<boolean>('planFirst', true)) {
-            await this.execute(task);
-            return;
-        }
-
-        this.post({ type: 'thinking', text: 'Working out what to do…' });
-        try {
-            this.post({ type: 'plan', text: await plan(task, choice), task });
-        } catch (error) {
-            this.post({ type: 'error', text: (error as Error).message });
-        }
+        // Plan mode explores the real code and reports; the other three go
+        // straight to work and differ in what they do without asking. A
+        // separate "write a plan first" step on top of that would be a second
+        // thing called planning, which is one too many.
+        await this.execute(task);
     }
 
     private async execute(task: string): Promise<void> {
@@ -124,61 +385,94 @@ export class AgentPanel implements vscode.WebviewViewProvider {
         if (!folder || this.busy) {
             return;
         }
-        const choice = await resolveChoice();
+        const choice = await resolveChoice(this.keys);
         if (choice.problem) {
-            this.post({ type: 'error', text: choice.problem });
+            this.post({ type: 'needsSetup', reason: choice.problem });
             return;
         }
 
         this.busy = true;
         this.stopRequested = false;
+        const mode = this.mode();
         this.post({ type: 'started' });
 
-        const used: string[] = [];
+        const history: Message[] = this.session?.history || [];
+        const composed = this.compose(task);
         try {
-            for await (const event of run(task, folder, this.history, choice, () => this.stopRequested)) {
-                this.post(this.forDisplay(event));
-                if (event.type === 'tool_call') {
-                    used.push(event.name);
-                }
-                if (event.type === 'done') {
-                    // Kept so a follow-up ("now add a test for it") knows what
-                    // was already done rather than starting from nothing.
-                    this.history.push({ role: 'user', content: task });
-                    this.history.push({ role: 'assistant', content: event.text });
+            for await (const event of run(
+                composed, folder, history, choice, () => this.stopRequested,
+                mode, (call, because) => this.ask(call, because),
+            )) {
+                this.record(this.asEntry(event, folder));
+                if (event.type === 'done' && this.session) {
+                    // Kept so a follow-up - "now add a test for that" - knows
+                    // what was already done rather than starting from nothing.
+                    this.session.history.push({ role: 'user', content: composed });
+                    this.session.history.push({ role: 'assistant', content: event.text });
+                    await this.sessions.save(this.session);
                 }
             }
             if (this.stopRequested) {
-                this.post({ type: 'stopped' });
+                this.record({ kind: 'note', title: 'Stopped. What it had already done is done.' });
             }
         } catch (error) {
-            this.post({ type: 'error', text: (error as Error).message });
+            this.record({ kind: 'error', title: 'Stopped', body: (error as Error).message });
         } finally {
             this.busy = false;
-            this.post({ type: 'finished', used });
-            // A run that wrote files leaves the editor showing what is no
-            // longer on disk. This is the moment to say so.
-            await vscode.commands.executeCommand('workbench.action.files.revert').then(undefined, () => undefined);
+            this.pendingApproval = undefined;
+            this.attachments = [];
+            this.post({ type: 'attachments', files: [] });
+            this.post({ type: 'finished', mode });
         }
     }
 
-    private forDisplay(event: AgentEvent): Record<string, unknown> {
-        if (event.type === 'tool_call') {
-            // A whole file in an argument would bury the panel; the size says
-            // as much as the text would.
-            const shown = Object.entries(event.args).map(([key, value]) => {
-                const text = String(value ?? '');
-                return key === 'content'
-                    ? [key, `${text.split('\n').length} lines`]
-                    : [key, text.length > 200 ? `${text.slice(0, 200)}…` : text];
-            });
-            return { type: 'tool_call', name: event.name, args: shown, step: event.step };
+    /** One event, in the words the panel shows and the history keeps. */
+    private asEntry(event: AgentEvent, folder: string): Entry {
+        switch (event.type) {
+            case 'workspace':
+                return { kind: 'note', title: `Working in ${event.root}` };
+
+            case 'message':
+                return { kind: 'says', body: event.text };
+
+            case 'tool_call': {
+                const args = Object.entries(event.args).map(([key, value]) => {
+                    const text = String(value ?? '');
+                    // A whole file in an argument would bury the panel; its
+                    // size says as much as the text would.
+                    return key === 'content'
+                        ? `${key}: ${text.split('\n').length} lines`
+                        : `${key}: ${text.length > 300 ? `${text.slice(0, 300)}…` : text}`;
+                });
+                return {
+                    kind: 'tool',
+                    title: `Step ${event.step} · ${event.name}`,
+                    body: args.join('\n'),
+                };
+            }
+
+            case 'tool_result':
+                return { kind: 'result', body: event.result };
+
+            case 'refused':
+                return { kind: 'note', title: `${event.name} was not run`, body: event.because };
+
+            case 'done':
+                return {
+                    kind: 'done',
+                    title: `Finished in ${event.steps} steps`,
+                    body: event.toolsUsed.length
+                        ? `Tools that actually ran: ${event.toolsUsed.join(', ')}`
+                        : 'No tools ran — nothing on disk was changed.',
+                };
+
+            case 'error':
+                return { kind: 'error', title: 'Stopped', body: event.message };
         }
-        if (event.type === 'done') {
-            return { type: 'done', steps: event.steps, tools_used: event.toolsUsed };
-        }
-        return event as unknown as Record<string, unknown>;
+        return { kind: 'note', title: String(folder) };
     }
+
+    // ── the page ──────────────────────────────────────────────────────────
 
     private html(webview: vscode.Webview): string {
         const asset = (name: string) =>
@@ -193,15 +487,31 @@ export class AgentPanel implements vscode.WebviewViewProvider {
 <link href="${asset('panel.css')}" rel="stylesheet">
 </head>
 <body>
-  <header id="status"><span id="folder"></span><span id="model"></span></header>
-  <main id="log"></main>
-  <footer>
-    <textarea id="task" rows="3" placeholder="What should it do? It can read the project, change files and run commands."></textarea>
+  <header>
+    <span id="folder" title="The folder the agent works in">—</span>
+    <span class="spacer"></span>
+    <button id="tabHistory" class="icon" title="Past conversations">History</button>
+    <button id="tabSetup" class="icon" title="Model and keys">Setup</button>
+    <button id="newSession" class="icon" title="Start a new conversation">New</button>
+  </header>
+
+  <main id="log" class="screen"></main>
+  <section id="history" class="screen" hidden></section>
+  <section id="setup" class="screen" hidden></section>
+
+  <footer id="composer">
+    <div id="attachments" class="chips"></div>
+    <textarea id="task" rows="3"
+      placeholder="What should it do?  It can read the project, change files and run commands."></textarea>
     <div class="row">
-      <button id="send">Send</button>
+      <button id="attach" class="ghost" title="Attach a file">+</button>
+      <button id="modeChip" class="ghost mode" title="How much it may do without asking">Manual</button>
+      <span class="spacer"></span>
+      <button id="modelChip" class="ghost model" title="Provider and model">no model</button>
+      <button id="send" title="Ctrl+Enter">Send</button>
       <button id="stop" class="ghost" hidden>Stop</button>
-      <button id="reset" class="ghost">New task</button>
     </div>
+    <div id="modeMenu" class="menu" hidden></div>
   </footer>
 <script nonce="${nonce}" src="${asset('panel.js')}"></script>
 </body>

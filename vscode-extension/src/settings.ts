@@ -1,11 +1,16 @@
 /**
- * Which model to use, from the settings and from what is already on the
- * machine.
+ * Which model to use, and where the keys live.
  *
- * Nothing here needs the SMARAN.AI app. If it happens to be installed, the
- * keys already entered there are read so that they do not have to be typed in
- * twice - but the file is read straight off the disk and the app does not have
- * to be running for that.
+ * Keys go in VS Code's SecretStorage - the OS keychain - rather than in
+ * settings.json. A key in settings.json is a key in a plain text file that
+ * Settings Sync copies to every machine you sign in on and that anybody
+ * screen-sharing your editor can read. The old `smaran.apiKeys` setting is
+ * still read once and moved across, so nothing anyone already typed is lost,
+ * and it is emptied afterwards so it does not sit there as a copy.
+ *
+ * Nothing here needs the SMARAN.AI app. If it is installed, keys already
+ * entered there are read off disk as a convenience - the app does not have to
+ * be running, and does not have to exist.
  */
 
 import * as fs from 'fs';
@@ -16,8 +21,9 @@ import * as vscode from 'vscode';
 import { Choice, firstInstalledOllamaModel } from './agent/models';
 
 const DEFAULT_OLLAMA = 'http://127.0.0.1:11434';
+const SECRET = (provider: string) => `smaran.key.${provider}`;
 
-/** Keys the app has saved, if it is installed. Never requires it to be running. */
+/** Keys the desktop app has saved, if it is installed. */
 function keysFromInstalledApp(): Record<string, string> {
     const roots = [
         process.env.LOCALAPPDATA,
@@ -36,11 +42,68 @@ function keysFromInstalledApp(): Record<string, string> {
                 }
             }
         } catch {
-            // A malformed or unreadable file is not worth reporting; the
-            // settings are the primary source and this is a convenience.
+            // Unreadable or malformed is not worth reporting: this is a
+            // convenience, and the panel's own fields are the real source.
         }
     }
     return {};
+}
+
+export class Keys {
+    constructor(private readonly secrets: vscode.SecretStorage) {}
+
+    /** Move anything in the old plain-text setting into the keychain, once. */
+    async migrate(): Promise<string[]> {
+        const config = vscode.workspace.getConfiguration('smaran');
+        const inSettings = config.get<Record<string, string>>('apiKeys') || {};
+        const moved: string[] = [];
+
+        for (const [name, value] of Object.entries(inSettings)) {
+            const provider = name === 'openRouter' ? 'openrouter' : name;
+            if (typeof value === 'string' && value.trim()) {
+                await this.secrets.store(SECRET(provider), value.trim());
+                moved.push(provider);
+            }
+        }
+        if (moved.length) {
+            try {
+                await config.update('apiKeys', {}, vscode.ConfigurationTarget.Global);
+            } catch {
+                // A workspace-level setting cannot always be cleared from
+                // here. The key is safe in the keychain either way.
+            }
+        }
+        return moved;
+    }
+
+    async get(provider: string): Promise<string> {
+        if (!provider) {
+            return '';
+        }
+        const stored = await this.secrets.get(SECRET(provider));
+        if (stored) {
+            return stored;
+        }
+        const fromApp = keysFromInstalledApp();
+        return (fromApp[provider] || (provider === 'openrouter' ? fromApp.openRouter : '') || '').trim();
+    }
+
+    async set(provider: string, key: string): Promise<void> {
+        if (key.trim()) {
+            await this.secrets.store(SECRET(provider), key.trim());
+        } else {
+            await this.secrets.delete(SECRET(provider));
+        }
+    }
+
+    /** Which providers have a key, without handing the keys themselves out. */
+    async configured(): Promise<Record<string, boolean>> {
+        const out: Record<string, boolean> = {};
+        for (const provider of ['groq', 'gemini', 'openrouter', 'nvidia', 'anthropic', 'openai', 'deepseek']) {
+            out[provider] = Boolean(await this.get(provider));
+        }
+        return out;
+    }
 }
 
 export interface Resolved extends Choice {
@@ -48,48 +111,32 @@ export interface Resolved extends Choice {
     problem?: string;
 }
 
-export async function resolveChoice(): Promise<Resolved> {
+export function ollamaUrl(): string {
+    return (vscode.workspace.getConfiguration('smaran').get<string>('ollamaUrl') || DEFAULT_OLLAMA).trim();
+}
+
+export async function resolveChoice(keys: Keys): Promise<Resolved> {
     const config = vscode.workspace.getConfiguration('smaran');
     const provider = (config.get<string>('provider') || '').trim();
-    const ollamaUrl = (config.get<string>('ollamaUrl') || DEFAULT_OLLAMA).trim();
+    const url = ollamaUrl();
     let model = (config.get<string>('model') || '').trim();
-
-    const settingKeys = config.get<Record<string, string>>('apiKeys') || {};
-    const appKeys = keysFromInstalledApp();
-    const keyFor = (name: string) =>
-        (settingKeys[name]
-            || (name === 'openrouter' ? settingKeys.openRouter : undefined)
-            || appKeys[name]
-            || (name === 'openrouter' ? appKeys.openRouter : undefined)
-            || '').trim();
 
     if (!provider) {
         // No provider means a model on this machine. Which one is worth
-        // finding rather than demanding: most people have one and do not know
-        // its exact tag.
+        // finding rather than demanding: most people have one and could not
+        // tell you its exact tag.
         if (!model) {
-            model = (await firstInstalledOllamaModel(ollamaUrl)) || '';
+            model = (await firstInstalledOllamaModel(url)) || '';
         }
         return {
-            provider: '',
-            model,
-            apiKey: '',
-            ollamaUrl,
-            problem: model
-                ? undefined
-                : 'No model is set and Ollama has none installed. Either install one '
-                  + '(ollama pull qwen2.5-coder:7b), or set smaran.provider and a key in smaran.apiKeys.',
+            provider: '', model, apiKey: '', ollamaUrl: url,
+            problem: model ? undefined : 'no-model',
         };
     }
 
-    const apiKey = keyFor(provider);
+    const apiKey = await keys.get(provider);
     return {
-        provider,
-        model,
-        apiKey,
-        ollamaUrl,
-        problem: apiKey
-            ? (model ? undefined : `Set smaran.model to the ${provider} model you want, for example a "flash" or "coder" one.`)
-            : `smaran.provider is set to ${provider} but there is no key for it in smaran.apiKeys.`,
+        provider, model, apiKey, ollamaUrl: url,
+        problem: apiKey ? (model ? undefined : 'no-model-chosen') : 'no-key',
     };
 }

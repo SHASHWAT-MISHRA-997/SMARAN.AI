@@ -19,6 +19,7 @@
  * and quietly fail for the rest.
  */
 
+import { decide, ModeId } from './modes';
 import { Choice, complete, Message } from './models';
 import { describeTools, execute, TOOLS } from './tools';
 
@@ -96,8 +97,15 @@ export type AgentEvent =
     | { type: 'message'; text: string }
     | { type: 'tool_call'; name: string; args: Record<string, string>; step: number }
     | { type: 'tool_result'; name: string; result: string; step: number }
+    | { type: 'refused'; name: string; because: string; step: number }
     | { type: 'done'; steps: number; toolsUsed: string[]; text: string }
     | { type: 'error'; message: string };
+
+/** Asked before anything that changes something, when the mode says to ask. */
+export type Approver = (
+    call: ToolCall,
+    because: string | undefined,
+) => Promise<boolean>;
 
 export async function plan(task: string, choice: Choice): Promise<string> {
     return complete(
@@ -115,9 +123,21 @@ export async function* run(
     history: Message[],
     choice: Choice,
     stopped: () => boolean,
+    mode: ModeId,
+    approve: Approver,
 ): AsyncGenerator<AgentEvent> {
+    const preamble = mode === 'plan'
+        // Told, as well as enforced. Refusing a write the model did not know
+        // was forbidden wastes a step; refusing one it was warned about is a
+        // backstop rather than the mechanism.
+        ? '\n\nYou are in Plan mode. You may read and search, but you cannot change '
+          + 'any file or run any command - those tools will refuse. Look at the real '
+          + 'code, then say what you would change, in which files, and how you would '
+          + 'check it.'
+        : '';
+
     const messages: Message[] = [
-        { role: 'system', content: SYSTEM.replace('%TOOLS%', describeTools()) },
+        { role: 'system', content: SYSTEM.replace('%TOOLS%', describeTools()) + preamble },
         ...history,
         { role: 'user', content: task },
     ];
@@ -159,9 +179,27 @@ export async function* run(
 
         yield { type: 'tool_call', name: call.name, args: call.args, step };
 
-        const result = await execute(call.name, call.args, root);
-        performed.push(call.name);
-        yield { type: 'tool_result', name: call.name, result, step };
+        // The mode is applied here, where the tool would run, rather than left
+        // to the model to respect.
+        const decision = decide(mode, call.name, call.args);
+        let result: string;
+
+        if (decision.act === 'refuse') {
+            yield { type: 'refused', name: call.name, because: decision.because, step };
+            result = decision.because;
+        } else if (decision.act === 'ask' && !(await approve(call, decision.because))) {
+            const declined = 'The person declined that. Do not repeat it - either '
+                + 'do the work another way, or stop and say what you would have done.';
+            yield { type: 'refused', name: call.name, because: 'You said no.', step };
+            result = declined;
+        } else {
+            if (stopped()) {
+                return;
+            }
+            result = await execute(call.name, call.args, root);
+            performed.push(call.name);
+            yield { type: 'tool_result', name: call.name, result, step };
+        }
 
         // The arrow back. Without these two lines this is 1.5.0 again.
         messages.push({ role: 'assistant', content: reply });

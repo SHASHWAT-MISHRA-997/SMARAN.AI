@@ -9,10 +9,27 @@
  */
 
 import * as vscode from 'vscode';
+
+import { MODES } from './agent/modes';
 import { AgentPanel } from './agentPanel';
+import { SessionStore } from './sessions';
+import { Keys } from './settings';
 
 export function activate(context: vscode.ExtensionContext): void {
-    const panel = new AgentPanel(context.extensionUri);
+    const keys = new Keys(context.secrets);
+    // Keys typed into settings.json by earlier versions are moved into the
+    // keychain the first time this runs, and the setting is emptied.
+    void keys.migrate().then((moved) => {
+        if (moved.length) {
+            void vscode.window.showInformationMessage(
+                `SMARAN.AI moved ${moved.length} API key(s) out of settings.json into your keychain.`,
+            );
+        }
+    });
+
+    // Per workspace: the history that matters when you open a repository is
+    // that repository's, not yesterday's work on something else.
+    const panel = new AgentPanel(context.extensionUri, keys, new SessionStore(context.workspaceState));
 
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(AgentPanel.viewId, panel, {
@@ -49,6 +66,24 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('smaran.startAgent', open),
+
+        vscode.commands.registerCommand('smaran.switchMode', async () => {
+            const config = vscode.workspace.getConfiguration('smaran');
+            const current = config.get<string>('mode');
+            const picked = await vscode.window.showQuickPick(
+                MODES.map((mode) => ({
+                    label: mode.label,
+                    description: mode.id === current ? 'current' : undefined,
+                    detail: mode.description,
+                    id: mode.id,
+                })),
+                { title: 'How much may the agent do without asking?' },
+            );
+            if (picked) {
+                await config.update('mode', picked.id, vscode.ConfigurationTarget.Global);
+                await open();
+            }
+        }),
 
         vscode.commands.registerCommand('smaran.runTask', async () => {
             const text = await vscode.window.showInputBox({

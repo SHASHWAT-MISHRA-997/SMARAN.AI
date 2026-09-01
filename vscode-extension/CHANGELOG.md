@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.2.0
+
+**A panel you can actually use, and four modes that are real.**
+
+2.1.0 had one text box. Everything else — which provider, which key, which
+model — was in `settings.json`, which is a fine place for a preference and a
+poor place for the first five minutes of using something.
+
+* **Modes: Plan, Manual, Edit automatically, Auto.** How much it may do
+  without asking. Enforced where the tool would run, not asked of the model:
+  in Plan mode the tools that change things refuse, whatever the model tries.
+  Auto pauses for the handful of things that are hard to undo — deleting
+  recursively, force-pushing, piping a download into a shell.
+* **Setup, in the panel.** Eight providers, a field for each key, and a model
+  list fetched from the provider you picked — 420 from OpenRouter with the
+  free ones marked, 38 from Google, 82 from NVIDIA. Coding models sort first.
+* **Keys moved to the OS keychain.** `smaran.apiKeys` put them in a plain text
+  file that Settings Sync copies to every machine you sign in on. Anything
+  already there is moved across once and the setting is emptied.
+* **History.** Every conversation, saved per project, reopenable.
+* **Attach a file.** One inside the project is named for the agent to read;
+  one from outside is included, because no tool can reach it.
+* **Approval is a real pause.** The run stops on the question. Nothing is
+  written and no command runs until you answer.
+* Code blocks with a copy button, a link straight to any file a step touched,
+  and the folder always in view.
+
+`smaran.planFirst` is replaced by `smaran.mode`.
+
 ## 2.1.0
 
 **It no longer needs anything else installed or open.**
