@@ -225,7 +225,13 @@ const PhonePairing = ({ onPaired }) => {
       setStatus(`Linked to ${result.url}`);
       onPaired?.(result);
       // Pull the desktop's history straight away so the phone is not empty.
-      syncWithHost(result);
+      await syncWithHost(result);
+      // The address the app talks to is settled once, at start-up, so that it
+      // cannot change underneath a request already in flight. Reloading is
+      // what makes a newly linked desktop take effect everywhere at once
+      // rather than in whichever screens happen to be remounted next.
+      setStatus('Linked. Reloading…');
+      window.location.reload();
     } catch (err) {
       setError(err.message);
       setStatus('');
@@ -297,6 +303,8 @@ const PhonePairing = ({ onPaired }) => {
     saveLink(null);
     setLink(null);
     setStatus('');
+    // Same reason as pairing: the API address is read once at start-up.
+    window.location.reload();
   };
 
   if (link) {

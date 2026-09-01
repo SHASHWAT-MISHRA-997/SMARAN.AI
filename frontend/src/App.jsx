@@ -19,11 +19,18 @@ import SitesHub from './components/SitesHub';
 import DesktopPet from './components/DesktopPet';
 import TerminalPanel from './components/TerminalPanel';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
+import { isNativeApp, loadLink } from './utils/hostLink';
 
 
 // SMARAN.AI runs as a free, offline, single-user desktop app. There is no
 // login, sign-up, Google auth, or legal gate — the local device is the user.
 const LOCAL_USER = { id: 'local', username: 'You', email: 'local@smaran.ai', role: 'user' };
+
+// True in the packaged phone app when no computer has been linked to it. The
+// phone has no backend of its own, so in this state the conversation list, the
+// documents, the models and the memory all have nothing behind them. Saying so
+// is better than an app that opens, looks complete and quietly does nothing.
+const needsPairing = () => isNativeApp() && !loadLink()?.url;
 
 const App = () => {
   // Auth state — always the local device user; never gated.
@@ -314,7 +321,26 @@ const App = () => {
     // Nothing behind the lock is rendered until the PIN is accepted, so the
     // workspace is never briefly visible on the way in.
     <PinLock>
-    <div className="h-[100dvh] min-h-0 w-full flex flex-col md:flex-row bg-[#ffffff] dark:bg-[#0c0c0e] text-[#1f1f1f] dark:text-[#e3e3e3] overflow-hidden font-sans relative transition-colors duration-300">
+    {/* The banner sits above the workspace rather than inside it: the frame
+        below becomes a row on wide screens, and a notice dropped into that
+        row would be laid out as a column beside the sidebar. */}
+    <div className="h-[100dvh] w-full flex flex-col overflow-hidden">
+      {needsPairing() && (
+        <div className="shrink-0 z-30 px-4 py-2.5 flex items-center justify-between gap-3 bg-amber-500/10 border-b border-amber-500/30 text-[13px] text-amber-700 dark:text-amber-200">
+          <span>
+            No computer is linked, so this app has no backend to talk to.
+            Chats, documents and models will stay empty until you pair one.
+          </span>
+          <button
+            type="button"
+            onClick={() => setIsPairingOpen(true)}
+            className="shrink-0 rounded-lg border border-amber-400/50 px-3 py-1 font-medium hover:bg-amber-400/15"
+          >
+            Link a computer
+          </button>
+        </div>
+      )}
+    <div className="flex-1 min-h-0 w-full flex flex-col md:flex-row bg-[#ffffff] dark:bg-[#0c0c0e] text-[#1f1f1f] dark:text-[#e3e3e3] overflow-hidden font-sans relative transition-colors duration-300">
       <StarfieldCanvas />
 
       {/* Sidebar Panel */}
@@ -459,6 +485,7 @@ const App = () => {
       <DesktopPet />
 
       <TerminalPanel isOpen={isTerminalOpen} onClose={() => setIsTerminalOpen(false)} />
+    </div>
     </div>
     </PinLock>
   );

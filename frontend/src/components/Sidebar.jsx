@@ -9,7 +9,7 @@ import {
 import ModelHubModal from './ModelHubModal';
 import { SmaranLogo } from './SmaranLogo';
 import { API_BASE, logoutUser, getCurrentUser, fetchWithAuth } from '../context/AuthContext';
-import { parseJsonResponse } from '../utils/api';
+import { asList, parseJsonResponse } from '../utils/api';
 
 /* Tooltip uses a React Portal so parent overflow never clips it. */
 const Tip = ({ label, children }) => {
@@ -209,7 +209,7 @@ const Sidebar = ({
       const res = await fetchWithAuth(`${API_BASE}/api/memory`);
       if (res.ok) {
         const data = await parseJsonResponse(res);
-        setMemoryFacts(data);
+        setMemoryFacts(asList(data));
       }
     } catch (err) {
       console.error(err);

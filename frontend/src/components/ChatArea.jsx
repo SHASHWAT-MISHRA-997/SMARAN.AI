@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch, PictureInPicture2,} from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
-import { parseJsonResponse } from '../utils/api';
+import { asList, parseJsonResponse } from '../utils/api';
 import { downloadProjectZip, downloadSingleFile } from '../utils/zip';
 import ArtifactRenderer from './ArtifactRenderer';
 import ModelCompareModal from './ModelCompareModal';
@@ -2188,8 +2188,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
+        // A 200 that is not a list is not a conversation. In the Android shell
+        // this came back as the app's own HTML page, and putting it into
+        // state took the whole interface down before it drew anything.
         const data = await parseJsonResponse(res);
-        setMessages(data);
+        setMessages(asList(data));
         setTimeout(scrollToBottom, 50);
       }
     } catch (err) {
@@ -2243,7 +2246,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         });
         if (colRes.ok) {
           const cols = await parseJsonResponse(colRes);
-          targetIds = cols.map((c) => c.id);
+          targetIds = asList(cols).map((c) => c.id);
           if (targetIds.length > 0) {
             setActiveCollections(targetIds);
           }
@@ -2266,7 +2269,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         });
         if (res.ok) {
           const docs = await parseJsonResponse(res);
-          allDocs.push(...docs);
+          allDocs.push(...asList(docs));
         }
       }
       

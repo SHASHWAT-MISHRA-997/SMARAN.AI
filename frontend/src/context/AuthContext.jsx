@@ -1,4 +1,30 @@
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+/* Where the API is, for this launch.
+ *
+ * On the desktop the backend is the page's own origin and the empty string is
+ * right. In the Android shell the origin is the app's own bundle of files -
+ * there is no server behind it - so every request went to the local asset
+ * server, which answers anything without a dot in the last path segment with
+ * index.html and a 200. The app spent its whole life talking to its own HTML.
+ *
+ * hostLink already knew the answer: pairing stores the desktop's address on
+ * this network. Nothing was reading it. This does, and it reads it
+ * synchronously from storage so that the value is settled before the first
+ * request goes out. Re-pairing reloads the app, which is what makes a plain
+ * constant enough here.
+ */
+const pairedHost = () => {
+  try {
+    const capacitor = typeof window !== 'undefined' ? window.Capacitor : null;
+    const native = Boolean(capacitor?.isNativePlatform?.() ?? capacitor?.isNative);
+    if (!native) return '';
+    const raw = localStorage.getItem('sm_host_link');
+    return (raw ? JSON.parse(raw)?.url : '') || '';
+  } catch {
+    return '';
+  }
+};
+
+export const API_BASE = import.meta.env.VITE_API_BASE_URL || pairedHost() || '';
 
 const DEVICE_ID_KEY = 'smaran_ai_device_id';
 const DEVICE_FP_KEY = 'smaran_ai_device_fingerprint';
