@@ -11,6 +11,7 @@ import { useTheme } from "../context/ThemeContext";
 
 import { detectClientDevice } from './RightPanel';
 import { isNativeApp, loadLink } from '../utils/hostLink';
+import * as standalone from '../utils/standalone';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const positive = (value) => finite(value) && value > 0;
@@ -71,6 +72,60 @@ const SettingsModal = ({
      Read at call time rather than stored, so pairing takes effect without a
      reload of this screen. */
   const noBackend = () => isNativeApp() && !loadLink()?.url;
+
+  /* The phone's own provider, key and model. Kept here rather than in the
+     backend's cloud-key store, because on this device there is no backend. */
+  const [directKeys, setDirectKeys] = useState(() => standalone.loadKeys());
+  const [directDrafts, setDirectDrafts] = useState({});
+  const [directProvider, setDirectProvider] = useState(() => standalone.getProvider());
+  const [directModel, setDirectModel] = useState(() => standalone.getModel());
+  const [directModels, setDirectModels] = useState([]);
+  const [directModelsLoading, setDirectModelsLoading] = useState(false);
+  const [directModelError, setDirectModelError] = useState("");
+
+  const refreshDirectModels = async (provider, keys) => {
+    const key = (keys || directKeys)[provider];
+    if (!provider || !key) { setDirectModels([]); return; }
+    setDirectModelsLoading(true);
+    setDirectModelError("");
+    try {
+      setDirectModels(standalone.usable(await standalone.listModels(provider, key)));
+    } catch (error) {
+      setDirectModels([]);
+      setDirectModelError(error?.message || "That provider would not list its models.");
+    } finally {
+      setDirectModelsLoading(false);
+    }
+  };
+
+  const selectDirectProvider = (provider) => {
+    standalone.setProvider(provider);
+    setDirectProvider(provider);
+    // A model belongs to the provider it came from; carrying one across would
+    // fail with a 404 that reads as the app being broken.
+    standalone.setModel("");
+    setDirectModel("");
+    refreshDirectModels(provider, directKeys);
+  };
+
+  const saveDirectKey = (provider, value) => {
+    const next = standalone.saveKey(provider, value === undefined ? (directDrafts[provider] || "") : value);
+    setDirectKeys(next);
+    setDirectDrafts((d) => ({ ...d, [provider]: "" }));
+    // Choosing is implied by bothering to enter a key for it.
+    if (next[provider] && standalone.getProvider() !== provider) {
+      selectDirectProvider(provider);
+    } else {
+      refreshDirectModels(provider, next);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && activeTab === "provider" && directProvider) {
+      refreshDirectModels(directProvider, directKeys);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, activeTab]);
 
   const checkUpdates = async (force = true) => {
     setCheckingUpdate(true);
@@ -336,6 +391,10 @@ const SettingsModal = ({
   const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
   const TABS = [
     { id: "general", label: "General & Theme", icon: SlidersHorizontal },
+    // First, and only where it is the thing standing between you and a
+    // working app: on a phone with no computer linked, nothing answers until
+    // a provider and a key are set.
+    ...(noBackend() ? [{ id: "provider", label: "AI Provider", icon: Boxes }] : []),
     { id: "account", label: "Account & Profile", icon: UserRound },
     { id: "models", label: "Model Matrix", icon: Boxes },
     ...(!isMobile ? [{ id: "analytics", label: "Analytics & Telemetry", icon: ChartNoAxesCombined }] : []),
@@ -536,6 +595,134 @@ const SettingsModal = ({
                     </select>
                   </div>}
                 </div>
+              </div>
+            )}
+
+            {/* AI PROVIDER — the phone's own model, with no computer involved */}
+            {activeTab === "provider" && (
+              <div className="space-y-5">
+                <div>
+                  <h3 className="text-base font-black text-zinc-900 dark:text-white">Where the model runs</h3>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                    This phone talks to the provider directly. Your key is kept on this
+                    device and sent to the provider you pick and nowhere else — there is no
+                    server of ours in between. Several have a free tier.
+                  </p>
+                </div>
+
+                {standalone.PROVIDERS.map((p) => {
+                  const saved = Boolean(directKeys[p.id]);
+                  const chosen = directProvider === p.id;
+                  return (
+                    <div
+                      key={p.id}
+                      className={`rounded-2xl border p-3.5 transition ${
+                        chosen
+                          ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40"
+                          : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => selectDirectProvider(p.id)}
+                        className="w-full text-left"
+                      >
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-black text-zinc-900 dark:text-white">{p.label}</span>
+                          {p.free && (
+                            <span className="rounded-full bg-violet-100 dark:bg-violet-900/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700 dark:text-violet-300">Free tier</span>
+                          )}
+                          {saved && (
+                            <span className="rounded-full bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Key saved</span>
+                          )}
+                          {chosen && <span className="ml-auto text-indigo-500">✓</span>}
+                        </span>
+                        <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">{p.hint}</span>
+                      </button>
+
+                      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                        <input
+                          type="password"
+                          value={directDrafts[p.id] || ""}
+                          onChange={(e) => setDirectDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
+                          placeholder={saved ? "A key is saved. Type to replace it." : "Paste your API key"}
+                          className="min-w-0 flex-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs outline-none focus:border-indigo-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => saveDirectKey(p.id)}
+                          className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white"
+                        >
+                          Save
+                        </button>
+                        {saved && (
+                          <button
+                            type="button"
+                            onClick={() => saveDirectKey(p.id, "")}
+                            className="rounded-xl border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-bold"
+                          >
+                            Remove
+                          </button>
+                        )}
+                        <a
+                          href={p.keyUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-bold text-indigo-600 dark:text-indigo-400 underline"
+                        >
+                          Get key
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <div>
+                  <h3 className="text-base font-black text-zinc-900 dark:text-white">Model</h3>
+                  <p className="mt-1 mb-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    Asked for from the provider, so this is what your key can actually run.
+                  </p>
+
+                  {directModelError && (
+                    <p className="mb-2 rounded-xl border border-amber-500/40 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                      {directModelError}
+                    </p>
+                  )}
+
+                  {directModelsLoading && (
+                    <p className="text-xs text-zinc-500">Asking the provider what it has…</p>
+                  )}
+
+                  {!directModelsLoading && directModels.length > 0 && (
+                    <div className="max-h-72 overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
+                      {directModels.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => { standalone.setModel(m.id); setDirectModel(m.id); }}
+                          className={`w-full px-3 py-2.5 text-left text-xs flex items-center gap-2 ${
+                            directModel === m.id
+                              ? "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold"
+                              : "text-zinc-700 dark:text-zinc-300"
+                          }`}
+                        >
+                          <span className="flex-1 break-all">{m.id}</span>
+                          {m.free && <span className="text-[10px] font-bold uppercase text-violet-500">free</span>}
+                          {directModel === m.id && <span>✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    Chosen: <strong>{directModel || "nothing yet"}</strong>
+                  </p>
+                </div>
+
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  Documents, models running on your own hardware, and controlling a computer
+                  do need one — pair it under Device Connections. Everything else works here.
+                </p>
               </div>
             )}
 

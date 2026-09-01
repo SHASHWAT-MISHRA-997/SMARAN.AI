@@ -21,6 +21,7 @@ import * as vscode from 'vscode';
 import { Choice, firstInstalledOllamaModel } from './agent/models';
 
 const DEFAULT_OLLAMA = 'http://127.0.0.1:11434';
+const DEFAULT_LM_STUDIO = 'http://127.0.0.1:1234/v1';
 const SECRET = (provider: string) => `smaran.key.${provider}`;
 
 /** Keys the desktop app has saved, if it is installed. */
@@ -115,11 +116,17 @@ export function ollamaUrl(): string {
     return (vscode.workspace.getConfiguration('smaran').get<string>('ollamaUrl') || DEFAULT_OLLAMA).trim();
 }
 
+export function lmStudioUrl(): string {
+    return (vscode.workspace.getConfiguration('smaran').get<string>('lmStudioUrl') || DEFAULT_LM_STUDIO).trim();
+}
+
 export async function resolveChoice(keys: Keys): Promise<Resolved> {
     const config = vscode.workspace.getConfiguration('smaran');
     const provider = (config.get<string>('provider') || '').trim();
     const url = ollamaUrl();
     let model = (config.get<string>('model') || '').trim();
+
+    const lmStudio = lmStudioUrl();
 
     if (!provider) {
         // No provider means a model on this machine. Which one is worth
@@ -129,14 +136,23 @@ export async function resolveChoice(keys: Keys): Promise<Resolved> {
             model = (await firstInstalledOllamaModel(url)) || '';
         }
         return {
-            provider: '', model, apiKey: '', ollamaUrl: url,
+            provider: '', model, apiKey: '', ollamaUrl: url, lmStudioUrl: lmStudio,
             problem: model ? undefined : 'no-model',
+        };
+    }
+
+    // The local runners have no key to check; whether they are running is
+    // something only the request itself can answer.
+    if (provider === 'lmstudio') {
+        return {
+            provider, model, apiKey: '', ollamaUrl: url, lmStudioUrl: lmStudio,
+            problem: model ? undefined : 'no-model-chosen',
         };
     }
 
     const apiKey = await keys.get(provider);
     return {
-        provider, model, apiKey, ollamaUrl: url,
+        provider, model, apiKey, ollamaUrl: url, lmStudioUrl: lmStudio,
         problem: apiKey ? (model ? undefined : 'no-model-chosen') : 'no-key',
     };
 }

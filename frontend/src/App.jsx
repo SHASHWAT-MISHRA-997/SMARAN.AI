@@ -21,17 +21,30 @@ import TerminalPanel from './components/TerminalPanel';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 import { isNativeApp, loadLink } from './utils/hostLink';
 import { useBackClose } from './utils/backStack';
+import * as standalone from './utils/standalone';
+import * as localChat from './utils/localChat';
+
+/** No computer linked, in the packaged phone app: nothing behind /api. */
+const noBackendHere = () => isNativeApp() && !loadLink()?.url;
 
 
 // SMARAN.AI runs as a free, offline, single-user desktop app. There is no
 // login, sign-up, Google auth, or legal gate — the local device is the user.
 const LOCAL_USER = { id: 'local', username: 'You', email: 'local@smaran.ai', role: 'user' };
 
-// True in the packaged phone app when no computer has been linked to it. The
-// phone has no backend of its own, so in this state the conversation list, the
-// documents, the models and the memory all have nothing behind them. Saying so
-// is better than an app that opens, looks complete and quietly does nothing.
-const needsPairing = () => isNativeApp() && !loadLink()?.url;
+/* The phone app needs a model, not a computer.
+ *
+ * This used to sit at the top of the screen for ever, on every launch, saying
+ * that nothing would work until a computer was paired. That was true when the
+ * only way to answer anything was a backend - and it is not true now: the app
+ * talks to a provider directly, with a key kept on the device.
+ *
+ * So the only thing worth saying is when there is no model set up yet, and it
+ * links to the screen that fixes that. Pairing a computer is still offered
+ * from Settings, for the things that genuinely need one: documents, local
+ * models, and driving that machine.
+ */
+const needsModel = () => isNativeApp() && !loadLink()?.url && !standalone.isReady();
 
 const App = () => {
   // Auth state — always the local device user; never gated.
@@ -146,6 +159,27 @@ const App = () => {
   // that simply failed was not, and that left the id null. On a phone talking
   // to a paired computer, a failed request is the common case.
   async function fetchSessions() {
+    /* No backend: the conversation list lives on the device.
+       Without this a fresh session id was invented on every launch, so the
+       previous conversation was still on disk and nothing ever went looking
+       for it - the app opened empty every time. */
+    if (noBackendHere()) {
+      const stored = localChat.loadSessions();
+      if (stored.length) {
+        setSessions(stored);
+        if (!activeSessionId) setActiveSessionId(stored[0].id);
+        return;
+      }
+      const first = {
+        id: `local-${Date.now()}`,
+        title: 'New Conversation',
+        created_at: new Date().toISOString(),
+      };
+      localChat.saveSessions([first]);
+      setSessions([first]);
+      setActiveSessionId(first.id);
+      return;
+    }
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions`);
       if (res.ok) {
@@ -175,6 +209,19 @@ const App = () => {
   }, []);
 
   async function handleCreateSession() {
+    if (noBackendHere()) {
+      const created = {
+        id: `local-${Date.now()}`,
+        title: 'New Conversation',
+        created_at: new Date().toISOString(),
+      };
+      const all = [created, ...localChat.loadSessions()].slice(0, 60);
+      localChat.saveSessions(all);
+      setSessions(all);
+      setActiveSessionId(created.id);
+      setActiveView('chat');
+      return created;
+    }
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions`, {
         method: 'POST',
@@ -341,18 +388,15 @@ const App = () => {
         below becomes a row on wide screens, and a notice dropped into that
         row would be laid out as a column beside the sidebar. */}
     <div className="h-[100dvh] w-full flex flex-col overflow-hidden">
-      {needsPairing() && (
-        <div className="shrink-0 z-30 px-4 py-2.5 flex items-center justify-between gap-3 bg-amber-500/10 border-b border-amber-500/30 text-[13px] text-amber-700 dark:text-amber-200">
-          <span>
-            No computer is linked, so this app has no backend to talk to.
-            Chats, documents and models will stay empty until you pair one.
-          </span>
+      {needsModel() && (
+        <div className="shrink-0 z-30 px-4 py-2.5 flex items-center justify-between gap-3 bg-indigo-500/10 border-b border-indigo-500/30 text-[13px] text-indigo-700 dark:text-indigo-200">
+          <span>Pick a model to start. Several are free.</span>
           <button
             type="button"
-            onClick={() => setIsPairingOpen(true)}
-            className="shrink-0 rounded-lg border border-amber-400/50 px-3 py-1 font-medium hover:bg-amber-400/15"
+            onClick={() => { setSettingsTab('provider'); setIsSettingsOpen(true); }}
+            className="shrink-0 rounded-lg border border-indigo-400/50 px-3 py-1 font-medium hover:bg-indigo-400/15"
           >
-            Link a computer
+            Set up
           </button>
         </div>
       )}

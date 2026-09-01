@@ -2,7 +2,7 @@
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
   "description": "A coding agent that reads your project, changes files, runs commands and reads the results — one step at a time, in view.",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {
@@ -148,6 +148,7 @@
           "default": "",
           "enum": [
             "",
+            "lmstudio",
             "gemini",
             "groq",
             "openrouter",
@@ -157,7 +158,8 @@
             "nvidia"
           ],
           "enumDescriptions": [
-            "Use a model installed locally in Ollama",
+            "Ollama on this machine",
+            "LM Studio on this machine",
             "Google Gemini",
             "Groq",
             "OpenRouter",
@@ -166,12 +168,12 @@
             "DeepSeek",
             "NVIDIA NIM"
           ],
-          "markdownDescription": "Which model runs the agent. Empty means a model installed locally through Ollama, with no key and nothing sent off the machine.\n\nThis matters more than any other setting. A small local model will follow the loop and still lose track of what it has done; the difference between a 3B model and a large one is not something the extension can make up for."
+          "markdownDescription": "Which model runs the agent. Empty means Ollama on this machine; `lmstudio` means LM Studio's local server. Both run without a key and send nothing off the machine, and whichever models you already have there are the ones offered.\n\nThis matters more than any other setting. A small local model will follow the loop and still lose track of what it has done; the difference between a 3B model and a large one is not something the extension can make up for."
         },
         "smaran.model": {
           "type": "string",
           "default": "",
-          "markdownDescription": "The model name to use, for example `gemini-flash-latest` or `qwen2.5-coder:7b`. Empty lets the app choose from what is installed locally."
+          "markdownDescription": "The model to use. Pick it from the Setup tab, which lists what the chosen provider actually has rather than guessing."
         },
         "smaran.apiKeys": {
           "type": "object",
@@ -198,6 +200,11 @@
             "Works on its own, and pauses for anything that looks risky."
           ],
           "markdownDescription": "How much the agent may do without asking. Also switchable from the panel.\n\nThis is enforced where the tool would run, not asked of the model — in Plan mode the tools that change things refuse, whatever the model tries."
+        },
+        "smaran.lmStudioUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:1234/v1",
+          "markdownDescription": "Where LM Studio's local server is. Start it from LM Studio's Developer tab. Only used when `#smaran.provider#` is `lmstudio`."
         }
       }
     }

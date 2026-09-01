@@ -3,6 +3,14 @@ import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, 
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink } from '../utils/hostLink';
+import * as standalone from '../utils/standalone';
+import * as localChat from '../utils/localChat';
+
+/* True in the packaged phone app with no computer linked: there is no backend
+   at the app's own origin, so anything under /api comes back as the app's own
+   HTML page. Module scope, because the message rows are their own components
+   and need to know too. */
+const noBackend = () => isNativeApp() && !loadLink()?.url;
 import { downloadProjectZip, downloadSingleFile } from '../utils/zip';
 import ArtifactRenderer from './ArtifactRenderer';
 import ModelCompareModal from './ModelCompareModal';
@@ -1103,6 +1111,12 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete, isSpeakingAudi
                                   ['Source', hasVerifiedSource ? measurementSource : 'Unavailable'],
                                 ];
 
+                /* These readings come from the backend. On a phone answering
+                   from the device there is no backend to report them, so the
+                   whole card would say "Not measured" six times - a panel
+                   whose only content is its own absence. */
+                if (noBackend()) return null;
+
                 return (
                   <div className="mt-4 overflow-hidden rounded-2xl border border-indigo-500/20 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-50/80 via-white/80 to-purple-50/80 dark:from-zinc-950/90 dark:via-zinc-900/90 dark:to-indigo-950/40 shadow-[0_8px_30px_-12px_rgba(99,102,241,0.3)] ring-1 ring-white/50 dark:ring-white/5 transition-all duration-300 w-full p-3.5 space-y-2.5">
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-200/50 dark:border-zinc-800 pb-2">
@@ -1669,6 +1683,15 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
     stopSpeaking();
 
+    /* No backend to synthesize with. The browser's own voice is built into
+       the Android WebView, so reading a reply aloud does not need a computer
+       at all - it was only ever asking the backend first because the backend
+       has better voices, not because this one is missing. */
+    if (noBackend()) {
+      speakNativeText(clean, langCode);
+      return;
+    }
+
     // The backend speaks first: it serves free natural neural voices for every
     // supported language. Windows itself usually ships English-only voices, so
     // going native first would read Hindi/Gujarati/Tamil in an English accent.
@@ -1820,6 +1843,14 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
      computer linked there is neither, and what happened instead was a
      microphone that started, a button that lit up, and silence - which reads
      as the feature being broken rather than absent. */
+  /** The reply in flight from a provider, so Stop can end it. */
+  const directAbortRef = useRef(null);
+
+  /* messages, readable without waiting for a re-render. The streaming path
+     needs the list as it stands right now to save it. */
+  const messagesRef = useRef([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
   const voiceNeedsHost = () => isNativeApp() && !loadLink()?.url;
 
   const sayVoiceUnavailable = () => {
@@ -1833,7 +1864,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
   const openVoiceMode = () => {
-    if (voiceNeedsHost()) { sayVoiceUnavailable(); return; }
+    // Reading a reply aloud needs no backend - the WebView has a voice. What
+    // it cannot do without one is hear you, so a session that can only speak
+    // says as much rather than sitting there waiting for words.
+    if (voiceNeedsHost() && !standalone.isReady()) { sayVoiceUnavailable(); return; }
 
     // Ensure any leftover dictation recognition is cleanly stopped
     if (recognitionRef.current) {
@@ -2260,6 +2294,12 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   }, [activeCollections, token, activeSessionId]);
 
   const fetchMessages = async () => {
+    // With no backend the conversation lives on the device.
+    if (noBackend()) {
+      setMessages(localChat.loadMessages(activeSessionId));
+      setTimeout(scrollToBottom, 50);
+      return;
+    }
     try {
       const res = await fetch(`${API_BASE}/api/chat/sessions/${activeSessionId}/messages`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -2848,6 +2888,103 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     );
   };
 
+  /**
+   * The whole conversation, in the shape a provider expects.
+   *
+   * Trimmed to the last twenty turns: a long chat sent in full is slow, costs
+   * more, and eventually exceeds what the model can hold - and the oldest
+   * turns are almost never what the next answer depends on.
+   */
+  const conversationFor = (prompt) => {
+    const history = messagesRef.current
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && m.content)
+      .slice(-20)
+      .map((m) => ({ role: m.role, content: String(m.content) }));
+    return [
+      {
+        role: 'system',
+        content: 'You are SMARAN.AI, a helpful assistant running on the '
+          + "person's own device. Answer directly and plainly. If you do not "
+          + 'know something, say so rather than inventing it.',
+      },
+      ...history,
+      { role: 'user', content: prompt },
+    ];
+  };
+
+  /** Answer with no backend, streaming into the bubble already on screen. */
+  const answerOnDevice = async ({ prompt, sessionId, assistantId, userMessage, spoken }) => {
+    const provider = standalone.getProvider();
+    const key = standalone.loadKeys()[provider];
+    const model = standalone.getModel();
+
+    const fail = (text) => {
+      setMessages((prev) => prev.map((m) =>
+        m.id === assistantId ? { ...m, content: text, isLoading: false } : m));
+      setStreaming(false);
+      streamingRef.current = false;
+    };
+
+    if (!provider || !key) {
+      fail('This device has no model set up yet. Open Settings → AI Provider, '
+        + 'pick one and paste its key — Google Gemini, Groq, OpenRouter and '
+        + 'NVIDIA all have a free tier.');
+      return;
+    }
+    if (!model) {
+      fail('Pick a model in Settings → AI Provider. The list comes from the '
+        + 'provider, so it shows what your key can actually run.');
+      return;
+    }
+
+    const controller = new AbortController();
+    directAbortRef.current = controller;
+    let sofar = '';
+
+    try {
+      await standalone.streamReply({
+        provider,
+        model,
+        key,
+        messages: conversationFor(prompt),
+        signal: controller.signal,
+        onToken: (chunk) => {
+          sofar += chunk;
+          setMessages((prev) => prev.map((m) =>
+            m.id === assistantId ? { ...m, content: sofar, isLoading: false } : m));
+        },
+      });
+
+      if (!sofar.trim()) {
+        sofar = 'The model returned an empty reply. Try again, or pick a '
+          + 'different model in Settings.';
+        setMessages((prev) => prev.map((m) =>
+          m.id === assistantId ? { ...m, content: sofar, isLoading: false } : m));
+      }
+
+      // Kept on the device, so the conversation is still here tomorrow.
+      localChat.saveMessages(sessionId, messagesRef.current.map((m) =>
+        (m.id === assistantId ? { ...m, content: sofar, isLoading: false } : m)));
+
+      if (spoken) speakText(sofar, selectedLanguage);
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        fail(error?.message || 'That request could not be completed.');
+        return;
+      }
+      setMessages((prev) => prev.map((m) =>
+        m.id === assistantId
+          ? { ...m, content: sofar || 'Stopped.', isLoading: false }
+          : m));
+    } finally {
+      directAbortRef.current = null;
+      setStreaming(false);
+      streamingRef.current = false;
+      window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'idle' } }));
+      setTimeout(scrollToBottom, 60);
+    }
+  };
+
   const handleSend = async (e, directPrompt = null, isVoicePrompt = false) => {
     if (e && e.preventDefault) e.preventDefault();
     const userPrompt = (directPrompt || input || '').trim();
@@ -2899,6 +3036,25 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setTimeout(scrollToBottom, 50);
+
+    /* No backend: answer from the device itself.
+     *
+     * A phone with no computer linked has nothing behind /api, so every path
+     * below this would have failed. It talks to the chosen provider directly
+     * instead - the key is on the device and goes to that provider and
+     * nowhere else. Documents, local models and desktop control genuinely do
+     * need a computer and are not pretended at; plain conversation does not,
+     * and now works. */
+    if (noBackend()) {
+      await answerOnDevice({
+        prompt: userPrompt,
+        sessionId: targetSessionId,
+        assistantId: assistantMessage.id,
+        userMessage,
+        spoken: isVoiceTurn,
+      });
+      return;
+    }
 
     // -----------------------------------------------------------------------
     // J.A.R.V.I.S. Desktop OS Control Engine (Apps, Files, System, URLs)

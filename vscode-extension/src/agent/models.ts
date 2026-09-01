@@ -26,6 +26,8 @@ export interface Choice {
     model: string;
     apiKey: string;
     ollamaUrl: string;
+    /** Where LM Studio's local server is, when that is the provider. */
+    lmStudioUrl?: string;
 }
 
 export const OPENAI_COMPATIBLE: Record<string, string> = {
@@ -197,6 +199,12 @@ export async function firstInstalledOllamaModel(ollamaUrl: string): Promise<stri
 
 export async function complete(messages: Message[], choice: Choice): Promise<string> {
     const call = async (): Promise<string> => {
+        // LM Studio speaks the OpenAI shape too; it just lives on this machine
+        // and its address is a setting rather than a constant.
+        if (choice.provider === 'lmstudio') {
+            return openAiStyle(
+                choice.lmStudioUrl || 'http://127.0.0.1:1234/v1', choice, messages);
+        }
         if (choice.provider in OPENAI_COMPATIBLE) {
             return openAiStyle(OPENAI_COMPATIBLE[choice.provider], choice, messages);
         }

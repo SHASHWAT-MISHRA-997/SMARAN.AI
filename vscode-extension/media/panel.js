@@ -236,6 +236,18 @@
 
     let setupState = null;
 
+    /* What has been typed into each key field but not saved yet.
+     *
+     * The whole Setup screen is rebuilt whenever anything changes - picking a
+     * provider, choosing a model, saving a key - and a rebuild replaces every
+     * input, taking its contents with it. So a key pasted before selecting the
+     * provider simply vanished, and pressing Save on the emptied field stored
+     * nothing. Held out here, the text survives the redraw. */
+    const drafts = {};
+
+    /** The provider whose key was just saved, so the panel can say so once. */
+    let savedJust = null;
+
     function drawSetup() {
         if (!setupState) return;
         const { providers, configured, provider, model } = setupState;
@@ -250,35 +262,61 @@
             const line = el('div', 'menu-line');
             line.appendChild(el('strong', null, p.label));
             if (p.free) line.appendChild(el('span', 'badge', 'free tier'));
+            if (p.local) line.appendChild(el('span', 'badge', 'on this machine'));
             if (configured[p.id]) line.appendChild(el('span', 'badge ok', 'key saved'));
+            // Said once, right after saving, because a badge that was already
+            // there does not tell you the press worked.
+            if (savedJust === p.id) line.appendChild(el('span', 'badge ok', 'saved'));
             if (p.id === provider) line.appendChild(el('span', 'tick', '✓'));
             pick.appendChild(line);
             pick.appendChild(el('div', 'menu-note', p.hint));
             row.appendChild(pick);
 
-            if (p.id) {
+            if (p.needsKey) {
                 const keyRow = el('div', 'key-row');
                 const input = el('input');
                 input.type = 'password';
+                input.value = drafts[p.id] || '';
                 input.placeholder = configured[p.id] ? 'A key is saved. Type to replace it.' : 'Paste your API key';
+                input.addEventListener('input', () => { drafts[p.id] = input.value; });
                 keyRow.appendChild(input);
-                keyRow.appendChild(button('Save', 'tiny', () => {
+
+                // A password field hides what was pasted, so a key that went in
+                // wrong looks the same as one that went in right.
+                const reveal = button('Show', 'tiny', () => {
+                    const hidden = input.type === 'password';
+                    input.type = hidden ? 'text' : 'password';
+                    reveal.textContent = hidden ? 'Hide' : 'Show';
+                });
+                keyRow.appendChild(reveal);
+
+                const save = button('Save', 'tiny', () => {
+                    if (!input.value.trim()) {
+                        save.textContent = 'Empty';
+                        setTimeout(() => { save.textContent = 'Save'; }, 1200);
+                        return;
+                    }
                     vscode.postMessage({ type: 'saveKey', provider: p.id, key: input.value });
-                    input.value = '';
-                }));
+                    delete drafts[p.id];
+                    savedJust = p.id;
+                });
+                keyRow.appendChild(save);
+
                 if (configured[p.id]) {
-                    keyRow.appendChild(button('Remove', 'tiny', () =>
-                        vscode.postMessage({ type: 'saveKey', provider: p.id, key: '' })));
+                    keyRow.appendChild(button('Remove', 'tiny', () => {
+                        delete drafts[p.id];
+                        vscode.postMessage({ type: 'saveKey', provider: p.id, key: '' });
+                    }));
                 }
                 if (p.keyUrl) {
                     keyRow.appendChild(button('Get key', 'tiny link', () =>
                         vscode.postMessage({ type: 'openLink', url: p.keyUrl })));
                 }
                 row.appendChild(keyRow);
-            } else {
+            } else if (p.setupUrl) {
                 const note = el('div', 'key-row');
-                note.appendChild(button('Get Ollama', 'tiny link', () =>
-                    vscode.postMessage({ type: 'openLink', url: 'https://ollama.com' })));
+                note.appendChild(button(p.setupLabel || 'Get it', 'tiny link', () =>
+                    vscode.postMessage({ type: 'openLink', url: p.setupUrl })));
                 row.appendChild(note);
             }
 

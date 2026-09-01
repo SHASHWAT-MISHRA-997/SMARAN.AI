@@ -27,7 +27,7 @@ import { MODES, ModeId } from './agent/modes';
 import { Message } from './agent/models';
 import { listModels, PROVIDERS } from './providers';
 import { Entry, Session, SessionStore } from './sessions';
-import { Keys, ollamaUrl, resolveChoice } from './settings';
+import { Keys, lmStudioUrl, ollamaUrl, resolveChoice } from './settings';
 
 /** Enough of a file to be useful, short enough not to crowd out the task. */
 const ATTACH_LIMIT = 60_000;
@@ -270,13 +270,23 @@ export class AgentPanel implements vscode.WebviewViewProvider {
     private async sendModels(provider: string): Promise<void> {
         this.post({ type: 'models', provider, loading: true, models: [] });
         try {
-            const models = await listModels(provider, await this.keys.get(provider), ollamaUrl());
+            const models = await listModels(
+                provider, await this.keys.get(provider), ollamaUrl(), lmStudioUrl());
             this.post({ type: 'models', provider, loading: false, models });
         } catch (error) {
+            // The local runners fail by not being started, which is not the
+            // same problem as a bad key and should not read like one. Neither
+            // message names a model to install: whichever one you already have
+            // will appear in this list, and pushing a particular one is not
+            // this extension's business.
+            const notRunning = (where: string, url: string) =>
+                `${where} is not answering at ${url}. Start it, and any model you have there `
+                + 'will appear here.';
+
             this.post({
                 type: 'models', provider, loading: false, models: [],
-                error: provider === ''
-                    ? 'Ollama is not answering. Install it from ollama.com, then run: ollama pull qwen2.5-coder:7b'
+                error: provider === '' ? notRunning('Ollama', ollamaUrl())
+                    : provider === 'lmstudio' ? notRunning('LM Studio', lmStudioUrl())
                     : (error as Error).message,
             });
         }

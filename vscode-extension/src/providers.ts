@@ -21,40 +21,53 @@ export interface Provider {
     keyUrl?: string;
     /** True where a free tier exists at the time of writing. */
     free?: boolean;
+    /** Runs on this machine: no key, and nothing leaves it. */
+    local?: boolean;
+    /** False for the local runners, which have nothing to paste. */
+    needsKey?: boolean;
+    /** Where to go to install a local runner. */
+    setupUrl?: string;
+    setupLabel?: string;
     hint: string;
 }
 
 export const PROVIDERS: Provider[] = [
     {
-        id: '', label: 'Ollama (on this machine)',
-        hint: 'No key, nothing leaves your computer. Needs Ollama installed.',
+        id: '', label: 'Ollama (on this machine)', local: true,
+        setupUrl: 'https://ollama.com', setupLabel: 'Get Ollama',
+        hint: 'No key, nothing leaves your computer. Any model you have pulled shows up below.',
     },
     {
-        id: 'groq', label: 'Groq', keyUrl: 'https://console.groq.com/keys', free: true,
+        id: 'lmstudio', label: 'LM Studio (on this machine)', local: true,
+        setupUrl: 'https://lmstudio.ai', setupLabel: 'Get LM Studio',
+        hint: 'No key. Start its local server (Developer tab) and whatever you have loaded appears below.',
+    },
+    {
+        id: 'groq', needsKey: true, label: 'Groq', keyUrl: 'https://console.groq.com/keys', free: true,
         hint: 'Free tier. Fast.',
     },
     {
-        id: 'gemini', label: 'Google Gemini', keyUrl: 'https://aistudio.google.com/app/apikey', free: true,
+        id: 'gemini', needsKey: true, label: 'Google Gemini', keyUrl: 'https://aistudio.google.com/app/apikey', free: true,
         hint: 'Free tier.',
     },
     {
-        id: 'openrouter', label: 'OpenRouter', keyUrl: 'https://openrouter.ai/keys', free: true,
+        id: 'openrouter', needsKey: true, label: 'OpenRouter', keyUrl: 'https://openrouter.ai/keys', free: true,
         hint: 'Many models behind one key, several free.',
     },
     {
-        id: 'nvidia', label: 'NVIDIA NIM', keyUrl: 'https://build.nvidia.com/', free: true,
+        id: 'nvidia', needsKey: true, label: 'NVIDIA NIM', keyUrl: 'https://build.nvidia.com/', free: true,
         hint: 'Free developer tier.',
     },
     {
-        id: 'anthropic', label: 'Anthropic Claude', keyUrl: 'https://console.anthropic.com/settings/keys',
+        id: 'anthropic', needsKey: true, label: 'Anthropic Claude', keyUrl: 'https://console.anthropic.com/settings/keys',
         hint: 'Paid.',
     },
     {
-        id: 'openai', label: 'OpenAI', keyUrl: 'https://platform.openai.com/api-keys',
+        id: 'openai', needsKey: true, label: 'OpenAI', keyUrl: 'https://platform.openai.com/api-keys',
         hint: 'Paid.',
     },
     {
-        id: 'deepseek', label: 'DeepSeek', keyUrl: 'https://platform.deepseek.com/api_keys',
+        id: 'deepseek', needsKey: true, label: 'DeepSeek', keyUrl: 'https://platform.deepseek.com/api_keys',
         hint: 'Paid, inexpensive.',
     },
 ];
@@ -110,8 +123,15 @@ export async function listModels(
     provider: string,
     key: string,
     ollamaUrl: string,
+    lmStudioUrl = 'http://127.0.0.1:1234/v1',
 ): Promise<ModelOption[]> {
     switch (provider) {
+        // Whatever is loaded in LM Studio's local server. It speaks the
+        // OpenAI shape, so this is the same call as the cloud hosts with no
+        // key and a different address.
+        case 'lmstudio':
+            return openAiStyleModels(lmStudioUrl.replace(/\/+$/, ''), '', 'LM Studio');
+
         case '': {
             const { status, body } = await get(`${ollamaUrl.replace(/\/+$/, '')}/api/tags`);
             if (status !== 200) {
