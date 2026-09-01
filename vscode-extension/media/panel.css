@@ -547,6 +547,28 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
     background: rgba(6, 11, 26, .5);
     padding: 4px;
 }
+.badge.paid {
+    color: var(--amber);
+    background: rgba(251, 191, 36, .12);
+    border-color: rgba(251, 191, 36, .35);
+}
+
+/* Model ids are long and slash-separated. They were being cut mid-name -
+   "bytedance-seed/seed-", "openai/gpt-5.1-codex" - which makes two different
+   models look identical. They wrap now.
+
+   flex-shrink on the name and flex:none on everything beside it: without
+   that the badge was laid over the middle of the name, so a row read
+   "nvidia/nemotro[FREE]-super". */
+.model span:first-child,
+.menu-line strong {
+    flex: 1 1 auto;
+    min-width: 0;
+    word-break: break-all;
+}
+.model .badge, .model .tick,
+.menu-line .badge, .menu-line .tick { flex: 0 0 auto; }
+
 .model {
     display: flex;
     align-items: center;

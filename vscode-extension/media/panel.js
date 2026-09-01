@@ -189,7 +189,50 @@
         drawModeMenu();
         modeMenu.hidden = !modeMenu.hidden;
     });
-    $('modelChip').addEventListener('click', () => show('setup'));
+    /* The model chip switches the model.
+     *
+     * It used to jump to Setup, which is where the key already is - so after
+     * entering a key, clicking the model went back to the screen you had just
+     * finished with, and looked like a loop. It opens the list instead, and
+     * only falls back to Setup when there is no list to open. */
+    $('modelChip').addEventListener('click', () => {
+        if (!modelState.models.length) {
+            show('setup');
+            vscode.postMessage({ type: 'setup' });
+            return;
+        }
+        drawModelMenu();
+        modeMenu.hidden = !modeMenu.hidden;
+    });
+
+    function drawModelMenu() {
+        modeMenu.replaceChildren();
+        modeMenu.appendChild(el('div', 'menu-title', 'Model'));
+
+        const provider = providerOf(setupState?.provider);
+        const mixed = provider && provider.free_models === 'some';
+        modelState.models
+            .filter((m) => (!mixed || !freeOnly) ? true : m.free)
+            .slice(0, 60)
+            .forEach((m) => {
+                const row = el('button', 'menu-item' + (m.id === setupState?.model ? ' on' : ''));
+                const line = el('div', 'menu-line');
+                line.appendChild(el('strong', null, m.id));
+                if (m.free) line.appendChild(el('span', 'badge', 'free'));
+                if (m.id === setupState?.model) line.appendChild(el('span', 'tick', '✓'));
+                row.appendChild(line);
+                row.addEventListener('click', () => {
+                    modeMenu.hidden = true;
+                    vscode.postMessage({ type: 'chooseModel', model: m.id });
+                });
+                modeMenu.appendChild(row);
+            });
+
+        modeMenu.appendChild(button('More in Setup…', 'tiny', () => {
+            modeMenu.hidden = true;
+            show('setup');
+        }));
+    }
 
     document.addEventListener('click', (event) => {
         if (!modeMenu.hidden && !modeMenu.contains(event.target) && event.target !== $('modeChip')) {
@@ -255,7 +298,13 @@
         const { providers, configured, provider, model } = setupState;
         setup.replaceChildren();
 
-        setup.appendChild(el('h3', null, 'Where the model runs'));
+        /* A way back. Setup was a dead end - the only route to the
+           conversation was the New button, which throws the conversation
+           away to get there. */
+        const top = el('div', 'screen-head');
+        top.appendChild(el('h3', null, 'Where the model runs'));
+        top.appendChild(button('Done', 'tiny', () => show('chat')));
+        setup.appendChild(top);
         providers.forEach((p) => {
             const row = el('div', 'provider' + (p.id === provider ? ' on' : ''));
 
@@ -271,10 +320,12 @@
                 const running = status && status !== 'not running';
                 line.appendChild(el('span', running ? 'badge ok' : 'badge', status || 'on this machine'));
             }
-            if (configured[p.id]) line.appendChild(el('span', 'badge ok', 'key saved'));
-            // Said once, right after saving, because a badge that was already
-            // there does not tell you the press worked.
-            if (savedJust === p.id) line.appendChild(el('span', 'badge ok', 'saved'));
+            /* One badge, not two. "KEY SAVED" and "SAVED" side by side said
+               the same thing twice and read as two different states. */
+            if (configured[p.id]) {
+                line.appendChild(el('span', 'badge ok', savedJust === p.id ? 'key saved ✓' : 'key saved'));
+            }
+            if (p.free_models === 'none') line.appendChild(el('span', 'badge paid', 'paid only'));
             if (p.id === provider) line.appendChild(el('span', 'tick', '✓'));
             pick.appendChild(line);
             pick.appendChild(el('div', 'menu-note', p.hint));
@@ -351,6 +402,10 @@
 
     let modelState = { loading: false, models: [], error: null };
     let pullState = { model: '', percent: -1, status: '', busy: false, failed: false };
+    /** null until a provider with mixed pricing is first shown. */
+    let freeOnly = null;
+
+    const providerOf = (id) => (setupState?.providers || []).find((p) => p.id === id);
 
     function drawModels() {
         const holder = document.getElementById('models');
@@ -413,9 +468,42 @@
             return;
         }
 
+        /* Free-only, and on by default where it means anything.
+         *
+         * OpenRouter returns 419 models and most of them are billed. Picking
+         * one by name and finding out it costs money when the answer fails is
+         * not a discovery anyone should have to make. Its API is the only one
+         * that publishes per-model pricing, so this is the only place the
+         * filter can be honest - the others are said in words instead. */
+        const provider = providerOf(setupState.provider);
+        const mixed = provider && provider.free_models === 'some';
+        if (mixed && freeOnly === null) freeOnly = true;
+
+        const note = el('p', 'empty');
+        note.textContent =
+            provider?.free_models === 'all'
+                ? (provider.local
+                    ? 'Runs on this machine. Nothing here costs anything.'
+                    : 'This provider’s free tier covers everything listed, up to its quota.')
+                : provider?.free_models === 'none'
+                    ? 'Every model here is billed to your account. There is no free tier.'
+                    : 'Mixed. Only the ones marked free cost nothing.';
+        holder.appendChild(note);
+
+        if (mixed) {
+            const toggle = button(freeOnly ? 'Showing free only' : 'Showing all', 'tiny', () => {
+                freeOnly = !freeOnly;
+                drawModels();
+            });
+            holder.appendChild(toggle);
+        }
+
         const filter = el('input');
         filter.type = 'text';
-        filter.placeholder = 'Filter ' + modelState.models.length + ' models…';
+        const shown = mixed && freeOnly
+            ? modelState.models.filter((m) => m.free).length
+            : modelState.models.length;
+        filter.placeholder = 'Filter ' + shown + ' models…';
         holder.appendChild(filter);
 
         const list = el('div', 'model-list');
@@ -425,6 +513,7 @@
             const needle = filter.value.toLowerCase();
             list.replaceChildren();
             modelState.models
+                .filter((m) => (!mixed || !freeOnly) ? true : m.free)
                 .filter((m) => !needle || m.id.toLowerCase().includes(needle))
                 .slice(0, 200)
                 .forEach((m) => {

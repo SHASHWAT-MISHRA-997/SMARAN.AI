@@ -42,13 +42,26 @@ export const PROVIDERS = [
     keyUrl: 'https://openrouter.ai/keys',
     hint: 'Many models behind one key, several free.',
   },
-  /* NVIDIA NIM is deliberately absent.
-   *
-   * It is in the desktop app's list and works there, but its API refuses
-   * cross-origin requests, so from a phone the call never leaves the WebView
-   * - it fails as "Failed to fetch" with nothing to act on. Checked from a
-   * page rather than assumed. Offering a provider that cannot answer here
-   * would be worse than not offering it. */
+  {
+    /* Listed, and honest about why it cannot be picked here.
+     *
+     * NVIDIA's free developer tier is real and it works in the desktop app.
+     * Its API refuses cross-origin requests, though, so from a phone the call
+     * never leaves the app - it fails as "Failed to fetch" with nothing to
+     * act on. Checked twice from a page, with Groq answering 401 from the
+     * same page as a control.
+     *
+     * Leaving it out entirely looked like an oversight. It is here, greyed,
+     * saying what it needs. */
+    id: 'nvidia',
+    label: 'NVIDIA NIM',
+    free: true,
+    keyUrl: 'https://build.nvidia.com/',
+    unavailable: 'Free, and works in the desktop app — but NVIDIA’s API refuses '
+      + 'requests from a phone app. Link a computer under Device Connections '
+      + 'and it becomes available.',
+    hint: 'Free developer tier.',
+  },
   {
     id: 'anthropic',
     label: 'Anthropic Claude',

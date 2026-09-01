@@ -627,8 +627,9 @@ const SettingsModal = ({
                     >
                       <button
                         type="button"
-                        onClick={() => selectDirectProvider(p.id)}
-                        className="w-full text-left"
+                        disabled={Boolean(p.unavailable)}
+                        onClick={() => !p.unavailable && selectDirectProvider(p.id)}
+                        className={`w-full text-left ${p.unavailable ? "opacity-60 cursor-default" : ""}`}
                       >
                         <span className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-black text-zinc-900 dark:text-white">{p.label}</span>
@@ -640,10 +641,12 @@ const SettingsModal = ({
                           )}
                           {chosen && <span className="ml-auto text-indigo-500">✓</span>}
                         </span>
-                        <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">{p.hint}</span>
+                        <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                          {p.unavailable || p.hint}
+                        </span>
                       </button>
 
-                      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                      <div className={`mt-2.5 flex flex-wrap items-center gap-2 ${p.unavailable ? "hidden" : ""}`}>
                         <input
                           type="password"
                           value={directDrafts[p.id] || ""}

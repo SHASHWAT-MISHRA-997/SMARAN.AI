@@ -36,6 +36,11 @@ export const OPENAI_COMPATIBLE: Record<string, string> = {
     openrouter: 'https://openrouter.ai/api/v1',
     deepseek: 'https://api.deepseek.com/v1',
     nvidia: 'https://integrate.api.nvidia.com/v1',
+    cerebras: 'https://api.cerebras.ai/v1',
+    mistral: 'https://api.mistral.ai/v1',
+    together: 'https://api.together.xyz/v1',
+    cohere: 'https://api.cohere.ai/compatibility/v1',
+    siliconflow: 'https://api.siliconflow.cn/v1',
 };
 
 /** Answered while busy; worth waiting out once. Refused is not. */
@@ -103,7 +108,16 @@ function contentOrThrow(provider: string, status: number, body: string): unknown
 async function openAiStyle(base: string, choice: Choice, messages: Message[]): Promise<string> {
     const { status, body } = await post(
         `${base.replace(/\/+$/, '')}/chat/completions`,
-        { model: choice.model, messages, temperature: 0.2 },
+        /* max_tokens matters more than it looks.
+         *
+         * Without it a host assumes the model's ceiling and reserves against
+         * it. OpenRouter refused outright: "You requested up to 65536 tokens,
+         * but can only afford 2845" - on a free account with a small balance,
+         * asking for the maximum fails before a single token is generated.
+         *
+         * 4096 is more than any single step of this agent produces; a whole
+         * file being written is well under it. */
+        { model: choice.model, messages, temperature: 0.2, max_tokens: 4096 },
         choice.apiKey ? { Authorization: `Bearer ${choice.apiKey}` } : {},
     );
     const data = contentOrThrow(choice.provider, status, body) as {

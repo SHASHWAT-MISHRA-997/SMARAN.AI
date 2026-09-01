@@ -25,6 +25,13 @@ export interface Provider {
     local?: boolean;
     /** False for the local runners, which have nothing to paste. */
     needsKey?: boolean;
+    /** How much of this provider's catalogue costs nothing.
+     *  'all'  - every model listed is usable at no cost (a local runner,
+     *           or a provider whose free tier covers its whole catalogue
+     *           within a quota)
+     *  'some' - mixed, and which is which is marked per model
+     *  'none' - everything here is billed */
+    free_models?: 'all' | 'some' | 'none';
     /** Where to go to install a local runner. */
     setupUrl?: string;
     setupLabel?: string;
@@ -33,41 +40,70 @@ export interface Provider {
 
 export const PROVIDERS: Provider[] = [
     {
-        id: '', label: 'Ollama (on this machine)', local: true,
+        id: '', free_models: 'all', label: 'Ollama (on this machine)', local: true,
         setupUrl: 'https://ollama.com', setupLabel: 'Get Ollama',
         hint: 'No key, nothing leaves your computer. Any model you have pulled shows up below.',
     },
     {
-        id: 'lmstudio', label: 'LM Studio (on this machine)', local: true,
+        id: 'lmstudio', free_models: 'all', label: 'LM Studio (on this machine)', local: true,
         setupUrl: 'https://lmstudio.ai', setupLabel: 'Get LM Studio',
         hint: 'No key. Start its local server (Developer tab) and whatever you have loaded appears below.',
     },
     {
-        id: 'groq', needsKey: true, label: 'Groq', keyUrl: 'https://console.groq.com/keys', free: true,
+        id: 'groq', free_models: 'all', needsKey: true, label: 'Groq', keyUrl: 'https://console.groq.com/keys', free: true,
         hint: 'Free tier. Fast.',
     },
     {
-        id: 'gemini', needsKey: true, label: 'Google Gemini', keyUrl: 'https://aistudio.google.com/app/apikey', free: true,
+        id: 'gemini', free_models: 'all', needsKey: true, label: 'Google Gemini', keyUrl: 'https://aistudio.google.com/app/apikey', free: true,
         hint: 'Free tier.',
     },
     {
-        id: 'openrouter', needsKey: true, label: 'OpenRouter', keyUrl: 'https://openrouter.ai/keys', free: true,
+        id: 'openrouter', free_models: 'some', needsKey: true, label: 'OpenRouter', keyUrl: 'https://openrouter.ai/keys', free: true,
         hint: 'Many models behind one key, several free.',
     },
     {
-        id: 'nvidia', needsKey: true, label: 'NVIDIA NIM', keyUrl: 'https://build.nvidia.com/', free: true,
+        id: 'nvidia', free_models: 'all', needsKey: true, label: 'NVIDIA NIM', keyUrl: 'https://build.nvidia.com/', free: true,
         hint: 'Free developer tier.',
     },
     {
-        id: 'anthropic', needsKey: true, label: 'Anthropic Claude', keyUrl: 'https://console.anthropic.com/settings/keys',
+        /* All five endpoints below were probed before being added: each
+           answered 401 to a made-up key, which is a host that exists and is
+           rejecting the key rather than a URL guessed from a blog post.
+           GitHub Models was left out - its documented path answered 410. */
+        id: 'cerebras', free_models: 'all', needsKey: true, label: 'Cerebras',
+        keyUrl: 'https://cloud.cerebras.ai/', free: true,
+        hint: 'Free tier, and the fastest of these by a distance.',
+    },
+    {
+        id: 'mistral', free_models: 'all', needsKey: true, label: 'Mistral',
+        keyUrl: 'https://console.mistral.ai/api-keys/', free: true,
+        hint: 'Free "Experiment" tier. It requires opting in to training on your data.',
+    },
+    {
+        id: 'together', free_models: 'some', needsKey: true, label: 'Together AI',
+        keyUrl: 'https://api.together.ai/settings/api-keys', free: true,
+        hint: 'A few models are free; the rest are billed.',
+    },
+    {
+        id: 'cohere', free_models: 'all', needsKey: true, label: 'Cohere',
+        keyUrl: 'https://dashboard.cohere.com/api-keys', free: true,
+        hint: 'Free trial key. Evaluation only - not licensed for commercial use.',
+    },
+    {
+        id: 'siliconflow', free_models: 'some', needsKey: true, label: 'SiliconFlow',
+        keyUrl: 'https://cloud.siliconflow.cn/account/ak', free: true,
+        hint: 'Several models free, the rest billed.',
+    },
+    {
+        id: 'anthropic', free_models: 'none', needsKey: true, label: 'Anthropic Claude', keyUrl: 'https://console.anthropic.com/settings/keys',
         hint: 'Paid.',
     },
     {
-        id: 'openai', needsKey: true, label: 'OpenAI', keyUrl: 'https://platform.openai.com/api-keys',
+        id: 'openai', free_models: 'none', needsKey: true, label: 'OpenAI', keyUrl: 'https://platform.openai.com/api-keys',
         hint: 'Paid.',
     },
     {
-        id: 'deepseek', needsKey: true, label: 'DeepSeek', keyUrl: 'https://platform.deepseek.com/api_keys',
+        id: 'deepseek', free_models: 'none', needsKey: true, label: 'DeepSeek', keyUrl: 'https://platform.deepseek.com/api_keys',
         hint: 'Paid, inexpensive.',
     },
 ];
@@ -283,6 +319,11 @@ export async function listModels(
         case 'openai': return openAiStyleModels('https://api.openai.com/v1', key, 'OpenAI');
         case 'deepseek': return openAiStyleModels('https://api.deepseek.com/v1', key, 'DeepSeek');
         case 'nvidia': return openAiStyleModels('https://integrate.api.nvidia.com/v1', key, 'NVIDIA');
+        case 'cerebras': return openAiStyleModels('https://api.cerebras.ai/v1', key, 'Cerebras');
+        case 'mistral': return openAiStyleModels('https://api.mistral.ai/v1', key, 'Mistral');
+        case 'together': return openAiStyleModels('https://api.together.xyz/v1', key, 'Together');
+        case 'cohere': return openAiStyleModels('https://api.cohere.ai/compatibility/v1', key, 'Cohere');
+        case 'siliconflow': return openAiStyleModels('https://api.siliconflow.cn/v1', key, 'SiliconFlow');
         default: throw new Error(`${provider} is not a provider this knows.`);
     }
 }
