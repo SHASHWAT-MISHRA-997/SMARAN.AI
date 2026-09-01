@@ -567,7 +567,7 @@ const SettingsModal = ({
                       <input
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
-                        placeholder="What should SMARAN.AI call you?"
+                        placeholder={isMobile ? "Your name" : "What should SMARAN.AI call you?"}
                         maxLength={60}
                         className="mt-1 w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-extrabold text-zinc-900 dark:text-white outline-none focus:border-indigo-500"
                       />
@@ -731,7 +731,9 @@ const SettingsModal = ({
                   <input
                     value={newFact}
                     onChange={(e) => setNewFact(e.target.value)}
-                    placeholder="Add a new custom rule or fact for the AI…"
+                    // An input's placeholder cannot wrap, so on a phone the long
+                    // form was cut to "Add a new custom rule or fact f".
+                    placeholder={isMobile ? "Add a rule or fact…" : "Add a new custom rule or fact for the AI…"}
                     className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2 text-xs outline-none focus:border-indigo-500"
                   />
                   <button
@@ -826,7 +828,10 @@ const SettingsModal = ({
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                {/* One column on a phone. Two gave each card about 160px, and
+                    an avatar plus a name plus a description does not fit in
+                    that - every description was cut mid-word. */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   {Object.entries(PET_FORMS).map(([id, form]) => (
                     <button
                       key={id}

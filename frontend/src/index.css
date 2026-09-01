@@ -336,6 +336,25 @@ pre {
   /* Tracking that suited 10px turns a 13px line into gaps between letters. */
   .tracking-widest { letter-spacing: .08em !important; }
   .tracking-\[0\.25em\], .tracking-\[0\.3em\] { letter-spacing: .12em !important; }
+
+  /* Sentences that stop mid-word.
+   *
+   * `truncate` is one line plus an ellipsis, which is fine in a wide desktop
+   * column and useless in a 160px card on a phone: "The cute cy…", "A playful
+   * ch…", "Add a new custom rule or fact f". Forty-nine places used it.
+   *
+   * Two lines instead of one. Still bounded, so nothing grows without limit,
+   * but almost everything that was being cut now fits - and what does not
+   * ends at a word rather than inside one.
+   */
+  .truncate {
+    white-space: normal !important;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
 }
 
 /* Auto-adjust sidebar for mobile */
