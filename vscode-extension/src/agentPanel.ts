@@ -158,6 +158,21 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 await this.sendSetup();
                 break;
 
+            case 'revealKey': {
+                /* Show had nothing to show. The field is empty once a key is
+                   saved - the key lives in the keychain and was never sent to
+                   the panel - so toggling the input's type revealed an empty
+                   box. It is your own key on your own machine; a button that
+                   does nothing is the worse of the two. */
+                const provider = String(message.provider);
+                this.post({
+                    type: 'revealedKey',
+                    provider,
+                    key: await this.keys.get(provider),
+                });
+                break;
+            }
+
             case 'chooseProvider': {
                 const config = vscode.workspace.getConfiguration('smaran');
                 await config.update('provider', String(message.provider), vscode.ConfigurationTarget.Global);

@@ -67,3 +67,46 @@ export const titleFrom = (text) => {
   if (!clean) return 'New Conversation';
   return clean.length > 48 ? `${clean.slice(0, 48)}…` : clean;
 };
+
+/* ── remembered facts ──────────────────────────────────────────────────── */
+
+/**
+ * Facts the assistant should keep in mind, on this device.
+ *
+ * The memory panel said "remembers across sessions" and, on a phone, did not:
+ * adding a fact posted it to a backend that is not there, the row was drawn
+ * anyway, and it was gone on the next launch. Kept here instead - and, more
+ * to the point, actually put in front of the model, because storing a fact
+ * nothing reads would be the same lie with extra steps.
+ */
+const FACTS = 'sm_local_facts';
+const MAX_FACTS = 100;
+
+export const loadFacts = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FACTS) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveFacts = (facts) => {
+  try {
+    localStorage.setItem(FACTS, JSON.stringify((facts || []).slice(-MAX_FACTS)));
+  } catch { /* storage full or unavailable */ }
+};
+
+export const addFact = (text) => {
+  const clean = String(text || '').trim();
+  if (!clean) return loadFacts();
+  const all = [...loadFacts(), { id: `f-${Date.now()}`, content: clean }];
+  saveFacts(all);
+  return loadFacts();
+};
+
+export const removeFact = (id) => {
+  const all = loadFacts().filter((f) => f.id !== id);
+  saveFacts(all);
+  return all;
+};

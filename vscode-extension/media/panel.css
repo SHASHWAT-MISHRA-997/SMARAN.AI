@@ -553,26 +553,35 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
     border-color: rgba(251, 191, 36, .35);
 }
 
-/* Model ids are long and slash-separated. They were being cut mid-name -
-   "bytedance-seed/seed-", "openai/gpt-5.1-codex" - which makes two different
-   models look identical. They wrap now.
-
-   flex-shrink on the name and flex:none on everything beside it: without
-   that the badge was laid over the middle of the name, so a row read
-   "nvidia/nemotro[FREE]-super". */
+/* Grid, not flex.
+ *
+ * Model ids are one long unbroken word - "google/gemma-4-26b-a4b-it" - and in
+ * a flex row the name kept overrunning its box with the badge drawn on top of
+ * it: "google/gemma-4[FREE]b-a". Two flex fixes did not hold. A grid gives
+ * the badge and the tick columns of their own, so the name has nowhere to
+ * overrun into and wraps instead. */
+.model, .menu-item .menu-line {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+}
 .model span:first-child,
 .menu-line strong {
-    flex: 1 1 auto;
     min-width: 0;
-    word-break: break-all;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
-.model .badge, .model .tick,
-.menu-line .badge, .menu-line .tick { flex: 0 0 auto; }
+
+.seg { display: flex; gap: 4px; margin-top: 6px; }
+.seg-on {
+    color: var(--cyan) !important;
+    border-color: var(--edge-hot) !important;
+    background: rgba(0, 229, 255, .12) !important;
+}
+.models-head { display: flex; gap: 5px; align-items: center; }
 
 .model {
-    display: flex;
-    align-items: center;
-    gap: 7px;
     width: 100%;
     text-align: left;
     background: none;

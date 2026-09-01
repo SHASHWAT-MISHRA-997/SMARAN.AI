@@ -340,12 +340,20 @@
                 input.addEventListener('input', () => { drafts[p.id] = input.value; });
                 keyRow.appendChild(input);
 
-                // A password field hides what was pasted, so a key that went in
-                // wrong looks the same as one that went in right.
+                // Show reveals the key that is actually saved, not the empty
+                // box in front of it.
                 const reveal = button('Show', 'tiny', () => {
-                    const hidden = input.type === 'password';
-                    input.type = hidden ? 'text' : 'password';
-                    reveal.textContent = hidden ? 'Hide' : 'Show';
+                    if (input.type === 'text') {
+                        input.type = 'password';
+                        reveal.textContent = 'Show';
+                        return;
+                    }
+                    input.type = 'text';
+                    reveal.textContent = 'Hide';
+                    if (!input.value) {
+                        revealInto[p.id] = input;
+                        vscode.postMessage({ type: 'revealKey', provider: p.id });
+                    }
                 });
                 keyRow.appendChild(reveal);
 
@@ -407,13 +415,34 @@
 
     const providerOf = (id) => (setupState?.providers || []).find((p) => p.id === id);
 
+    /** Inputs waiting for the extension to hand back a saved key. */
+    const revealInto = {};
+
+    /** Whether the model list is open. Closed until you go looking for it. */
+    let modelsOpen = false;
+
     function drawModels() {
         const holder = document.getElementById('models');
         if (!holder) return;
         holder.replaceChildren();
 
-        holder.appendChild(button('Refresh', 'tiny', () =>
-            vscode.postMessage({ type: 'refreshModels', provider: setupState.provider })));
+        /* The list was always open, under whichever provider was selected,
+           and there was no way to put it away. It is a drawer now: shut until
+           you want to change the model, which is not most of the time. */
+        const head = el('div', 'models-head');
+        head.appendChild(button(
+            modelsOpen ? 'Hide models' : `Choose model${setupState.model ? ' · ' + setupState.model : ''}`,
+            'tiny',
+            () => { modelsOpen = !modelsOpen; drawModels(); },
+        ));
+        if (modelsOpen) {
+            head.appendChild(button('Refresh', 'tiny', () =>
+                vscode.postMessage({ type: 'refreshModels', provider: setupState.provider })));
+        }
+        holder.appendChild(head);
+        if (!modelsOpen) {
+            return;
+        }
 
         /* Installing a model, for Ollama only.
            LM Studio's local server has no endpoint for fetching or deleting
@@ -491,11 +520,20 @@
         holder.appendChild(note);
 
         if (mixed) {
-            const toggle = button(freeOnly ? 'Showing free only' : 'Showing all', 'tiny', () => {
-                freeOnly = !freeOnly;
-                drawModels();
-            });
-            holder.appendChild(toggle);
+            /* Two buttons, one of them lit. A single button labelled with the
+               current state reads as an action - press "Showing free only"
+               and you get everything, which is the opposite of what it says. */
+            const choice = el('div', 'seg');
+            const pick = (label, wanted) => {
+                const b = button(label, 'tiny' + (freeOnly === wanted ? ' seg-on' : ''), () => {
+                    freeOnly = wanted;
+                    drawModels();
+                });
+                choice.appendChild(b);
+            };
+            pick('Free', true);
+            pick('All', false);
+            holder.appendChild(choice);
         }
 
         const filter = el('input');

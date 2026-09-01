@@ -63,6 +63,45 @@ export const PROVIDERS = [
     hint: 'Free developer tier.',
   },
   {
+    /* Added after checking each one from a page, which is what a phone is:
+       all five answered 401 to a made-up key, meaning the browser let the
+       request out and the host rejected the key. NVIDIA is the only one that
+       never left the device. */
+    id: 'cerebras',
+    label: 'Cerebras',
+    free: true,
+    keyUrl: 'https://cloud.cerebras.ai/',
+    hint: 'Free tier, and the fastest of these.',
+  },
+  {
+    id: 'mistral',
+    label: 'Mistral',
+    free: true,
+    keyUrl: 'https://console.mistral.ai/api-keys/',
+    hint: 'Free "Experiment" tier. Requires opting in to training on your data.',
+  },
+  {
+    id: 'together',
+    label: 'Together AI',
+    free: true,
+    keyUrl: 'https://api.together.ai/settings/api-keys',
+    hint: 'A few models free, the rest billed.',
+  },
+  {
+    id: 'cohere',
+    label: 'Cohere',
+    free: true,
+    keyUrl: 'https://dashboard.cohere.com/api-keys',
+    hint: 'Free trial key. Evaluation only, not for commercial use.',
+  },
+  {
+    id: 'siliconflow',
+    label: 'SiliconFlow',
+    free: true,
+    keyUrl: 'https://cloud.siliconflow.cn/account/ak',
+    hint: 'Several models free, the rest billed.',
+  },
+  {
     id: 'anthropic',
     label: 'Anthropic Claude',
     keyUrl: 'https://console.anthropic.com/settings/keys',
@@ -84,6 +123,11 @@ export const PROVIDERS = [
 
 const OPENAI_COMPATIBLE = {
   openai: 'https://api.openai.com/v1',
+  cerebras: 'https://api.cerebras.ai/v1',
+  mistral: 'https://api.mistral.ai/v1',
+  together: 'https://api.together.xyz/v1',
+  cohere: 'https://api.cohere.ai/compatibility/v1',
+  siliconflow: 'https://api.siliconflow.cn/v1',
   groq: 'https://api.groq.com/openai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
   deepseek: 'https://api.deepseek.com/v1',

@@ -1856,9 +1856,13 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const sayVoiceUnavailable = () => {
     window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
       detail: {
-        message: 'Speaking and dictation run on the computer this phone is '
-          + 'linked to, and none is linked yet. Open Settings and choose '
-          + '"Link your phone" to pair one.',
+        // Two different answers, and they used to be given as one.
+        // Reading a reply aloud needs a model, nothing more - the phone has a
+        // voice of its own. Hearing you needs a computer, because a WebView
+        // has no speech recognition at all.
+        message: 'Set up a model first — Settings → AI Provider — and the '
+          + 'assistant will speak its answers on this phone. Hearing you is '
+          + 'the part that needs a linked computer.',
       },
     }));
   };
@@ -2900,12 +2904,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && m.content)
       .slice(-20)
       .map((m) => ({ role: m.role, content: String(m.content) }));
+    /* Anything remembered goes in front of the model. Storing a fact that
+       nothing ever reads would be the same broken promise with extra steps. */
+    const facts = localChat.loadFacts()
+      .map((f) => `- ${f.content || f.fact || ''}`.trim())
+      .filter((line) => line.length > 2);
+
     return [
       {
         role: 'system',
         content: 'You are SMARAN.AI, a helpful assistant running on the '
           + "person's own device. Answer directly and plainly. If you do not "
-          + 'know something, say so rather than inventing it.',
+          + 'know something, say so rather than inventing it.'
+          + (facts.length
+            ? ['', '', 'Things this person has asked you to remember:', ...facts].join('\n')
+            : ''),
       },
       ...history,
       { role: 'user', content: prompt },
@@ -3854,7 +3867,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         {voiceNotice && (
           <div
             role="alert"
-            className="max-w-4xl mx-auto mb-1.5 flex items-start gap-2 rounded-xl border border-amber-500/50 bg-amber-50 dark:bg-amber-950/50 px-3 py-2 text-[11px] leading-relaxed text-amber-900 dark:text-amber-100"
+            className="relative z-30 max-w-4xl mx-auto mb-1.5 flex items-start gap-2 rounded-xl border border-amber-500/50 bg-amber-50 dark:bg-amber-950/50 px-3 py-2 text-[11px] leading-relaxed text-amber-900 dark:text-amber-100"
           >
             <span className="flex-1">{voiceNotice}</span>
             <button

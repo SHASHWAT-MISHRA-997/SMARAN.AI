@@ -3,7 +3,7 @@ import {
   X, Cpu, Monitor, Sparkles, SlidersHorizontal, Wifi, PawPrint,
   UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop,
   ShieldCheck, HardDrive, Database, Zap, RefreshCw, Trash2, CheckCircle2,
-  ExternalLink, Key, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle
+  ExternalLink, Key, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe
 } from "lucide-react";
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
@@ -12,6 +12,12 @@ import { useTheme } from "../context/ThemeContext";
 import { detectClientDevice } from './RightPanel';
 import { isNativeApp, loadLink } from '../utils/hostLink';
 import * as standalone from '../utils/standalone';
+import * as localChat from '../utils/localChat';
+
+/* Written in at build time, from package.json. It used to be the string
+   "2.8.6" typed into the markup, so a phone that could not check for
+   updates displayed a version four releases old as though it were fact. */
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'unknown';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const positive = (value) => finite(value) && value > 0;
@@ -308,6 +314,14 @@ const SettingsModal = ({
     // Fetch memory facts
     const fetchMemory = async () => {
       setLoadingMemory(true);
+      // On a phone the facts live on the device. The panel said "remembers
+      // across sessions" and did not: adding one drew a row, posted nothing
+      // anywhere, and it was gone on the next launch.
+      if (noBackend()) {
+        setMemoryFacts(localChat.loadFacts());
+        setLoadingMemory(false);
+        return;
+      }
       try {
         const res = await fetchWithAuth(`${API_BASE}/api/memory`);
         if (res.ok) {
@@ -379,12 +393,21 @@ const SettingsModal = ({
 
   const handleAddMemoryFact = () => {
     if (!newFact.trim()) return;
+    if (noBackend()) {
+      setMemoryFacts(localChat.addFact(newFact.trim()));
+      setNewFact("");
+      return;
+    }
     const item = { id: `mem_${Date.now()}`, fact: newFact.trim() };
     setMemoryFacts((prev) => [item, ...prev]);
     setNewFact("");
   };
 
   const handleDeleteMemoryFact = (id) => {
+    if (noBackend()) {
+      setMemoryFacts(localChat.removeFact(id));
+      return;
+    }
     setMemoryFacts((prev) => prev.filter((f) => f.id !== id));
   };
 
@@ -944,7 +967,7 @@ const SettingsModal = ({
                       key={f.id}
                       className="flex items-center justify-between p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 text-xs"
                     >
-                      <span className="text-zinc-800 dark:text-zinc-200">{f.fact}</span>
+                      <span className="text-zinc-800 dark:text-zinc-200">{f.fact || f.content}</span>
                       <button
                         onClick={() => handleDeleteMemoryFact(f.id)}
                         className="text-zinc-400 hover:text-rose-500 p-1"
@@ -1073,14 +1096,24 @@ const SettingsModal = ({
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-black text-zinc-900 dark:text-white">
-                          SMARAN.AI v{updateInfo?.current_version || "2.8.6"}
+                          SMARAN.AI v{updateInfo?.current_version || APP_VERSION}
                         </span>
+                        {/* "Up to Date" used to show whenever no update had
+                            been found - which includes never having looked.
+                            On a phone with no computer linked nothing can be
+                            checked at all, and the badge claimed the newest
+                            version anyway, directly above a line saying it
+                            could not know. A claim needs an answer behind it. */}
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                           updateInfo?.update_available
                             ? "bg-red-500/20 text-red-500 border border-red-500/30"
-                            : "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+                            : updateInfo
+                              ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+                              : "bg-zinc-500/20 text-zinc-500 border border-zinc-500/30"
                         }`}>
-                          {updateInfo?.update_available ? `Update v${updateInfo.latest_version} Available` : "Up to Date"}
+                          {updateInfo?.update_available
+                            ? `Update v${updateInfo.latest_version} Available`
+                            : updateInfo ? "Up to Date" : "Not checked"}
                         </span>
                       </div>
                       {/* One line that says what is actually happening right
@@ -1354,17 +1387,27 @@ const SettingsModal = ({
                       href="https://shashwatmishra-portfolio.netlify.app/"
                       target="_blank"
                       rel="noreferrer"
-                      className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold flex items-center gap-1.5 hover:bg-indigo-500 transition shadow-md shadow-indigo-600/20"
+                      className="dev-link dev-link-portfolio group backdrop-blur-md"
                     >
-                      Portfolio <ExternalLink className="w-3.5 h-3.5" />
+                      <span className="dev-link-sheen" aria-hidden="true" />
+                      <Globe className="w-4 h-4 transition-transform duration-500 group-hover:rotate-[20deg]" />
+                      Portfolio
+                      <ExternalLink className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                     </a>
                     <a
                       href="https://www.linkedin.com/in/sm980/"
                       target="_blank"
                       rel="noreferrer"
-                      className="px-4 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-bold flex items-center gap-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition"
+                      className="dev-link dev-link-linkedin group backdrop-blur-md"
                     >
-                      LinkedIn Profile <ExternalLink className="w-3.5 h-3.5" />
+                      <span className="dev-link-sheen" aria-hidden="true" />
+                      {/* The actual mark, not the word. A link called LinkedIn
+                          with nothing of LinkedIn on it is just a word. */}
+                      <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+                        <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05a3.74 3.74 0 0 1 3.37-1.85c3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13Zm1.78 13.02H3.55V9h3.57v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.2 0 22.22 0Z"/>
+                      </svg>
+                      LinkedIn
+                      <ExternalLink className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                     </a>
                   </div>
                 </div>

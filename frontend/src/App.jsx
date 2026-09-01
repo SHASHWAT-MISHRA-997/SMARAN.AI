@@ -380,17 +380,20 @@ const App = () => {
   /* Back closes what is on top, and only leaves the app when nothing is open.
      Order does not matter here - each overlay owns its own history entry, so
      they nest by themselves. */
-  useBackClose(isSettingsOpen, () => setIsSettingsOpen(false));
-  useBackClose(isModelHubOpen, () => setIsModelHubOpen(false));
-  useBackClose(isWorkspaceOpen, () => setIsWorkspaceOpen(false));
-  useBackClose(isAnalyticsOpen, () => setIsAnalyticsOpen(false));
-  useBackClose(isDeveloperOpen, () => setIsDeveloperOpen(false));
-  useBackClose(isPairingOpen, () => setIsPairingOpen(false));
-  useBackClose(isTerminalOpen, () => setIsTerminalOpen(false));
-  useBackClose(isAuthOpen, () => setIsAuthOpen(false));
-  // The full-screen sections are views rather than overlays, and on a phone
-  // the sidebar that would take you back is behind the menu.
-  useBackClose(activeView !== 'chat', () => setActiveView('chat'));
+  /* Topmost first: the pairing screen opens over Settings, so Back must
+     close it and leave Settings where it was. The views come last - they are
+     the thing underneath everything else. */
+  useBackClose([
+    { open: isPairingOpen, close: () => setIsPairingOpen(false) },
+    { open: isAuthOpen, close: () => setIsAuthOpen(false) },
+    { open: isDeveloperOpen, close: () => setIsDeveloperOpen(false) },
+    { open: isAnalyticsOpen, close: () => setIsAnalyticsOpen(false) },
+    { open: isModelHubOpen, close: () => setIsModelHubOpen(false) },
+    { open: isWorkspaceOpen, close: () => setIsWorkspaceOpen(false) },
+    { open: isTerminalOpen, close: () => setIsTerminalOpen(false) },
+    { open: isSettingsOpen, close: () => setIsSettingsOpen(false) },
+    { open: activeView !== 'chat', close: () => setActiveView('chat') },
+  ]);
 
   const [settingsTab, setSettingsTab] = useState('general');
 

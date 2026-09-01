@@ -4,44 +4,53 @@
  * On Android the hardware Back button asks the WebView to go back in history,
  * and leaves the app when there is nowhere to go. This app is one page that
  * never navigates, so there was never anywhere to go: opening Settings, the
- * Model Hub or the Sites screen and pressing Back closed the whole app,
- * losing whatever was on screen. There was no on-screen way back out of the
- * full-screen sections either, so on a phone some of them were a dead end.
+ * Model Hub or the Sites screen and pressing Back closed the whole app.
  *
- * The fix is to give Back something to pop. Every overlay adds one history
- * entry while it is open, so Back closes the topmost one and only leaves the
- * app once nothing is left to close. Closing with the X removes that entry
- * again, or the next Back press would appear to do nothing.
+ * One history entry for "something is open", not one per overlay.
  *
- * No plugin needed: this is the History API, which Capacitor's Back button
- * already drives, and it gives the browser build the same behaviour for free.
+ * Per-overlay entries looked tidier and were wrong. Settings hands off to the
+ * pairing screen by closing itself and opening the other in the same render;
+ * React ran Settings' cleanup first, which called history.back(), and the
+ * popstate that produced arrived after the pairing screen had registered its
+ * own listener - so the pairing screen closed itself the instant it opened and
+ * you landed back on the conversation. Reported as "Device Connections does
+ * not work".
+ *
+ * With a single entry, a hand-off never changes whether anything is open, the
+ * effect does not re-run, and nothing is pushed or popped. Back closes the
+ * topmost thing; the order below is what "topmost" means.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
-export function useBackClose(isOpen, close) {
+export function useBackClose(layers) {
+  // Read inside the handler, so the entry does not have to be rebuilt every
+  // time one of them changes.
+  const current = useRef(layers);
+  current.current = layers;
+
+  const anyOpen = layers.some((layer) => layer.open);
+
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (!anyOpen) return undefined;
 
     window.history.pushState({ smaranLayer: true }, '');
     let closedByBack = false;
 
     const onPop = () => {
       closedByBack = true;
-      close();
+      const top = current.current.find((layer) => layer.open);
+      top?.close();
     };
     window.addEventListener('popstate', onPop);
 
     return () => {
       window.removeEventListener('popstate', onPop);
-      // Closed from the interface rather than by Back. The entry we pushed is
-      // still there, and left alone it would swallow the next Back press.
+      // Closed from the interface. The entry we pushed is still there, and
+      // left alone it would swallow the next Back press.
       if (!closedByBack) {
         window.history.back();
       }
     };
-    // `close` is intentionally not a dependency: callers pass an inline arrow,
-    // which would re-run this on every render and push an entry each time.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [anyOpen]);
 }
