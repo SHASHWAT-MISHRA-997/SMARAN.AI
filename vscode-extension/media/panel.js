@@ -10,6 +10,7 @@
     const stop = document.getElementById('stop');
     const reset = document.getElementById('reset');
     const folder = document.getElementById('folder');
+    const model = document.getElementById('model');
 
     /** Appending, never innerHTML: everything below is text from a model or a
         shell, and one of those is happy to emit a script tag. */
@@ -59,9 +60,9 @@
         switch (message.type) {
             case 'ready':
                 folder.textContent = message.folder || 'No folder open';
-                if (!message.connected) {
-                    add('error', 'The SMARAN.AI app is not running',
-                        'The agent lives inside the app. Start it, and this connects on its own.');
+                model.textContent = message.model || '';
+                if (message.problem) {
+                    add('error', 'No model to run on yet', message.problem);
                 }
                 break;
 

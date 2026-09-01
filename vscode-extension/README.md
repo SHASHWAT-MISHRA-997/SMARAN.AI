@@ -44,13 +44,25 @@ Turn off `smaran.planFirst` if you would rather it started straight away.
 
 ## What it needs
 
-**The SMARAN.AI app has to be running.** The agent lives in the app — that is
-where the tools, the workspace boundary and the model routing are, and it is
-the same agent the desktop app and the command line use. The extension finds
-the app on its own, by reading the port it published.
+**A model. That is the whole list.** The agent runs inside this extension.
+Nothing else has to be installed, nothing has to be left open, and no server
+of ours sits in between — your key goes straight to the provider you chose.
 
-**A model.** Either one installed locally through Ollama, or a provider key in
-`smaran.apiKeys` with `smaran.provider` set.
+Either:
+
+* a model in [Ollama](https://ollama.com) on your machine — `ollama pull
+  qwen2.5-coder:7b` and leave `smaran.provider` empty. Nothing leaves the
+  machine; or
+* a provider key in `smaran.apiKeys` with `smaran.provider` set. Groq, Google
+  Gemini, OpenRouter and NVIDIA all have free tiers.
+
+If you happen to have the SMARAN.AI desktop app installed, keys you entered
+there are picked up so you do not type them twice. The app does not need to be
+running, and you do not need it at all.
+
+*In 2.0.0 the app did have to be running — the agent lived in it. That made a
+266 MB install the price of using the editor, which was the wrong trade.
+2.1.0 carries its own.*
 
 ## About the model
 
@@ -67,10 +79,10 @@ listed, you can see that without opening anything.
 
 | Setting | What it does |
 | --- | --- |
-| `smaran.backendUrl` | Where the app is. Empty finds it automatically. |
 | `smaran.provider` | Which provider runs the agent. Empty means local Ollama. |
-| `smaran.model` | Model name. Empty lets the app pick from what is installed. |
-| `smaran.apiKeys` | Your keys. They go to your own machine's app, and from there to the provider you chose. |
+| `smaran.model` | Model name. Empty picks an installed Ollama model. |
+| `smaran.apiKeys` | Your keys. They go to the provider you chose and nowhere else. |
+| `smaran.ollamaUrl` | Where Ollama is. Only used when no provider is set. |
 | `smaran.planFirst` | Ask before acting. On by default. |
 
 MIT licensed. Part of [SMARAN.AI](https://smaran-ai.netlify.app/).

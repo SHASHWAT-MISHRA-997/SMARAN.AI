@@ -14,17 +14,27 @@ body {
 }
 
 header {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
     padding: 6px 10px;
     font-size: 11px;
     color: var(--vscode-descriptionForeground);
     border-bottom: 1px solid var(--vscode-panel-border);
-    white-space: nowrap;
+}
+
+/* The folder is truncated at the front, where the uninteresting part of a
+   path is. The model name is short and never truncated - it is the setting
+   people most often have wrong. */
+#folder {
     overflow: hidden;
+    white-space: nowrap;
     text-overflow: ellipsis;
-    direction: rtl;      /* a long path is truncated at the front, where the
-                            uninteresting part of it is */
+    direction: rtl;
     text-align: left;
 }
+
+#model { flex: none; opacity: .8; }
 
 main {
     flex: 1;

@@ -2,7 +2,7 @@
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
   "description": "A coding agent that reads your project, changes files, runs commands and reads the results — one step at a time, in view.",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {
@@ -121,10 +121,10 @@
     "configuration": {
       "title": "SMARAN.AI Codex",
       "properties": {
-        "smaran.backendUrl": {
+        "smaran.ollamaUrl": {
           "type": "string",
-          "default": "",
-          "markdownDescription": "Address of the running SMARAN.AI app. Leave empty to find it automatically — the app publishes the port it bound to, and that is read first.\n\nThe agent runs inside the app, so the app has to be running. There is no second copy of it in here."
+          "default": "http://127.0.0.1:11434",
+          "markdownDescription": "Where Ollama is, for running a model on this machine. Only used when `#smaran.provider#` is empty."
         },
         "smaran.provider": {
           "type": "string",
@@ -140,7 +140,7 @@
             "DeepSeek",
             "NVIDIA NIM"
           ],
-          "markdownDescription": "Which model runs the agent. Empty means a model installed locally through Ollama.\n\nThis matters more than any other setting. A small local model will follow the loop and still lose track of what it has done; the difference between a 3B model and a large one is not something the extension can make up for."
+          "markdownDescription": "Which model runs the agent. Empty means a model installed locally through Ollama, with no key and nothing sent off the machine.\n\nThis matters more than any other setting. A small local model will follow the loop and still lose track of what it has done; the difference between a 3B model and a large one is not something the extension can make up for."
         },
         "smaran.model": {
           "type": "string",
@@ -150,7 +150,7 @@
         "smaran.apiKeys": {
           "type": "object",
           "default": {},
-          "markdownDescription": "Your provider keys. They stay in your VS Code settings and are sent to the SMARAN.AI app on your own machine, which passes them to the provider you chose and nowhere else.\n\n**Free tiers:** [Groq](https://console.groq.com/keys) · [Google Gemini](https://aistudio.google.com/app/apikey) · [OpenRouter](https://openrouter.ai/keys) · [NVIDIA NIM](https://build.nvidia.com/)\n\n**Paid:** [Anthropic](https://console.anthropic.com/settings/keys) · [OpenAI](https://platform.openai.com/api-keys) · [DeepSeek](https://platform.deepseek.com/api_keys)",
+          "markdownDescription": "Your provider keys. They stay in your VS Code settings and are sent to the provider you chose and nowhere else — there is no server of ours in between. If you already entered keys in the SMARAN.AI app, those are picked up too, without the app needing to run.\n\n**Free tiers:** [Groq](https://console.groq.com/keys) · [Google Gemini](https://aistudio.google.com/app/apikey) · [OpenRouter](https://openrouter.ai/keys) · [NVIDIA NIM](https://build.nvidia.com/)\n\n**Paid:** [Anthropic](https://console.anthropic.com/settings/keys) · [OpenAI](https://platform.openai.com/api-keys) · [DeepSeek](https://platform.deepseek.com/api_keys)",
           "additionalProperties": { "type": "string" }
         },
         "smaran.planFirst": {

@@ -1,0 +1,178 @@
+/**
+ * The loop that makes this an agent rather than a chat box.
+ *
+ *     ask the model
+ *       -> it asks for a tool
+ *       -> run the tool
+ *       -> give it the result
+ *       -> ask again
+ *     until it stops asking, or the step limit is reached
+ *
+ * Version 1.5.0 had no arrow going back: it scanned one reply with two regular
+ * expressions and stopped, so the model never learned whether the file was
+ * written or the test passed. Everything else here is detail; that arrow is
+ * the difference.
+ *
+ * Tool calls are tags in ordinary text rather than a provider's function
+ * calling. Every model reachable from here can produce tags - a small one in
+ * Ollama, a large one behind a key. Native tool calling would work for some
+ * and quietly fail for the rest.
+ */
+
+import { Choice, complete, Message } from './models';
+import { describeTools, execute, TOOLS } from './tools';
+
+/** Not a guess at how much work a task needs — a stop, so a model repeating
+ *  itself cannot run forever on somebody's machine. Reaching it is reported. */
+export const MAX_STEPS = 24;
+
+const SYSTEM = `You are SMARAN.AI's coding agent, working inside a real folder \
+on this machine. You can read and change files and run commands, and you see \
+the result of everything you do.
+
+Work like an engineer, not like a chat reply:
+
+- Look before you change. Read the files you are about to edit. Do not assume \
+what is in them.
+- Make the change with a tool. Writing code into your message is not doing it; \
+the person asked for the work, not a description of it.
+- Check what you did. Run the tests, run the file, read it back. If something \
+failed, the output will say so - fix it and try again.
+- Stop when it is actually done, and say what you changed.
+
+To use a tool, emit exactly this and nothing after it in that message:
+
+<tool_call name="read_file">
+<path>src/main.py</path>
+</tool_call>
+
+One tool per message. You will be given the result and can then continue.
+
+%TOOLS%
+
+When the work is complete, reply normally with no tool call, and summarise \
+what you changed and what you verified.`;
+
+const PLAN_SYSTEM = `You are SMARAN.AI's coding agent. Before doing anything, \
+say what you intend to do.
+
+Give a short numbered plan: which files you will read, what you will change, \
+and how you will check it worked. Name real files where you can. Do not write \
+the code yet and do not use any tools - this is the plan the person will agree \
+to or correct.
+
+Keep it under ten lines.`;
+
+const TOOL_CALL = /<tool_call\s+name=["']([a-z_]+)["']\s*>([\s\S]*?)<\/tool_call>/i;
+const ARGUMENT = /<([a-z_]+)>([\s\S]*?)<\/\1>/gi;
+
+export interface ToolCall {
+    name: string;
+    args: Record<string, string>;
+    raw: string;
+}
+
+export function parseToolCall(text: string): ToolCall | undefined {
+    const match = TOOL_CALL.exec(text || '');
+    if (!match) {
+        return undefined;
+    }
+    const args: Record<string, string> = {};
+    ARGUMENT.lastIndex = 0;
+    let found = ARGUMENT.exec(match[2]);
+    while (found) {
+        // Content is code and must survive exactly. Everything else is a path
+        // or a command, where a stray newline is the model's formatting rather
+        // than part of the value.
+        const key = found[1].toLowerCase();
+        args[key] = key === 'content' ? found[2] : found[2].trim();
+        found = ARGUMENT.exec(match[2]);
+    }
+    return { name: match[1].toLowerCase(), args, raw: match[0] };
+}
+
+export type AgentEvent =
+    | { type: 'workspace'; root: string }
+    | { type: 'message'; text: string }
+    | { type: 'tool_call'; name: string; args: Record<string, string>; step: number }
+    | { type: 'tool_result'; name: string; result: string; step: number }
+    | { type: 'done'; steps: number; toolsUsed: string[]; text: string }
+    | { type: 'error'; message: string };
+
+export async function plan(task: string, choice: Choice): Promise<string> {
+    return complete(
+        [
+            { role: 'system', content: PLAN_SYSTEM },
+            { role: 'user', content: task },
+        ],
+        choice,
+    );
+}
+
+export async function* run(
+    task: string,
+    root: string,
+    history: Message[],
+    choice: Choice,
+    stopped: () => boolean,
+): AsyncGenerator<AgentEvent> {
+    const messages: Message[] = [
+        { role: 'system', content: SYSTEM.replace('%TOOLS%', describeTools()) },
+        ...history,
+        { role: 'user', content: task },
+    ];
+
+    // What was actually done, so a claim of completion can be checked against
+    // it. A small model will write one file and announce it wrote three.
+    const performed: string[] = [];
+
+    yield { type: 'workspace', root };
+
+    for (let step = 1; step <= MAX_STEPS; step += 1) {
+        if (stopped()) {
+            return;
+        }
+
+        let reply: string;
+        try {
+            reply = await complete(messages, choice);
+        } catch (error) {
+            yield { type: 'error', message: (error as Error).message };
+            return;
+        }
+
+        if (stopped()) {
+            return;
+        }
+
+        const call = parseToolCall(reply);
+        if (!call) {
+            yield { type: 'message', text: reply };
+            yield { type: 'done', steps: step, toolsUsed: performed, text: reply };
+            return;
+        }
+
+        const spoken = reply.slice(0, reply.indexOf(call.raw)).trim();
+        if (spoken) {
+            yield { type: 'message', text: spoken };
+        }
+
+        yield { type: 'tool_call', name: call.name, args: call.args, step };
+
+        const result = await execute(call.name, call.args, root);
+        performed.push(call.name);
+        yield { type: 'tool_result', name: call.name, result, step };
+
+        // The arrow back. Without these two lines this is 1.5.0 again.
+        messages.push({ role: 'assistant', content: reply });
+        messages.push({ role: 'user', content: `Result of ${call.name}:\n${result}` });
+    }
+
+    yield {
+        type: 'error',
+        message: `Stopped after ${MAX_STEPS} steps without finishing. The work so far has been done; ask again to carry on.`,
+    };
+}
+
+/** Whether a tool changes anything, for callers that treat those differently. */
+export const changesThings = (name: string): boolean => Boolean(TOOLS[name]?.changes);

@@ -1,15 +1,15 @@
 /**
  * The panel: a task goes in, and every step the agent takes comes out.
  *
- * What is on screen is the whole point of this rewrite. The previous version
- * showed a reply. This shows the work - which file is being read, which
- * command is running, what that command printed, and what the agent did with
- * the answer. If it goes wrong you can see the step it went wrong on.
+ * What is on screen is the whole point. 1.5.0 showed a reply. This shows the
+ * work - which file is being read, which command is running, what that command
+ * printed, and what the agent did with the answer. If it goes wrong you can
+ * see the step it went wrong on.
  *
  * Two things are deliberately visible and not summarised away:
  *
- *   the folder it is working in, because the editor's project and the
- *   desktop app's open folder are often not the same one;
+ *   the folder it is working in, because an agent that can write files should
+ *   never leave you guessing where;
  *
  *   which tools actually ran, listed at the end next to the agent's own
  *   account of what it did. A small model will write one file and say it
@@ -17,14 +17,18 @@
  */
 
 import * as vscode from 'vscode';
-import { AgentEvent, APP_NOT_FOUND, baseUrl, plan, run } from './backend';
+
+import { Message } from './agent/models';
+import { AgentEvent, plan, run } from './agent/loop';
+import { resolveChoice } from './settings';
 
 export class AgentPanel implements vscode.WebviewViewProvider {
     public static readonly viewId = 'smaran-ai.chatView';
 
     private view?: vscode.WebviewView;
-    private running?: AbortController;
-    private history: unknown[] = [];
+    private stopRequested = false;
+    private busy = false;
+    private history: Message[] = [];
 
     constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -42,7 +46,7 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                     await this.start(String(message.text || ''));
                     break;
                 case 'stop':
-                    this.stop();
+                    this.stopRequested = true;
                     break;
                 case 'approve':
                     await this.execute(String(message.text || ''));
@@ -54,7 +58,7 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             }
         });
 
-        this.post({ type: 'ready', folder: this.folder(), connected: Boolean(baseUrl()) });
+        void this.announce();
     }
 
     /** Give the agent a task from somewhere other than the panel. */
@@ -62,6 +66,18 @@ export class AgentPanel implements vscode.WebviewViewProvider {
         await vscode.commands.executeCommand('smaran-ai.chatView.focus');
         this.post({ type: 'echo', text: task });
         await this.start(task);
+    }
+
+    private async announce(): Promise<void> {
+        const choice = await resolveChoice();
+        this.post({
+            type: 'ready',
+            folder: this.folder(),
+            model: choice.provider
+                ? `${choice.provider} · ${choice.model || 'no model set'}`
+                : (choice.model ? `local · ${choice.model}` : 'no model'),
+            problem: choice.problem,
+        });
     }
 
     private folder(): string | undefined {
@@ -73,32 +89,31 @@ export class AgentPanel implements vscode.WebviewViewProvider {
     }
 
     private async start(task: string): Promise<void> {
-        if (!task.trim()) {
+        if (!task.trim() || this.busy) {
             return;
         }
-        const folder = this.folder();
-        if (!folder) {
+        if (!this.folder()) {
             this.post({
                 type: 'error',
                 text: 'Open a folder first. The agent works inside a project, and there is no project here.',
             });
             return;
         }
-        if (!baseUrl()) {
-            this.post({ type: 'error', text: APP_NOT_FOUND });
+
+        const choice = await resolveChoice();
+        if (choice.problem) {
+            this.post({ type: 'error', text: choice.problem });
             return;
         }
 
-        const planFirst = vscode.workspace.getConfiguration('smaran').get<boolean>('planFirst', true);
-        if (!planFirst) {
+        if (!vscode.workspace.getConfiguration('smaran').get<boolean>('planFirst', true)) {
             await this.execute(task);
             return;
         }
 
         this.post({ type: 'thinking', text: 'Working out what to do…' });
         try {
-            const intent = await plan(task, folder);
-            this.post({ type: 'plan', text: intent, task });
+            this.post({ type: 'plan', text: await plan(task, choice), task });
         } catch (error) {
             this.post({ type: 'error', text: (error as Error).message });
         }
@@ -106,42 +121,52 @@ export class AgentPanel implements vscode.WebviewViewProvider {
 
     private async execute(task: string): Promise<void> {
         const folder = this.folder();
-        if (!folder) {
+        if (!folder || this.busy) {
             return;
         }
-        this.stop();
-        this.running = new AbortController();
+        const choice = await resolveChoice();
+        if (choice.problem) {
+            this.post({ type: 'error', text: choice.problem });
+            return;
+        }
+
+        this.busy = true;
+        this.stopRequested = false;
         this.post({ type: 'started' });
 
         const used: string[] = [];
         try {
-            for await (const event of run(task, folder, this.history, this.running.signal)) {
+            for await (const event of run(task, folder, this.history, choice, () => this.stopRequested)) {
                 this.post(this.forDisplay(event));
-                if (event.type === 'tool_call' && event.name) {
+                if (event.type === 'tool_call') {
                     used.push(event.name);
                 }
                 if (event.type === 'done') {
                     // Kept so a follow-up ("now add a test for it") knows what
                     // was already done rather than starting from nothing.
                     this.history.push({ role: 'user', content: task });
-                    this.history.push({ role: 'assistant', content: event.text || '' });
+                    this.history.push({ role: 'assistant', content: event.text });
                 }
             }
+            if (this.stopRequested) {
+                this.post({ type: 'stopped' });
+            }
         } catch (error) {
-            const message = (error as Error).message;
-            this.post({ type: message === 'stopped' ? 'stopped' : 'error', text: message });
+            this.post({ type: 'error', text: (error as Error).message });
         } finally {
-            this.running = undefined;
+            this.busy = false;
             this.post({ type: 'finished', used });
+            // A run that wrote files leaves the editor showing what is no
+            // longer on disk. This is the moment to say so.
+            await vscode.commands.executeCommand('workbench.action.files.revert').then(undefined, () => undefined);
         }
     }
 
     private forDisplay(event: AgentEvent): Record<string, unknown> {
         if (event.type === 'tool_call') {
-            const args = event.arguments || {};
-            // The whole file contents in an argument would bury the panel;
-            // the size says as much as the text would.
-            const shown = Object.entries(args).map(([key, value]) => {
+            // A whole file in an argument would bury the panel; the size says
+            // as much as the text would.
+            const shown = Object.entries(event.args).map(([key, value]) => {
                 const text = String(value ?? '');
                 return key === 'content'
                     ? [key, `${text.split('\n').length} lines`]
@@ -149,12 +174,10 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             });
             return { type: 'tool_call', name: event.name, args: shown, step: event.step };
         }
+        if (event.type === 'done') {
+            return { type: 'done', steps: event.steps, tools_used: event.toolsUsed };
+        }
         return event as unknown as Record<string, unknown>;
-    }
-
-    private stop(): void {
-        this.running?.abort();
-        this.running = undefined;
     }
 
     private html(webview: vscode.Webview): string {
@@ -170,7 +193,7 @@ export class AgentPanel implements vscode.WebviewViewProvider {
 <link href="${asset('panel.css')}" rel="stylesheet">
 </head>
 <body>
-  <header id="status"><span id="folder"></span></header>
+  <header id="status"><span id="folder"></span><span id="model"></span></header>
   <main id="log"></main>
   <footer>
     <textarea id="task" rows="3" placeholder="What should it do? It can read the project, change files and run commands."></textarea>
