@@ -65,11 +65,12 @@ export const WEB_EVENTS = ['visit', 'download_click'];
 
 export const WEB_LABELS = ['exe', 'apk', 'vsix', 'cli', 'page', 'unknown'];
 
-export const json = (body, status = 200) =>
+export const json = (body, status = 200, extraHeaders = {}) =>
   new Response(JSON.stringify(body), {
     status,
     headers: {
       'content-type': 'application/json',
+      ...extraHeaders,
       // Counters must never be served from a cache; a stale dashboard that
       // looks live is worse than one that is slow.
       'cache-control': 'no-store',

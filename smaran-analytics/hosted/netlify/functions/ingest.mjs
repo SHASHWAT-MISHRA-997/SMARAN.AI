@@ -16,30 +16,49 @@ import { ALLOWED_EVENTS, ALLOWED_PLATFORMS, dayOf, encodeEventKey, ingestKey, js
  *              number nobody makes decisions from, and the alternative is a
  *              lock this does not warrant.
  */
+/* The phone app is a web page, so its POST is cross-origin and the browser
+ * sends a preflight first. Without an answer to that preflight the request
+ * never leaves the device - the console said "blocked by CORS policy", and
+ * the phone could never have reported a single install however correct the
+ * app's own code was.
+ *
+ * Only the ingest route opens up, and only for the two things a counter
+ * needs. The dashboard route stays closed: it reads data, and nothing but the
+ * dashboard should be able to ask it anything. */
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'POST, OPTIONS',
+  'access-control-allow-headers': 'content-type, x-ingest-key',
+  'access-control-max-age': '86400',
+};
+
 export default async (req) => {
-  if (req.method !== 'POST') return json({ detail: 'Method not allowed.' }, 405);
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: CORS });
+  }
+  if (req.method !== 'POST') return json({ detail: 'Method not allowed.' }, 405, CORS);
 
   const expected = ingestKey();
-  if (!expected) return json({ detail: 'Ingest is not configured.' }, 503);
+  if (!expected) return json({ detail: 'Ingest is not configured.' }, 503, CORS);
   if (!timingSafeEqual(req.headers.get('x-ingest-key') || '', expected)) {
-    return json({ detail: 'Bad ingest key.' }, 401);
+    return json({ detail: 'Bad ingest key.' }, 401, CORS);
   }
 
   let body;
   try {
     body = await req.json();
   } catch {
-    return json({ detail: 'Body must be JSON.' }, 400);
+    return json({ detail: 'Body must be JSON.' }, 400, CORS);
   }
 
   const installId = String(body.install_id || '').trim();
   if (installId.length < 8 || installId.length > 64) {
-    return json({ detail: 'install_id is missing or the wrong length.' }, 400);
+    return json({ detail: 'install_id is missing or the wrong length.' }, 400, CORS);
   }
 
   const event = String(body.event || '').trim().toLowerCase();
   if (!ALLOWED_EVENTS.includes(event)) {
-    return json({ detail: `'${event}' is not a recorded event.` }, 400);
+    return json({ detail: `'${event}' is not a recorded event.` }, 400, CORS);
   }
 
   let platform = String(body.platform || 'unknown').trim().toLowerCase();
@@ -83,7 +102,7 @@ export default async (req) => {
     });
   }
 
-  return json({ recorded: true });
+  return json({ recorded: true }, 200, CORS);
 };
 
 export const config = { path: '/ingest' };

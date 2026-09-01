@@ -97,9 +97,15 @@ const App = () => {
      window: the phone header, the composer and the desktop pet all drawn
      over the character.
 
-     Width is the honest signal. A window this narrow is a pinned one
-     whatever put it there, and a window that grows past it is not. */
+     Width is the honest signal on a desktop. It is a terrible one on a phone,
+     and that was the bug behind "the input bar does not show": every phone is
+     360 to 430 pixels wide, so every phone matched, and html.sm-pip sets
+     display:none on the composer, the pet and the header controls. The app
+     was treating each of them as a pinned window and hiding the thing you
+     type into. Nothing about the packaged phone app is ever pinned. */
   useEffect(() => {
+    if (isNativeApp()) return undefined;
+
     const PINNED_MAX_WIDTH = 460;
     const apply = () => {
       document.documentElement.classList.toggle(
