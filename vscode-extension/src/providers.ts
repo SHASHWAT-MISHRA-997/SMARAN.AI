@@ -87,6 +87,98 @@ function get(url: string, headers: Record<string, string> = {}): Promise<{ statu
     });
 }
 
+/**
+ * Installing and removing Ollama models from here.
+ *
+ * Only Ollama. LM Studio's local server speaks the OpenAI chat API and
+ * nothing else - it has no endpoint for fetching or deleting a model, so
+ * offering the buttons for it would be offering something that cannot work.
+ * Its own window does that job.
+ */
+export function pullOllamaModel(
+    ollamaUrl: string,
+    model: string,
+    onProgress: (percent: number, status: string) => void,
+): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const target = new URL(`${ollamaUrl.replace(/\/+$/, '')}/api/pull`);
+        const transport = target.protocol === 'https:' ? https : http;
+        const payload = JSON.stringify({ model, stream: true });
+
+        const request = transport.request(
+            target,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+            },
+            (response) => {
+                let buffer = '';
+                let failed: string | undefined;
+
+                response.on('data', (chunk: Buffer) => {
+                    buffer += chunk.toString('utf8');
+                    let newline = buffer.indexOf('\n');
+                    while (newline >= 0) {
+                        const line = buffer.slice(0, newline).trim();
+                        buffer = buffer.slice(newline + 1);
+                        newline = buffer.indexOf('\n');
+                        if (!line) continue;
+                        try {
+                            const event = JSON.parse(line);
+                            if (event.error) { failed = String(event.error); continue; }
+                            // A percentage only when there is something to be a
+                            // percentage of; the early phases have no total.
+                            const percent = event.total
+                                ? Math.round(((event.completed || 0) / event.total) * 100)
+                                : -1;
+                            onProgress(percent, String(event.status || ''));
+                        } catch { /* a half-written line; the rest still arrives */ }
+                    }
+                });
+                response.on('end', () => (failed ? reject(new Error(failed)) : resolve()));
+            },
+        );
+        request.on('error', (error: NodeJS.ErrnoException) =>
+            reject(error.code === 'ECONNREFUSED'
+                ? new Error(`Ollama is not running at ${ollamaUrl}.`)
+                : error));
+        request.write(payload);
+        request.end();
+    });
+}
+
+export function deleteOllamaModel(ollamaUrl: string, model: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const target = new URL(`${ollamaUrl.replace(/\/+$/, '')}/api/delete`);
+        const transport = target.protocol === 'https:' ? https : http;
+        const payload = JSON.stringify({ model });
+
+        const request = transport.request(
+            target,
+            {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+            },
+            (response) => {
+                const chunks: Buffer[] = [];
+                response.on('data', (c: Buffer) => chunks.push(c));
+                response.on('end', () => {
+                    if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
+                        resolve();
+                        return;
+                    }
+                    let detail = Buffer.concat(chunks).toString('utf8').slice(0, 160);
+                    try { detail = JSON.parse(detail).error || detail; } catch { /* as it came */ }
+                    reject(new Error(detail || `Ollama answered ${response.statusCode}.`));
+                });
+            },
+        );
+        request.on('error', reject);
+        request.write(payload);
+        request.end();
+    });
+}
+
 /** A model as the panel shows it. */
 export interface ModelOption {
     id: string;

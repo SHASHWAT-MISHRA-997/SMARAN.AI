@@ -255,6 +255,15 @@
         const { providers, configured, provider, model } = setupState;
         setup.replaceChildren();
 
+        /* Model first. It was underneath eight provider cards, so choosing one
+           - the thing people come here to do most often - meant scrolling past
+           everything else to find it. */
+        setup.appendChild(el('h3', null, 'Model'));
+        const models = el('div', 'models');
+        models.id = 'models';
+        setup.appendChild(models);
+        drawModels();
+
         setup.appendChild(el('h3', null, 'Where the model runs'));
         providers.forEach((p) => {
             const row = el('div', 'provider' + (p.id === provider ? ' on' : ''));
@@ -331,12 +340,6 @@
             setup.appendChild(row);
         });
 
-        setup.appendChild(el('h3', null, 'Model'));
-        const models = el('div', 'models');
-        models.id = 'models';
-        setup.appendChild(models);
-        drawModels();
-
         setup.appendChild(el('p', 'foot',
             'Keys are kept in your operating system’s keychain, not in settings.json, '
             + 'and are sent only to the provider you picked.'));
@@ -344,6 +347,7 @@
     }
 
     let modelState = { loading: false, models: [], error: null };
+    let pullState = { model: '', percent: -1, status: '', busy: false, failed: false };
 
     function drawModels() {
         const holder = document.getElementById('models');
@@ -352,6 +356,37 @@
 
         holder.appendChild(button('Refresh', 'tiny', () =>
             vscode.postMessage({ type: 'refreshModels', provider: setupState.provider })));
+
+        /* Installing a model, for Ollama only.
+           LM Studio's local server has no endpoint for fetching or deleting
+           one - it speaks the chat API and nothing else - so the buttons are
+           not offered where they cannot work. */
+        if (setupState.provider === '') {
+            const pull = el('div', 'pull-row');
+            const name = el('input');
+            name.type = 'text';
+            name.placeholder = 'Install a model, e.g. qwen2.5-coder:7b';
+            name.value = pullState.model && pullState.busy ? pullState.model : '';
+            name.disabled = pullState.busy;
+            pull.appendChild(name);
+            const go = button(pullState.busy ? 'Installing…' : 'Install', 'tiny', () => {
+                if (!name.value.trim() || pullState.busy) return;
+                vscode.postMessage({ type: 'pullModel', model: name.value.trim() });
+            });
+            go.disabled = pullState.busy;
+            pull.appendChild(go);
+            pull.appendChild(button('Browse', 'tiny link', () =>
+                vscode.postMessage({ type: 'openLink', url: 'https://ollama.com/library' })));
+            holder.appendChild(pull);
+
+            if (pullState.status) {
+                const line = el('p', pullState.failed ? 'empty pull-failed' : 'empty',
+                    pullState.percent >= 0
+                        ? `${pullState.model}: ${pullState.percent}% — ${pullState.status}`
+                        : `${pullState.model}: ${pullState.status}`);
+                holder.appendChild(line);
+            }
+        }
 
         if (modelState.loading) {
             holder.appendChild(el('p', 'empty', 'Asking the provider what it has…'));
@@ -381,12 +416,20 @@
                 .filter((m) => !needle || m.id.toLowerCase().includes(needle))
                 .slice(0, 200)
                 .forEach((m) => {
+                    const line = el('div', 'model-line');
                     const row = button('', 'model' + (m.id === setupState.model ? ' on' : ''), () =>
                         vscode.postMessage({ type: 'chooseModel', model: m.id }));
                     row.appendChild(el('span', null, m.id));
                     if (m.free) row.appendChild(el('span', 'badge', 'free'));
                     if (m.id === setupState.model) row.appendChild(el('span', 'tick', '✓'));
-                    list.appendChild(row);
+                    line.appendChild(row);
+                    if (setupState.provider === '') {
+                        line.appendChild(button('Delete', 'tiny', (event) => {
+                            event.stopPropagation();
+                            vscode.postMessage({ type: 'deleteModel', model: m.id });
+                        }));
+                    }
+                    list.appendChild(line);
                 });
         };
         filter.addEventListener('input', draw);
@@ -402,9 +445,13 @@
             case 'ready':
                 $('folder').textContent = message.folderName || message.folder || 'No folder open';
                 $('folder').title = message.folder || '';
-                $('modelChip').textContent = message.model
-                    ? (message.provider ? message.provider + ' · ' + message.model : message.model)
-                    : 'choose a model';
+                // "Ollama (on this machine) · qwen2.5-coder:3b" did not fit in
+                // the composer and was cut mid-word. The model is the part
+                // that changes; the full pair is on the tooltip.
+                $('modelChip').textContent = message.model || 'choose a model';
+                $('modelChip').title = message.model
+                    ? `${message.provider || 'Local'} · ${message.model}`
+                    : 'Pick where the model runs, and which one';
                 modes = message.modes || [];
                 currentMode = message.mode;
                 const active = modes.find((m) => m.id === currentMode);
@@ -491,6 +538,14 @@
             case 'setup':
                 setupState = message;
                 drawSetup();
+                break;
+
+            case 'pull':
+                pullState = {
+                    model: message.model, percent: message.percent,
+                    status: message.status, busy: message.busy, failed: Boolean(message.failed),
+                };
+                drawModels();
                 break;
 
             case 'models':

@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.6.0
+
+**Install and remove Ollama models without leaving the panel.** Type a name,
+watch it download, delete one you no longer want. Only Ollama: LM Studio's
+local server speaks the chat API and nothing else — it has no endpoint for
+fetching or deleting a model, so the buttons are not offered where they cannot
+work.
+
+**The model list is at the top of Setup**, not underneath eight provider
+cards. Choosing a model is the thing people come here to do most often, and it
+was the furthest thing to reach.
+
+The model chip in the composer showed "Ollama (on this machine) · qwen2.5-…"
+and was cut mid-word. It shows the model; the pair is on the tooltip.
+
+## 2.5.0
+
+**Your own message was missing from every saved conversation.** The panel drew
+it and posted the task; nothing wrote it down. Reopening from History showed
+the answers with no sign of what they were answering.
+
+**Ollama and LM Studio are both listed, with what each one currently has** —
+"3 models", "not running". Plenty of people have both installed, and until now
+the list said the same thing about both either way.
+
+## 2.4.0
+
+**LM Studio.** No key; start its local server and whatever you have loaded
+appears in the model list. `smaran.lmStudioUrl` if it is not on the default
+port.
+
+**Keys were being wiped as you typed them.** The Setup screen is rebuilt
+whenever anything changes, and a rebuild replaced every input — so a key
+pasted before selecting the provider vanished, and Save then stored nothing.
+What you have typed now survives the redraw, there is a Show button because a
+password field hides a bad paste, and saving says so.
+
+Nothing suggests a particular model to install any more. Whatever you have in
+Ollama is what the list offers.
+
 ## 2.3.0
 
 **A look of its own.**

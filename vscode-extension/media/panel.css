@@ -522,6 +522,22 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
 .key-row { display: flex; align-items: center; gap: 5px; padding: 0 10px 9px; }
 .key-row input { margin: 0; min-width: 0; }   /* so the buttons keep their width */
 
+.pull-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 6px;
+}
+.pull-row input { margin: 0; min-width: 0; }
+.pull-failed { color: var(--red); }
+
+.model-line { display: flex; align-items: center; gap: 4px; }
+.model-line .model { flex: 1; min-width: 0; }
+.model-line .tiny { opacity: 0; transition: opacity .15s ease; }
+/* Delete appears on the row you are pointing at, so a list of models is not
+   also a row of ways to lose one. */
+.model-line:hover .tiny, .model-line:focus-within .tiny { opacity: 1; }
+
 .model-list {
     max-height: 280px;
     overflow-y: auto;

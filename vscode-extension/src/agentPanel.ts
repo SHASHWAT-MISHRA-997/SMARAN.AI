@@ -25,7 +25,7 @@ import * as vscode from 'vscode';
 import { AgentEvent, run, ToolCall } from './agent/loop';
 import { MODES, ModeId } from './agent/modes';
 import { Message } from './agent/models';
-import { listModels, PROVIDERS } from './providers';
+import { deleteOllamaModel, listModels, PROVIDERS, pullOllamaModel } from './providers';
 import { Entry, Session, SessionStore } from './sessions';
 import { Keys, lmStudioUrl, ollamaUrl, resolveChoice } from './settings';
 
@@ -178,6 +178,47 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 break;
 
             case 'refreshModels': await this.sendModels(String(message.provider)); break;
+
+            case 'pullModel': {
+                const name = String(message.model || '').trim();
+                if (!name) break;
+                this.post({ type: 'pull', model: name, percent: -1, status: 'starting…', busy: true });
+                try {
+                    await pullOllamaModel(ollamaUrl(), name, (percent, status) =>
+                        this.post({ type: 'pull', model: name, percent, status, busy: true }));
+                    this.post({ type: 'pull', model: name, percent: 100, status: 'installed', busy: false });
+                    await this.sendSetup();
+                } catch (error) {
+                    this.post({
+                        type: 'pull', model: name, percent: -1, busy: false,
+                        status: (error as Error).message,
+                        failed: true,
+                    });
+                }
+                break;
+            }
+
+            case 'deleteModel': {
+                const name = String(message.model || '');
+                // Deleting a model is a download thrown away, and some of them
+                // are many gigabytes. Worth one question.
+                const answer = await vscode.window.showWarningMessage(
+                    `Delete ${name} from Ollama? You would have to download it again.`,
+                    { modal: true }, 'Delete');
+                if (answer !== 'Delete') break;
+                try {
+                    await deleteOllamaModel(ollamaUrl(), name);
+                    if (vscode.workspace.getConfiguration('smaran').get<string>('model') === name) {
+                        await vscode.workspace.getConfiguration('smaran')
+                            .update('model', '', vscode.ConfigurationTarget.Global);
+                    }
+                    await this.sendSetup();
+                    await this.announce();
+                } catch (error) {
+                    void vscode.window.showErrorMessage(`Could not delete ${name}: ${(error as Error).message}`);
+                }
+                break;
+            }
 
             case 'openLink':
                 await vscode.env.openExternal(vscode.Uri.parse(String(message.url)));

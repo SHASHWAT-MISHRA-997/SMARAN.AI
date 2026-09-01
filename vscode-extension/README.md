@@ -62,6 +62,11 @@ tree both fail as a message rather than as a file somewhere else on your disk.
   provider actually has. The list is fetched from the provider, never
   hardcoded: two models this was tested against were retired within a day of
   each other, and a typed-in list would still be offering them.
+* **Ollama models, installed and removed from here.** Type a name, watch it
+  download, delete one you are done with. Ollama only — LM Studio's local
+  server has no endpoint for either, so the buttons are not offered there.
+  Both runners are listed with what each one currently has, so if you have
+  both you can see which is running without picking one to find out.
 * **History** — every conversation, saved per project, on your machine.
   Reopen one and carry on where it stopped.
 * **Attach** — pull in a file. One inside the project is named for the agent
