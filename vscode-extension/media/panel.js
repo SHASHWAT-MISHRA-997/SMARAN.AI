@@ -144,9 +144,11 @@
     function send() {
         const text = task.value.trim();
         if (!text) return;
-        addEntry({ kind: 'you', title: 'You', body: text });
         task.value = '';
         show('chat');
+        // Drawn by the extension, not here. Drawing it locally left the
+        // question out of the saved transcript, so reopening a past
+        // conversation showed the answers with nothing they were answering.
         vscode.postMessage({ type: 'task', text });
     }
 
@@ -262,7 +264,13 @@
             const line = el('div', 'menu-line');
             line.appendChild(el('strong', null, p.label));
             if (p.free) line.appendChild(el('span', 'badge', 'free tier'));
-            if (p.local) line.appendChild(el('span', 'badge', 'on this machine'));
+            if (p.local) {
+                // What is in it, now, so somebody with both runners installed
+                // can see which is running without selecting each in turn.
+                const status = (setupState.localStatus || {})[p.id];
+                const running = status && status !== 'not running';
+                line.appendChild(el('span', running ? 'badge ok' : 'badge', status || 'on this machine'));
+            }
             if (configured[p.id]) line.appendChild(el('span', 'badge ok', 'key saved'));
             // Said once, right after saving, because a badge that was already
             // there does not tell you the press worked.

@@ -2,7 +2,7 @@
 
 <img src="frontend/public/smaran-logo.png" alt="SMARAN.AI" width="110" />
 
-# SMARAN.AI 2.9.9
+# SMARAN.AI 2.10.0
 
 **A local-first AI workspace.** Chat, voice, vision and your own documents,
 running on your own machine.
@@ -14,7 +14,7 @@ running on your own machine.
 [![Download APK](https://img.shields.io/badge/Android-Download%20APK-ef4444?style=for-the-badge&logo=android&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI.apk)
 [![VS Code extension](https://img.shields.io/badge/VS_Code-SMARAN.AI_Codex-00E5FF?style=for-the-badge&logo=visualstudiocode&logoColor=white&labelColor=04060f)](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)
 
-![Version](https://img.shields.io/badge/version-2.9.9-b91c1c)
+![Version](https://img.shields.io/badge/version-2.10.0-b91c1c)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-b91c1c)
 ![Android](https://img.shields.io/badge/Android-7.0%2B-b91c1c)
 ![Models](https://img.shields.io/badge/catalogue-63%20models-b91c1c)

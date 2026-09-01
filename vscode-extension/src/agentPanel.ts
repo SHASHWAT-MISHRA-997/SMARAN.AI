@@ -70,7 +70,16 @@ export class AgentPanel implements vscode.WebviewViewProvider {
     private async handle(message: { type: string; [key: string]: unknown }): Promise<void> {
         switch (message.type) {
             case 'hello': await this.announce(); break;
-            case 'task': await this.start(String(message.text || '')); break;
+            case 'task': {
+                const text = String(message.text || '');
+                if (text.trim()) {
+                    // Recorded before anything is attempted, so the question
+                    // is in the transcript even if the answer fails.
+                    this.record({ kind: 'you', title: 'You', body: text });
+                }
+                await this.start(text);
+                break;
+            }
             case 'approve': await this.execute(String(message.text || '')); break;
 
             case 'answer':
@@ -251,12 +260,37 @@ export class AgentPanel implements vscode.WebviewViewProvider {
         });
     }
 
+    /**
+     * How many models each local runner has, right now.
+     *
+     * Plenty of people have both Ollama and LM Studio installed. Without this
+     * the only way to find out which one is running, and what is in it, was to
+     * select it and wait - so the list said the same thing about both whether
+     * one was running, both were, or neither.
+     */
+    private async localStatus(): Promise<Record<string, string>> {
+        const count = async (id: string, url: string) => {
+            try {
+                const models = await listModels(id, '', ollamaUrl(), lmStudioUrl());
+                return models.length ? `${models.length} model${models.length === 1 ? '' : 's'}` : 'no models yet';
+            } catch {
+                return 'not running';
+            }
+        };
+        const [ollama, lmstudio] = await Promise.all([
+            count('', ollamaUrl()),
+            count('lmstudio', lmStudioUrl()),
+        ]);
+        return { '': ollama, lmstudio };
+    }
+
     private async sendSetup(): Promise<void> {
         const config = vscode.workspace.getConfiguration('smaran');
         const provider = (config.get<string>('provider') || '').trim();
         this.post({
             type: 'setup',
             providers: PROVIDERS,
+            localStatus: await this.localStatus(),
             configured: await this.keys.configured(),
             provider,
             model: (config.get<string>('model') || '').trim(),
