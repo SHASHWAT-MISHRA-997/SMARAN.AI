@@ -165,7 +165,7 @@
     <div class="panel">
       <h2>Live event feed</h2>
       <p class="sub">
-        Newest first, refreshed every 15 seconds. <b>install</b> is the first
+        Newest first, refreshed every 5 seconds. <b>install</b> is the first
         time a copy ever reported; <b>launch</b> is every start after that.
       </p>
       <div class="scroll">
@@ -512,7 +512,10 @@ document.getElementById('apply').onclick = () => {
 // when nothing is actually wrong. Caught here, where it is expected.
 const refresh = () => load().catch(() => {});
 refresh();
-setInterval(refresh, 15000);
+// Every five seconds. The number here and the number written on
+// the page are the same number, so the page cannot claim a
+// freshness it does not have.
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>
