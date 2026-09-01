@@ -2,7 +2,7 @@
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
   "description": "A coding agent that reads your project, changes files, runs commands and reads the results — one step at a time, in view.",
-  "version": "2.10.0",
+  "version": "2.11.0",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {
@@ -158,6 +158,7 @@
             "cohere",
             "siliconflow",
             "nvidia",
+            "ollamacloud",
             "openai",
             "anthropic",
             "deepseek"
@@ -174,6 +175,7 @@
             "Cohere (free trial, evaluation only)",
             "SiliconFlow (some models free)",
             "NVIDIA NIM (free tier)",
+            "Ollama Cloud (paid, hosted)",
             "OpenAI (paid)",
             "Anthropic Claude (paid)",
             "DeepSeek (paid)"

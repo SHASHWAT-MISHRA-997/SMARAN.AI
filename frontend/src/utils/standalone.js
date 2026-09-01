@@ -14,6 +14,13 @@
  * documents, local models, and control of that machine.
  *
  * The four shapes here are the same four the rest of this project uses.
+ *
+ * NVIDIA NIM is not here. Its free tier is real and it works in the desktop
+ * app, but its API refuses cross-origin requests, so from a phone the call
+ * never leaves the WebView. It was listed and greyed with that explanation
+ * for a while; showing a provider that can never be picked was decided to be
+ * worse than not showing it. Checked twice from a page, with Groq answering
+ * 401 from the same page as a control.
  */
 
 const KEY_STORE = 'sm_cloud_keys';
@@ -41,26 +48,6 @@ export const PROVIDERS = [
     free: true,
     keyUrl: 'https://openrouter.ai/keys',
     hint: 'Many models behind one key, several free.',
-  },
-  {
-    /* Listed, and honest about why it cannot be picked here.
-     *
-     * NVIDIA's free developer tier is real and it works in the desktop app.
-     * Its API refuses cross-origin requests, though, so from a phone the call
-     * never leaves the app - it fails as "Failed to fetch" with nothing to
-     * act on. Checked twice from a page, with Groq answering 401 from the
-     * same page as a control.
-     *
-     * Leaving it out entirely looked like an oversight. It is here, greyed,
-     * saying what it needs. */
-    id: 'nvidia',
-    label: 'NVIDIA NIM',
-    free: true,
-    keyUrl: 'https://build.nvidia.com/',
-    unavailable: 'Free, and works in the desktop app — but NVIDIA’s API refuses '
-      + 'requests from a phone app. Link a computer under Device Connections '
-      + 'and it becomes available.',
-    hint: 'Free developer tier.',
   },
   {
     /* Added after checking each one from a page, which is what a phone is:
@@ -131,7 +118,6 @@ const OPENAI_COMPATIBLE = {
   groq: 'https://api.groq.com/openai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
   deepseek: 'https://api.deepseek.com/v1',
-  nvidia: 'https://integrate.api.nvidia.com/v1',
 };
 
 /* ── what is stored on this device ─────────────────────────────────────── */
