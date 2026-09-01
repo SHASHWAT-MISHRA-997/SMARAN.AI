@@ -6,7 +6,10 @@
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="manifest" href="/manifest.json" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) mean anything.
+         Without it the app cannot know where the phone's gesture bar is, and
+         the composer ends up drawn underneath it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f59e0b" />
     
     <!-- Primary Meta Tags & SEO for Google Search & Google AI Overviews -->
@@ -64,8 +67,8 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>SMARAN.AI - Autonomous AI Coding Assistant</title>
-    <script type="module" crossorigin src="/assets/index-v2.10.0-Bw-Znyrw.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-v2.10.0-Bye6AoHS.css">
+    <script type="module" crossorigin src="/assets/index-v2.10.1-C4OzxX_e.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-v2.10.1-C8vZuCZu.css">
   </head>
   <body class="bg-[#ffffff] dark:bg-[#131314] text-[#1f1f1f] dark:text-[#e3e3e3] transition-colors duration-300">
     <div id="root"></div>

@@ -306,6 +306,34 @@ pre {
   }
 }
 
+/* The app is exactly as tall as the window, and no taller.
+ *
+ * Everything was sized with 100dvh. In a browser that is the visible height;
+ * in an Android WebView it is the whole screen, including the strip the
+ * system's gesture bar sits over - so the bottom of the app, which is the
+ * composer, was drawn underneath it and could not be reached. The menu went
+ * the same way for the same reason.
+ *
+ * Chaining from html/body instead is the height the WebView actually gave us,
+ * and the safe-area inset keeps the last row clear of the gesture bar.
+ */
+html, body, #root {
+  height: 100%;
+  max-height: 100%;
+}
+
+body {
+  overflow: hidden;
+  /* Stops the whole page rubber-banding on a phone, which is what made the
+     header scroll away and not come back. */
+  overscroll-behavior: none;
+}
+
+.sm-app-shell {
+  height: 100%;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 /* Mobile-friendly touch targets */
 @media (max-width: 640px) {
   button, [role="button"] {

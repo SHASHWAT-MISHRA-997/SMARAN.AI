@@ -255,15 +255,6 @@
         const { providers, configured, provider, model } = setupState;
         setup.replaceChildren();
 
-        /* Model first. It was underneath eight provider cards, so choosing one
-           - the thing people come here to do most often - meant scrolling past
-           everything else to find it. */
-        setup.appendChild(el('h3', null, 'Model'));
-        const models = el('div', 'models');
-        models.id = 'models';
-        setup.appendChild(models);
-        drawModels();
-
         setup.appendChild(el('h3', null, 'Where the model runs'));
         providers.forEach((p) => {
             const row = el('div', 'provider' + (p.id === provider ? ' on' : ''));
@@ -337,8 +328,20 @@
                 row.appendChild(note);
             }
 
+            /* Each provider's own models, inside its own card.
+               One shared list underneath meant that with both Ollama and LM
+               Studio installed there was nothing to say which models belonged
+               to which - you had to remember what you had selected. */
+            if (p.id === provider) {
+                const models = el('div', 'models');
+                models.id = 'models';
+                row.appendChild(models);
+            }
+
             setup.appendChild(row);
         });
+
+        drawModels();
 
         setup.appendChild(el('p', 'foot',
             'Keys are kept in your operating system’s keychain, not in settings.json, '
@@ -365,7 +368,10 @@
             const pull = el('div', 'pull-row');
             const name = el('input');
             name.type = 'text';
-            name.placeholder = 'Install a model, e.g. qwen2.5-coder:7b';
+            // The exact tag, because that is what Ollama's API takes. It
+            // publishes no search endpoint, so this cannot offer to look one
+            // up - Browse opens the library where the tags are.
+            name.placeholder = 'Exact tag from the library, e.g. qwen2.5-coder:7b';
             name.value = pullState.model && pullState.busy ? pullState.model : '';
             name.disabled = pullState.busy;
             pull.appendChild(name);
@@ -380,11 +386,17 @@
             holder.appendChild(pull);
 
             if (pullState.status) {
-                const line = el('p', pullState.failed ? 'empty pull-failed' : 'empty',
-                    pullState.percent >= 0
+                // Ollama's own words are exact but not helpful on their own:
+                // "pull model manifest: file does not exist" means the tag was
+                // not found, which is worth saying in those words.
+                const notFound = /manifest|not found|does not exist/i.test(pullState.status);
+                const text = pullState.failed && notFound
+                    ? `Ollama has no model tagged "${pullState.model}". Tags look like `
+                      + 'qwen2.5-coder:7b or llama3.2:3b — open Browse and copy one.'
+                    : pullState.percent >= 0
                         ? `${pullState.model}: ${pullState.percent}% — ${pullState.status}`
-                        : `${pullState.model}: ${pullState.status}`);
-                holder.appendChild(line);
+                        : `${pullState.model}: ${pullState.status}`;
+                holder.appendChild(el('p', pullState.failed ? 'empty pull-failed' : 'empty', text));
             }
         }
 

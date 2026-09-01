@@ -14,7 +14,8 @@ import * as vscode from 'vscode';
 
 /** One thing that appeared in the panel, stored exactly as it was shown. */
 export interface Entry {
-    kind: 'you' | 'says' | 'tool' | 'result' | 'done' | 'error' | 'note' | 'plan';
+    /** 'skip' is thrown away rather than shown or stored. */
+    kind: 'you' | 'says' | 'tool' | 'result' | 'done' | 'error' | 'note' | 'plan' | 'skip';
     title?: string;
     body?: string;
 }

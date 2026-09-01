@@ -4025,16 +4025,22 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               <span>{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
             </button>
 
-            {/* Compare Mode */}
-            <button
-              type="button"
-              onClick={() => { setComparePrompt(input); setIsModelCompareOpen(true); }}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/30 cursor-pointer shrink-0"
-              title="Compare Models Side-by-Side"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Compare</span>
-            </button>
+            {/* Compare Mode.
+                Not on a phone answering from the device: it runs several
+                models side by side through the backend, so with none it
+                showed "0 models confirmed", a key field that led nowhere, and
+                no way back out of it. */}
+            {!noBackend() && (
+              <button
+                type="button"
+                onClick={() => { setComparePrompt(input); setIsModelCompareOpen(true); }}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/30 cursor-pointer shrink-0"
+                title="Compare Models Side-by-Side"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Compare</span>
+              </button>
+            )}
 
             {/* Language Selector */}
             <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-2 py-1 shrink-0" title="Response Language">

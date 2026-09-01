@@ -432,6 +432,9 @@ export class AgentPanel implements vscode.WebviewViewProvider {
     // ── running ───────────────────────────────────────────────────────────
 
     private record(entry: Entry): void {
+        if (entry.kind === 'skip') {
+            return;
+        }
         this.post({ type: 'entry', entry });
         if (!this.session) {
             this.session = this.sessions.create(entry.kind === 'you' ? entry.body || '' : 'Untitled');
@@ -543,13 +546,16 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 return { kind: 'note', title: `${event.name} was not run`, body: event.because };
 
             case 'done':
-                return {
-                    kind: 'done',
-                    title: `Finished in ${event.steps} steps`,
-                    body: event.toolsUsed.length
-                        ? `Tools that actually ran: ${event.toolsUsed.join(', ')}`
-                        : 'No tools ran — nothing on disk was changed.',
-                };
+                // Only worth saying when something was done. A card after
+                // every reply announcing that nothing happened is noise, and
+                // after "Hi" it is faintly absurd.
+                return event.toolsUsed.length
+                    ? {
+                        kind: 'done',
+                        title: `Finished in ${event.steps} steps`,
+                        body: `Tools that ran: ${event.toolsUsed.join(', ')}`,
+                    }
+                    : { kind: 'skip' };
 
             case 'error':
                 return { kind: 'error', title: 'Stopped', body: event.message };

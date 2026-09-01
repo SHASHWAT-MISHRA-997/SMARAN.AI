@@ -387,7 +387,7 @@ const App = () => {
     {/* The banner sits above the workspace rather than inside it: the frame
         below becomes a row on wide screens, and a notice dropped into that
         row would be laid out as a column beside the sidebar. */}
-    <div className="h-[100dvh] w-full flex flex-col overflow-hidden">
+    <div className="sm-app-shell w-full flex flex-col overflow-hidden">
       {needsModel() && (
         <div className="shrink-0 z-30 px-4 py-2.5 flex items-center justify-between gap-3 bg-indigo-500/10 border-b border-indigo-500/30 text-[13px] text-indigo-700 dark:text-indigo-200">
           <span>Pick a model to start. Several are free.</span>

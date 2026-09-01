@@ -396,7 +396,10 @@ const SettingsModal = ({
     // a provider and a key are set.
     ...(noBackend() ? [{ id: "provider", label: "AI Provider", icon: Boxes }] : []),
     { id: "account", label: "Account & Profile", icon: UserRound },
-    { id: "models", label: "Model Matrix", icon: Boxes },
+    // The Model Matrix downloads and compares models that run on the machine's
+    // own hardware. A phone has none of that, and the screen was showing
+    // "0 models confirmed" with controls that could not do anything.
+    ...(isMobile ? [] : [{ id: "models", label: "Model Matrix", icon: Boxes }]),
     ...(!isMobile ? [{ id: "analytics", label: "Analytics & Telemetry", icon: ChartNoAxesCombined }] : []),
     { id: "memory", label: "AI Memory", icon: Brain },
     { id: "connections", label: "Device Connections", icon: Wifi },
