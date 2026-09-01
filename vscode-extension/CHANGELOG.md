@@ -1,0 +1,51 @@
+# Changelog
+
+## 2.1.0
+
+**It no longer needs anything else installed or open.**
+
+2.0.0 put the agent in the SMARAN.AI desktop app and had the extension call
+it. That made a 266 MB install, left running, the price of using this in the
+editor — the wrong trade for something most people will try before they have
+ever heard of the app. If the app was not running, the panel said so and
+stopped, which was the feature working exactly as designed and still being the
+wrong answer.
+
+The agent runs in the extension now. All you need is a model:
+
+* one in [Ollama](https://ollama.com) on your machine — nothing leaves it; or
+* a provider key. Groq, Google Gemini, OpenRouter and NVIDIA all have free
+  tiers.
+
+Your key goes straight to the provider. There is no server of ours in between.
+
+Keys already entered in the SMARAN.AI app are picked up if it happens to be
+installed, so you do not type them twice — but it never has to be running.
+
+`smaran.backendUrl` is gone; `smaran.ollamaUrl` replaces it.
+
+## 2.0.0
+
+**A rewrite, because 1.5.0 was not an agent.**
+
+It sent your question, took the one reply, scanned it with two regular
+expressions for a `create_file` or a `run_command`, did whatever matched, and
+stopped. The model never found out whether the file was written, whether the
+command failed, or whether the test it had just written passes. One guess, and
+nothing to correct it if the guess was wrong. No API key or prompt could fix
+that — the shape was wrong, not the model.
+
+2.0.0 runs the loop: ask, run the tool, feed the result back, ask again. So it
+can read a file, notice the function is not where it assumed, search for it,
+edit the right place, run the tests, see one fail, and fix it.
+
+* Seven tools instead of two: `list_files`, `read_file`, `write_file`,
+  `edit_file`, `search`, `run_command`, `git`.
+* Everything is confined to the folder you have open. Paths are resolved and
+  then checked to still be inside it, so `../` and a symlink pointing out of
+  the tree both fail as a message.
+* It says what it intends to do and waits, unless you turn `smaran.planFirst`
+  off. Every step appears as it happens, and **Stop** ends a run where it is.
+* Each run ends with the tools that **actually ran**. A small model will write
+  one file and report that it wrote three; you should not have to take its
+  word.
