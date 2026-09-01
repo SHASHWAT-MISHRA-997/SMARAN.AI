@@ -11,16 +11,16 @@ the work is done — every step on screen, under a mode you choose.
 Nothing else has to be installed and nothing has to be left running.
 Bring an API key, or a model in Ollama, and that is the whole setup.
 
-[![Marketplace](https://img.shields.io/visual-studio-marketplace/v/ShashwatMishra.smaran-ai-codex?style=for-the-badge&label=MARKETPLACE&labelColor=0d1117&color=00E5FF&logo=visualstudiocode&logoColor=00E5FF)](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/ShashwatMishra.smaran-ai-codex?style=for-the-badge&label=INSTALLS&labelColor=0d1117&color=FF2D95)](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)
-[![License](https://img.shields.io/badge/MIT-8B5CF6?style=for-the-badge&label=LICENSE&labelColor=0d1117)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/blob/main/LICENSE)
+[![Agent](https://img.shields.io/badge/RUNS_A_REAL_LOOP-00E5FF?style=for-the-badge&labelColor=04060f)](#the-four-modes)
+[![Local or cloud](https://img.shields.io/badge/OLLAMA_OR_YOUR_KEY-FF2D95?style=for-the-badge&labelColor=04060f)](#where-the-model-comes-from)
+[![License](https://img.shields.io/badge/MIT-8B5CF6?style=for-the-badge&label=LICENSE&labelColor=04060f)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/blob/main/LICENSE)
 
 <br>
 
 **Built by Shashwat Mishra**
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white&labelColor=0A66C2)](https://www.linkedin.com/in/sm980/)
-[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white&labelColor=FFFFFF&color=FF0000)](https://www.youtube.com/@ShashwatMishra-997)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white&labelColor=FF0000)](https://www.youtube.com/@ShashwatMishra-997)
 
 </div>
 
@@ -117,9 +117,8 @@ problems in this file. Each writes a sentence and hands it to the same agent —
 ### Made by Shashwat Mishra
 
 [![LinkedIn](https://img.shields.io/badge/Connect_on_LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white&labelColor=0A66C2)](https://www.linkedin.com/in/sm980/)
-[![YouTube](https://img.shields.io/badge/Watch_on_YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=FF0000&labelColor=FFFFFF&color=FFFFFF)](https://www.youtube.com/@ShashwatMishra-997)
+[![YouTube](https://img.shields.io/badge/Watch_on_YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white&labelColor=FF0000)](https://www.youtube.com/@ShashwatMishra-997)
 
-**MIT licensed.** Part of [SMARAN.AI](https://smaran-ai.netlify.app/) —
-which you do not need in order to use this.
+**MIT licensed.** Part of [SMARAN.AI](https://smaran-ai.netlify.app/).
 
 </div>

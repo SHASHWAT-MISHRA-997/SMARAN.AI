@@ -10,6 +10,7 @@ import { PET_FORMS, PetAvatar } from "./DesktopPet";
 import { useTheme } from "../context/ThemeContext";
 
 import { detectClientDevice } from './RightPanel';
+import { isNativeApp, loadLink } from '../utils/hostLink';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const positive = (value) => finite(value) && value > 0;
@@ -66,10 +67,25 @@ const SettingsModal = ({
   const [downloaded, setDownloaded] = useState(null);
   const [updateError, setUpdateError] = useState("");
 
+  /* True in the packaged phone app when no computer has been linked to it.
+     Read at call time rather than stored, so pairing takes effect without a
+     reload of this screen. */
+  const noBackend = () => isNativeApp() && !loadLink()?.url;
+
   const checkUpdates = async (force = true) => {
     setCheckingUpdate(true);
     setUpdateError("");
     try {
+      // On a phone with no computer linked there is no backend, and this app's
+      // own local server answers with the page itself. Checking first means
+      // the message below can say what is actually wrong instead of blaming
+      // the network on a device that is plainly online.
+      if (noBackend()) {
+        setUpdateError(
+          'This phone has no computer linked, so there is nothing to ask about updates. '
+          + 'The app itself updates from the Play Store or wherever you installed it.');
+        return;
+      }
       const res = await fetch(`${API_BASE}/api/updates/check?force=${force}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
@@ -424,7 +440,10 @@ const SettingsModal = ({
                   <span className="block text-xs font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
                     Interface Theme Mode
                   </span>
-                  <div className="grid grid-cols-3 gap-3">
+                  {/* One column on a phone. Three of these in 375px gave each
+                      about a hundred pixels, which broke "Sleek obsidian
+                      palette" into four stacked words. */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {[
                       { id: "dark", label: "Dark Mode", icon: Moon, desc: "Sleek obsidian palette" },
                       { id: "light", label: "Light Mode", icon: Sun, desc: "Crisp bright palette" },
@@ -467,7 +486,10 @@ const SettingsModal = ({
                     onChange={(e) => onModelChange?.(e.target.value)}
                     className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-xs font-bold text-zinc-900 dark:text-white outline-none focus:border-indigo-500"
                   >
-                    <option value="auto">Auto (Smart Routing - Fastest available)</option>
+                    {/* A select cannot wrap, so a long option is simply cut
+                        off mid-word on a phone. The short form says the same
+                        thing; the paragraph under the control explains it. */}
+                    <option value="auto">{isMobile ? "Auto (smart routing)" : "Auto (Smart Routing - Fastest available)"}</option>
                     {/* These were three fixed names - deepseek-coder:6.7b,
                         llama3.2:3b, qwen2.5-coder:7b - offered whether or not
                         they were installed. Picking one you did not have was

@@ -20,6 +20,7 @@ import DesktopPet from './components/DesktopPet';
 import TerminalPanel from './components/TerminalPanel';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 import { isNativeApp, loadLink } from './utils/hostLink';
+import { useBackClose } from './utils/backStack';
 
 
 // SMARAN.AI runs as a free, offline, single-user desktop app. There is no
@@ -283,6 +284,21 @@ const App = () => {
     return () => window.removeEventListener('smaran:navigate', goHome);
   }, []);
 
+  /* Back closes what is on top, and only leaves the app when nothing is open.
+     Order does not matter here - each overlay owns its own history entry, so
+     they nest by themselves. */
+  useBackClose(isSettingsOpen, () => setIsSettingsOpen(false));
+  useBackClose(isModelHubOpen, () => setIsModelHubOpen(false));
+  useBackClose(isWorkspaceOpen, () => setIsWorkspaceOpen(false));
+  useBackClose(isAnalyticsOpen, () => setIsAnalyticsOpen(false));
+  useBackClose(isDeveloperOpen, () => setIsDeveloperOpen(false));
+  useBackClose(isPairingOpen, () => setIsPairingOpen(false));
+  useBackClose(isTerminalOpen, () => setIsTerminalOpen(false));
+  useBackClose(isAuthOpen, () => setIsAuthOpen(false));
+  // The full-screen sections are views rather than overlays, and on a phone
+  // the sidebar that would take you back is behind the menu.
+  useBackClose(activeView !== 'chat', () => setActiveView('chat'));
+
   const [settingsTab, setSettingsTab] = useState('general');
 
   // The views that actually have a branch in the render below. Kept next to
@@ -374,6 +390,27 @@ const App = () => {
 
       {/* Main Workspace Frame */}
       <main className="order-2 flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden relative z-10 glass-panel border-t md:border-t-0 border-zinc-200 dark:border-zinc-850/50">
+        {/* A way out of the full-screen sections that does not rely on knowing
+            the hardware Back button exists, or on finding the sidebar behind
+            the menu. Phones only; on a wide screen the sidebar is right there. */}
+        {activeView !== 'chat' && (
+          <div className="md:hidden shrink-0 flex items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/70 backdrop-blur">
+            <button
+              type="button"
+              onClick={() => setActiveView('chat')}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70"
+              aria-label="Back to chat"
+            >
+              <span aria-hidden="true">←</span> Back
+            </button>
+            <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+              {activeView === 'sites' ? 'Sites'
+                : activeView === 'plugins' ? 'Plugins & Skills'
+                : activeView === 'collections' ? 'Collections' : ''}
+            </span>
+          </div>
+        )}
+
         {activeView === 'chat' && (
           <ChatArea
             token={currentUser?.session_token}

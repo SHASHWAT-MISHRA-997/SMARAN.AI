@@ -312,9 +312,30 @@ pre {
     min-height: 44px;
     min-width: 44px;
   }
-  .text-xs {
-    font-size: 0.75rem;
-  }
+}
+
+/* Text a person can actually read on a phone.
+ *
+ * The interface was written at desktop distance, where 10px beside a 13px
+ * heading reads as a quiet caption. On a phone held at arm's length it is a
+ * smudge - and there were 404 places using 8, 9, 10 or 11 pixels, including
+ * the descriptions on the home cards and every label in the composer.
+ *
+ * Nothing goes below 12px here, and the line height goes up with the size,
+ * because raising one without the other only makes the lines collide. The
+ * desktop keeps its own scale: this is a phone problem, not a taste.
+ */
+@media (max-width: 767px) {
+  .text-\[8px\]  { font-size: 11px !important; line-height: 1.45 !important; }
+  .text-\[9px\]  { font-size: 12px !important; line-height: 1.45 !important; }
+  .text-\[10px\] { font-size: 12.5px !important; line-height: 1.5 !important; }
+  .text-\[11px\] { font-size: 13px !important; line-height: 1.55 !important; }
+  .text-\[12px\], .text-xs { font-size: 13.5px !important; line-height: 1.6 !important; }
+  .text-sm { font-size: 14.5px !important; line-height: 1.6 !important; }
+
+  /* Tracking that suited 10px turns a 13px line into gaps between letters. */
+  .tracking-widest { letter-spacing: .08em !important; }
+  .tracking-\[0\.25em\], .tracking-\[0\.3em\] { letter-spacing: .12em !important; }
 }
 
 /* Auto-adjust sidebar for mobile */
@@ -351,15 +372,33 @@ pre {
      would be the wrong thing to give back. */
   @container chat-workspace (max-width: 520px) {
     .composer-shell { gap:.25rem !important; padding:.4rem !important; }
+
+    /* The tool row scrolled sideways with the scrollbar hidden, so on a phone
+       half the controls were off the edge with nothing to say they were
+       there - Compare and the language picker could only be reached by
+       guessing there was more and dragging. Icons at this width are small
+       enough to wrap onto a second line, which shows all of them at once and
+       costs about twenty pixels. */
+    .composer-compact-tools {
+      flex-wrap: wrap !important;
+      overflow-x: visible !important;
+      justify-content: flex-start !important;
+      row-gap: .3rem !important;
+    }
+    .composer-compact-tools > * { flex: 0 0 auto !important; }
+
     .composer-compact-tools { gap:.25rem !important; }
     .composer-compact-tools button,
     .composer-compact-tools select {
       padding-top:.25rem !important; padding-bottom:.25rem !important;
-      font-size:9px !important;
+      /* Was 9px. Legible beats compact on the device with the least room:
+         the row wraps now, so the height this costs is a second line rather
+         than controls pushed off the edge. */
+      font-size:12px !important;
     }
-    /* Labels are what makes each control tall. The icons carry the meaning at
-       this width, and the titles still name them for a screen reader. */
-    .composer-compact-tools .tool-label { display:none !important; }
+    /* The labels stay. Hiding them left six unlabelled icons in a row, which
+       is a guessing game - and the title attribute they fell back to is not
+       something a phone can show at all. */
   }
 @container chat-workspace (min-width: 821px) {
   /* Two rows, not one: the toolbar had grown enough buttons that the text

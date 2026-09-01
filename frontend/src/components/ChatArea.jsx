@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch, PictureInPicture2,} from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
+import { isNativeApp, loadLink } from '../utils/hostLink';
 import { downloadProjectZip, downloadSingleFile } from '../utils/zip';
 import ArtifactRenderer from './ArtifactRenderer';
 import ModelCompareModal from './ModelCompareModal';
@@ -1814,7 +1815,26 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     return '';
   };
 
+  /* Both Speak and dictation need a backend: one to turn recorded audio into
+     words, the other to turn an answer into sound. On a phone with no
+     computer linked there is neither, and what happened instead was a
+     microphone that started, a button that lit up, and silence - which reads
+     as the feature being broken rather than absent. */
+  const voiceNeedsHost = () => isNativeApp() && !loadLink()?.url;
+
+  const sayVoiceUnavailable = () => {
+    window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
+      detail: {
+        message: 'Speaking and dictation run on the computer this phone is '
+          + 'linked to, and none is linked yet. Open Settings and choose '
+          + '"Link your phone" to pair one.',
+      },
+    }));
+  };
+
   const openVoiceMode = () => {
+    if (voiceNeedsHost()) { sayVoiceUnavailable(); return; }
+
     // Ensure any leftover dictation recognition is cleanly stopped
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch (_) {}
@@ -1899,6 +1919,19 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     };
     const toggle = async () => {
       if (sidebarDictationRef.current) { stop(); return; }
+      // Recorded dictation is transcribed by the backend, so without one this
+      // can only ever record and discard. Saying so beats a red button that
+      // never produces a word.
+      if (isNativeApp() && !loadLink()?.url
+          && !(window.SpeechRecognition || window.webkitSpeechRecognition)) {
+        window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
+          detail: {
+            message: 'Dictation is transcribed by the computer this phone is '
+              + 'linked to, and none is linked yet. Pair one from Settings.',
+          },
+        }));
+        return;
+      }
       const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       // Once the browser's speech service has failed, it fails every time.
       // Trying it first on each click meant the button lit up, the service
@@ -1974,6 +2007,50 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     const observer = new ResizeObserver(publish);
     observer.observe(shell);
     return () => observer.disconnect();
+  }, []);
+
+  /* Keeping the box you are typing in on screen.
+
+     A phone's on-screen keyboard takes half the window. The layout is sized
+     in dvh, so the page shrinks under it and the composer - which is at the
+     bottom - ends up below the fold. Tapping the box, or the dictate button
+     beside it, appeared to make the input bar vanish.
+
+     visualViewport reports the space the keyboard actually left, which is the
+     only reliable measure of it; there is no keyboard event on the web. */
+  const composerShell = composerShellRef;
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return undefined;
+
+    const keepInView = () => {
+      const hiddenByKeyboard = window.innerHeight - viewport.height > 120;
+      if (!hiddenByKeyboard) return;
+      // A frame later, so it runs after the browser has finished resizing.
+      window.requestAnimationFrame(() => {
+        composerShell.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      });
+    };
+
+    viewport.addEventListener('resize', keepInView);
+    return () => viewport.removeEventListener('resize', keepInView);
+  }, []);
+
+  /* Voice failures, said where the button was pressed.
+     They were only ever rendered in the sidebar, which on a phone is behind
+     the hamburger menu - so on the one device where the microphone most often
+     will not start, the reason was invisible and Speak just did nothing. */
+  const [voiceNotice, setVoiceNotice] = useState('');
+  useEffect(() => {
+    const failed = (event) => setVoiceNotice(
+      event.detail?.message || 'Voice could not start.');
+    const started = () => setVoiceNotice('');
+    window.addEventListener('smaran:dictation-error', failed);
+    window.addEventListener('smaran:dictation-state', started);
+    return () => {
+      window.removeEventListener('smaran:dictation-error', failed);
+      window.removeEventListener('smaran:dictation-state', started);
+    };
   }, []);
 
   const composerRef = useRef(null);
@@ -3618,6 +3695,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             </span>
           )}
         </div>
+        {voiceNotice && (
+          <div
+            role="alert"
+            className="max-w-4xl mx-auto mb-1.5 flex items-start gap-2 rounded-xl border border-amber-500/50 bg-amber-50 dark:bg-amber-950/50 px-3 py-2 text-[11px] leading-relaxed text-amber-900 dark:text-amber-100"
+          >
+            <span className="flex-1">{voiceNotice}</span>
+            <button
+              type="button"
+              onClick={() => setVoiceNotice('')}
+              className="shrink-0 font-bold underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         <form data-testid="chat-composer" ref={composerShellRef} onSubmit={handleSend} className="composer-shell max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 bg-gradient-to-b from-white/95 to-zinc-50/90 dark:from-zinc-900/95 dark:to-zinc-950/95 border border-indigo-300/60 dark:border-indigo-500/35 rounded-2xl sm:rounded-3xl p-2.5 sm:p-2.5 shadow-[0_14px_35px_-18px_rgba(99,102,241,0.55)] focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/35 focus-within:shadow-[0_0_38px_rgba(99,102,241,0.38)] transition-all w-full overflow-hidden">
           {/* Hidden file inputs */}
           <input

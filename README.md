@@ -2,18 +2,29 @@
 
 <img src="frontend/public/smaran-logo.png" alt="SMARAN.AI" width="110" />
 
-# SMARAN.AI 2.8.2
+# SMARAN.AI 2.9.9
 
 **A local-first AI workspace.** Chat, voice, vision and your own documents,
 running on your own machine.
 
-[![Download for Windows](https://img.shields.io/badge/Windows-Download%20installer-ef4444?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI-Setup.exe)
-[![Download APK](https://img.shields.io/badge/Android-Download%20APK-ef4444?style=for-the-badge&logo=android&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI/releases/latest/download/SMARAN.AI.apk)
+<!-- These point at the downloads repository, which is where releases actually
+     live. They used to point here, and quietly served the 2.8.2 installer
+     long after it stopped being the current one. -->
+[![Download for Windows](https://img.shields.io/badge/Windows-Download%20installer-ef4444?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI-Setup.exe)
+[![Download APK](https://img.shields.io/badge/Android-Download%20APK-ef4444?style=for-the-badge&logo=android&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI.apk)
+[![VS Code extension](https://img.shields.io/badge/VS_Code-SMARAN.AI_Codex-00E5FF?style=for-the-badge&logo=visualstudiocode&logoColor=white&labelColor=04060f)](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)
 
-![Version](https://img.shields.io/badge/version-2.8.2-b91c1c)
+![Version](https://img.shields.io/badge/version-2.9.9-b91c1c)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-b91c1c)
 ![Android](https://img.shields.io/badge/Android-7.0%2B-b91c1c)
 ![Models](https://img.shields.io/badge/catalogue-63%20models-b91c1c)
+
+<br>
+
+**Built by Shashwat Mishra**
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white&labelColor=0A66C2)](https://www.linkedin.com/in/sm980/)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white&labelColor=FF0000)](https://www.youtube.com/@ShashwatMishra-997)
 
 </div>
 
@@ -174,15 +185,29 @@ A raw `docker pull`/`docker run` can see only container/VM telemetry. Real host 
 - Saved custom connectors are not active until a real protocol/authentication handshake is implemented and succeeds.
 - Docker Desktop has its own licence terms; larger commercial organizations should review them before deployment.
 
-## VS Code extension
+## SMARAN.AI Codex — the VS Code extension
 
-Package: `vscode-smaran-coding-agent/smaran-ai-codex-1.3.5.vsix`
+**[Install from the Marketplace](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)**, or from
+[`vscode-extension/`](vscode-extension) in this repository.
 
-```powershell
-code --install-extension .\vscode-smaran-coding-agent\smaran-ai-engineering-copilot-1.3.3.vsix
-```
+A coding agent in the sidebar: give it a task and it reads the project,
+changes files, runs commands, reads what they printed, and keeps going until
+the work is done — every step on screen.
 
-The extension finds the running desktop app by reading the port it advertises in `runtime.json` rather than assuming 3003, and checks the advertised process is still alive before trusting it - a crash used to leave a stale advert behind and every request went to a dead port. It is not equivalent to Codex or Kilo Code: there is no general Explorer delete agent, no browser-control agent, image attachments provide metadata rather than pixel vision, and VS Code/Electron must expose Web Speech for dictation.
+**It does not need this app.** The agent runs inside the extension. All it
+wants is a model, either in Ollama on your machine or a provider key.
+
+Four modes decide how much it may do without asking — Plan, Manual, Edit
+automatically, Auto — and they are enforced where the tool would run rather
+than asked of the model: in Plan mode the tools that change things refuse,
+whatever the model tries.
+
+Everything is confined to the folder open in VS Code. Paths are resolved and
+then checked to still be inside it.
+
+Up to 1.5.0 this was not an agent. It sent one question, scanned the one reply
+with two regular expressions, and stopped — the model never learned whether
+the file was written or the test passed. 2.x runs the loop.
 
 ## Validation
 
