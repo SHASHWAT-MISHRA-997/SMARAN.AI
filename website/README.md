@@ -92,7 +92,7 @@ here too — a landing page that overstates is worse than one that says less.
 | 9 screen sizes tested | the viewport list in `frontend/tests/visual/responsive.spec.js` |
 | 3 platforms shipped | Windows installer, Android APK, VS Code extension |
 | No version shown | Deliberate: the release tag carries it, the page does not |
-| 233 MB / 31 MB | `dist-release/SMARAN.AI-Setup.exe` and `SMARAN.AI.apk` |
+| 266 MB / 32 MB | `dist-release/SMARAN.AI-Setup.exe` and `SMARAN.AI.apk` |
 | Android 7.0+ | `minSdkVersion = 24` in `frontend/android/variables.gradle` |
 | 64-bit Windows | `ArchitecturesAllowed=x64compatible` in `installer/*.iss` |
 | 4 GB / 8 GB / 512 GB | `ram_gb_req` across the catalogue: lowest 4, highest 512, 18 entries at 8 or less |
