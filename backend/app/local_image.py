@@ -2,6 +2,7 @@
 import logging
 import os
 import threading
+import difflib
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -97,29 +98,102 @@ def generate_local_image(prompt: str, output_dir: str) -> str:
 # had been through a lossy encoding somewhere and come out as question marks.
 # They matched nothing anybody would ever say, so asking for an image in Hindi
 # never worked. Written back in Devanagari, and the file is UTF-8.
+# The Hindi entries here were "????? ????" and "?????? ????" - Devanagari that
+# had been through a lossy encoding somewhere and come out as question marks.
+# They matched nothing anybody would ever say, so asking for an image in Hindi
+# never worked. Written back in Devanagari, and the file is UTF-8.
+#
+# A verb and a thing, not a fixed phrase.
+#
+# This was a list of exact strings - "create a video", "make a video". Real
+# requests put words in between: "Craete a full ultrarealistic + cyber and neon
+# effect video" contains neither phrase, so it was not recognised as a video
+# request at all. With web search on it went to the search path instead, and
+# came back as a summary of somebody else's YouTube videos. The person had
+# asked for a video to be made.
+#
+# So: any of these verbs, then the noun, with room between them - and the verb
+# is matched a token at a time, allowing for a typo, because "craete" is what
+# people type and refusing it is not principled.
+
+MAKE_VERBS = (
+    "generate", "create", "make", "draw", "render", "animate",
+    "banao", "bana", "banaa", "banado", "banaye", "banaiye",
+    "बनाओ", "बनाना", "बनाइए",
+)
+
+IMAGE_NOUNS = (
+    "image", "picture", "photo", "photograph", "poster", "logo", "wallpaper",
+    "illustration", "artwork", "tasveer", "tasvir", "chitra", "photu",
+    "छवि", "तस्वीर", "फोटो", "चित्र",
+)
+
+VIDEO_NOUNS = (
+    "video", "vidio", "clip", "animation", "movie", "reel", "footage",
+    "चलचित्र", "वीडियो",
+)
+
+# Kept because they are unambiguous on their own, and shorter than the pattern
+# above would allow: "/image", "image banao".
 IMAGE_COMMANDS = (
-    "generate an image", "generate image", "create an image", "create image",
-    "make an image", "draw a", "make a picture", "create a picture",
-    "image generate", "image banao", "image bana", "photo banao", "picture banao",
+    # Drawing and painting are picture-making whatever the object is: "draw a
+    # red car" names no image noun at all.
+    "draw a", "draw me", "draw an", "sketch a", "sketch me", "paint a",
+    "image banao", "image bana", "photo banao", "picture banao",
     "tasveer banao", "tasvir banao", "chitra banao",
     "छवि बनाओ", "तस्वीर बनाओ", "फोटो बनाओ", "चित्र बनाओ",
 )
 
+# "draw" is also an ordinary English verb. These are the ways it gets used that
+# have nothing to do with pictures.
+NOT_DRAWING = (
+    "draw a conclusion", "draw a comparison", "draw a parallel",
+    "draw a distinction", "draw a line under", "draw attention",
+    "draw the line", "draw a blank", "draw a salary",
+)
+
 VIDEO_COMMANDS = (
-    "generate a video", "generate video", "create a video", "create video",
-    "make a video", "make me a video", "animate a", "animate this",
-    "video generate", "video banao", "video bana", "vidio banao",
+    "video banao", "video bana", "vidio banao",
     "वीडियो बनाओ", "चलचित्र बनाओ",
 )
 
 # A question about how to do something is not a request to do it.
 QUESTION_MARKERS = ("how to", "how do i", "kaise", "कैसे")
 
+# How far apart the verb and the noun may sit. Eight words covers "create a
+# full ultrarealistic cyber and neon effect video" with room to spare, and
+# stops "make a coffee while I watch a video" from counting.
+_MAX_WORDS_BETWEEN = 8
 
-def _asks_for(text: str, commands) -> bool:
+
+def _looks_like(token: str, verb: str) -> bool:
+    """One typo away is still the word. "craete" is "create"."""
+    if token == verb:
+        return True
+    if abs(len(token) - len(verb)) > 1 or len(verb) < 4:
+        return False
+    return difflib.SequenceMatcher(None, token, verb).ratio() >= 0.8
+
+
+def _verb_then_noun(words, nouns) -> bool:
+    for index, word in enumerate(words):
+        if not any(_looks_like(word, verb) for verb in MAKE_VERBS):
+            continue
+        window = words[index + 1:index + 2 + _MAX_WORDS_BETWEEN]
+        if any(w.strip(".,!?:;\"'") in nouns for w in window):
+            return True
+    return False
+
+
+def _asks_for(text: str, commands, nouns=()) -> bool:
     text = " ".join(text.lower().split())
-    return (any(command in text for command in commands)
-            and not any(marker in text for marker in QUESTION_MARKERS))
+    if any(marker in text for marker in QUESTION_MARKERS):
+        return False
+    if any(phrase in text for phrase in NOT_DRAWING):
+        return False
+    if any(command in text for command in commands):
+        return True
+    return bool(nouns) and _verb_then_noun(text.split(), nouns)
 
 
 def is_image_generation_request(prompt: str) -> bool:
@@ -128,9 +202,9 @@ def is_image_generation_request(prompt: str) -> bool:
     if text.startswith(("/image", "/txt2img")):
         return True
     # A video request usually also contains image-ish words; it is not this.
-    if _asks_for(text, VIDEO_COMMANDS):
+    if _asks_for(text, VIDEO_COMMANDS, VIDEO_NOUNS):
         return False
-    return _asks_for(text, IMAGE_COMMANDS)
+    return _asks_for(text, IMAGE_COMMANDS, IMAGE_NOUNS)
 
 
 def is_video_generation_request(prompt: str) -> bool:
@@ -138,7 +212,7 @@ def is_video_generation_request(prompt: str) -> bool:
     text = " ".join(prompt.lower().split())
     if text.startswith("/video"):
         return True
-    return _asks_for(text, VIDEO_COMMANDS)
+    return _asks_for(text, VIDEO_COMMANDS, VIDEO_NOUNS)
 
 
 def clean_video_prompt(prompt: str) -> str:
