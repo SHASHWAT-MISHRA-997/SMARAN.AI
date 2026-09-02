@@ -347,6 +347,9 @@
     /** The provider whose key was just saved, so the panel can say so once. */
     let savedJust = null;
 
+    /** Rows where the key box has been asked for, to replace one. */
+    const replacingKey = {};
+
     function drawSetup() {
         if (!setupState) return;
         const { providers, configured, provider } = setupState;
@@ -374,9 +377,14 @@
                 const running = status && status !== 'not running';
                 line.appendChild(el('span', running ? 'badge ok' : 'badge', status || 'on this machine'));
             }
-            /* One badge, not two. "KEY SAVED" and "SAVED" side by side said
-               the same thing twice and read as two different states. */
-            if (configured[p.id]) {
+            /* Where the key came from, not just that there is one.
+               A key the SMARAN.AI app on this machine already has is borrowed
+               from it, so the extension works without setting anything up
+               twice - but it was labelled "KEY SAVED" beside a Remove button,
+               which reads as a key you entered and cannot remember entering. */
+            if (configured[p.id] === 'app') {
+                line.appendChild(el('span', 'badge', 'from the app'));
+            } else if (configured[p.id]) {
                 line.appendChild(el('span', 'badge ok', savedJust === p.id ? 'key saved ✓' : 'key saved'));
             }
             if (p.free_models === 'none') line.appendChild(el('span', 'badge paid', 'paid only'));
@@ -387,38 +395,59 @@
 
             if (p.needsKey) {
                 const keyRow = el('div', 'key-row');
-                const input = el('input');
-                input.type = 'password';
-                input.value = drafts[p.id] || '';
-                /* Once a key is saved there is nothing to ask for. The box
-                   used to read "A key is saved. Type to replace it." beside a
-                   KEY SAVED badge, which looks like the key did not take and
-                   is being asked for again. Replacing one is rare; the badge
-                   says the state and the empty box is just where you would
-                   type if you wanted to. */
-                input.placeholder = configured[p.id] ? '' : 'Paste your API key';
-                input.addEventListener('input', () => { drafts[p.id] = input.value; });
-                keyRow.appendChild(input);
 
-                // No Show button. A saved key is in the editor's own secret
-                // store; reading it back to look at it is not something this
-                // needs to offer, and the row is shorter without it. Whether
-                // one is saved is said by the badge and by the placeholder.
-                const save = button('Save', 'tiny', () => {
-                    if (!input.value.trim()) {
-                        save.textContent = 'Empty';
-                        setTimeout(() => { save.textContent = 'Save'; }, 1200);
-                        return;
+                /* The box only exists when there is a key to enter.
+                 *
+                 * Once one is saved there is nothing to type: an empty field
+                 * sitting under a KEY SAVED badge reads as the save not
+                 * having taken, and it was the second thing reported about
+                 * this row. Replacing a key is rare, so it asks first. */
+                const replacing = replacingKey[p.id];
+                const showBox = !configured[p.id] || replacing;
+
+                if (showBox) {
+                    const input = el('input');
+                    input.type = 'password';
+                    input.value = drafts[p.id] || '';
+                    input.placeholder = 'Paste your API key';
+                    input.addEventListener('input', () => { drafts[p.id] = input.value; });
+                    keyRow.appendChild(input);
+
+                    const save = button('Save', 'tiny', () => {
+                        if (!input.value.trim()) {
+                            save.textContent = 'Empty';
+                            setTimeout(() => { save.textContent = 'Save'; }, 1200);
+                            return;
+                        }
+                        vscode.postMessage({ type: 'saveKey', provider: p.id, key: input.value });
+                        delete drafts[p.id];
+                        delete replacingKey[p.id];
+                        savedJust = p.id;
+                    });
+                    keyRow.appendChild(save);
+
+                    if (replacing) {
+                        keyRow.appendChild(button('Cancel', 'tiny', () => {
+                            delete replacingKey[p.id];
+                            delete drafts[p.id];
+                            drawSetup();
+                        }));
                     }
-                    vscode.postMessage({ type: 'saveKey', provider: p.id, key: input.value });
-                    delete drafts[p.id];
-                    savedJust = p.id;
-                });
-                keyRow.appendChild(save);
+                } else {
+                    keyRow.appendChild(button('Replace key', 'tiny', () => {
+                        replacingKey[p.id] = true;
+                        drawSetup();
+                    }));
+                }
 
-                if (configured[p.id]) {
+                // Remove only where there is something here to remove. On a
+                // borrowed key it deleted a keychain entry that does not
+                // exist, the app's key was still found, and the badge came
+                // straight back - a button that appeared to do nothing.
+                if (configured[p.id] === 'own') {
                     keyRow.appendChild(button('Remove', 'tiny', () => {
                         delete drafts[p.id];
+                        delete replacingKey[p.id];
                         vscode.postMessage({ type: 'saveKey', provider: p.id, key: '' });
                     }));
                 }

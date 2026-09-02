@@ -99,25 +99,34 @@ export class Keys {
         }
     }
 
-    /** Which providers have a key, without handing the keys themselves out. */
     /**
-     * Which providers have a key, asked of the list that actually exists.
+     * Which providers have a key, and where that key came from.
      *
-     * This was seven ids typed in by hand, and six providers had been added
-     * since without anyone thinking to come back here: Cerebras, Mistral,
-     * Together, Cohere and SiliconFlow. Their keys saved
-     * correctly into the keychain and the panel was simply never told, so the
-     * row kept saying "Paste your API key" with no KEY SAVED badge and no
-     * Remove button - it looked exactly like a save that had failed.
+     * Two things were being reported as one. A key you pasted here lives in
+     * the editor's keychain; a key the SMARAN.AI app on this machine already
+     * has is borrowed from it, so the extension works without setting it up
+     * twice. Both showed "KEY SAVED" with a Remove button beside them - and
+     * Remove deletes a keychain entry that, for a borrowed key, is not there.
+     * It looked like a key nobody had entered, because nobody had entered it.
      *
-     * Derived from PROVIDERS now, so the next provider added is reported
-     * without a second edit.
+     * 'own'  - pasted into this panel, in the keychain
+     * 'app'  - the desktop app on this machine has it
+     *
+     * The list is derived from PROVIDERS. It used to be seven ids typed in by
+     * hand, and six providers had been added since without anyone coming back
+     * here, so their keys saved and the panel was never told.
      */
-    async configured(): Promise<Record<string, boolean>> {
-        const out: Record<string, boolean> = {};
+    async configured(): Promise<Record<string, 'own' | 'app'>> {
+        const out: Record<string, 'own' | 'app'> = {};
+        const fromApp = keysFromInstalledApp();
         for (const provider of PROVIDERS) {
             if (!provider.needsKey) continue;
-            out[provider.id] = Boolean(await this.get(provider.id));
+            if (await this.secrets.get(SECRET(provider.id))) {
+                out[provider.id] = 'own';
+            } else if ((fromApp[provider.id]
+                || (provider.id === 'openrouter' ? fromApp.openRouter : '') || '').trim()) {
+                out[provider.id] = 'app';
+            }
         }
         return out;
     }

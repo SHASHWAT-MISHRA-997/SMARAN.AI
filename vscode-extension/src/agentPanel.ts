@@ -195,10 +195,27 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 await this.announce();
                 break;
 
-            case 'openMcpSettings':
-                await vscode.commands.executeCommand(
-                    'workbench.action.openSettings', 'smaran.mcpServers');
+            case 'openMcpSettings': {
+                /* settings.json, not the settings UI.
+                 *
+                 * This is an array of objects, and the UI cannot edit those -
+                 * it shows the description and a single "Edit in settings.json"
+                 * link, which is one more click and a screen that does
+                 * nothing. Straight to the file, with a starter entry put in
+                 * when there is none, so there is something to edit rather
+                 * than a name to spell correctly from memory. */
+                const config = vscode.workspace.getConfiguration('smaran');
+                const existing = config.get<unknown[]>('mcpServers') || [];
+                if (!existing.length) {
+                    await config.update('mcpServers', [{
+                        name: 'example',
+                        target: 'npx -y @modelcontextprotocol/server-filesystem .',
+                        enabled: false,
+                    }], vscode.ConfigurationTarget.Global);
+                }
+                await vscode.commands.executeCommand('workbench.action.openSettingsJson');
                 break;
+            }
 
             case 'refreshModels': await this.sendModels(String(message.provider)); break;
 
