@@ -7,8 +7,8 @@ android {
         applicationId "ai.smaran.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 21006
-        versionName "2.10.6"
+        versionCode 21007
+        versionName "2.10.7"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -39,6 +39,19 @@ android {
                 storePassword props['storePassword']
                 keyAlias props['keyAlias']
                 keyPassword props['keyPassword']
+
+                /* Both schemes, not just v2.
+                 *
+                 * Gradle turns v1 off by default once minSdk is 24, and for
+                 * Android itself that is correct - 7.0 and newer verify v2.
+                 * But a file downloaded from a browser is often opened through
+                 * a file manager or a third-party installer, and several of
+                 * those still look for the v1 JAR signature and refuse an APK
+                 * that has none. It costs a few kilobytes and removes a whole
+                 * class of "it will not install".
+                 */
+                enableV1Signing true
+                enableV2Signing true
             }
         }
     }
