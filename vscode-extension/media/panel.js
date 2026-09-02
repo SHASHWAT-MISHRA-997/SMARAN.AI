@@ -189,46 +189,100 @@
         drawModeMenu();
         modeMenu.hidden = !modeMenu.hidden;
     });
-    /* The model chip switches the model.
+    /* The chip is the whole choice: provider and model, without leaving.
      *
      * It used to jump to Setup, which is where the key already is - so after
      * entering a key, clicking the model went back to the screen you had just
-     * finished with, and looked like a loop. It opens the list instead, and
-     * only falls back to Setup when there is no list to open. */
+     * finished with, and looked like a loop. Then it opened a model list, but
+     * only for whichever provider Setup was on, so changing provider still
+     * meant the round trip. */
     $('modelChip').addEventListener('click', () => {
-        if (!modelState.models.length) {
-            show('setup');
-            vscode.postMessage({ type: 'setup' });
-            return;
-        }
+        if (!modeMenu.hidden) { modeMenu.hidden = true; return; }
+        // The provider list and which keys are saved come with the setup
+        // message. Without asking, the menu is empty until Setup is opened
+        // once - which is the trip this exists to avoid.
+        vscode.postMessage({ type: 'setup' });
         drawModelMenu();
-        modeMenu.hidden = !modeMenu.hidden;
+        modeMenu.hidden = false;
     });
 
+    /* The whole choice, from the chip.
+     *
+     * This listed models for whichever provider Setup happened to be on, so
+     * moving from Groq to OpenRouter meant leaving the conversation, finding
+     * Setup, choosing there and coming back. Both halves of the decision live
+     * here now: which provider, and which of its models. Setup is for keys. */
     function drawModelMenu() {
         modeMenu.replaceChildren();
-        modeMenu.appendChild(el('div', 'menu-title', 'Model'));
 
-        const provider = providerOf(setupState?.provider);
-        const mixed = provider && provider.free_models === 'some';
-        modelState.models
-            .filter((m) => (!mixed || !freeOnly) ? true : m.free)
-            .slice(0, 60)
-            .forEach((m) => {
-                const row = el('button', 'menu-item' + (m.id === setupState?.model ? ' on' : ''));
+        const providers = (setupState?.providers || []);
+        const configured = setupState?.configured || {};
+        // Only ones you can actually use right now: the two local runners, and
+        // any provider whose key is saved. Listing the rest would be a menu of
+        // things that fail when picked.
+        const usable = providers.filter((p) => p.local || !p.needsKey || configured[p.id]);
+
+        if (usable.length > 1) {
+            modeMenu.appendChild(el('div', 'menu-title', 'Where it runs'));
+            usable.forEach((p) => {
+                const row = el('button', 'menu-item' + (p.id === setupState?.provider ? ' on' : ''));
                 const line = el('div', 'menu-line');
-                line.appendChild(el('strong', null, m.id));
-                if (m.free) line.appendChild(el('span', 'badge', 'free'));
-                if (m.id === setupState?.model) line.appendChild(el('span', 'tick', '✓'));
+                line.appendChild(el('strong', null, p.label));
+                if (p.free) line.appendChild(el('span', 'badge', 'free tier'));
+                if (p.id === setupState?.provider) line.appendChild(el('span', 'tick', '✓'));
                 row.appendChild(line);
                 row.addEventListener('click', () => {
                     modeMenu.hidden = true;
-                    vscode.postMessage({ type: 'chooseModel', model: m.id });
+                    // Picks a model for the new provider and lands on the chat.
+                    vscode.postMessage({ type: 'chooseProvider', provider: p.id });
                 });
                 modeMenu.appendChild(row);
             });
+        }
 
-        modeMenu.appendChild(button('More in Setup…', 'tiny', () => {
+        const provider = providerOf(setupState?.provider);
+        const mixed = provider && provider.free_models === 'some';
+
+        const head = el('div', 'menu-title', 'Model');
+        modeMenu.appendChild(head);
+
+        if (mixed) {
+            const seg = el('div', 'seg');
+            const free = button('Free', 'tiny' + (freeOnly !== false ? ' seg-on' : ''), () => {
+                freeOnly = true; drawModelMenu();
+            });
+            const all = button('All', 'tiny' + (freeOnly === false ? ' seg-on' : ''), () => {
+                freeOnly = false; drawModelMenu();
+            });
+            seg.appendChild(free);
+            seg.appendChild(all);
+            modeMenu.appendChild(seg);
+        }
+
+        const shown = modelState.models
+            .filter((m) => (!mixed || freeOnly === false) ? true : m.free)
+            .slice(0, 60);
+
+        if (!shown.length) {
+            modeMenu.appendChild(el('div', 'menu-note',
+                modelState.loading ? 'Loading…' : (modelState.error || 'No models to show.')));
+        }
+
+        shown.forEach((m) => {
+            const row = el('button', 'menu-item' + (m.id === setupState?.model ? ' on' : ''));
+            const line = el('div', 'menu-line');
+            line.appendChild(el('strong', null, m.id));
+            if (m.free) line.appendChild(el('span', 'badge', 'free'));
+            if (m.id === setupState?.model) line.appendChild(el('span', 'tick', '✓'));
+            row.appendChild(line);
+            row.addEventListener('click', () => {
+                modeMenu.hidden = true;
+                vscode.postMessage({ type: 'chooseModel', model: m.id });
+            });
+            modeMenu.appendChild(row);
+        });
+
+        modeMenu.appendChild(button('Keys and more in Setup…', 'tiny', () => {
             modeMenu.hidden = true;
             show('setup');
         }));
@@ -336,7 +390,13 @@
                 const input = el('input');
                 input.type = 'password';
                 input.value = drafts[p.id] || '';
-                input.placeholder = configured[p.id] ? 'A key is saved. Type to replace it.' : 'Paste your API key';
+                /* Once a key is saved there is nothing to ask for. The box
+                   used to read "A key is saved. Type to replace it." beside a
+                   KEY SAVED badge, which looks like the key did not take and
+                   is being asked for again. Replacing one is rare; the badge
+                   says the state and the empty box is just where you would
+                   type if you wanted to. */
+                input.placeholder = configured[p.id] ? '' : 'Paste your API key';
                 input.addEventListener('input', () => { drafts[p.id] = input.value; });
                 keyRow.appendChild(input);
 
@@ -669,6 +729,8 @@
             case 'setup':
                 setupState = message;
                 drawSetup();
+                // The chip's menu may be open and waiting for exactly this.
+                if (!modeMenu.hidden) drawModelMenu();
                 break;
 
             case 'pull':
@@ -677,6 +739,7 @@
                     status: message.status, busy: message.busy, failed: Boolean(message.failed),
                 };
                 drawModels();
+                if (!modeMenu.hidden) drawModelMenu();
                 break;
 
             case 'models':

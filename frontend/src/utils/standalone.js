@@ -27,9 +27,20 @@ const KEY_STORE = 'sm_cloud_keys';
 const PROVIDER_STORE = 'sm_direct_provider';
 const MODEL_STORE = 'sm_direct_model';
 
+/**
+ * free_models says whether the free/paid split is worth showing.
+ *
+ * 'all'  - everything this key can run costs nothing on the free tier
+ * 'some' - one catalogue with both in it, so the distinction matters
+ * 'none' - billed
+ *
+ * Only 'some' providers get a Free/All switch. Filtering an 'all' catalogue
+ * on a flag the host never sets would empty the list and look broken.
+ */
 export const PROVIDERS = [
   {
     id: 'gemini',
+    free_models: 'all',
     label: 'Google Gemini',
     free: true,
     keyUrl: 'https://aistudio.google.com/app/apikey',
@@ -37,6 +48,7 @@ export const PROVIDERS = [
   },
   {
     id: 'groq',
+    free_models: 'all',
     label: 'Groq',
     free: true,
     keyUrl: 'https://console.groq.com/keys',
@@ -44,6 +56,7 @@ export const PROVIDERS = [
   },
   {
     id: 'openrouter',
+    free_models: 'some',
     label: 'OpenRouter',
     free: true,
     keyUrl: 'https://openrouter.ai/keys',
@@ -55,6 +68,7 @@ export const PROVIDERS = [
        request out and the host rejected the key. NVIDIA is the only one that
        never left the device. */
     id: 'cerebras',
+    free_models: 'all',
     label: 'Cerebras',
     free: true,
     keyUrl: 'https://cloud.cerebras.ai/',
@@ -62,6 +76,7 @@ export const PROVIDERS = [
   },
   {
     id: 'mistral',
+    free_models: 'all',
     label: 'Mistral',
     free: true,
     keyUrl: 'https://console.mistral.ai/api-keys/',
@@ -69,6 +84,7 @@ export const PROVIDERS = [
   },
   {
     id: 'together',
+    free_models: 'some',
     label: 'Together AI',
     free: true,
     keyUrl: 'https://api.together.ai/settings/api-keys',
@@ -76,6 +92,7 @@ export const PROVIDERS = [
   },
   {
     id: 'cohere',
+    free_models: 'all',
     label: 'Cohere',
     free: true,
     keyUrl: 'https://dashboard.cohere.com/api-keys',
@@ -83,6 +100,7 @@ export const PROVIDERS = [
   },
   {
     id: 'siliconflow',
+    free_models: 'some',
     label: 'SiliconFlow',
     free: true,
     keyUrl: 'https://cloud.siliconflow.cn/account/ak',
@@ -90,18 +108,21 @@ export const PROVIDERS = [
   },
   {
     id: 'anthropic',
+    free_models: 'none',
     label: 'Anthropic Claude',
     keyUrl: 'https://console.anthropic.com/settings/keys',
     hint: 'Paid.',
   },
   {
     id: 'openai',
+    free_models: 'none',
     label: 'OpenAI',
     keyUrl: 'https://platform.openai.com/api-keys',
     hint: 'Paid.',
   },
   {
     id: 'deepseek',
+    free_models: 'none',
     label: 'DeepSeek',
     keyUrl: 'https://platform.deepseek.com/api_keys',
     hint: 'Paid, inexpensive.',

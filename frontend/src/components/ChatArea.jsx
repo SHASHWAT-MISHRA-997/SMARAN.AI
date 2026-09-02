@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch, PictureInPicture2,} from 'lucide-react';
+import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch, PictureInPicture2,} from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink } from '../utils/hostLink';
@@ -1355,14 +1355,64 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [isDictating, setIsDictating] = useState(false);
   /** The phone's composer menu, behind the plus. */
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+
+  /* Which provider and model are actually answering, on the phone.
+     The chip said "LOCAL · Auto Router" whatever was set, so there was no way
+     to tell what had answered and no way to change it without going through
+     Settings. */
+  const [deviceChoice, setDeviceChoice] = useState(() => ({
+    provider: standalone.getProvider(),
+    model: standalone.getModel(),
+  }));
+  const [modelSheetOpen, setModelSheetOpen] = useState(false);
+  const [sheetModels, setSheetModels] = useState([]);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetError, setSheetError] = useState('');
+  const [sheetFreeOnly, setSheetFreeOnly] = useState(true);
+
+  const refreshDeviceChoice = () => setDeviceChoice({
+    provider: standalone.getProvider(),
+    model: standalone.getModel(),
+  });
+
+  const loadSheetModels = async (providerId) => {
+    const key = standalone.loadKeys()[providerId];
+    if (!providerId || !key) { setSheetModels([]); return; }
+    setSheetBusy(true);
+    setSheetError('');
+    try {
+      setSheetModels(standalone.usable(await standalone.listModels(providerId, key)));
+    } catch (error) {
+      setSheetModels([]);
+      setSheetError(error?.message || 'That provider would not list its models.');
+    } finally {
+      setSheetBusy(false);
+    }
+  };
+
+  const providerLabel = (id) =>
+    standalone.PROVIDERS.find((p) => p.id === id)?.label || id || 'No provider';
+
+  const deviceChipLabel = () => {
+    if (!deviceChoice.provider) return 'Choose a provider';
+    if (!deviceChoice.model) return `${providerLabel(deviceChoice.provider)} · choose a model`;
+    return `${providerLabel(deviceChoice.provider)} · ${deviceChoice.model}`;
+  };
+
+  const openModelSheet = () => {
+    refreshDeviceChoice();
+    setModelSheetOpen(true);
+    loadSheetModels(standalone.getProvider());
+  };
   /* The floating pet is fixed in the root stacking context and the menu is
      inside the composer's, so a higher z-index on the menu lost anyway - the
      robot sat on top of the language row. Rather than fight the layering,
      the pet steps aside while the menu is open. */
   useEffect(() => {
-    document.documentElement.classList.toggle('sm-menu-open', mobileToolsOpen);
+    const covering = mobileToolsOpen || modelSheetOpen;
+    document.documentElement.classList.toggle('sm-menu-open', covering);
     return () => document.documentElement.classList.remove('sm-menu-open');
-  }, [mobileToolsOpen]);
+  }, [mobileToolsOpen, modelSheetOpen]);
   const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'thinking' | 'speaking'
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [voiceAiResponse, setVoiceAiResponse] = useState('');
@@ -2987,6 +3037,13 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         m.id === assistantId ? { ...m, content: text, isLoading: false } : m));
       setStreaming(false);
       streamingRef.current = false;
+      /* The voice screen is a separate surface and it only ever learned about
+         replies through the backend path. On a phone answering from the
+         device, nothing was ever handed to it - so Speak sat on "Waiting for
+         model response" for ever, including when the answer had already
+         arrived in the conversation behind it, and including when it had
+         failed outright. */
+      if (spoken) setVoiceAiResponse(text);
     };
 
     if (!provider || !key) {
@@ -3040,7 +3097,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       localChat.saveMessages(sessionId, messagesRef.current.map((m) =>
         (m.id === assistantId ? { ...m, content: sofar, isLoading: false } : m)));
 
-      if (spoken) speakText(sofar, selectedLanguage);
+      if (spoken) {
+        setVoiceAiResponse(sofar);
+        speakText(sofar, selectedLanguage);
+      }
     } catch (error) {
       if (error?.name !== 'AbortError') {
         fail(error?.message || 'That request could not be completed.');
@@ -3050,6 +3110,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         m.id === assistantId
           ? { ...m, content: sofar || 'Stopped.', isLoading: false }
           : m));
+      if (spoken) setVoiceAiResponse(sofar || 'Stopped.');
     } finally {
       directAbortRef.current = null;
       setStreaming(false);
@@ -3515,6 +3576,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     }
 
     // 2) Detect + run a fresh control command.
+    /* Not on a phone with no computer. This posts to the machine's own
+       control bridge; without one the app's file server answers with its own
+       page, res.ok is true, and the JSON parse throws into the catch below.
+       It reached the right answer by falling over, every single utterance. */
+    if (noBackend()) return false;
     try {
       const res = await fetch(`${API_BASE}/api/desktop/voice-command`, {
         method: 'POST',
@@ -3572,10 +3638,28 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           </div>
           <div className="flex items-center gap-2 min-w-0">
             <span className="hidden sm:inline shrink-0 text-zinc-500 dark:text-zinc-400 font-mono text-[10px] sm:text-xs uppercase tracking-wider">AI Engine:</span>
-            <span className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0" title={activeModelDisplay}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse mr-1.5" />
-              <span className="truncate">{activeModelDisplay}</span>
-            </span>
+            {/* On the phone this said "LOCAL · Auto Router" no matter what was
+                answering, which is neither local nor a router - the request
+                goes straight to one provider and one model. It says which,
+                and opens the picker, so changing either does not mean a trip
+                through Settings. */}
+            {noBackend() ? (
+              <button
+                type="button"
+                onClick={openModelSheet}
+                className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0"
+                title={deviceChoice.model ? `${providerLabel(deviceChoice.provider)} · ${deviceChoice.model}` : 'Choose a provider and model'}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${deviceChoice.model ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse' : 'bg-amber-500'}`} />
+                <span className="truncate">{deviceChipLabel()}</span>
+                <ChevronDown className="w-3 h-3 ml-1 shrink-0 opacity-70" />
+              </button>
+            ) : (
+              <span className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0" title={activeModelDisplay}>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse mr-1.5" />
+                <span className="truncate">{activeModelDisplay}</span>
+              </span>
+            )}
           </div>
         </div>
 
@@ -3724,11 +3808,139 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         </div>
       )}
 
+      {/* The picker, on the phone.
+          Both halves of the choice in one place: which provider, and which of
+          its models. Only providers with a key are listed - offering one that
+          fails the moment it is picked is not offering it. */}
+      {modelSheetOpen && (
+        <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm"
+             onClick={() => setModelSheetOpen(false)}>
+          <div className="w-full sm:max-w-lg max-h-[80vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 overflow-hidden"
+               onClick={(e) => e.stopPropagation()}>
+
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
+              <Boxes className="w-5 h-5 text-indigo-500" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-black text-zinc-900 dark:text-white">Where answers come from</p>
+                <p className="text-[11px] text-zinc-500 truncate">{deviceChipLabel()}</p>
+              </div>
+              <button type="button" onClick={() => setModelSheetOpen(false)}
+                      className="p-2 rounded-xl text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {(() => {
+                const keys = standalone.loadKeys();
+                const withKeys = standalone.PROVIDERS.filter((p) => keys[p.id]);
+                if (!withKeys.length) {
+                  return (
+                    <p className="px-4 py-6 text-xs text-zinc-500 leading-relaxed">
+                      No provider has a key yet. Settings → AI Provider, paste one, and
+                      it appears here. Gemini, Groq, OpenRouter and Cerebras all have a
+                      free tier.
+                    </p>
+                  );
+                }
+                const current = standalone.PROVIDERS.find((p) => p.id === deviceChoice.provider);
+                const mixed = current?.free_models === 'some';
+                const shown = sheetModels.filter((m) => (!mixed || !sheetFreeOnly) ? true : m.free);
+                return (
+                  <>
+                    <p className="px-4 pt-3 pb-1 text-[10px] font-black uppercase tracking-widest text-zinc-400">Provider</p>
+                    {withKeys.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          standalone.setProvider(p.id);
+                          // A model belongs to the provider it came from.
+                          standalone.setModel('');
+                          refreshDeviceChoice();
+                          setSheetFreeOnly(true);
+                          loadSheetModels(p.id);
+                        }}
+                        className={`w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-bold ${
+                          p.id === deviceChoice.provider
+                            ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-300'
+                            : 'text-zinc-700 dark:text-zinc-300 active:bg-zinc-100 dark:active:bg-zinc-900'}`}
+                      >
+                        <span className="flex-1 truncate">{p.label}</span>
+                        {p.free && <span className="text-[10px] font-black text-emerald-500">FREE TIER</span>}
+                        {p.id === deviceChoice.provider && <Check className="w-4 h-4" />}
+                      </button>
+                    ))}
+
+                    <div className="flex items-center gap-2 px-4 pt-4 pb-1">
+                      <p className="flex-1 text-[10px] font-black uppercase tracking-widest text-zinc-400">Model</p>
+                      {/* Only where the catalogue actually mixes the two.
+                          Elsewhere the host never marks a model free, so this
+                          switch would empty the list. */}
+                      {mixed && (
+                        <div className="flex gap-1">
+                          <button type="button" onClick={() => setSheetFreeOnly(true)}
+                                  className={`px-2 py-1 rounded-lg text-[10px] font-black ${sheetFreeOnly ? 'bg-emerald-500/15 text-emerald-500' : 'text-zinc-400'}`}>FREE</button>
+                          <button type="button" onClick={() => setSheetFreeOnly(false)}
+                                  className={`px-2 py-1 rounded-lg text-[10px] font-black ${!sheetFreeOnly ? 'bg-indigo-500/15 text-indigo-500' : 'text-zinc-400'}`}>ALL</button>
+                        </div>
+                      )}
+                    </div>
+
+                    {current?.free_models === 'all' && (
+                      <p className="px-4 pb-2 text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
+                        Everything here is on {current.label}&rsquo;s free tier.
+                      </p>
+                    )}
+                    {current?.free_models === 'none' && (
+                      <p className="px-4 pb-2 text-[11px] text-amber-600 dark:text-amber-400 font-bold">
+                        {current.label} bills every one of these.
+                      </p>
+                    )}
+
+                    {sheetBusy && <p className="px-4 py-3 text-xs text-zinc-500">Asking {providerLabel(deviceChoice.provider)} what your key can run…</p>}
+                    {!sheetBusy && sheetError && <p className="px-4 py-3 text-xs text-rose-500">{sheetError}</p>}
+                    {!sheetBusy && !sheetError && shown.length === 0 && (
+                      <p className="px-4 py-3 text-xs text-zinc-500">Nothing to show.</p>
+                    )}
+
+                    {shown.slice(0, 200).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          standalone.setModel(m.id);
+                          refreshDeviceChoice();
+                          setModelSheetOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-2 px-4 py-2.5 text-left text-xs font-mono font-bold ${
+                          m.id === deviceChoice.model
+                            ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-300'
+                            : 'text-zinc-700 dark:text-zinc-300 active:bg-zinc-100 dark:active:bg-zinc-900'}`}
+                      >
+                        <span className="flex-1 break-all">{m.id}</span>
+                        {m.free && <span className="shrink-0 text-[10px] font-black text-emerald-500">FREE</span>}
+                        {m.id === deviceChoice.model && <Check className="w-4 h-4 shrink-0" />}
+                      </button>
+                    ))}
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Messages Scroll Panel */}
       <div
         ref={chatContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-3 sm:px-6 md:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6 relative z-10"
+        /* overflow-x-hidden: the glow behind the hero logo is 422px wide and
+           the panel on a phone is 368, so this box scrolled sideways and drew
+           a scrollbar across the screen just above the composer - reported as
+           a slider nobody could explain. Decoration should never be able to
+           add a scrollbar. */
+        className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-6 md:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6 relative z-10"
       >
         {messages.length === 0 ? (
           <div className="min-h-full flex flex-col items-center justify-start sm:justify-center text-center max-w-2xl mx-auto w-full space-y-4 sm:space-y-6 px-2 py-6 sm:py-8 select-none animate-in fade-in slide-in-from-bottom-4 duration-500">

@@ -559,7 +559,11 @@ const SettingsModal = ({
                     {[
                       { id: "dark", label: "Dark Mode", icon: Moon, desc: "Sleek obsidian palette" },
                       { id: "light", label: "Light Mode", icon: Sun, desc: "Crisp bright palette" },
-                      { id: "system", label: "System Sync", icon: Laptop, desc: "Match OS preference" },
+                      /* System Sync is gone. It followed the operating
+                         system, so "light" could arrive without anyone
+                         choosing it and half the app - anything painted with
+                         a fixed dark colour rather than a theme one - stayed
+                         dark against it. Two choices, both of them yours. */
                     ].map((mode) => {
                       const Icon = mode.icon;
                       const isCurrent = theme === mode.id;
@@ -701,7 +705,10 @@ const SettingsModal = ({
                           type="password"
                           value={directDrafts[p.id] || ""}
                           onChange={(e) => setDirectDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
-                          placeholder={saved ? "A key is saved. Type to replace it." : "Paste your API key"}
+                          // Nothing to ask for once it is saved: the badge
+                          // beside it says so, and asking again reads as the
+                          // key not having taken.
+                          placeholder={saved ? "" : "Paste your API key"}
                           className="min-w-0 flex-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs outline-none focus:border-indigo-500"
                         />
                         <button

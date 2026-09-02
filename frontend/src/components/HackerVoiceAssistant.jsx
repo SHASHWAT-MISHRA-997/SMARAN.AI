@@ -35,7 +35,10 @@ import {
 import { LiveVoiceSession } from '../utils/liveVoice';
 import { Ambience } from '../utils/ambience';
 import * as nativeSpeech from '../utils/nativeSpeech';
-import { isNativeApp } from '../utils/hostLink';
+import { isNativeApp, loadLink } from '../utils/hostLink';
+
+/** No computer behind the phone: the live session these controls need. */
+const noBackend = () => isNativeApp() && !loadLink()?.url;
 import EnergyCore from './EnergyCore';
 import GestureHUD from './GestureHUD';
 import CyberFX from './CyberFX';
@@ -2249,6 +2252,10 @@ export const HackerVoiceAssistant = ({
           {/* Both sources, one control. Two buttons implied they could run
               together; visionMode holds a single value, so they never could.
               This is one button that opens the pair, and shows which is live. */}
+          {/* Vision needs the live session, which needs a computer. On a
+              phone with none it was a permanently grey button with nothing
+              saying why - the same as Gesture, and gone for the same reason. */}
+          {!noBackend() && (
           <div className="relative">
             <CallToggle
               icon={visionMode === 'camera' ? Camera : Monitor}
@@ -2286,6 +2293,7 @@ export const HackerVoiceAssistant = ({
               </div>
             )}
           </div>
+          )}
 
           {/* The one control that is not a toggle: answer or hang up. */}
           <button
@@ -2326,7 +2334,14 @@ export const HackerVoiceAssistant = ({
               and the vision picker are hidden there - not disabled, hidden -
               so the small window is one thing you can use rather than six
               you cannot. They all come back at full size. */}
-          <span className="contents"><CallToggle icon={Hand} label="Gesture" active={gestureMode} onClick={() => setGestureMode((v) => !v)} /></span>
+          {/* Gesture is not on the phone. It watches a camera for hand
+              poses to drive the call - on a phone the camera is pointed at
+              your face from six inches away and the hands holding it are not
+              in frame. The HUD was already suppressed there; the button that
+              turned on nothing is gone with it. */}
+          {!isNativeApp() && (
+            <span className="contents"><CallToggle icon={Hand} label="Gesture" active={gestureMode} onClick={() => setGestureMode((v) => !v)} /></span>
+          )}
           {Ambience.isSupported() && (
             <span className="contents"><CallToggle icon={Music2} label="Ambience" active={ambienceOn} onClick={() => setAmbienceOn((v) => !v)} /></span>
           )}

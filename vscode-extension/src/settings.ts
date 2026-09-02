@@ -19,6 +19,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { Choice, firstInstalledOllamaModel } from './agent/models';
+import { PROVIDERS } from './providers';
 
 const DEFAULT_OLLAMA = 'http://127.0.0.1:11434';
 const DEFAULT_LM_STUDIO = 'http://127.0.0.1:1234/v1';
@@ -98,10 +99,24 @@ export class Keys {
     }
 
     /** Which providers have a key, without handing the keys themselves out. */
+    /**
+     * Which providers have a key, asked of the list that actually exists.
+     *
+     * This was seven ids typed in by hand, and six providers had been added
+     * since without anyone thinking to come back here: Ollama Cloud,
+     * Cerebras, Mistral, Together, Cohere and SiliconFlow. Their keys saved
+     * correctly into the keychain and the panel was simply never told, so the
+     * row kept saying "Paste your API key" with no KEY SAVED badge and no
+     * Remove button - it looked exactly like a save that had failed.
+     *
+     * Derived from PROVIDERS now, so the next provider added is reported
+     * without a second edit.
+     */
     async configured(): Promise<Record<string, boolean>> {
         const out: Record<string, boolean> = {};
-        for (const provider of ['groq', 'gemini', 'openrouter', 'nvidia', 'anthropic', 'openai', 'deepseek']) {
-            out[provider] = Boolean(await this.get(provider));
+        for (const provider of PROVIDERS) {
+            if (!provider.needsKey) continue;
+            out[provider.id] = Boolean(await this.get(provider.id));
         }
         return out;
     }

@@ -6,6 +6,7 @@ import {
   ChevronLeft, ChevronDown, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, User,
   Activity, LayoutDashboard, QrCode, LogIn, Blocks, FolderOpen, Globe2, Volume2, ArrowDownToLine, Terminal
 } from 'lucide-react';
+import { isNativeApp } from '../utils/hostLink';
 import ModelHubModal from './ModelHubModal';
 import { SmaranLogo } from './SmaranLogo';
 import { API_BASE, logoutUser, getCurrentUser, fetchWithAuth } from '../context/AuthContext';
@@ -749,10 +750,17 @@ const Sidebar = ({
           </button>
         </div>
 
+        {/* Sites and Plugins & Skills are not on the phone.
+            Both are computer features: one has a local model write an HTML
+            page, the other runs programs that read files and execute
+            commands. On the phone app they opened screens that could only
+            explain why they were empty. */}
+        {!isNativeApp() && (
         <nav className="px-3 pb-3 space-y-1 border-b border-zinc-200 dark:border-zinc-800">
           <button onClick={() => { onNavigate('sites'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'sites' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Globe2 className="h-4 w-4"/> Sites</button>
           <button onClick={() => { onNavigate('plugins'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'plugins' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Blocks className="h-4 w-4"/> Plugins & Skills</button>
         </nav>
+        )}
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-1 space-y-1">
           <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest px-2 mb-2">Chat History</span>

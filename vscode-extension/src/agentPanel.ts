@@ -565,7 +565,12 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 return { kind: 'note', title: `Working in ${event.root}` };
 
             case 'message':
-                return { kind: 'says', body: event.text };
+                // An empty one was drawn as an empty box - a question asked,
+                // a box, and nothing in it. The parser refuses empty replies
+                // now; this is the belt to that pair of braces.
+                return event.text.trim()
+                    ? { kind: 'says', body: event.text }
+                    : { kind: 'skip' };
 
             case 'tool_call': {
                 const args = Object.entries(event.args).map(([key, value]) => {
@@ -630,7 +635,9 @@ export class AgentPanel implements vscode.WebviewViewProvider {
   <div class="fx fx-scan" aria-hidden="true"></div>
 
   <header>
-    <span class="brand" aria-hidden="true"></span>
+    <!-- The real mark. This was a gradient square standing in for a logo
+         that has been in this folder the whole time. -->
+    <img class="brand" src="${asset('smaran-logo.png')}" alt="SMARAN.AI">
     <span id="folder" title="The folder the agent works in">—</span>
     <span class="spacer"></span>
     <button id="tabHistory" class="icon" title="Past conversations">History</button>

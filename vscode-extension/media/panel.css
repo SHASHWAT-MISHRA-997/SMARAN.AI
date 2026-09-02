@@ -130,19 +130,22 @@ header {
     box-shadow: 0 1px 0 rgba(0, 229, 255, .08), 0 6px 18px rgba(0, 0, 0, .45);
 }
 
+/* The mark itself, not a coloured square standing in for one. Kept small and
+   given the same cyan halo the rest of the header uses, so it reads as part
+   of the panel rather than a pasted-in favicon. */
 .brand {
-    width: 9px;
-    height: 9px;
+    width: 18px;
+    height: 18px;
     flex: none;
-    border-radius: 2px;
-    background: linear-gradient(135deg, var(--cyan), var(--magenta));
-    box-shadow: var(--glow-cyan);
+    border-radius: 4px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 6px rgba(0, 229, 255, .55));
     animation: pulse 3.2s ease-in-out infinite;
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1;   box-shadow: 0 0 10px rgba(0, 229, 255, .5); }
-    50%      { opacity: .55; box-shadow: 0 0 18px rgba(255, 45, 149, .5); }
+    0%, 100% { opacity: 1; }
+    50%      { opacity: .72; }
 }
 
 .spacer { flex: 1; }
