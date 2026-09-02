@@ -398,6 +398,20 @@ const SettingsModal = ({
     .split(/[\s._-]+/).filter(Boolean).slice(0, 2)
     .map((part) => part[0].toUpperCase()).join('') || 'Y';
 
+  const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+
+  /* Something can still ask for a tab that no longer exists here - a saved
+     initialTab, or a navigation from elsewhere. Without this the panel would
+     open on a phone with nothing in it at all.
+     
+     Above the early return on purpose. Below it, this hook only ran while the
+     panel was open, so the hook count changed between renders and React threw
+     #310 - the whole app fell over to "Something went wrong" the moment you
+     tapped Settings. */
+  useEffect(() => {
+    if (isMobile && activeTab === "updates") setActiveTab("general");
+  }, [isMobile, activeTab]);
+
   if (!isOpen) return null;
 
   const handleAddMemoryFact = () => {
@@ -420,7 +434,6 @@ const SettingsModal = ({
     setMemoryFacts((prev) => prev.filter((f) => f.id !== id));
   };
 
-  const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
   const TABS = [
     { id: "general", label: "General & Theme", icon: SlidersHorizontal },
     // First, and only where it is the thing standing between you and a
@@ -436,7 +449,12 @@ const SettingsModal = ({
     { id: "memory", label: "AI Memory", icon: Brain },
     { id: "connections", label: "Device Connections", icon: Wifi },
     { id: "pets", label: isMobile ? "Mobile Pets" : "Desktop Pets", icon: PawPrint },
-    { id: "updates", label: "Software Updates", icon: ArrowDownToLine },
+    /* Not on a phone. Every button on that screen asks a backend - check,
+       download, install - and a phone app installs its own updates through
+       the store it came from. With no computer linked there was nothing it
+       could do but explain why it could do nothing, which is a screen worth
+       removing rather than writing. */
+    ...(isMobile ? [] : [{ id: "updates", label: "Software Updates", icon: ArrowDownToLine }]),
     { id: "developer", label: "About Developer", icon: UserCheck },
   ];
 
@@ -1085,7 +1103,7 @@ const SettingsModal = ({
             )}
 
             {/* 8. SOFTWARE UPDATES TAB */}
-            {activeTab === "updates" && (
+            {activeTab === "updates" && !isMobile && (
               <div className="space-y-6">
                 <div>
                   <h3 className="text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">

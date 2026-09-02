@@ -122,9 +122,38 @@ async function openAiStyle(base: string, choice: Choice, messages: Message[]): P
         choice.apiKey ? { Authorization: `Bearer ${choice.apiKey}` } : {},
     );
     const data = contentOrThrow(choice.provider, status, body) as {
-        choices?: { message?: { content?: string } }[];
+        choices?: {
+            finish_reason?: string;
+            message?: { content?: string; reasoning_content?: string; reasoning?: string };
+        }[];
     };
-    return (data.choices?.[0]?.message?.content || '').trim();
+    const choiceOut = data.choices?.[0];
+    const message = choiceOut?.message;
+
+    /* Some models put the answer where the answer is not.
+     *
+     * A reasoning model can return an empty `content` and leave everything it
+     * said in `reasoning_content` (or `reasoning`, depending on the host).
+     * Reading only `content` produced an empty string, which the loop passed
+     * on as an empty message, which the panel drew as an empty box: a question
+     * asked, a box, and nothing in it.
+     */
+    const text = (message?.content
+        || message?.reasoning_content
+        || message?.reasoning
+        || '').trim();
+    if (text) return text;
+
+    /* Still nothing. Saying so is the whole point - silence reads as the
+     * extension being broken, and the reason is usually one of these two. */
+    if (choiceOut?.finish_reason === 'length') {
+        throw new Error(
+            `${choice.model} used its whole budget before writing anything. `
+            + 'Try a different model, or a shorter question.');
+    }
+    throw new Error(
+        `${choice.model} returned an empty reply. That model may not be usable `
+        + 'through this provider - pick another from the chip beside Send.');
 }
 
 async function gemini(choice: Choice, messages: Message[]): Promise<string> {
