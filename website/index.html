@@ -592,11 +592,14 @@
           <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10 4.6v6.9H3V5.5Zm0 13 7 .9v-6.8H3v5.9Zm8 1 10 1.3V12.5H11v7Zm0-15.9v7h10V3.2L11 4.6Z"/></svg>
           <div>
             <h3>Windows</h3>
-            <!-- Sizes in MB, the way a browser and a phone count them: bytes divided
-     by a million. The page said 266 MB and the download said 278.83, which
-     is the same file counted in MiB - reported as the site being wrong,
-     and the one people can check is the one the download shows. -->
-            <p class="dl-meta">10 &amp; 11 · 64-bit · 279 MB</p>
+            <!-- Each size is the number that platform will show you, and the two
+                 platforms disagree. Windows Explorer divides by 1024 and calls
+                 the result MB; a browser and Android divide by 1000. The same
+                 installer is 266 there and 278.8 here. Quoting one convention
+                 everywhere made the other one wrong, which was reported twice -
+                 once from a phone, once from Explorer. So: Windows files as
+                 Explorer counts them, the APK as the phone's download counts it. -->
+            <p class="dl-meta">10 &amp; 11 · 64-bit · 266 MB</p>
           </div>
         </div>
         <a class="btn btn-primary block no-lift" id="dlWin"
@@ -660,7 +663,7 @@
              releases/latest, which cannot go stale. Both do now. -->
         <a class="btn btn-primary block no-lift" id="dlApk"
            download="SMARAN.AI.apk"
-           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN-AI.apk">
+           href="/downloads/SMARAN-AI.apk">
           Download APK
         </a>
         <!-- These said the phone "pairs with your PC" and that conversations
@@ -683,7 +686,7 @@
           <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M13 15h5"/></svg>
           <div>
             <h3>Command line</h3>
-            <p class="dl-meta">Windows &middot; 10 MB &middot; no Python needed</p>
+            <p class="dl-meta">Windows &middot; 9.5 MB &middot; no Python needed</p>
           </div>
         </div>
         <!-- Same as the APK above: a copy on the site, updated by hand or not

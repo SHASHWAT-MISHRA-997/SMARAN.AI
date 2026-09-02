@@ -35,6 +35,19 @@
   [headers.values]
     Cache-Control = "public, max-age=604800"
 
+# Served from this site rather than only linked to GitHub.
+#
+# The GitHub link works and the file it delivers is correct - checked, byte for
+# byte - but it is a 302 to a signed CDN URL with an expiring token, and a
+# phone was left showing "Downloading... 33.90 of 33.90 MB" and never
+# finishing. A plain same-origin file with a fixed length removes every moving
+# part between the tap and the file.
+[[headers]]
+  for = "/downloads/*.apk"
+  [headers.values]
+    Content-Type = "application/vnd.android.package-archive"
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
 [[headers]]
   for = "/SMARAN.AI.apk"
   [headers.values]

@@ -75,3 +75,7 @@ backend/data/
 dist-release/
 .pet-work/
 
+
+# The APK is copied in before a deploy so the site can serve it directly;
+# it is a release artefact, not source.
+website/downloads/
