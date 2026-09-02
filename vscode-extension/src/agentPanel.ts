@@ -25,7 +25,9 @@ import * as vscode from 'vscode';
 import { AgentEvent, run, ToolCall } from './agent/loop';
 import { MODES, ModeId } from './agent/modes';
 import { Message } from './agent/models';
-import { deleteOllamaModel, listModels, PROVIDERS, pullOllamaModel } from './providers';
+import {
+    deleteOllamaModel, listModels, ModelOption, PROVIDERS, pullOllamaModel,
+} from './providers';
 import { Entry, Session, SessionStore } from './sessions';
 import { Keys, lmStudioUrl, ollamaUrl, resolveChoice } from './settings';
 
@@ -158,30 +160,26 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 await this.sendSetup();
                 break;
 
-            case 'revealKey': {
-                /* Show had nothing to show. The field is empty once a key is
-                   saved - the key lives in the keychain and was never sent to
-                   the panel - so toggling the input's type revealed an empty
-                   box. It is your own key on your own machine; a button that
-                   does nothing is the worse of the two. */
-                const provider = String(message.provider);
-                this.post({
-                    type: 'revealedKey',
-                    provider,
-                    key: await this.keys.get(provider),
-                });
-                break;
-            }
-
             case 'chooseProvider': {
                 const config = vscode.workspace.getConfiguration('smaran');
-                await config.update('provider', String(message.provider), vscode.ConfigurationTarget.Global);
+                const chosen = String(message.provider);
+                await config.update('provider', chosen, vscode.ConfigurationTarget.Global);
                 // The model that was chosen belongs to the old provider and
                 // will 404 against the new one. Clearing it is kinder than
                 // letting that happen and reading as a broken extension.
                 await config.update('model', '', vscode.ConfigurationTarget.Global);
+
+                /* Then pick one, rather than leaving Setup with a key entered,
+                   nothing selected and no sign that a second step is owed. The
+                   list is already ordered coding-first; the first free entry is
+                   a working default and every one of them is one tap away in
+                   the chip. */
+                const picked = await this.autoPickModel(chosen);
                 await this.sendSetup();
                 await this.announce();
+                // Setup is finished when there is something to talk to, so it
+                // gets out of the way instead of waiting to be dismissed.
+                if (picked) this.post({ type: 'goChat', model: picked });
                 break;
             }
 
@@ -355,6 +353,37 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             ollamaUrl: ollamaUrl(),
         });
         await this.sendModels(provider);
+    }
+
+    /**
+     * Choose a model for a provider that has none, and say which.
+     *
+     * Entering a key used to leave you on Setup with nothing selected: the
+     * agent refused to run, and the only clue was a chip reading "choose a
+     * model" on a screen you had just left. Returns undefined when nothing
+     * could be listed - a wrong key, or a local runner that is not started -
+     * and in that case Setup stays put, which is where the problem is.
+     */
+    private async autoPickModel(provider: string): Promise<string | undefined> {
+        let models: ModelOption[];
+        try {
+            models = await listModels(
+                provider, await this.keys.get(provider), ollamaUrl(), lmStudioUrl());
+        } catch {
+            return undefined;
+        }
+        const definition = PROVIDERS.find((p) => p.id === provider);
+        // Only where free and paid sit in one list. Where everything is free,
+        // or nothing is, the flag says nothing and filtering on it would
+        // discard the whole catalogue.
+        const preferred = definition?.free_models === 'some'
+            ? models.filter((m) => m.free)
+            : models;
+        const pick = (preferred[0] || models[0])?.id;
+        if (!pick) return undefined;
+        await vscode.workspace.getConfiguration('smaran')
+            .update('model', pick, vscode.ConfigurationTarget.Global);
+        return pick;
     }
 
     private async sendModels(provider: string): Promise<void> {

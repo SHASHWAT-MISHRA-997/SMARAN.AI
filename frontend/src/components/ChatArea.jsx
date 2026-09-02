@@ -5,6 +5,7 @@ import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink } from '../utils/hostLink';
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
+import * as nativeSpeech from '../utils/nativeSpeech';
 
 /* True in the packaged phone app with no computer linked: there is no backend
    at the app's own origin, so anything under /api comes back as the app's own
@@ -1352,6 +1353,16 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   );
   const wakeListenerRef = useRef(null);
   const [isDictating, setIsDictating] = useState(false);
+  /** The phone's composer menu, behind the plus. */
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  /* The floating pet is fixed in the root stacking context and the menu is
+     inside the composer's, so a higher z-index on the menu lost anyway - the
+     robot sat on top of the language row. Rather than fight the layering,
+     the pet steps aside while the menu is open. */
+  useEffect(() => {
+    document.documentElement.classList.toggle('sm-menu-open', mobileToolsOpen);
+    return () => document.documentElement.classList.remove('sm-menu-open');
+  }, [mobileToolsOpen]);
   const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'thinking' | 'speaking'
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [voiceAiResponse, setVoiceAiResponse] = useState('');
@@ -1803,6 +1814,16 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
   const transcribeRecordedAudio = async () => {
     if (!audioChunksRef.current || audioChunksRef.current.length === 0) return '';
+    /* There is no backend to send this to. Posting anyway reached the app's
+       own file server, which answers every path with index.html and a 200, so
+       res.ok was true and JSON.parse choked on a doctype - reported as
+       "Speech recognition could not run: Unexpected token '<'". */
+    if (noBackend()) {
+      audioChunksRef.current = [];
+      lastTranscribeErrorRef.current = 'this phone has no computer linked to '
+        + 'transcribe the recording, and its own recogniser did not start.';
+      return '';
+    }
     try {
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
@@ -1955,17 +1976,47 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         window.dispatchEvent(new CustomEvent('smaran:dictation-error', { detail: { message } }));
       }
     };
+    /* The phone's own recogniser, which is the right one to ask on a phone.
+       Before this, dictation on Android tried the WebView's Web Speech API,
+       watched it fail, and fell back to posting the recording to a backend
+       that is not there - so the app answered its own request with index.html
+       and the screen said "Unexpected token '<'". */
+    const startNativeDictation = async () => {
+      const startingText = inputValueRef.current.trim();
+      try {
+        const stopListening = await nativeSpeech.listen({
+          language: getRecognitionLang(selectedLanguage),
+          onText: (heard) => setInput([startingText, heard].filter(Boolean).join(' ').trim()),
+          onEnd: () => stop(),
+        });
+        sidebarDictationRef.current = { kind: 'native', stop: stopListening };
+        setIsDictating(true);
+        composerRef.current?.focus?.();
+        window.dispatchEvent(new CustomEvent('smaran:dictation-state', { detail: { active: true } }));
+      } catch (error) {
+        window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
+          detail: { message: error?.message || 'The phone could not start listening.' },
+        }));
+      }
+    };
+
     const toggle = async () => {
       if (sidebarDictationRef.current) { stop(); return; }
-      // Recorded dictation is transcribed by the backend, so without one this
-      // can only ever record and discard. Saying so beats a red button that
-      // never produces a word.
+
+      if (isNativeApp() && await nativeSpeech.available()) {
+        await startNativeDictation();
+        return;
+      }
+
+      // No recogniser on the device, and no computer to send the recording to.
+      // Recording anyway would produce a lit button and never a word.
       if (isNativeApp() && !loadLink()?.url
           && !(window.SpeechRecognition || window.webkitSpeechRecognition)) {
         window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
           detail: {
-            message: 'Dictation is transcribed by the computer this phone is '
-              + 'linked to, and none is linked yet. Pair one from Settings.',
+            message: 'This phone has no speech recogniser available. On most '
+              + 'Android phones that is Google’s app being disabled or a '
+              + 'missing language pack; a linked computer can transcribe instead.',
           },
         }));
         return;
@@ -2929,7 +2980,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const answerOnDevice = async ({ prompt, sessionId, assistantId, userMessage, spoken }) => {
     const provider = standalone.getProvider();
     const key = standalone.loadKeys()[provider];
-    const model = standalone.getModel();
+    let model = standalone.getModel();
 
     const fail = (text) => {
       setMessages((prev) => prev.map((m) =>
@@ -2939,15 +2990,25 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     };
 
     if (!provider || !key) {
+      // NVIDIA used to be named here as a free option. It was removed from
+      // this app because its API cannot be called from a WebView, and the
+      // advice outlived it by a release.
       fail('This device has no model set up yet. Open Settings → AI Provider, '
         + 'pick one and paste its key — Google Gemini, Groq, OpenRouter and '
-        + 'NVIDIA all have a free tier.');
+        + 'Cerebras all have a free tier.');
       return;
     }
+    /* A key with no model was a dead end: the reply was an instruction to go
+       and choose one. Anyone who has entered a key has said which provider
+       they want, so choose from it here instead of handing the job back. */
     if (!model) {
-      fail('Pick a model in Settings → AI Provider. The list comes from the '
-        + 'provider, so it shows what your key can actually run.');
-      return;
+      model = await standalone.pickDefaultModel(provider, key);
+      if (!model) {
+        fail('That key did not list any models, so there is nothing to run. '
+          + 'Check it in Settings → AI Provider — a key that has been revoked '
+          + 'or copied short fails exactly this way.');
+        return;
+      }
     }
 
     const controller = new AbortController();
@@ -3676,75 +3737,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                 energy arcs, and a wordmark that assembles itself. */}
             <HeroLogo3D />
 
-            {/* Prompt Cards  single col on mobile, 2-col on sm+ */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4 w-full select-none">
-              {[
-                {
-                  title: "🎥 YouTube Video Intelligence",
-                  subtitle: "Extract video transcript, key timestamps, visual context, and ask anything about the video.",
-                  prompt: "Explain what happens inside this YouTube video: https://youtu.be/B1PUBlhd9Yg",
-                  icon: "▶",
-                  gradient: "from-red-500/20 via-orange-500/20 to-amber-500/20 dark:from-red-500/15 dark:to-amber-500/15",
-                  borderHover: "hover:border-red-500/50 dark:hover:border-red-500/40",
-                  glowHover: "hover:shadow-[0_0_30px_rgba(239,68,68,0.25)]"
-                },
-                {
-                  title: "🌐 Real-Time Web & Website Scraper",
-                  subtitle: "Analyze live web page URLs, portfolio sites, documentation, or search internet facts.",
-                  prompt: "Analyze the content of this portfolio website: https://shashwatmishra-portfolio.netlify.app/",
-                  icon: "🌐",
-                  gradient: "from-blue-500/20 via-cyan-500/20 to-teal-500/20 dark:from-blue-500/15 dark:to-teal-500/15",
-                  borderHover: "hover:border-cyan-400/50 dark:hover:border-cyan-500/40",
-                  glowHover: "hover:shadow-[0_0_30px_rgba(6,182,212,0.25)]"
-                },
-                {
-                  title: "📄 Deep RAG Document Intelligence",
-                  subtitle: "Query complex PDF invoices, Word docs, Excel BoMs, or multi-page technical manuals.",
-                  prompt: "Summarize the key findings, data tables, and metrics across all uploaded documents in this chat.",
-                  icon: "📊",
-                  gradient: "from-emerald-500/20 via-teal-500/20 to-indigo-500/20 dark:from-emerald-500/15 dark:to-indigo-500/15",
-                  borderHover: "hover:border-emerald-400/50 dark:hover:border-emerald-500/40",
-                  glowHover: "hover:shadow-[0_0_30px_rgba(16,185,129,0.25)]"
-                },
-                {
-                  title: "🧠 AI Memory & Model Matrix",
-                  subtitle: "Store persistent user preferences, compare vLLM vs Ollama models, and run multi-agent reasoning.",
-                  prompt: "What long-term memory facts do you have stored about me, and which AI inference engine is active right now?",
-                  icon: "🧠",
-                  gradient: "from-purple-500/20 via-indigo-500/20 to-pink-500/20 dark:from-purple-500/15 dark:to-pink-500/15",
-                  borderHover: "hover:border-purple-400/50 dark:hover:border-purple-500/40",
-                  glowHover: "hover:shadow-[0_0_30px_rgba(168,85,247,0.25)]"
-                }
-              ].map((card, idx) => (
-                <div
-                  key={idx}
-                  onClick={() => {
-                    if (activeSessionId) {
-                      setInput(card.prompt);
-                    }
-                  }}
-                  className={`relative p-3 sm:p-4 bg-white/70 dark:bg-white/[0.03] backdrop-blur-md border border-zinc-200/60 dark:border-white/[0.06] rounded-2xl cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-left flex flex-col justify-between min-h-[90px] sm:min-h-28 md:min-h-32 group overflow-hidden ${card.borderHover} ${card.glowHover}`}
-                >
-                  {/* Hover gradient overlay */}
-                  <div className={`absolute inset-0 bg-gradient-to-br ${card.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-2xl`} />
-                  
-                  <div className="space-y-1 relative z-10">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-black text-zinc-950 dark:text-white group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">
-                        {card.title}
-                      </span>
-                      <span className="text-base group-hover:scale-125 transition-transform duration-300">{card.icon}</span>
-                    </div>
-                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed font-semibold">
-                      {card.subtitle}
-                    </p>
-                  </div>
-                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-extrabold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-1 group-hover:translate-y-0 relative z-10">
-                    Use Prompt &rarr;
-                  </span>
-                </div>
-              ))}
-            </div>
           </div>
         ) : (
           <>
@@ -3919,6 +3911,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               has to be attached to something. */}
           {/* Main Textarea Area */}
           <div className="composer-input w-full sm:flex-1 relative min-w-0 flex items-center gap-1.5 order-first sm:order-none">
+            {/* Everything that used to be a row of chips below the box. */}
+            <button
+              type="button"
+              onClick={() => setMobileToolsOpen((open) => !open)}
+              className={`sm:hidden h-8 w-8 rounded-xl shrink-0 flex items-center justify-center border transition-all cursor-pointer ${
+                mobileToolsOpen
+                  ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-500 rotate-45'
+                  : 'bg-zinc-200 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300'
+              }`}
+              title="Attach, voice, web search and language"
+              aria-label="More"
+              aria-expanded={mobileToolsOpen}
+            >
+              <Plus className="w-4 h-4" />
+            </button>
             <textarea
               ref={composerRef}
               value={input}
@@ -3976,98 +3983,91 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             </button>
           </div>
 
-          {/* Mobile Tools Strip (sm:hidden) — Single Touch-Scrollable Action Bar */}
-          <div className="composer-compact-tools sm:hidden w-full flex items-center gap-1.5 pt-2 border-t border-zinc-200/70 dark:border-zinc-800/80 overflow-x-auto no-scrollbar py-0.5">
-            {/* Speak Button — Prominent Primary Mobile Action */}
-            <button
-              type="button"
-              onClick={openVoiceMode}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-fuchsia-600 text-white rounded-xl font-black text-xs shadow-md shadow-violet-500/25 cursor-pointer hover:scale-105 active:scale-95 transition-all shrink-0"
-              title="Real-time Voice Mode (Speak & AI Responds Aloud)"
-            >
-              <Volume2 className="w-3.5 h-3.5 animate-pulse" />
-              <span>Speak</span>
-            </button>
+          {/* One button, not a row of them.
+              The strip that stood here held Speak, Attach, RAG, Web, Compare
+              and a language menu, all at once, on a screen four inches wide:
+              it wrapped to two lines, pushed the box up, and its labels were
+              cut. Everything it did is still here, behind the plus - which is
+              where a phone puts this. */}
+          <div className="composer-compact-tools sm:hidden">
+            {mobileToolsOpen && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Close menu"
+                  onClick={() => setMobileToolsOpen(false)}
+                  className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]"
+                />
+                {/* Fixed, not absolute. Inside the composer it was trapped in
+                    the footer's stacking context, so the floating pet - a
+                    z-30 element in a higher context - was drawn over the
+                    language row. */}
+                <div
+                  className="fixed left-2 right-2 z-[60] rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl overflow-hidden"
+                  style={{ bottom: 'calc(var(--sm-composer-h, 84px) + 14px)' }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => { setMobileToolsOpen(false); openVoiceMode(); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-bold text-zinc-900 dark:text-zinc-100 active:bg-zinc-100 dark:active:bg-zinc-800"
+                  >
+                    <Volume2 className="w-4 h-4 text-violet-500 shrink-0" />
+                    <span className="flex-1">Speak</span>
+                    <span className="text-[11px] font-semibold text-zinc-400">Voice conversation</span>
+                  </button>
 
-            {/* File Attach */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!activeSessionId || directUploading}
-              className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl text-xs font-bold border border-zinc-200 dark:border-zinc-700/60 cursor-pointer disabled:opacity-35 shrink-0"
-              title="Attach Files"
-            >
-              <Upload className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Attach file</span>
-            </button>
+                  <button
+                    type="button"
+                    onClick={() => { setMobileToolsOpen(false); fileInputRef.current?.click(); }}
+                    disabled={!activeSessionId || directUploading}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-bold text-zinc-900 dark:text-zinc-100 active:bg-zinc-100 dark:active:bg-zinc-800 disabled:opacity-40"
+                  >
+                    <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span className="flex-1">Attach files</span>
+                  </button>
 
-            {/* Folder upload was offered twice over: this chip and the
-                "Open a folder" button above the composer, which do different
-                things and both said folder. Renaming it was not enough - it
-                is gone. "Attach file" takes multiple files at once, which is
-                what folder upload was mostly used for. */}
-            {/* RAG Toggle */}
-            <button
-              type="button"
-              onClick={() => setIsRagEnabled(!isRagEnabled)}
-              disabled={!activeSessionId || directUploading}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
-                isRagEnabled
-                  ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/40 shadow-xs'
-                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700/60'
-              }`}
-              title={isRagEnabled ? 'RAG Mode Active' : 'Direct AI Mode'}
-            >
-              <Brain className={`w-3.5 h-3.5 ${isRagEnabled ? 'text-purple-600 dark:text-purple-400' : ''}`} />
-              <span>{isRagEnabled ? 'RAG' : 'Direct AI'}</span>
-            </button>
+                  <button
+                    type="button"
+                    onClick={() => { setIsRagEnabled(!isRagEnabled); setMobileToolsOpen(false); }}
+                    disabled={!activeSessionId || directUploading}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-bold text-zinc-900 dark:text-zinc-100 active:bg-zinc-100 dark:active:bg-zinc-800 disabled:opacity-40"
+                  >
+                    <Brain className="w-4 h-4 text-purple-500 shrink-0" />
+                    <span className="flex-1">Answer from my files</span>
+                    <span className={`text-[11px] font-black ${isRagEnabled ? 'text-purple-500' : 'text-zinc-400'}`}>
+                      {isRagEnabled ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
 
-            {/* Web Search Toggle */}
-            <button
-              type="button"
-              onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
-              disabled={!activeSessionId || directUploading}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
-                isWebSearchEnabled
-                  ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-500/40 shadow-xs'
-                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700/60'
-              }`}
-              title={isWebSearchEnabled ? 'Live Web Search Active' : 'Web Search Inactive'}
-            >
-              <Globe className={`w-3.5 h-3.5 ${isWebSearchEnabled ? 'animate-pulse text-blue-500' : ''}`} />
-              <span>{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
-            </button>
+                  <button
+                    type="button"
+                    onClick={() => { setIsWebSearchEnabled(!isWebSearchEnabled); setMobileToolsOpen(false); }}
+                    disabled={!activeSessionId || directUploading}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-bold text-zinc-900 dark:text-zinc-100 active:bg-zinc-100 dark:active:bg-zinc-800 disabled:opacity-40"
+                  >
+                    <Globe className="w-4 h-4 text-blue-500 shrink-0" />
+                    <span className="flex-1">Search the live web</span>
+                    <span className={`text-[11px] font-black ${isWebSearchEnabled ? 'text-blue-500' : 'text-zinc-400'}`}>
+                      {isWebSearchEnabled ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
 
-            {/* Compare Mode.
-                Not on a phone answering from the device: it runs several
-                models side by side through the backend, so with none it
-                showed "0 models confirmed", a key field that led nowhere, and
-                no way back out of it. */}
-            {!noBackend() && (
-              <button
-                type="button"
-                onClick={() => { setComparePrompt(input); setIsModelCompareOpen(true); }}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/30 cursor-pointer shrink-0"
-                title="Compare Models Side-by-Side"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Compare</span>
-              </button>
+                  <div className="flex items-center gap-3 px-4 py-3 border-t border-zinc-200 dark:border-zinc-800">
+                    <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span className="flex-1 text-sm font-bold text-zinc-900 dark:text-zinc-100">Reply in</span>
+                    <select
+                      value={selectedLanguage}
+                      onChange={(e) => setSelectedLanguage(e.target.value)}
+                      className="text-sm font-bold text-zinc-900 dark:text-zinc-100 bg-transparent outline-none"
+                    >
+                      {LANGUAGES.map((l) => (
+                        <option key={l.code} value={l.code} className="bg-white dark:bg-zinc-900">{l.flag} {l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </>
             )}
-
-            {/* Language Selector */}
-            <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-2 py-1 shrink-0" title="Response Language">
-              <Globe className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-              <select
-                value={selectedLanguage}
-                onChange={(e) => setSelectedLanguage(e.target.value)}
-                className="text-xs font-bold text-zinc-900 dark:text-zinc-100 bg-transparent outline-none cursor-pointer"
-              >
-                {LANGUAGES.map((l) => (
-                  <option key={l.code} value={l.code} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-bold">{l.flag} {l.name}</option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {/* Desktop Right Tools (sm+) — Single Continuous Row */}

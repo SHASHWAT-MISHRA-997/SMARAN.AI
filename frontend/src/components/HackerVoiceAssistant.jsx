@@ -34,6 +34,8 @@ import {
 } from 'lucide-react';
 import { LiveVoiceSession } from '../utils/liveVoice';
 import { Ambience } from '../utils/ambience';
+import * as nativeSpeech from '../utils/nativeSpeech';
+import { isNativeApp } from '../utils/hostLink';
 import EnergyCore from './EnergyCore';
 import GestureHUD from './GestureHUD';
 import CyberFX from './CyberFX';
@@ -957,7 +959,15 @@ export const HackerVoiceAssistant = ({
   // =========================================================================
   // CONTINUOUS HANDS-FREE VOICE RECOGNITION LOOP (Genspark / Speakly Style)
   // =========================================================================
+  /** The phone's own recogniser, when one is listening. */
+  const nativeStopRef = useRef(null);
+
   const stopRecognition = useCallback(() => {
+    if (nativeStopRef.current) {
+      const end = nativeStopRef.current;
+      nativeStopRef.current = null;
+      Promise.resolve(end()).catch(() => {});
+    }
     if (recognitionRef.current) {
       try {
         recognitionRef.current.abort();
@@ -1068,6 +1078,48 @@ export const HackerVoiceAssistant = ({
     // with it. That is why a voice call went green and dropped straight away
     // and why nothing spoken ever reached the assistant. Once the service has
     // shown it cannot work, this session stops asking.
+    /* Ask the phone itself.
+     *
+     * The branch below says speech is "transcribed locally" and on a phone
+     * with no computer linked that was not true: it recorded, posted the audio
+     * to a backend that is not there, got this app's own index.html back, and
+     * the call sat on "waiting" having heard nothing. Android has its own
+     * recogniser; it feeds the same transcript the rest of this screen reads,
+     * so the silence watchdog and auto-send work unchanged.
+     *
+     * The recorder still runs alongside it - that is where the level meter and
+     * the silence detection come from, not the words. */
+    if (isNativeApp()) {
+      startFreshRecorder();
+      (async () => {
+        if (!(await nativeSpeech.available())) {
+          setRecognizerStatus('unavailable');
+          setRecognizerIssue('This phone has no speech recogniser available.');
+          return;
+        }
+        try {
+          nativeStopRef.current = await nativeSpeech.listen({
+            language: getRecognitionLang(selectedLanguage),
+            onText: (heard) => {
+              setTranscript(heard);
+              transcriptRef.current = heard;
+              hasSpokenRef.current = true;
+              if (voiceStateRef.current === 'idle' || voiceStateRef.current === 'vad-ready') {
+                setVoiceState('listening');
+                voiceStateRef.current = 'listening';
+              }
+            },
+          });
+          setRecognizerStatus('active');
+          setRecognizerIssue('');
+        } catch (error) {
+          setRecognizerStatus('unavailable');
+          setRecognizerIssue(error?.message || 'The phone would not start listening.');
+        }
+      })();
+      return;
+    }
+
     if (isMobileVoiceDevice() || speechServiceUnusableRef.current) {
       setRecognizerStatus('local');
       setRecognizerIssue('Listening on this device; speech is transcribed locally.');

@@ -4,6 +4,10 @@ import {
   Search, Sparkles, Trash2, Wrench, X, Code2, Play, Terminal, Database, Globe, FolderGit2, Cpu
 } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
+import { isNativeApp, loadLink } from '../utils/hostLink';
+
+/** No computer behind the phone, so nothing on this screen can run. */
+const noBackend = () => isNativeApp() && !loadLink()?.url;
 
 const MANAGE_FILTERS = [
   { id: 'plugin', label: 'Plugins', icon: Blocks },
@@ -423,6 +427,25 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
                   <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>
                 </div>
               </div>
+
+              {/* Every one of these runs on a computer, not here.
+                  On a phone with no computer linked, the two requests behind
+                  this screen were answered by the app's own file server with
+                  index.html, JSON parsing failed, and the catch left an empty
+                  list. An empty list means "you have none". This screen had no
+                  way to say "these cannot run here", so it said the wrong
+                  thing quietly. */}
+              {noBackend() && (
+                <div className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                  <p className="font-bold">These run on a computer, not on the phone.</p>
+                  <p className="mt-1 text-amber-200/80">
+                    Plugins, skills and MCP servers are programs that read files and run
+                    commands on a machine. The phone can talk to a model on its own, but it
+                    cannot run these. Pair a computer in Settings → Device Connections and
+                    they appear here.
+                  </p>
+                </div>
+              )}
 
               {/* Search */}
               <div className="relative mt-6 min-w-0 overflow-hidden">

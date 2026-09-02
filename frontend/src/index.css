@@ -1918,3 +1918,9 @@ html.sm-pip,
 html.sm-pip body {
   background: transparent !important;
 }
+
+
+/* While the composer's menu is open, the floating pet is in the way and
+   cannot be layered under it - it lives in the root stacking context and the
+   menu does not. It waits. */
+html.sm-menu-open .sm-pet { display: none; }

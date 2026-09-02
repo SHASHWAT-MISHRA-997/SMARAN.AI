@@ -295,7 +295,7 @@
 
     function drawSetup() {
         if (!setupState) return;
-        const { providers, configured, provider, model } = setupState;
+        const { providers, configured, provider } = setupState;
         setup.replaceChildren();
 
         /* A way back. Setup was a dead end - the only route to the
@@ -340,23 +340,10 @@
                 input.addEventListener('input', () => { drafts[p.id] = input.value; });
                 keyRow.appendChild(input);
 
-                // Show reveals the key that is actually saved, not the empty
-                // box in front of it.
-                const reveal = button('Show', 'tiny', () => {
-                    if (input.type === 'text') {
-                        input.type = 'password';
-                        reveal.textContent = 'Show';
-                        return;
-                    }
-                    input.type = 'text';
-                    reveal.textContent = 'Hide';
-                    if (!input.value) {
-                        revealInto[p.id] = input;
-                        vscode.postMessage({ type: 'revealKey', provider: p.id });
-                    }
-                });
-                keyRow.appendChild(reveal);
-
+                // No Show button. A saved key is in the editor's own secret
+                // store; reading it back to look at it is not something this
+                // needs to offer, and the row is shorter without it. Whether
+                // one is saved is said by the badge and by the placeholder.
                 const save = button('Save', 'tiny', () => {
                     if (!input.value.trim()) {
                         save.textContent = 'Empty';
@@ -402,10 +389,6 @@
 
         drawModels();
 
-        setup.appendChild(el('p', 'foot',
-            'Keys are kept in your operating system’s keychain, not in settings.json, '
-            + 'and are sent only to the provider you picked.'));
-        setup.appendChild(el('p', 'foot', 'Chosen: ' + (model || 'nothing yet')));
     }
 
     let modelState = { loading: false, models: [], error: null };
@@ -414,9 +397,6 @@
     let freeOnly = null;
 
     const providerOf = (id) => (setupState?.providers || []).find((p) => p.id === id);
-
-    /** Inputs waiting for the extension to hand back a saved key. */
-    const revealInto = {};
 
     /** Whether the model list is open. Closed until you go looking for it. */
     let modelsOpen = false;
@@ -556,8 +536,13 @@
                 .slice(0, 200)
                 .forEach((m) => {
                     const line = el('div', 'model-line');
-                    const row = button('', 'model' + (m.id === setupState.model ? ' on' : ''), () =>
-                        vscode.postMessage({ type: 'chooseModel', model: m.id }));
+                    /* Choosing is the last thing anyone came to Setup to do,
+                       so it ends here rather than leaving you on the screen
+                       you have finished with. */
+                    const row = button('', 'model' + (m.id === setupState.model ? ' on' : ''), () => {
+                        vscode.postMessage({ type: 'chooseModel', model: m.id });
+                        show('chat');
+                    });
                     row.appendChild(el('span', null, m.id));
                     if (m.free) row.appendChild(el('span', 'badge', 'free'));
                     if (m.id === setupState.model) row.appendChild(el('span', 'tick', '✓'));
@@ -581,6 +566,13 @@
         const message = event.data;
 
         switch (message.type) {
+            /* Setup finished by itself, having chosen something. Staying on
+               Setup after that meant hunting for a way out through History or
+               a new conversation. */
+            case 'goChat':
+                show('chat');
+                break;
+
             case 'ready':
                 $('folder').textContent = message.folderName || message.folder || 'No folder open';
                 $('folder').title = message.folder || '';

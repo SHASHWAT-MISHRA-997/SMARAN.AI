@@ -107,10 +107,30 @@ export type Approver = (
     because: string | undefined,
 ) => Promise<boolean>;
 
+/**
+ * What is answering, in its own words.
+ *
+ * Asked "which model are you using?", the agent said GPT-4. It is not, and it
+ * had no way to know - nothing in the prompt told it, so it guessed from what
+ * models generally say about themselves. Anyone asking that question is asking
+ * because the answer matters to them, and a confident wrong one is worse than
+ * no feature at all. It is told now, and repeats what it is told.
+ */
+export function identify(choice: Choice): string {
+    const where = choice.provider
+        ? `the ${choice.provider} API`
+        : 'Ollama, on this machine';
+    return `
+
+You are running as the model "${choice.model}", served by `
+        + `${where}. If you are asked which model you are, say exactly that and `
+        + `nothing more - do not guess a name from your training.`;
+}
+
 export async function plan(task: string, choice: Choice): Promise<string> {
     return complete(
         [
-            { role: 'system', content: PLAN_SYSTEM },
+            { role: 'system', content: PLAN_SYSTEM + identify(choice) },
             { role: 'user', content: task },
         ],
         choice,
@@ -137,7 +157,10 @@ export async function* run(
         : '';
 
     const messages: Message[] = [
-        { role: 'system', content: SYSTEM.replace('%TOOLS%', describeTools()) + preamble },
+        {
+            role: 'system',
+            content: SYSTEM.replace('%TOOLS%', describeTools()) + preamble + identify(choice),
+        },
         ...history,
         { role: 'user', content: task },
     ];

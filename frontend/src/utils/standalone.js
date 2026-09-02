@@ -208,6 +208,35 @@ export const usable = (models) => {
     .sort((a, b) => score(a.id) - score(b.id) || a.id.localeCompare(b.id));
 };
 
+/**
+ * Choose one, so entering a key is the whole job.
+ *
+ * Pasting a key selected the provider and deliberately cleared the model, and
+ * then said nothing. The next question was answered with "Pick a model in
+ * Settings → AI Provider" - a second step nobody had been told about, on a
+ * screen they had just closed. The list is already ordered smallest-and-
+ * fastest first, which is the right default on a phone; anything else in it is
+ * still one tap away.
+ *
+ * Returns the model id, or '' when the provider would not list anything -
+ * a wrong key, usually, and that is worth seeing rather than papering over.
+ */
+export async function pickDefaultModel(provider, key) {
+  if (!provider || !key) return '';
+  let models;
+  try {
+    models = usable(await listModels(provider, key));
+  } catch {
+    return '';
+  }
+  // Only where free and paid sit in one list. Elsewhere the flag is absent
+  // and filtering on it would throw the whole catalogue away.
+  const free = models.filter((m) => m.free);
+  const chosen = (free.length ? free[0] : models[0])?.id || '';
+  if (chosen) setModel(chosen);
+  return chosen;
+}
+
 /* ── one answer, streamed ──────────────────────────────────────────────── */
 
 /**

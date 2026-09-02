@@ -95,7 +95,16 @@ const SettingsModal = ({
     setDirectModelsLoading(true);
     setDirectModelError("");
     try {
-      setDirectModels(standalone.usable(await standalone.listModels(provider, key)));
+      const listed = standalone.usable(await standalone.listModels(provider, key));
+      setDirectModels(listed);
+      /* Choose one if nothing is chosen. Leaving it empty meant the next
+         question was answered with instructions to come back here. */
+      if (!standalone.getModel() && listed.length) {
+        const free = listed.filter((m) => m.free);
+        const chosen = (free.length ? free[0] : listed[0]).id;
+        standalone.setModel(chosen);
+        setDirectModel(chosen);
+      }
     } catch (error) {
       setDirectModels([]);
       setDirectModelError(error?.message || "That provider would not list its models.");
