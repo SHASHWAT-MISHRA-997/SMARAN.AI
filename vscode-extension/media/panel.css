@@ -314,7 +314,14 @@ button.ghost:hover {
     box-shadow: var(--glow-cyan);
 }
 
-button.mode, button.model {
+/* The two chips in the header bar, and only those.
+ *
+ * This rule used to say "button.model", which is also every row of the model
+ * list. Those rows inherited a 44% width cap and white-space: nowrap, so a
+ * long id had a narrow box it was forbidden to wrap inside - it ran straight
+ * out and the FREE badge was painted over the middle of it. The grid further
+ * down could not save it: nowrap wins over overflow-wrap. */
+button.mode, button#modelChip {
     font-size: 11px;
     padding: 5px 10px;
     font-family: var(--vscode-editor-font-family);
@@ -560,13 +567,13 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
  * it: "google/gemma-4[FREE]b-a". Two flex fixes did not hold. A grid gives
  * the badge and the tick columns of their own, so the name has nowhere to
  * overrun into and wraps instead. */
-.model, .menu-item .menu-line {
+.model:not(#modelChip), .menu-item .menu-line {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 8px;
 }
-.model span:first-child,
+.model:not(#modelChip) span:first-child,
 .menu-line strong {
     min-width: 0;
     overflow-wrap: anywhere;
