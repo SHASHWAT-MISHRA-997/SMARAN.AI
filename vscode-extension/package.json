@@ -2,7 +2,7 @@
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
   "description": "A coding agent that reads your project, changes files, runs commands and reads the results — one step at a time, in view.",
-  "version": "2.11.5",
+  "version": "2.12.0",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {
@@ -220,6 +220,40 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Send a count of installs and launches. Four fields: a random id for this installation, the word `install` or `launch`, the word `vscode`, and the version. No file, task, project name, path or key is ever sent. Turn it off and nothing is sent at all."
+        },
+        "smaran.mcpServers": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "MCP servers the agent may use. Each entry is `{ \"name\": \"github\", \"target\": \"npx -y @modelcontextprotocol/server-github\" }`. `target` is either a command to run or an `http(s)` address. Optional `env` and `headers` objects are passed through. Their tools are always shown and waited on before they run, in every mode.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "target"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Short name, used as the tool prefix."
+              },
+              "target": {
+                "type": "string",
+                "description": "A command line, or an http(s) address."
+              },
+              "env": {
+                "type": "object",
+                "description": "Extra environment variables for the process."
+              },
+              "headers": {
+                "type": "object",
+                "description": "Extra HTTP headers, for an address."
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              }
+            }
+          }
         }
       }
     }

@@ -29,7 +29,8 @@ import {
     deleteOllamaModel, listModels, ModelOption, PROVIDERS, pullOllamaModel,
 } from './providers';
 import { Entry, Session, SessionStore } from './sessions';
-import { Keys, lmStudioUrl, ollamaUrl, resolveChoice } from './settings';
+import { McpRegistry } from './agent/mcpRegistry';
+import { Keys, lmStudioUrl, mcpServers, ollamaUrl, resolveChoice } from './settings';
 
 /** Enough of a file to be useful, short enough not to crowd out the task. */
 const ATTACH_LIMIT = 60_000;
@@ -46,6 +47,10 @@ export class AgentPanel implements vscode.WebviewViewProvider {
     private view?: vscode.WebviewView;
     private stopRequested = false;
     private busy = false;
+
+    /** MCP servers stay open for the window, not per conversation: they are
+     *  processes, and one per question would leave a pile of them running. */
+    private readonly mcp = new McpRegistry();
     private session?: Session;
     private attachments: Attachment[] = [];
     /** Resolves when the person answers the approval showing in the panel. */
@@ -188,6 +193,11 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                     .update('model', String(message.model), vscode.ConfigurationTarget.Global);
                 await this.sendSetup();
                 await this.announce();
+                break;
+
+            case 'openMcpSettings':
+                await vscode.commands.executeCommand(
+                    'workbench.action.openSettings', 'smaran.mcpServers');
                 break;
 
             case 'refreshModels': await this.sendModels(String(message.provider)); break;
@@ -345,6 +355,7 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             type: 'setup',
             providers: PROVIDERS,
             localStatus: await this.localStatus(),
+            mcp: await this.mcpReport(),
             configured: await this.keys.configured(),
             provider,
             model: (config.get<string>('model') || '').trim(),
@@ -384,6 +395,27 @@ export class AgentPanel implements vscode.WebviewViewProvider {
         await vscode.workspace.getConfiguration('smaran')
             .update('model', pick, vscode.ConfigurationTarget.Global);
         return pick;
+    }
+
+    /**
+     * What the MCP servers are doing, for the Setup screen.
+     *
+     * Connecting here rather than only before a run means the screen shows
+     * the truth as soon as you look at it - including a server that will not
+     * start, which is the thing worth knowing before asking a question that
+     * depends on it.
+     */
+    private async mcpReport(): Promise<
+        { name: string; target: string; connected: boolean; tools: string[]; problem?: string }[]
+    > {
+        const configured = mcpServers();
+        if (!configured.length) return [];
+        try {
+            await this.mcp.use(configured);
+        } catch {
+            // A failure to connect is already recorded per server.
+        }
+        return this.mcp.report();
     }
 
     private async sendModels(provider: string): Promise<void> {
@@ -531,9 +563,24 @@ export class AgentPanel implements vscode.WebviewViewProvider {
         const history: Message[] = this.session?.history || [];
         const composed = this.compose(task);
         try {
+            /* Connect before the first step, so the tools are in the prompt
+               rather than discovered halfway through. A server that will not
+               start is not fatal: its tools are absent and the panel says
+               why, which beats an agent quietly missing half its abilities. */
+            await this.mcp.use(mcpServers());
+            const report = this.mcp.report();
+            const broken = report.filter((r) => !r.connected);
+            if (broken.length) {
+                this.record({
+                    kind: 'note',
+                    title: `${broken.length} MCP server${broken.length === 1 ? '' : 's'} did not start`,
+                    body: broken.map((r) => r.problem || r.name).join('\n'),
+                });
+            }
+
             for await (const event of run(
                 composed, folder, history, choice, () => this.stopRequested,
-                mode, (call, because) => this.ask(call, because),
+                mode, (call, because) => this.ask(call, because), this.mcp,
             )) {
                 this.record(this.asEntry(event, folder));
                 if (event.type === 'done' && this.session) {

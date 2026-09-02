@@ -46,6 +46,17 @@ export const MODES: Mode[] = [
 export const MUTATING = new Set(['write_file', 'edit_file', 'run_command', 'git']);
 
 /**
+ * A tool from an MCP server, by the name the model calls it.
+ *
+ * These are treated as changing something whatever they are called. The
+ * server is somebody else's program: this extension cannot read its code and
+ * has no way to know whether `search_issues` reads or writes. Assuming the
+ * safe answer for a tool that turns out to write is the failure that cannot
+ * be undone, so the assumption goes the other way.
+ */
+export const isMcpTool = (name: string): boolean => name.startsWith('mcp_');
+
+/**
  * Commands worth stopping on even when you asked not to be stopped.
  *
  * This is a short list of things that are hard to undo, not an attempt at a
@@ -90,6 +101,21 @@ export type Decision =
 
 /** What should happen when this tool is about to run, in this mode. */
 export function decide(mode: ModeId, name: string, args: Record<string, string>): Decision {
+    if (isMcpTool(name)) {
+        // Plan mode changes nothing, and an MCP tool might.
+        if (mode === 'plan') {
+            return {
+                act: 'refuse',
+                because:
+                    'You are in Plan mode, so no tool that could change something may run - '
+                    + 'that includes tools from MCP servers. Say what you would do instead.',
+            };
+        }
+        // Everywhere else it is shown and waited on. Auto mode is a promise
+        // about tools whose behaviour is known; these are not those.
+        return { act: 'ask', because: 'a tool from an MCP server' };
+    }
+
     if (!MUTATING.has(name)) {
         return { act: 'run' };
     }

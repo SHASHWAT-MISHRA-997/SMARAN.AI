@@ -21,6 +21,7 @@
 
 import { decide, ModeId } from './modes';
 import { Choice, complete, Message } from './models';
+import { McpRegistry } from './mcpRegistry';
 import { describeTools, execute, TOOLS } from './tools';
 
 /** Not a guess at how much work a task needs — a stop, so a model repeating
@@ -145,6 +146,9 @@ export async function* run(
     stopped: () => boolean,
     mode: ModeId,
     approve: Approver,
+    /* Optional, so every existing caller and test keeps working and the agent
+       behaves exactly as before when no server is configured. */
+    mcp?: McpRegistry,
 ): AsyncGenerator<AgentEvent> {
     const preamble = mode === 'plan'
         // Told, as well as enforced. Refusing a write the model did not know
@@ -156,10 +160,21 @@ export async function* run(
           + 'check it.'
         : '';
 
+    /* Tools from MCP servers are listed alongside the built-in ones, in the
+       same shape, so the model has nothing new to learn. They are named
+       mcp_<server>_<tool> so two servers offering `search` stay distinct. */
+    const extra = mcp?.describe() || '';
+    const toolList = extra
+        ? `${describeTools()}
+
+From connected MCP servers:
+${extra}`
+        : describeTools();
+
     const messages: Message[] = [
         {
             role: 'system',
-            content: SYSTEM.replace('%TOOLS%', describeTools()) + preamble + identify(choice),
+            content: SYSTEM.replace('%TOOLS%', toolList) + preamble + identify(choice),
         },
         ...history,
         { role: 'user', content: task },
@@ -219,7 +234,9 @@ export async function* run(
             if (stopped()) {
                 return;
             }
-            result = await execute(call.name, call.args, root);
+            result = mcp?.has(call.name)
+                ? await mcp.call(call.name, call.args)
+                : await execute(call.name, call.args, root);
             performed.push(call.name);
             yield { type: 'tool_result', name: call.name, result, step };
         }

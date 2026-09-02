@@ -448,7 +448,50 @@
         });
 
         drawModels();
+        drawMcp();
 
+    }
+
+    /* MCP servers, and whether they actually started.
+     *
+     * A tool the agent cannot reach is worse than one it does not have, so a
+     * server that failed is shown with the reason it gave rather than left
+     * out of the list. Configuring them is a settings file, not a form here:
+     * the record has to match what the desktop app stores, and a half-built
+     * editor for it would be the thing that drifts. */
+    function drawMcp() {
+        const servers = setupState?.mcp || [];
+        setup.appendChild(el('h3', null, 'MCP servers'));
+
+        if (!servers.length) {
+            setup.appendChild(el('p', 'foot',
+                'None configured. Add them in Settings under smaran.mcpServers - '
+                + 'each is a name and either a command to run or an https address. '
+                + 'Their tools are always shown and waited on before they run.'));
+            setup.appendChild(button('Open settings', 'tiny', () =>
+                vscode.postMessage({ type: 'openMcpSettings' })));
+            return;
+        }
+
+        servers.forEach((server) => {
+            const row = el('div', 'provider' + (server.connected ? ' on' : ''));
+            const line = el('div', 'menu-line');
+            line.appendChild(el('strong', null, server.name));
+            line.appendChild(el('span', server.connected ? 'badge ok' : 'badge paid',
+                server.connected
+                    ? server.tools.length + (server.tools.length === 1 ? ' tool' : ' tools')
+                    : 'not started'));
+            row.appendChild(line);
+            row.appendChild(el('div', 'menu-note', server.target));
+            if (server.problem) row.appendChild(el('div', 'pull-failed', server.problem));
+            if (server.tools.length) {
+                row.appendChild(el('div', 'menu-note', server.tools.join(', ')));
+            }
+            setup.appendChild(row);
+        });
+
+        setup.appendChild(button('Reconnect', 'tiny', () =>
+            vscode.postMessage({ type: 'setup' })));
     }
 
     let modelState = { loading: false, models: [], error: null };

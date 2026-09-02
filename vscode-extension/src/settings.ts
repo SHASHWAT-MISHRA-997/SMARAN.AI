@@ -20,6 +20,7 @@ import * as vscode from 'vscode';
 
 import { Choice, firstInstalledOllamaModel } from './agent/models';
 import { PROVIDERS } from './providers';
+import { McpServerConfig } from './agent/mcp';
 
 const DEFAULT_OLLAMA = 'http://127.0.0.1:11434';
 const DEFAULT_LM_STUDIO = 'http://127.0.0.1:1234/v1';
@@ -125,6 +126,23 @@ export class Keys {
 export interface Resolved extends Choice {
     /** Something a person can act on when there is no model to use at all. */
     problem?: string;
+}
+
+/**
+ * The MCP servers configured for this window.
+ *
+ * Same record shape the desktop app stores, so a server described for one
+ * works in the other without being rewritten.
+ */
+export function mcpServers(): McpServerConfig[] {
+    const raw = vscode.workspace.getConfiguration('smaran').get<unknown[]>('mcpServers') || [];
+    return raw
+        .filter((entry): entry is McpServerConfig =>
+            Boolean(entry && typeof entry === 'object'
+                && typeof (entry as McpServerConfig).name === 'string'
+                && typeof (entry as McpServerConfig).target === 'string'))
+        .map((entry) => ({ ...entry, name: entry.name.trim(), target: entry.target.trim() }))
+        .filter((entry) => entry.name && entry.target);
 }
 
 export function ollamaUrl(): string {
