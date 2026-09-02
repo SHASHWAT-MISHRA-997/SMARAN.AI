@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Search, Cpu, Download, Trash2, CheckCircle2, BarChart2, Sparkles, Filter, ShieldCheck, Check, Layers, AlertCircle, RefreshCw, Key, ExternalLink, Zap, Cloud, Globe } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { X, Search, Cpu, Download, Trash2, CheckCircle2, BarChart2, Sparkles, Filter, ShieldCheck, Check, Layers, AlertCircle, RefreshCw, Key, ExternalLink, Zap, Cloud, Globe, Video } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import ModelComparisonModal from './ModelComparisonModal';
 
@@ -67,6 +67,103 @@ const CLOUD_PROVIDERS = [
   cloudProvider({ id: 'nvidia', name: 'NVIDIA Build (NIM)', color: 'from-green-500/20 via-emerald-500/10 to-green-950/40 border-green-500/40 text-green-400', getKeyUrl: 'https://build.nvidia.com/', placeholder: 'nvapi-...' }),
   cloudProvider({ id: 'mistral', name: 'Mistral AI', color: 'from-orange-600/20 via-amber-600/10 to-orange-950/40 border-orange-500/40 text-orange-400', getKeyUrl: 'https://console.mistral.ai/api-keys/', placeholder: 'mistral_...' }),
 ];
+
+
+/**
+ * Getting the packages that video generation needs.
+ *
+ * Separate from the model catalogue because it is not a model: it is PyTorch
+ * and diffusers, about 3 GB, which the packaged app does not ship because
+ * most installs never make a video. The backend has been able to fetch them
+ * all along; nothing ever asked it to.
+ *
+ * The weights are a second, much larger download that happens on first use -
+ * said here rather than discovered as a surprise after the 3 GB finishes.
+ */
+const VideoPackages = () => {
+  const [state, setState] = useState(null);
+  const [starting, setStarting] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/video/install`, { credentials: 'include' });
+      if (res.ok) setState(await res.json());
+    } catch (_) { /* backend not reachable; the panel stays quiet */ }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // While it runs, the backend collects progress lines; poll for them.
+  useEffect(() => {
+    if (state?.status !== 'running') return undefined;
+    const timer = setInterval(refresh, 3000);
+    return () => clearInterval(timer);
+  }, [state?.status, refresh]);
+
+  const start = async () => {
+    setStarting(true);
+    try {
+      await fetch(`${API_BASE}/api/video/install`, { method: 'POST', credentials: 'include' });
+      await refresh();
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  if (!state) return null;
+
+  const running = state.status === 'running';
+  const done = state.installed;
+
+  return (
+    <div className={`rounded-2xl border p-4 ${
+      done ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-amber-500/30 bg-amber-500/5'}`}>
+      <div className="flex flex-wrap items-center gap-3">
+        <Video className={`w-5 h-5 ${done ? 'text-emerald-400' : 'text-amber-400'}`} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black text-white">Video generation packages</p>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            {done
+              ? 'Installed. Ask for a video in the chat and it runs on this machine.'
+              : `PyTorch and diffusers, about ${state.approx_download_gb} GB. Not shipped with the app because most installs never generate a video.`}
+          </p>
+        </div>
+        {!done && state.can_install && (
+          <button
+            type="button"
+            onClick={start}
+            disabled={running || starting}
+            className="rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-4 py-2 text-xs font-black text-white cursor-pointer"
+          >
+            {running ? 'Installing…' : starting ? 'Starting…' : 'Install'}
+          </button>
+        )}
+      </div>
+
+      {/* Why it cannot be done from here, when that is the case. */}
+      {!done && !state.can_install && state.blocker && (
+        <p className="mt-3 text-xs leading-relaxed text-amber-300/90">{state.blocker}</p>
+      )}
+
+      {!done && state.can_install && (
+        <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+          The model weights are a separate download on first use and are far larger
+          than this — LTX-Video is about 28 GB. Worth knowing before you start.
+        </p>
+      )}
+
+      {state.error && (
+        <p className="mt-3 text-xs text-rose-400 font-mono leading-relaxed">{state.error}</p>
+      )}
+
+      {running && (state.messages || []).length > 0 && (
+        <pre className="mt-3 max-h-32 overflow-y-auto rounded-xl bg-black/40 p-3 text-[11px] leading-relaxed text-zinc-400 font-mono whitespace-pre-wrap">
+          {(state.messages || []).slice(-8).join(String.fromCharCode(10))}
+        </pre>
+      )}
+    </div>
+  );
+};
 
 const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
   const mobileDevice = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
@@ -647,6 +744,14 @@ Download it anyway?`)) {
                   leave over. A fixed vh cap overflowed the clipped modal on
                   short screens, so the list could not be scrolled at all. */}
               <div className="p-4 sm:p-6 sm:overflow-y-auto sm:overscroll-contain sm:flex-1 sm:min-h-0 space-y-4">
+
+                {/* Video packages.
+                    The chat has been saying they are "fetched on request" for
+                    a while, and POST /api/video/install has existed for just
+                    as long with nothing in the interface calling it. This is
+                    the request. */}
+                <VideoPackages />
+
                 {loading ? (
                   <div className="py-20 text-center text-zinc-500 text-sm font-semibold flex items-center justify-center gap-2">
                     <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" /> Loading Enterprise Model Catalog...
