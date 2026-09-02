@@ -156,6 +156,27 @@
     $('stop').addEventListener('click', () => vscode.postMessage({ type: 'stop' }));
     $('attach').addEventListener('click', () => vscode.postMessage({ type: 'attach' }));
 
+    /* An image on the clipboard.
+     *
+     * Pasting a screenshot did nothing at all, silently. It still cannot be
+     * sent - every route out of here is a chat completion carrying text, and
+     * the attachments are file paths the agent reads from disk - so the
+     * honest thing is to say that rather than to swallow the paste and let it
+     * look broken. Text pastes are untouched. */
+    task.addEventListener('paste', (event) => {
+        const items = [...(event.clipboardData?.items || [])];
+        const image = items.find((item) => item.type.startsWith('image/'));
+        if (!image) return;
+        event.preventDefault();
+        addEntry({
+            kind: 'note',
+            title: 'That is an image, and this agent reads text',
+            body: 'Save it into the project and ask about it by name, or use '
+                + 'Attach - the agent opens files from disk. Sending an image '
+                + 'to the model is not something this can do yet.',
+        });
+    });
+
     task.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
             event.preventDefault();

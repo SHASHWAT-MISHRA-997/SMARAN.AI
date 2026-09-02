@@ -3870,6 +3870,24 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 reason = (ready.get("candidates") or [{}])[0].get(
                     "reason", "no video model can run on this machine")
                 yield json.dumps({"token": "I cannot make that video here: " + reason}) + "\n"
+
+                # A refusal that says "fetched on request" and offers no way
+                # to request it is a dead end. The installer has been
+                # reachable at POST /api/video/install the whole time and
+                # nothing in the interface ever called it.
+                from app.video.install import status as video_install_status
+                install = video_install_status()
+                if not install.get("installed"):
+                    if install.get("can_install"):
+                        hint = (
+                            "\n\nThey can be installed from Settings -> "
+                            "Model Matrix -> Video packages. About %.1f GB, "
+                            "and it runs in the background."
+                            % install.get("approx_download_gb", 3.0))
+                        yield json.dumps({"token": hint}) + "\n"
+                    elif install.get("blocker"):
+                        yield json.dumps(
+                            {"token": "\n\n" + install["blocker"]}) + "\n"
                 return
 
             job_id = _uuid.uuid4().hex[:12]

@@ -2,7 +2,7 @@
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
   "description": "A coding agent that reads your project, changes files, runs commands and reads the results — one step at a time, in view.",
-  "version": "2.12.3",
+  "version": "2.12.4",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {
@@ -256,7 +256,45 @@
           }
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "editor.action.clipboardCopyAction",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "webviewFocus"
+      },
+      {
+        "command": "editor.action.clipboardCutAction",
+        "key": "ctrl+x",
+        "mac": "cmd+x",
+        "when": "webviewFocus"
+      },
+      {
+        "command": "editor.action.clipboardPasteAction",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "webviewFocus"
+      },
+      {
+        "command": "editor.action.selectAll",
+        "key": "ctrl+a",
+        "mac": "cmd+a",
+        "when": "webviewFocus"
+      },
+      {
+        "command": "undo",
+        "key": "ctrl+z",
+        "mac": "cmd+z",
+        "when": "webviewFocus"
+      },
+      {
+        "command": "redo",
+        "key": "ctrl+y",
+        "mac": "cmd+shift+z",
+        "when": "webviewFocus"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
