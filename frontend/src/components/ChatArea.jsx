@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch, PictureInPicture2,} from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
-import { isNativeApp, loadLink } from '../utils/hostLink';
+import { isNativeApp, loadLink, probeHost } from '../utils/hostLink';
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
 import * as nativeSpeech from '../utils/nativeSpeech';
@@ -1355,6 +1355,23 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [isDictating, setIsDictating] = useState(false);
   /** The phone's composer menu, behind the plus. */
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+
+  /* Is the computer this phone is linked to actually there?
+   *
+   * null until asked. A link is a saved address, not a promise - pair a
+   * computer once and every request afterwards goes to it, including from a
+   * different network or after it has been shut down. Nothing timed those
+   * requests out, so the phone sat waiting for ever: type a message, nothing;
+   * speak, nothing; and the desktop app working perfectly, because on the
+   * desktop the backend is right there. */
+  const [hostAlive, setHostAlive] = useState(null);
+  useEffect(() => {
+    const link = loadLink();
+    if (!isNativeApp() || !link?.url) return undefined;
+    let cancelled = false;
+    probeHost(link.url).then((ok) => { if (!cancelled) setHostAlive(ok); });
+    return () => { cancelled = true; };
+  }, []);
 
   /* Which provider and model are actually answering, on the phone.
      The chip said "LOCAL · Auto Router" whatever was set, so there was no way
@@ -3180,7 +3197,29 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
      * nowhere else. Documents, local models and desktop control genuinely do
      * need a computer and are not pretended at; plain conversation does not,
      * and now works. */
-    if (noBackend()) {
+    let onDevice = noBackend();
+    /* A link that does not answer is the same as no link, for this question.
+       Checked here rather than trusted, with the same brief probe pairing
+       uses, so a computer that is off or on another network costs three
+       seconds instead of the whole request. */
+    if (!onDevice && isNativeApp() && loadLink()?.url) {
+      // Once it has been found missing, do not spend three seconds finding it
+      // missing again on every message.
+      const alive = hostAlive === false ? false : await probeHost(loadLink().url);
+      setHostAlive(alive);
+      if (!alive) {
+        onDevice = true;
+        window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
+          detail: {
+            message: 'The computer this phone is linked to is not answering, so '
+              + 'this was answered on the phone. Documents and local models need '
+              + 'that computer; ordinary questions do not.',
+          },
+        }));
+      }
+    }
+
+    if (onDevice) {
       await answerOnDevice({
         prompt: userPrompt,
         sessionId: targetSessionId,

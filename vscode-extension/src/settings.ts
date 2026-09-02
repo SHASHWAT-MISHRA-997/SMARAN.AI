@@ -26,31 +26,10 @@ const DEFAULT_OLLAMA = 'http://127.0.0.1:11434';
 const DEFAULT_LM_STUDIO = 'http://127.0.0.1:1234/v1';
 const SECRET = (provider: string) => `smaran.key.${provider}`;
 
-/** Keys the desktop app has saved, if it is installed. */
-function keysFromInstalledApp(): Record<string, string> {
-    const roots = [
-        process.env.LOCALAPPDATA,
-        path.join(os.homedir(), 'Library', 'Application Support'),
-        path.join(os.homedir(), '.local', 'share'),
-        os.homedir(),
-    ].filter(Boolean) as string[];
-
-    for (const root of roots) {
-        const file = path.join(root, 'SMARAN.AI', 'data', 'cloud_keys.json');
-        try {
-            if (fs.existsSync(file)) {
-                const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-                if (parsed && typeof parsed === 'object') {
-                    return parsed as Record<string, string>;
-                }
-            }
-        } catch {
-            // Unreadable or malformed is not worth reporting: this is a
-            // convenience, and the panel's own fields are the real source.
-        }
-    }
-    return {};
-}
+/* The SMARAN.AI app's own key file used to be read here as a fallback, so
+   the extension worked without being set up twice. It is gone: a provider
+   nobody had touched showed KEY SAVED, and Remove could not remove it. If
+   both are wanted, paste the key in both. */
 
 export class Keys {
     constructor(private readonly secrets: vscode.SecretStorage) {}
@@ -79,16 +58,23 @@ export class Keys {
         return moved;
     }
 
+    /**
+     * The key for a provider, from this panel and nowhere else.
+     *
+     * It used to fall back to the key the SMARAN.AI app on this machine had,
+     * so the extension worked without being set up twice. That convenience
+     * cost more than it gave: a provider you had never touched showed KEY
+     * SAVED, with a Remove button that deleted a keychain entry which was not
+     * there, so the badge came straight back. Reported as "I never entered
+     * this key" - and that was exactly right.
+     *
+     * What this panel shows is now what this panel has.
+     */
     async get(provider: string): Promise<string> {
         if (!provider) {
             return '';
         }
-        const stored = await this.secrets.get(SECRET(provider));
-        if (stored) {
-            return stored;
-        }
-        const fromApp = keysFromInstalledApp();
-        return (fromApp[provider] || (provider === 'openrouter' ? fromApp.openRouter : '') || '').trim();
+        return (await this.secrets.get(SECRET(provider))) || '';
     }
 
     async set(provider: string, key: string): Promise<void> {
@@ -116,17 +102,11 @@ export class Keys {
      * hand, and six providers had been added since without anyone coming back
      * here, so their keys saved and the panel was never told.
      */
-    async configured(): Promise<Record<string, 'own' | 'app'>> {
-        const out: Record<string, 'own' | 'app'> = {};
-        const fromApp = keysFromInstalledApp();
+    async configured(): Promise<Record<string, 'own'>> {
+        const out: Record<string, 'own'> = {};
         for (const provider of PROVIDERS) {
             if (!provider.needsKey) continue;
-            if (await this.secrets.get(SECRET(provider.id))) {
-                out[provider.id] = 'own';
-            } else if ((fromApp[provider.id]
-                || (provider.id === 'openrouter' ? fromApp.openRouter : '') || '').trim()) {
-                out[provider.id] = 'app';
-            }
+            if (await this.secrets.get(SECRET(provider.id))) out[provider.id] = 'own';
         }
         return out;
     }

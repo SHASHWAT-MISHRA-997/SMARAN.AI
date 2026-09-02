@@ -86,6 +86,8 @@ const SettingsModal = ({
   const [directProvider, setDirectProvider] = useState(() => standalone.getProvider());
   const [directModel, setDirectModel] = useState(() => standalone.getModel());
   const [directModels, setDirectModels] = useState([]);
+  /** Rows where the key box has been asked for, to replace one. */
+  const [replacingKey, setReplacingKey] = useState({});
   const [directModelsLoading, setDirectModelsLoading] = useState(false);
   const [directModelError, setDirectModelError] = useState("");
 
@@ -701,23 +703,52 @@ const SettingsModal = ({
                       </button>
 
                       <div className={`mt-2.5 flex flex-wrap items-center gap-2 ${p.unavailable ? "hidden" : ""}`}>
-                        <input
-                          type="password"
-                          value={directDrafts[p.id] || ""}
-                          onChange={(e) => setDirectDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
-                          // Nothing to ask for once it is saved: the badge
-                          // beside it says so, and asking again reads as the
-                          // key not having taken.
-                          placeholder={saved ? "" : "Paste your API key"}
-                          className="min-w-0 flex-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs outline-none focus:border-indigo-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => saveDirectKey(p.id)}
-                          className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white"
-                        >
-                          Save
-                        </button>
+                        {/* The box only exists when there is a key to enter.
+                            Once one is saved there is nothing to type, and a
+                            field sitting under a KEY SAVED badge reads as the
+                            save not having taken. Replacing one is rare, so
+                            it asks first. */}
+                        {(!saved || replacingKey[p.id]) ? (
+                          <>
+                            <input
+                              type="password"
+                              value={directDrafts[p.id] || ""}
+                              onChange={(e) => setDirectDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
+                              placeholder="Paste your API key"
+                              className="min-w-0 flex-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs outline-none focus:border-indigo-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                saveDirectKey(p.id);
+                                setReplacingKey((r) => ({ ...r, [p.id]: false }));
+                              }}
+                              className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white"
+                            >
+                              Save
+                            </button>
+                            {replacingKey[p.id] && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplacingKey((r) => ({ ...r, [p.id]: false }));
+                                  setDirectDrafts((d) => ({ ...d, [p.id]: "" }));
+                                }}
+                                className="rounded-xl border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-bold"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setReplacingKey((r) => ({ ...r, [p.id]: true }))}
+                            className="rounded-xl border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-bold"
+                          >
+                            Replace key
+                          </button>
+                        )}
                         {saved && (
                           <button
                             type="button"

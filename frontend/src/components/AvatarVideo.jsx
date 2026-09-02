@@ -47,6 +47,8 @@ const AvatarVideo = ({
   const playerB = useRef(null);
   const [frontIsA, setFrontIsA] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  /** True once a frame has actually played, not merely been asked to. */
+  const [started, setStarted] = useState(false);
   const currentStateRef = useRef(null);
 
   // Which player is visible is tracked in a ref as well as state: reading it
@@ -130,6 +132,12 @@ const AvatarVideo = ({
     loop: true,
     playsInline: true,
     preload: 'auto',
+    /* Explicitly off. Android's WebView draws its own play button over a
+       <video> that has not started - a huge grey triangle across the whole
+       character, which is the first thing you see when the call opens. */
+    controls: false,
+    disablePictureInPicture: true,
+    onPlaying: () => setStarted(true),
     onError: () => setLoadError(true),
       // Filling is right for a tall portrait clip, where letterboxing left
       // large empty bands. It is wrong for a square composition in a wide
@@ -159,8 +167,19 @@ const AvatarVideo = ({
 
   return (
     <div className={`relative w-full h-full overflow-hidden ${className}`}>
-      <video ref={playerA} {...sharedVideoProps} style={{ opacity: frontIsA ? 1 : 0 }} />
-      <video ref={playerB} {...sharedVideoProps} style={{ opacity: frontIsA ? 0 : 1 }} />
+      {/* Held back until a frame has actually played. Even with controls off,
+          the moment between mounting and the first frame showed the platform's
+          own placeholder; covering it is the only thing that works on every
+          WebView. */}
+      {!started && (
+        <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
+          <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-purple-600/30 via-indigo-500/20 to-pink-500/30 border border-purple-400/30 animate-pulse" />
+        </div>
+      )}
+      <video ref={playerA} {...sharedVideoProps}
+             style={{ opacity: started && frontIsA ? 1 : 0 }} />
+      <video ref={playerB} {...sharedVideoProps}
+             style={{ opacity: started && !frontIsA ? 1 : 0 }} />
 
       {/* Soft vignette so the clip sits inside the dark interface. */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(0,0,0,0.65)_100%)]" />

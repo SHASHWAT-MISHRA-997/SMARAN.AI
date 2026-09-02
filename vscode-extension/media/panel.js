@@ -377,14 +377,11 @@
                 const running = status && status !== 'not running';
                 line.appendChild(el('span', running ? 'badge ok' : 'badge', status || 'on this machine'));
             }
-            /* Where the key came from, not just that there is one.
-               A key the SMARAN.AI app on this machine already has is borrowed
-               from it, so the extension works without setting anything up
-               twice - but it was labelled "KEY SAVED" beside a Remove button,
-               which reads as a key you entered and cannot remember entering. */
-            if (configured[p.id] === 'app') {
-                line.appendChild(el('span', 'badge', 'from the app'));
-            } else if (configured[p.id]) {
+            /* One badge, and it only ever means a key entered here. The
+               extension used to fall back to the desktop app's key file, so
+               a provider nobody had touched showed this. It does not any
+               more: what this panel shows is what this panel has. */
+            if (configured[p.id]) {
                 line.appendChild(el('span', 'badge ok', savedJust === p.id ? 'key saved ✓' : 'key saved'));
             }
             if (p.free_models === 'none') line.appendChild(el('span', 'badge paid', 'paid only'));
