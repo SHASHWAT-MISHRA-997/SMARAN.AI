@@ -530,6 +530,16 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
                             <span className="mt-0.5 line-clamp-2 block text-xs text-zinc-400 leading-relaxed">
                               {row.description || row.target || '—'}
                             </span>
+                            {/* Why it is not running, on the row itself. The
+                                backend has been sending this all along and it
+                                was only visible after opening the plugin, so
+                                "Needs setup" meant a click to find out which
+                                setup. */}
+                            {row.runtime_status === 'setup_required' && row.status_detail && (
+                              <span className="mt-1.5 block text-[11px] leading-relaxed text-amber-400/90">
+                                {row.status_detail}
+                              </span>
+                            )}
                             {row.capabilities?.length > 0 && (
                               <span className="mt-2 flex flex-wrap gap-1">
                                 {row.capabilities.slice(0, 4).map((cap) => (
@@ -543,7 +553,12 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
                         </button>
 
                         <div className="flex items-center gap-3 self-end sm:self-center">
-                          <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold ${state.tone}`}>
+                          {/* The reason, not just the word.
+                              "Needs setup" on its own sends you clicking into
+                              the row to find out what setup - and the answer
+                              was already being sent with the list. */}
+                          <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold ${state.tone}`}
+                                title={row.status_detail || state.label}>
                             <span className={`h-2 w-2 rounded-full ${state.dot}`} />
                             {state.label}
                           </span>

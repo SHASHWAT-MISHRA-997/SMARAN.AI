@@ -408,6 +408,10 @@ const App = () => {
     } else if (view === 'updates') {
       setSettingsTab('updates');
       setIsSettingsOpen(true);
+    } else if (view === 'models') {
+      // The model chip in the header sends this. The Model Hub is where the
+      // models this machine can run are listed and downloaded.
+      setIsModelHubOpen(true);
     } else if (view === 'terminal') {
       // Not a view - a panel over whatever you were doing. Without this the
       // guard below would have swallowed it silently, which is exactly the

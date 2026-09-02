@@ -3694,10 +3694,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                 <ChevronDown className="w-3 h-3 ml-1 shrink-0 opacity-70" />
               </button>
             ) : (
-              <span className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0" title={activeModelDisplay}>
+              /* It looked like a button - a bordered chip with a pointer
+                 cursor - and did nothing. "Auto Router" chooses for you, and
+                 there was no way from here to choose yourself. It opens the
+                 Model Matrix, which is where the models this machine can run
+                 are listed. */
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('smaran:navigate', { detail: { view: 'models' } }))}
+                className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0"
+                title={`${activeModelDisplay} — click to choose a model`}
+              >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse mr-1.5" />
                 <span className="truncate">{activeModelDisplay}</span>
-              </span>
+                <ChevronDown className="w-3 h-3 ml-1 shrink-0 opacity-70" />
+              </button>
             )}
           </div>
         </div>
