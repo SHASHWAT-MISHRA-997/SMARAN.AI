@@ -288,8 +288,18 @@
         }));
     }
 
+    /* Clicking away closes the menu - but not the chip that opens it.
+     *
+     * This named only the mode chip. The model chip's own handler opened the
+     * menu, the same click then bubbled to here, the target was not the mode
+     * chip, and the menu was hidden again in the same tick. So the model list
+     * never appeared from the chip: you clicked it, saw a tooltip, and
+     * nothing else. closest() rather than an identity check, because the
+     * click usually lands on the text inside the button, not the button. */
     document.addEventListener('click', (event) => {
-        if (!modeMenu.hidden && !modeMenu.contains(event.target) && event.target !== $('modeChip')) {
+        const onAChip = event.target instanceof Element
+            && event.target.closest('#modeChip, #modelChip');
+        if (!modeMenu.hidden && !modeMenu.contains(event.target) && !onAChip) {
             modeMenu.hidden = true;
         }
     });
