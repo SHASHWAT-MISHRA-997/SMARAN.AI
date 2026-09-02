@@ -66,6 +66,10 @@ const CLOUD_PROVIDERS = [
   cloudProvider({ id: 'huggingface', name: 'Hugging Face Inference', color: 'from-yellow-500/20 via-amber-500/10 to-yellow-950/40 border-yellow-500/40 text-yellow-400', getKeyUrl: 'https://huggingface.co/settings/tokens', placeholder: 'hf_...' }),
   cloudProvider({ id: 'nvidia', name: 'NVIDIA Build (NIM)', color: 'from-green-500/20 via-emerald-500/10 to-green-950/40 border-green-500/40 text-green-400', getKeyUrl: 'https://build.nvidia.com/', placeholder: 'nvapi-...' }),
   cloudProvider({ id: 'mistral', name: 'Mistral AI', color: 'from-orange-600/20 via-amber-600/10 to-orange-950/40 border-orange-500/40 text-orange-400', getKeyUrl: 'https://console.mistral.ai/api-keys/', placeholder: 'mistral_...' }),
+  // Video, not chat. One key reaches many video models rather than one
+  // company's own, which is why it is this one - and the generation is billed
+  // to that account, so nothing uses it until the key is deliberately saved.
+  cloudProvider({ id: 'replicate', name: 'Replicate — video generation', color: 'from-fuchsia-500/20 via-pink-500/10 to-fuchsia-950/40 border-fuchsia-500/40 text-fuchsia-400', getKeyUrl: 'https://replicate.com/account/api-tokens', placeholder: 'r8_...' }),
 ];
 
 

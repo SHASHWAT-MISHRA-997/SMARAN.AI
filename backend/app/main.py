@@ -2417,6 +2417,9 @@ _CLOUD_PROVIDER_ENV_VARS = {
     "nvidia": "NVIDIA_API_KEY",
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
+    # Video, not chat. Kept in the same store so it is saved, restored and
+    # removed the same way every other key is.
+    "replicate": "REPLICATE_API_TOKEN",
 }
 
 
@@ -3869,7 +3872,36 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             if not ready.get("recommended"):
                 reason = (ready.get("candidates") or [{}])[0].get(
                     "reason", "no video model can run on this machine")
-                yield json.dumps({"token": "I cannot make that video here: " + reason}) + "\n"
+                from app.video import hosted as hosted_video
+
+                # Somebody else's machine, when this one cannot. Only with a
+                # key that is already saved: the generation is billed to that
+                # account and the prompt goes to that company, so it is never
+                # a silent fallback.
+                if hosted_video.configured():
+                    yield json.dumps({"token":
+                        "This machine cannot make it, so it is going to "
+                        "Replicate with your key. Billed to your account.\n\n"
+                        }) + "\n"
+                    lines_seen = []
+                    try:
+                        loop = asyncio.get_running_loop()
+                        url = await loop.run_in_executor(
+                            None,
+                            lambda: hosted_video.generate(
+                                clean_prompt, lines_seen.append))
+                    except Exception as hosted_error:
+                        yield json.dumps(
+                            {"token": str(hosted_error)}) + "\n"
+                        return
+                    for line in lines_seen:
+                        yield json.dumps({"token": str(line) + "\n"}) + "\n"
+                    yield json.dumps(
+                        {"token": "\n\n" + url}) + "\n"
+                    return
+
+                yield json.dumps(
+                    {"token": "I cannot make that video here: " + reason}) + "\n"
 
                 # A refusal that says "fetched on request" and offers no way
                 # to request it is a dead end. The installer has been
@@ -3881,8 +3913,9 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                     if install.get("can_install"):
                         hint = (
                             "\n\nThey can be installed from Settings -> "
-                            "Model Matrix -> Video packages. About %.1f GB, "
-                            "and it runs in the background."
+                            "Model Matrix -> Video packages. About %.1f GB. "
+                            "Or save a Replicate key there to make it on "
+                            "hosted hardware instead."
                             % install.get("approx_download_gb", 3.0))
                         yield json.dumps({"token": hint}) + "\n"
                     elif install.get("blocker"):
