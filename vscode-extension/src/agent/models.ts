@@ -36,7 +36,6 @@ export const OPENAI_COMPATIBLE: Record<string, string> = {
     openrouter: 'https://openrouter.ai/api/v1',
     deepseek: 'https://api.deepseek.com/v1',
     nvidia: 'https://integrate.api.nvidia.com/v1',
-    ollamacloud: 'https://ollama.com/v1',
     cerebras: 'https://api.cerebras.ai/v1',
     mistral: 'https://api.mistral.ai/v1',
     together: 'https://api.together.xyz/v1',

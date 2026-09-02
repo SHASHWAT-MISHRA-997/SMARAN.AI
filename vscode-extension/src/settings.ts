@@ -103,8 +103,8 @@ export class Keys {
      * Which providers have a key, asked of the list that actually exists.
      *
      * This was seven ids typed in by hand, and six providers had been added
-     * since without anyone thinking to come back here: Ollama Cloud,
-     * Cerebras, Mistral, Together, Cohere and SiliconFlow. Their keys saved
+     * since without anyone thinking to come back here: Cerebras, Mistral,
+     * Together, Cohere and SiliconFlow. Their keys saved
      * correctly into the keychain and the panel was simply never told, so the
      * row kept saying "Paste your API key" with no KEY SAVED badge and no
      * Remove button - it looked exactly like a save that had failed.

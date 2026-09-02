@@ -38,6 +38,9 @@ export interface Provider {
     hint: string;
 }
 
+/* Ollama Cloud was here and was removed at the owner's request. Its API does
+   answer from Node, so it worked; it is simply not wanted. Written down so
+   the next person does not spend an afternoon proving it is possible. */
 export const PROVIDERS: Provider[] = [
     {
         id: '', free_models: 'all', label: 'Ollama (on this machine)', local: true,
@@ -48,17 +51,6 @@ export const PROVIDERS: Provider[] = [
         id: 'lmstudio', free_models: 'all', label: 'LM Studio (on this machine)', local: true,
         setupUrl: 'https://lmstudio.ai', setupLabel: 'Get LM Studio',
         hint: 'No key. Start its local server (Developer tab) and whatever you have loaded appears below.',
-    },
-    {
-        /* Ollama's hosted service, for models too large for the machine in
-           front of you. Same key, same tags, someone else's hardware.
-
-           Only here, not in the phone app: like NVIDIA, its API refuses
-           cross-origin requests, so from a WebView the call never leaves the
-           device. An extension is Node, which has no such rule. */
-        id: 'ollamacloud', free_models: 'none', needsKey: true, label: 'Ollama Cloud',
-        keyUrl: 'https://ollama.com/settings/keys',
-        hint: 'Ollama’s hosted models, for ones too big to run here. Paid.',
     },
     {
         id: 'groq', free_models: 'all', needsKey: true, label: 'Groq', keyUrl: 'https://console.groq.com/keys', free: true,
@@ -330,7 +322,6 @@ export async function listModels(
         case 'openai': return openAiStyleModels('https://api.openai.com/v1', key, 'OpenAI');
         case 'deepseek': return openAiStyleModels('https://api.deepseek.com/v1', key, 'DeepSeek');
         case 'nvidia': return openAiStyleModels('https://integrate.api.nvidia.com/v1', key, 'NVIDIA');
-        case 'ollamacloud': return openAiStyleModels('https://ollama.com/v1', key, 'Ollama Cloud');
         case 'cerebras': return openAiStyleModels('https://api.cerebras.ai/v1', key, 'Cerebras');
         case 'mistral': return openAiStyleModels('https://api.mistral.ai/v1', key, 'Mistral');
         case 'together': return openAiStyleModels('https://api.together.xyz/v1', key, 'Together');
