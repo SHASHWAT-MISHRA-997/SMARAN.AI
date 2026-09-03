@@ -1273,14 +1273,19 @@ const SettingsModal = ({
                 </div>
 
                 {/* Status Hero Card */}
-                <div className="p-5 rounded-3xl border border-red-500/30 bg-gradient-to-br from-red-500/5 via-zinc-50 to-zinc-100 dark:from-red-500/10 dark:via-zinc-900/60 dark:to-zinc-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
+                <div className="p-5 rounded-3xl border border-red-500/30 bg-gradient-to-br from-red-500/5 via-zinc-50 to-zinc-100 dark:from-red-500/10 dark:via-zinc-900/60 dark:to-zinc-950 flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5 min-w-0">
                     <div className="w-12 h-12 rounded-2xl bg-red-600/15 border border-red-500/40 text-red-500 flex items-center justify-center shrink-0">
                       <Sparkles className="w-6 h-6 animate-pulse" />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-black text-zinc-900 dark:text-white">
+                      {/* flex-wrap and a badge that will not break.
+                          "UPDATE V2.10.12 AVAILABLE" was wrapping onto two
+                          lines inside its pill, which grew the pill until it
+                          touched the card's border. The name gives way first;
+                          the badge keeps its shape. */}
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        <span className="text-sm font-black text-zinc-900 dark:text-white truncate">
                           SMARAN.AI v{updateInfo?.current_version || APP_VERSION}
                         </span>
                         {/* "Up to Date" used to show whenever no update had
@@ -1289,7 +1294,7 @@ const SettingsModal = ({
                             checked at all, and the badge claimed the newest
                             version anyway, directly above a line saying it
                             could not know. A claim needs an answer behind it. */}
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                        <span className={`shrink-0 whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                           updateInfo?.update_available
                             ? "bg-red-500/20 text-red-500 border border-red-500/30"
                             : updateInfo
