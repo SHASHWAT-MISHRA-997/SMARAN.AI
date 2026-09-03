@@ -19,6 +19,15 @@ import { URL } from 'url';
 export interface Message {
     role: 'system' | 'user' | 'assistant';
     content: string;
+    /**
+     * Pictures attached to this turn, base64 with their type.
+     *
+     * Every provider takes them in a different shape and the four shapes are
+     * handled below. A model that cannot see will say so in its own words -
+     * that is better than this file keeping a list of which models have eyes,
+     * which would be wrong within a month.
+     */
+    images?: { data: string; mime: string }[];
 }
 
 export interface Choice {
@@ -105,6 +114,23 @@ function contentOrThrow(provider: string, status: number, body: string): unknown
     return JSON.parse(body);
 }
 
+/** The OpenAI content-parts shape, used only when there is a picture. */
+function toOpenAiMessage(message: Message): unknown {
+    if (!message.images?.length) {
+        return { role: message.role, content: message.content };
+    }
+    return {
+        role: message.role,
+        content: [
+            { type: 'text', text: message.content },
+            ...message.images.map((image) => ({
+                type: 'image_url',
+                image_url: { url: `data:${image.mime};base64,${image.data}` },
+            })),
+        ],
+    };
+}
+
 async function openAiStyle(base: string, choice: Choice, messages: Message[]): Promise<string> {
     const { status, body } = await post(
         `${base.replace(/\/+$/, '')}/chat/completions`,
@@ -117,7 +143,12 @@ async function openAiStyle(base: string, choice: Choice, messages: Message[]): P
          *
          * 4096 is more than any single step of this agent produces; a whole
          * file being written is well under it. */
-        { model: choice.model, messages, temperature: 0.2, max_tokens: 4096 },
+        {
+            model: choice.model,
+            messages: messages.map(toOpenAiMessage),
+            temperature: 0.2,
+            max_tokens: 4096,
+        },
         choice.apiKey ? { Authorization: `Bearer ${choice.apiKey}` } : {},
     );
     const data = contentOrThrow(choice.provider, status, body) as {
@@ -161,7 +192,16 @@ async function gemini(choice: Choice, messages: Message[]): Promise<string> {
     const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
     const contents = messages
         .filter((m) => m.role !== 'system')
-        .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+        .map((m) => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [
+                { text: m.content },
+                // Gemini calls it inline_data, and wants the base64 bare.
+                ...(m.images || []).map((image) => ({
+                    inline_data: { mime_type: image.mime, data: image.data },
+                })),
+            ],
+        }));
 
     const payload: Record<string, unknown> = { contents, generationConfig: { temperature: 0.2 } };
     if (system) {
@@ -178,11 +218,28 @@ async function gemini(choice: Choice, messages: Message[]): Promise<string> {
     return (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim();
 }
 
+/** Anthropic wants each picture as its own content block with a source. */
+function toAnthropicMessage(message: Message): unknown {
+    if (!message.images?.length) {
+        return { role: message.role, content: message.content };
+    }
+    return {
+        role: message.role,
+        content: [
+            { type: 'text', text: message.content },
+            ...message.images.map((image) => ({
+                type: 'image',
+                source: { type: 'base64', media_type: image.mime, data: image.data },
+            })),
+        ],
+    };
+}
+
 async function anthropic(choice: Choice, messages: Message[]): Promise<string> {
     const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
     const payload: Record<string, unknown> = {
         model: choice.model,
-        messages: messages.filter((m) => m.role !== 'system'),
+        messages: messages.filter((m) => m.role !== 'system').map(toAnthropicMessage),
         max_tokens: 4096,
         temperature: 0.2,
     };
@@ -204,7 +261,10 @@ async function ollama(choice: Choice, messages: Message[]): Promise<string> {
         `${choice.ollamaUrl.replace(/\/+$/, '')}/api/chat`,
         {
             model: choice.model,
-            messages,
+            // Ollama takes pictures as a bare base64 array on the message.
+            messages: messages.map((m) => (m.images?.length
+                ? { role: m.role, content: m.content, images: m.images.map((i) => i.data) }
+                : { role: m.role, content: m.content })),
             stream: false,
             options: { temperature: 0.2, num_predict: 2048 },
         },

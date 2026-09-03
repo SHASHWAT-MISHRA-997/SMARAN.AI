@@ -765,3 +765,19 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
     background: var(--violet);
     animation: pulse 1.1s ease-in-out infinite;
 }
+
+/* An attachment chip that shows what it is holding.
+ * A name alone made a pasted screenshot and a source file look identical, and
+ * said nothing about whether either had been read. */
+.chip-thumb {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    object-fit: cover;
+    border: 1px solid var(--edge);
+}
+.chip-size {
+    color: var(--ink-far);
+    font-size: 9.5px;
+    letter-spacing: .04em;
+}

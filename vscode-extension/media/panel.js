@@ -173,18 +173,33 @@
      * the attachments are file paths the agent reads from disk - so the
      * honest thing is to say that rather than to swallow the paste and let it
      * look broken. Text pastes are untouched. */
+    /* A screenshot on the clipboard becomes an attachment.
+     *
+     * It used to do nothing at all, and then it explained why it could do
+     * nothing. Now it is sent: the four provider shapes for an image are all
+     * handled, so whether it can be read depends on the model rather than on
+     * this panel. A model without eyes will say so in its own words, which is
+     * a better answer than a refusal written here. */
     task.addEventListener('paste', (event) => {
         const items = [...(event.clipboardData?.items || [])];
         const image = items.find((item) => item.type.startsWith('image/'));
         if (!image) return;
         event.preventDefault();
-        addEntry({
-            kind: 'note',
-            title: 'That is an image, and this agent reads text',
-            body: 'Save it into the project and ask about it by name, or use '
-                + 'Attach - the agent opens files from disk. Sending an image '
-                + 'to the model is not something this can do yet.',
-        });
+        const file = image.getAsFile();
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            const url = String(reader.result || '');
+            const comma = url.indexOf(',');
+            if (comma < 0) return;
+            vscode.postMessage({
+                type: 'attachImage',
+                name: file.name || `pasted-${Date.now()}.png`,
+                mime: file.type || 'image/png',
+                data: url.slice(comma + 1),
+            });
+        };
+        reader.readAsDataURL(file);
     });
 
     task.addEventListener('keydown', (event) => {
@@ -821,16 +836,34 @@
                 break;
             }
 
-            case 'attachments':
+            case 'attachments': {
+                /* A name was all a chip said, so an attached screenshot and an
+                   attached file looked identical and neither showed whether it
+                   had actually been read. */
                 attachments.replaceChildren();
-                (message.files || []).forEach((file) => {
+                const items = message.items
+                    || (message.files || []).map((path) => ({ path, kind: 'text' }));
+                items.forEach((item) => {
                     const chip = el('span', 'chip');
-                    chip.appendChild(el('span', null, file));
+                    if (item.preview) {
+                        const thumb = el('img', 'chip-thumb');
+                        thumb.src = item.preview;
+                        thumb.alt = '';
+                        chip.appendChild(thumb);
+                    }
+                    chip.appendChild(el('span', null, item.path.split('/').pop() || item.path));
+                    if (item.bytes) {
+                        chip.appendChild(el('span', 'chip-size',
+                            item.kind === 'image'
+                                ? `${Math.max(1, Math.round(item.bytes / 1024))} KB image`
+                                : `${item.bytes} chars${item.truncated ? ', trimmed' : ''}`));
+                    }
                     chip.appendChild(button('×', 'tiny', () =>
-                        vscode.postMessage({ type: 'unattach', path: file })));
+                        vscode.postMessage({ type: 'unattach', path: item.path })));
                     attachments.appendChild(chip);
                 });
                 break;
+            }
 
             case 'sessions':
                 drawSessions(message.sessions || []);

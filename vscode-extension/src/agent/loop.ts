@@ -174,6 +174,10 @@ export async function* run(
     /* Optional, so every existing caller and test keeps working and the agent
        behaves exactly as before when no server is configured. */
     mcp?: McpRegistry,
+    /* Pictures attached to this turn. They ride on the first user message and
+       nowhere else: repeating them on every step would resend the same
+       megabytes for every tool call. */
+    images?: { data: string; mime: string }[],
 ): AsyncGenerator<AgentEvent> {
     const preamble = mode === 'plan'
         // Told, as well as enforced. Refusing a write the model did not know
@@ -202,7 +206,7 @@ ${extra}`
             content: SYSTEM.replace('%TOOLS%', toolList) + preamble + identify(choice),
         },
         ...history,
-        { role: 'user', content: task },
+        { role: 'user', content: task, images: images?.length ? images : undefined },
     ];
 
     // What was actually done, so a claim of completion can be checked against

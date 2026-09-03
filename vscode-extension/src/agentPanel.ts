@@ -37,9 +37,24 @@ const ATTACH_LIMIT = 60_000;
 
 interface Attachment {
     path: string;
+    /** Empty for an image: there is no text in a screenshot. */
     text: string;
     truncated: boolean;
+    /** Base64, without the data: prefix. Present only for images. */
+    image?: string;
+    /** image/png, image/jpeg - what the model has to be told it is. */
+    mime?: string;
 }
+
+/** Extensions a picture arrives as. Read as bytes rather than as text. */
+const IMAGE_TYPES: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+};
 
 export class AgentPanel implements vscode.WebviewViewProvider {
     public static readonly viewId = 'smaran-ai.chatView';
@@ -153,9 +168,26 @@ export class AgentPanel implements vscode.WebviewViewProvider {
 
             case 'attach': await this.attach(); break;
 
+            case 'attachImage': {
+                /* A screenshot pasted into the composer. Held exactly as the
+                   picker holds one, so there is one attachment type and one
+                   path to the model rather than two. */
+                const name = String(message.name || `pasted-${Date.now()}.png`);
+                this.attachments = this.attachments.filter((a) => a.path !== name);
+                this.attachments.push({
+                    path: name,
+                    text: '',
+                    truncated: false,
+                    image: String(message.data || ''),
+                    mime: String(message.mime || 'image/png'),
+                });
+                this.sendAttachments();
+                break;
+            }
+
             case 'unattach':
                 this.attachments = this.attachments.filter((a) => a.path !== message.path);
-                this.post({ type: 'attachments', files: this.attachments.map((a) => a.path) });
+                this.sendAttachments();
                 break;
 
             case 'setup': await this.sendSetup(); break;
@@ -474,19 +506,47 @@ export class AgentPanel implements vscode.WebviewViewProvider {
         }
         for (const uri of picked) {
             const shown = folder ? path.relative(folder, uri.fsPath).split(path.sep).join('/') : uri.fsPath;
+            const mime = IMAGE_TYPES[path.extname(uri.fsPath).toLowerCase()];
             try {
-                const raw = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+                const bytes = Buffer.from(await vscode.workspace.fs.readFile(uri));
                 this.attachments = this.attachments.filter((a) => a.path !== shown);
-                this.attachments.push({
-                    path: shown,
-                    text: raw.slice(0, ATTACH_LIMIT),
-                    truncated: raw.length > ATTACH_LIMIT,
-                });
+                if (mime) {
+                    // A picture read as UTF-8 is a page of replacement
+                    // characters, which is what used to be sent.
+                    this.attachments.push({
+                        path: shown, text: '', truncated: false,
+                        image: bytes.toString('base64'), mime,
+                    });
+                } else {
+                    const raw = bytes.toString('utf8');
+                    this.attachments.push({
+                        path: shown,
+                        text: raw.slice(0, ATTACH_LIMIT),
+                        truncated: raw.length > ATTACH_LIMIT,
+                    });
+                }
             } catch {
-                void vscode.window.showWarningMessage(`${shown} could not be read as text.`);
+                void vscode.window.showWarningMessage(`${shown} could not be read.`);
             }
         }
-        this.post({ type: 'attachments', files: this.attachments.map((a) => a.path) });
+        this.sendAttachments();
+    }
+
+    /** What is attached, in a shape the panel can show rather than just name. */
+    private sendAttachments(): void {
+        this.post({
+            type: 'attachments',
+            files: this.attachments.map((a) => a.path),
+            items: this.attachments.map((a) => ({
+                path: a.path,
+                kind: a.image ? 'image' : 'text',
+                // Small enough to sit in a chip; it is the same bytes the model
+                // will be given, so the preview cannot disagree with what is sent.
+                preview: a.image ? `data:${a.mime};base64,${a.image}` : undefined,
+                bytes: a.image ? Math.round((a.image.length * 3) / 4) : a.text.length,
+                truncated: a.truncated,
+            })),
+        });
     }
 
     /**
@@ -584,6 +644,18 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                rather than discovered halfway through. A server that will not
                start is not fatal: its tools are absent and the panel says
                why, which beats an agent quietly missing half its abilities. */
+            /* What this mode will and will not do, before it does anything.
+               A mode that never interrupts looks like a mode that does
+               nothing - the run that prompted this only read files, which no
+               mode gates, so Manual sat silent throughout and read as fake. */
+            const active = MODES.find((m) => m.id === mode);
+            if (active) {
+                this.record({
+                    kind: 'note',
+                    title: `${active.label} — ${active.description}`,
+                });
+            }
+
             await this.mcp.use(mcpServers());
             const report = this.mcp.report();
             const broken = report.filter((r) => !r.connected);
@@ -598,6 +670,9 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             for await (const event of run(
                 composed, folder, history, choice, () => this.stopRequested,
                 mode, (call, because) => this.ask(call, because), this.mcp,
+                this.attachments
+                    .filter((a) => a.image && a.mime)
+                    .map((a) => ({ data: a.image as string, mime: a.mime as string })),
             )) {
                 this.record(this.asEntry(event, folder));
                 if (event.type === 'done' && this.session) {
