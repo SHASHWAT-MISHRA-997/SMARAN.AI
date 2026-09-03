@@ -535,7 +535,11 @@ const SettingsModal = ({
           </nav>
 
           {/* Right Content Area */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-7 space-y-5 sm:space-y-6 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+          {/* min-w-0 and overflow-x-hidden: a flex child sizes to its content
+              by default, so one wide thing inside - a release note with a long
+              unbroken line, a file path - widened this pane past the dialog and
+              put a horizontal scrollbar across the bottom of it. */}
+          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-7 space-y-5 sm:space-y-6 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
             
             {/* 1. GENERAL & THEME TAB */}
             {activeTab === "general" && (
@@ -1301,7 +1305,11 @@ const SettingsModal = ({
                     <h4 className="text-[11px] font-black uppercase tracking-wider text-zinc-500">
                       What&apos;s new in v{updateInfo.latest_version}
                     </h4>
-                    <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-[11px] leading-5 text-zinc-600 dark:text-zinc-400">
+                    {/* break-words, because release notes carry things that
+                        do not break on their own: html.sm-pip, an address like
+                        192.168.1.5:3003, a file path. One of those is wider
+                        than the card at a narrow window. */}
+                    <p className="mt-2 max-h-40 overflow-y-auto overflow-x-hidden break-words whitespace-pre-wrap text-[11px] leading-5 text-zinc-600 dark:text-zinc-400">
                       {String(updateInfo.notes).replace(/[*#`]/g, '').trim().slice(0, 1200)}
                     </p>
                     <p className="mt-2.5 text-[10px] text-zinc-500">
