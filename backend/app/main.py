@@ -262,6 +262,38 @@ from app import usage_reporting
 usage_reporting.start()
 
 
+@app.on_event("shutdown")
+async def _settle_the_database() -> None:
+    """Fold the write-ahead log back in before the process goes.
+
+    The backend runs on a daemon thread inside the desktop window. When the
+    window closes, the shutdown is asked for politely and then waited on for
+    ten seconds - and if it has not finished by then the process exits anyway
+    and that thread dies wherever it happens to be, which can be in the middle
+    of a checkpoint.
+
+    A checkpoint cut in half is not, by itself, damage: the write-ahead log is
+    still there and the next open replays it. Measured, twelve times out of
+    twelve. What was measured too is what happens when that log is not there -
+    the file keeps a header claiming more pages than it holds, and every read
+    of the missing part answers "database disk image is malformed", which is
+    the state this app's own store was found in on 31 August.
+
+    So the log is folded in and the file left whole while there is still a
+    thread to do it, rather than left for a next start that may not get one.
+    """
+    if not settings.DATABASE_URL.startswith("sqlite"):
+        return
+    try:
+        from sqlalchemy import text as _text
+
+        with engine.connect() as connection:
+            connection.execute(_text("PRAGMA wal_checkpoint(TRUNCATE)"))
+        engine.dispose()
+    except Exception as exc:  # noqa: BLE001 - a tidy exit is not worth a crash
+        logger.warning("The database could not be settled on the way out: %s", exc)
+
+
 @app.on_event("startup")
 async def _load_enabled_plugins() -> None:
     """Bring up whatever the user has switched on.
