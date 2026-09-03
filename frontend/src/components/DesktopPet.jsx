@@ -342,7 +342,7 @@ const DesktopPet = () => {
   return (
     <aside
       aria-label="Desktop AI Companion"
-      className="sm-pet fixed right-3 sm:right-6 md:right-8 z-30 flex flex-col items-end pointer-events-none transition-all duration-300"
+      className="sm-pet fixed z-30 flex flex-col items-end pointer-events-none transition-all duration-300"
     >
       {/* Interactive Floating speech bubble */}
       {showMessage && !minimized && (

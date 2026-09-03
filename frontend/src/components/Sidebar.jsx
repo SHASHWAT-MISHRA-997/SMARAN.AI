@@ -409,6 +409,22 @@ const Sidebar = ({
     );
   };
 
+  /* How much of the right edge the sidebar is occupying.
+   *
+   * The pet is position:fixed, so it is placed against the window, while the
+   * sidebar is a flex sibling that takes real layout space. Move the sidebar
+   * to the right and the pet sits underneath it - reported as the pet being
+   * cut off. Published as a variable rather than guessed at in CSS, because
+   * the rail is 64px collapsed and 304px expanded and it animates between
+   * them. */
+  useEffect(() => {
+    const width = position === 'right'
+      ? (expanded ? '304px' : '64px')
+      : '0px';
+    document.documentElement.style.setProperty('--sm-rail-right', width);
+    return () => document.documentElement.style.setProperty('--sm-rail-right', '0px');
+  }, [position, expanded]);
+
   /* Desktop sidebar: collapsed icon rail or expanded panel */
   const sidebarDesktop = (
     <aside className={`

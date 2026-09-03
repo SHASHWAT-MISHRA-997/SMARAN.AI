@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import {
+import { Lock,
   X, Cpu, Monitor, Sparkles, SlidersHorizontal, Wifi, PawPrint,
   UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop,
   ShieldCheck, HardDrive, Database, Zap, RefreshCw, Trash2, CheckCircle2,
@@ -88,6 +88,49 @@ const SettingsModal = ({
   const [directModels, setDirectModels] = useState([]);
   /** Rows where the key box has been asked for, to replace one. */
   const [replacingKey, setReplacingKey] = useState({});
+
+  /* Screen lock.
+     The lock itself has existed all along - PinLock gates the whole app and
+     /api/lock is mounted - but the only way to set a PIN was inside the sign-up
+     flow, so anyone past that point could not find it. Reported as "there is no
+     PIN system". Same endpoints, reachable from Settings. */
+  const [lockState, setLockState] = useState(null);
+  const [lockPin, setLockPin] = useState("");
+  const [lockCurrentPin, setLockCurrentPin] = useState("");
+  const [lockNote, setLockNote] = useState("");
+  const [lockBusy, setLockBusy] = useState(false);
+
+  const refreshLock = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/lock/status`, { credentials: "include" });
+      if (res.ok) setLockState(await res.json());
+    } catch (_) { /* no backend here; the section stays hidden */ }
+  };
+
+  useEffect(() => { if (isOpen && !noBackend()) refreshLock(); }, [isOpen]);
+
+  const callLock = async (path, body, done) => {
+    setLockBusy(true);
+    setLockNote("");
+    try {
+      const res = await fetch(`${API_BASE}/api/lock/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || `That did not work (${res.status}).`);
+      setLockPin("");
+      setLockCurrentPin("");
+      setLockNote(data?.message || done);
+      await refreshLock();
+    } catch (error) {
+      setLockNote(error?.message || "That did not work.");
+    } finally {
+      setLockBusy(false);
+    }
+  };
   const [directModelsLoading, setDirectModelsLoading] = useState(false);
   const [directModelError, setDirectModelError] = useState("");
 
@@ -658,6 +701,79 @@ const SettingsModal = ({
                     </select>
                   </div>}
                 </div>
+
+                {/* SCREEN LOCK.
+                    The lock and its endpoints have existed all along; the only
+                    place to set a PIN was inside the sign-up flow, which anyone
+                    already signed in never sees again. */}
+                {!noBackend() && lockState && (
+                  <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Lock className={`w-5 h-5 ${lockState.enabled ? "text-emerald-500" : "text-zinc-500"}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-black text-zinc-900 dark:text-white">Screen lock</p>
+                        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                          {lockState.enabled
+                            ? "A PIN is asked for every time the app starts."
+                            : `Ask for a PIN when the app starts. ${lockState.min_length}–${lockState.max_length} digits.`}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {lockState.enabled && (
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          value={lockCurrentPin}
+                          onChange={(e) => setLockCurrentPin(e.target.value.replace(/\D/g, ""))}
+                          placeholder="Current PIN"
+                          className="w-32 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs outline-none focus:border-indigo-500"
+                        />
+                      )}
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        value={lockPin}
+                        onChange={(e) => setLockPin(e.target.value.replace(/\D/g, ""))}
+                        placeholder={lockState.enabled ? "New PIN" : "Choose a PIN"}
+                        className="w-32 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        disabled={lockBusy || lockPin.length < (lockState.min_length || 4)}
+                        onClick={() => callLock("set",
+                          { pin: lockPin, current_pin: lockState.enabled ? lockCurrentPin : undefined },
+                          "Saved.")}
+                        className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40"
+                      >
+                        {lockState.enabled ? "Change PIN" : "Turn on"}
+                      </button>
+                      {lockState.enabled && (
+                        <button
+                          type="button"
+                          disabled={lockBusy || lockCurrentPin.length < (lockState.min_length || 4)}
+                          onClick={() => callLock("disable", { pin: lockCurrentPin }, "Screen lock is off.")}
+                          className="rounded-xl border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-bold disabled:opacity-40"
+                        >
+                          Turn off
+                        </button>
+                      )}
+                    </div>
+
+                    {lockNote && (
+                      <p className="mt-2.5 text-[11px] font-bold text-indigo-500 dark:text-indigo-400">{lockNote}</p>
+                    )}
+
+                    {/* What a PIN does and does not do. It keeps someone out of
+                        the interface; it does not encrypt anything on the disk. */}
+                    <p className="mt-2.5 text-[11px] leading-relaxed text-zinc-500">
+                      This locks the app, not the files. Your chats and documents sit on
+                      this machine exactly as before, and anyone who can read its storage
+                      can read them whether or not a PIN is set.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

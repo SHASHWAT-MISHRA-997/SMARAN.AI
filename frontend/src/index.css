@@ -1877,6 +1877,17 @@ body.sidebar-open { overflow:hidden; overscroll-behavior:none; }
    actually is, including when it stacks into two rows or the text box grows. */
 .sm-pet {
   bottom: calc(var(--sm-composer-h, 92px) + 1.25rem + env(safe-area-inset-bottom, 0px));
+  /* Clear of the sidebar when it is on the right. The pet is fixed to the
+     window and the sidebar takes layout space, so without this the pet sits
+     under the rail. Sidebar publishes its own width; zero when it is on the
+     left, where nothing is in the way. */
+  right: calc(var(--sm-rail-right, 0px) + 0.75rem);
+}
+@media (min-width: 640px) {
+  .sm-pet { right: calc(var(--sm-rail-right, 0px) + 1.5rem); }
+}
+@media (min-width: 768px) {
+  .sm-pet { right: calc(var(--sm-rail-right, 0px) + 2rem); }
 }
 @media (min-width: 768px) {
   /* On a desktop the composer is one row and well clear of the corner. */
