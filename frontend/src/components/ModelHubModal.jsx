@@ -623,10 +623,13 @@ Download it anyway?`)) {
 
           {/* TAB 1: LOCAL HARDWARE MODELS */}
           {activeTab === 'local' && (
-            /* On phones the filter block alone is taller than the viewport, so
-               the whole tab scrolls as one. From `sm` up the filters stay put
-               and only the model list scrolls. */
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain sm:overflow-hidden sm:flex sm:flex-col">
+            /* One scrolling column, not a pinned block with a scrolling list
+               under it. The install row, the company chips and the capability
+               chips together are taller than a short window, so on a laptop
+               screen the cards below were cut off at the top: all you could see
+               of each was "Download Model Weights", with the model's name above
+               the fold and no way to scroll to it. */
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
               {/* Downloading was limited to this app's catalogue, so anything
                   Ollama published that the catalogue did not list - glm4,
                   qwen3, deepseek-r1, and everything released after the
@@ -747,7 +750,7 @@ Download it anyway?`)) {
               {/* Model Catalog Grid — fills the space the header and filters
                   leave over. A fixed vh cap overflowed the clipped modal on
                   short screens, so the list could not be scrolled at all. */}
-              <div className="p-4 sm:p-6 sm:overflow-y-auto sm:overscroll-contain sm:flex-1 sm:min-h-0 space-y-4">
+              <div className="p-4 sm:p-6 space-y-4">
 
                 {/* Video packages.
                     The chat has been saying they are "fetched on request" for

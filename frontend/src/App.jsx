@@ -522,6 +522,9 @@ const App = () => {
             onOpenAnalytics={() => setIsAnalyticsOpen(true)}
             onOpenWorkspace={() => setIsWorkspaceOpen(true)}
             onEnsureSession={handleCreateSession}
+            // So the header can stop offering a panel that has been switched
+            // off: the button stayed, and pressing it did nothing visible.
+            performancePosition={performancePosition}
           />
         )}
         

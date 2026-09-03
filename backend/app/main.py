@@ -1686,6 +1686,10 @@ def _categorise_fact(fact: str) -> str:
     return "durable_record"
 
 
+#: How many remembered facts go into a prompt. A cap, not a filter:
+#: everything is eligible, the oldest simply fall off the end.
+MAX_MEMORY_FACTS_IN_PROMPT = 40
+
 MEMORY_CATEGORY_LABELS = {
     "identity_core": "Identity Core",
     "active_projects": "Active Projects",
@@ -3458,17 +3462,9 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         if len(context_parts) < len(retrieved_chunks):
             context_str += f"\n\n[COVERAGE NOTICE: {len(context_parts)} of {len(retrieved_chunks)} chunks fit in this model context. Continue in the next response from chunk {len(context_parts) + 1}; do not claim full coverage yet.]"
 
-    # 2. Retrieve Persistent Long-term User Memory (survives across sessions, refresh, chat deletions)
-    memory_context = ""
-    try:
-        user_memories = db.query(UserMemory).filter(
-            UserMemory.user_id == current_user.id
-        ).order_by(UserMemory.updated_at.desc()).limit(20).all()
-        if user_memories:
-            mem_lines = [f"- {m.fact}" for m in user_memories]
-            memory_context = "Long-term memory facts about this user:\n" + "\n".join(mem_lines)
-    except Exception as me:
-        logger.error(f"Error retrieving user memory: {me}")
+    # A second read of the same table stood here, building a `memory_context`
+    # string that nothing ever used: the facts were fetched and dropped. The
+    # injection further down is the one that reaches the model.
 
     # Load auto-selected model info for system prompt context
     _hw_cfg_sp = {}
@@ -3521,7 +3517,18 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         system_prompt += plugin_prompt_context
 
     # Fetch active user memory vault facts
-    user_mems = db.query(UserMemory).filter(UserMemory.user_id == current_user.id).all() if not chat_req.rag_enabled and not chat_req.web_search else []
+    # This used to end in `if not chat_req.rag_enabled and not
+    # chat_req.web_search else []`, so who you are was withheld whenever RAG
+    # or web search was on. Asked "my name is what?" with web search on, the
+    # model had the web and no memory, and answered about a song called "My
+    # Name Is...". The name was in the database the whole time.
+    #
+    # Identity is the wrong thing to economise context on. Capped instead.
+    user_mems = (db.query(UserMemory)
+                 .filter(UserMemory.user_id == current_user.id)
+                 .order_by(UserMemory.updated_at.desc())
+                 .limit(MAX_MEMORY_FACTS_IN_PROMPT)
+                 .all())
     if user_mems:
         mem_lines = [f" {m.fact}" for m in user_mems]
         system_prompt += "\n\n STORED USER MEMORY VAULT FACTS\n" + "\n".join(mem_lines) + "\n"

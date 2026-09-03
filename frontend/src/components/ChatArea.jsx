@@ -1263,7 +1263,7 @@ const voiceGender = (name = '') => {
   return '';
 };
 
-const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenDeveloper, onOpenWorkspace, onEnsureSession }) => {
+const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenDeveloper, onOpenWorkspace, onEnsureSession, performancePosition }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const inputValueRef = useRef('');
@@ -3726,8 +3726,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             </button>
           )}
 
-          {/* Performance Panel Toggle */}
-          {onTogglePanel && (
+          {/* Performance Panel Toggle.
+              Hidden when the panel itself has been set to Hidden in Settings:
+              the button used to stay, and pressing it did nothing at all,
+              because the panel is gated on that setting further up. */}
+          {onTogglePanel && performancePosition !== 'hidden' && (
             <button
               data-testid="performance-toggle"
               onClick={onTogglePanel}
