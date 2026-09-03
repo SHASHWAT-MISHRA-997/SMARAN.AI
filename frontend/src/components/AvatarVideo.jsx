@@ -68,11 +68,33 @@ const AvatarVideo = ({
 
     incoming.src = source;
     incoming.load();
+
+    /* Brought forward when it is genuinely playing, not when it is asked to.
+     *
+     * The swap used to happen on the same tick as load(), so the front player
+     * was a video that had not decoded a frame yet - a beat of nothing at
+     * every change, and if the clip failed to start, a still picture that
+     * stayed still while the voice played. */
+    let swapped = false;
+    const bringForward = () => {
+        if (swapped) return;
+        swapped = true;
+        frontIsARef.current = !frontIsARef.current;
+        setFrontIsA(frontIsARef.current);
+    };
+
+    incoming.addEventListener('playing', bringForward, { once: true });
+    // If it will not start at all, show it anyway rather than holding the old
+    // clip for ever: a wrong frame beats a frozen character.
+    const fallback = setTimeout(bringForward, 900);
+
     const play = incoming.play();
     if (play?.catch) play.catch(() => { /* autoplay of a muted clip rarely fails */ });
 
-    frontIsARef.current = !frontIsARef.current;
-    setFrontIsA(frontIsARef.current);
+    return () => {
+        clearTimeout(fallback);
+        incoming.removeEventListener('playing', bringForward);
+    };
   }, [state, character]);
 
   // Hold the frame while idle, and let it run the moment there is something

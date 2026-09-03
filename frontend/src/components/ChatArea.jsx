@@ -1702,6 +1702,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           }
         };
 
+        /* Speaking starts here, not at utterance.onstart.
+         *
+         * onstart is the documented signal and it is not a dependable one:
+         * WebView2 delays it, and for a short chunk it can be skipped
+         * altogether. The character's mouth is driven by this flag, so a
+         * missed onstart is a character that stands still while the voice
+         * plays - which is exactly what was reported. The reply is spoken in
+         * chunks of about 140 characters, so there were many chances to miss.
+         *
+         * Calling speak() is the honest moment: the request has been made.
+         * onstart still fires when it fires, and setting the same flag twice
+         * costs nothing. */
+        setIsSpeakingAudio(true);
+        if (isVoiceModeOpenRef.current) setVoiceState('speaking');
+
         window.speechSynthesis.speak(utterance);
       };
 
