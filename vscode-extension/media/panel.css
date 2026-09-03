@@ -825,6 +825,15 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
     white-space: nowrap;
 }
 
+/* A note in a menu that is a warning rather than a description. */
+.menu-note.caution {
+    color: var(--amber);
+    border-left: 2px solid var(--amber);
+    padding-left: 7px;
+    margin: 0 12px 6px;
+    opacity: .95;
+}
+
 /* The published step list.
  * One block that is replaced in place as the run goes, so the shape of the
  * work stays visible instead of scrolling away under the steps themselves. */

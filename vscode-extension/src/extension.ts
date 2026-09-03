@@ -10,7 +10,7 @@
 
 import * as vscode from 'vscode';
 
-import { MODES } from './agent/modes';
+import { APPROVALS, REACHES } from './agent/modes';
 import { AgentPanel } from './agentPanel';
 import { SessionStore } from './sessions';
 import { Keys } from './settings';
@@ -71,22 +71,42 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('smaran.startAgent', open),
 
+        /* Two questions, asked one after the other, because they are two
+           questions. What it may touch is the one that can lose work, so it
+           is asked first and on its own. */
         vscode.commands.registerCommand('smaran.switchMode', async () => {
             const config = vscode.workspace.getConfiguration('smaran');
-            const current = config.get<string>('mode');
-            const picked = await vscode.window.showQuickPick(
-                MODES.map((mode) => ({
-                    label: mode.label,
-                    description: mode.id === current ? 'current' : undefined,
-                    detail: mode.description,
-                    id: mode.id,
+
+            const reachNow = config.get<string>('reach');
+            const reach = await vscode.window.showQuickPick(
+                REACHES.map((item) => ({
+                    label: item.label,
+                    description: item.id === reachNow ? 'current' : undefined,
+                    detail: item.description,
+                    id: item.id as string,
                 })),
-                { title: 'How much may the agent do without asking?' },
+                { title: 'What may the agent touch?' },
             );
-            if (picked) {
-                await config.update('mode', picked.id, vscode.ConfigurationTarget.Global);
-                await open();
+            if (!reach) return;
+            await config.update('reach', reach.id, vscode.ConfigurationTarget.Global);
+
+            // Read-only has nothing to approve: there is nothing it can do.
+            if (reach.id !== 'read') {
+                const approvalNow = config.get<string>('approval');
+                const approval = await vscode.window.showQuickPick(
+                    APPROVALS.map((item) => ({
+                        label: item.label,
+                        description: item.id === approvalNow ? 'current' : undefined,
+                        detail: item.description,
+                        id: item.id as string,
+                    })),
+                    { title: 'When should it stop and ask?' },
+                );
+                if (approval) {
+                    await config.update('approval', approval.id, vscode.ConfigurationTarget.Global);
+                }
             }
+            await open();
         }),
 
         vscode.commands.registerCommand('smaran.runTask', async () => {

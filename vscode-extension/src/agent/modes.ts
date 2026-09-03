@@ -1,49 +1,101 @@
 /**
- * How much the agent may do without asking you.
+ * Two dials: what the agent may touch, and when it has to ask.
  *
- * The mode is enforced here, at the point a tool is about to run, and not
- * anywhere the model can see. A mode that lived in the prompt would be a
- * request; asking a model not to write files is not the same as it being
- * unable to, and the difference only shows up on the day it matters.
+ * There used to be one. Four modes ran from "changes nothing" to "works on its
+ * own", and each of them silently decided both questions at once - so there
+ * was no way to say "you may edit anything in this project, but ask me every
+ * single time", and no way to say "never interrupt me, but you cannot leave
+ * this folder". Those are different questions and they were answered together.
  *
- * Reading is never gated. list_files, read_file and search change nothing, and
- * a confirmation for each one trains people to click through confirmations.
+ * Codex separates them, and the reason is worth repeating: a loose approval
+ * policy inside a tight reach is still safe, while a strict approval policy
+ * with full reach is only as safe as the attention of whoever is clicking.
+ * One of those is a property of the system; the other is a property of a tired
+ * person at midnight.
+ *
+ * WHAT THIS IS NOT
+ *
+ * Codex's reach is enforced by the operating system - Seatbelt, Landlock,
+ * restricted tokens. This one is not, and saying otherwise would be the kind
+ * of claim that only fails on the day it matters.
+ *
+ * What is genuinely enforced here:
+ *
+ *   - Reading and writing files. Every path goes through a check that resolves
+ *     symlinks and refuses anything outside the folder. That is real.
+ *   - Whether a changing tool runs at all. Read-only means the write and
+ *     command tools refuse, in this process, before anything happens.
+ *
+ * What is not:
+ *
+ *   - Where a shell command goes. It starts in the project folder and can walk
+ *     straight out of it. Nothing here can stop that, and a list of patterns
+ *     pretending to would be worse than useless because it would be believed.
+ *     This is said in the interface, not hidden in a comment.
  */
 
-export type ModeId = 'plan' | 'manual' | 'autoEdit' | 'auto';
+/** What the agent may touch. */
+export type ReachId = 'read' | 'workspace' | 'full';
 
-export interface Mode {
-    id: ModeId;
+/** When it must stop and ask. */
+export type ApprovalId = 'always' | 'commands' | 'risky' | 'never';
+
+export interface Policy {
+    reach: ReachId;
+    approval: ApprovalId;
+}
+
+export interface Choice1<T> {
+    id: T;
     label: string;
-    /** What it does, in the terms the panel shows. */
     description: string;
 }
 
-export const MODES: Mode[] = [
+export const REACHES: Choice1<ReachId>[] = [
     {
-        id: 'plan',
-        label: 'Plan',
-        description: 'Explores the code and tells you what it would do. Changes nothing at all.',
+        id: 'read',
+        label: 'Read only',
+        description: 'Looks at the code and changes nothing. No files written, no commands run.',
     },
     {
-        id: 'manual',
-        label: 'Manual',
-        description: 'Asks before every change and every command.',
+        id: 'workspace',
+        label: 'This project',
+        description: 'Writes only inside the open folder. Commands start here, but a command can go anywhere.',
     },
     {
-        id: 'autoEdit',
-        label: 'Edit automatically',
-        description: 'Changes files on its own. Still asks before running a command.',
-    },
-    {
-        id: 'auto',
-        label: 'Auto',
-        description: 'Works on its own, and pauses for anything that looks risky.',
+        id: 'full',
+        label: 'Anywhere',
+        description: 'May read and write outside the open folder too.',
     },
 ];
 
-/** Tools that change something. Everything else runs unasked in every mode. */
+export const APPROVALS: Choice1<ApprovalId>[] = [
+    { id: 'always', label: 'Every time', description: 'Asks before every change and every command.' },
+    { id: 'commands', label: 'Before commands', description: 'Edits files on its own. Asks before running anything.' },
+    { id: 'risky', label: 'When it looks risky', description: 'Works on its own and stops at what is hard to undo.' },
+    { id: 'never', label: 'Never', description: 'Never asks. Whatever it may touch, it touches.' },
+];
+
+/**
+ * The old single mode, as the pair it always secretly was.
+ *
+ * Anyone who set a mode meant something by it, and that meaning is kept rather
+ * than reset to a default on upgrade.
+ */
+export type ModeId = 'plan' | 'manual' | 'autoEdit' | 'auto';
+
+export const FROM_MODE: Record<ModeId, Policy> = {
+    plan: { reach: 'read', approval: 'never' },
+    manual: { reach: 'workspace', approval: 'always' },
+    autoEdit: { reach: 'workspace', approval: 'commands' },
+    auto: { reach: 'workspace', approval: 'risky' },
+};
+
+/** Tools that change something. Everything else runs unasked, always. */
 export const MUTATING = new Set(['write_file', 'edit_file', 'run_command', 'git']);
+
+/** Tools that run a shell. These are the ones reach cannot actually contain. */
+export const SHELL = new Set(['run_command', 'git']);
 
 /**
  * A tool from an MCP server, by the name the model calls it.
@@ -64,8 +116,6 @@ export const isMcpTool = (name: string): boolean => name.startsWith('mcp_');
  * pattern matching would be lying. It catches the well-known ways to lose work
  * by accident: deleting recursively, force-pushing over somebody's history,
  * piping a download straight into a shell, overwriting a disk.
- *
- * Auto mode pauses on these. Nothing else about them is special.
  */
 const RISKY: { pattern: RegExp; why: string }[] = [
     { pattern: /\brm\s+(-[a-z]*[rf][a-z]*\s+)+/i, why: 'deletes files recursively' },
@@ -99,52 +149,72 @@ export type Decision =
     | { act: 'ask'; because?: string }
     | { act: 'refuse'; because: string };
 
-/** What should happen when this tool is about to run, in this mode. */
-export function decide(mode: ModeId, name: string, args: Record<string, string>): Decision {
-    if (isMcpTool(name)) {
-        // Plan mode changes nothing, and an MCP tool might.
-        if (mode === 'plan') {
-            return {
-                act: 'refuse',
-                because:
-                    'You are in Plan mode, so no tool that could change something may run - '
-                    + 'that includes tools from MCP servers. Say what you would do instead.',
-            };
-        }
-        // Everywhere else it is shown and waited on. Auto mode is a promise
-        // about tools whose behaviour is known; these are not those.
-        return { act: 'ask', because: 'a tool from an MCP server' };
-    }
+/**
+ * What should happen when this tool is about to run.
+ *
+ * Reach is asked first and can only refuse. Approval is asked second and can
+ * only slow things down. Neither can loosen the other, which is the whole
+ * point of there being two: no setting of approval can grant reach that was
+ * not given, and no reach makes an approval prompt go away.
+ */
+export function decide(policy: Policy, name: string, args: Record<string, string>): Decision {
+    const changes = isMcpTool(name) || MUTATING.has(name);
 
-    if (!MUTATING.has(name)) {
+    if (!changes) {
         return { act: 'run' };
     }
 
+    // ── first dial ────────────────────────────────────────────────────────
+    if (policy.reach === 'read') {
+        return {
+            act: 'refuse',
+            because: isMcpTool(name)
+                ? 'The agent is set to read only, so no tool that could change something may '
+                  + 'run - including tools from MCP servers. Say what you would do instead.'
+                : 'The agent is set to read only, so nothing can be changed. Do not try '
+                  + 'again - finish looking at the code and describe what you would change '
+                  + 'and why.',
+        };
+    }
+
+    // ── second dial ───────────────────────────────────────────────────────
+    /* An MCP tool is always shown and waited on, at every approval setting
+       short of never. "Never ask" is a decision about this agent's own tools,
+       whose behaviour is known; a server's tools are somebody else's program.
+       So it is honoured, and not quietly overridden - but it is the only
+       setting that runs one unasked. */
+    if (isMcpTool(name)) {
+        return policy.approval === 'never'
+            ? { act: 'run' }
+            : { act: 'ask', because: 'a tool from an MCP server' };
+    }
+
     const command = name === 'git' ? `git ${args.subcommand ?? ''}` : (args.command ?? '');
+    const shell = SHELL.has(name);
+    const risk = shell ? riskOf(command) : undefined;
 
-    switch (mode) {
-        case 'plan':
-            return {
-                act: 'refuse',
-                because:
-                    'You are in Plan mode, so nothing can be changed. Do not try again - '
-                    + 'finish looking at the code and describe what you would change and why.',
-            };
+    switch (policy.approval) {
+        case 'always':
+            return { act: 'ask', because: risk };
 
-        case 'manual':
-            return { act: 'ask' };
-
-        case 'autoEdit':
+        case 'commands':
             // Writing a file is visible, reviewable and inside the project.
             // Running a command is neither bounded nor undoable, which is the
-            // line this mode draws.
-            return name === 'run_command' || name === 'git'
-                ? { act: 'ask', because: riskOf(command) }
-                : { act: 'run' };
+            // line this setting draws.
+            return shell ? { act: 'ask', because: risk } : { act: 'run' };
 
-        case 'auto': {
-            const risk = name === 'run_command' || name === 'git' ? riskOf(command) : undefined;
+        case 'risky':
             return risk ? { act: 'ask', because: risk } : { act: 'run' };
-        }
+
+        case 'never':
+            return { act: 'run' };
     }
+}
+
+/** The pair in the words the panel puts on its chip. */
+export function describePolicy(policy: Policy): string {
+    const reach = REACHES.find((r) => r.id === policy.reach);
+    const approval = APPROVALS.find((a) => a.id === policy.approval);
+    return `${reach ? reach.label : policy.reach} · asks ${
+        approval ? approval.label.toLowerCase() : policy.approval}`;
 }

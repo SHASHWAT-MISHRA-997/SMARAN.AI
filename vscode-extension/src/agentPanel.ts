@@ -23,7 +23,9 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { AgentEvent, run, ToolCall } from './agent/loop';
-import { MODES, ModeId } from './agent/modes';
+import {
+    APPROVALS, ApprovalId, describePolicy, FROM_MODE, ModeId, Policy, REACHES, ReachId,
+} from './agent/modes';
 import { Message } from './agent/models';
 import {
     deleteOllamaModel, firstVisionModel, listModels, ModelOption, PROVIDERS,
@@ -132,9 +134,15 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 this.pendingApproval = undefined;
                 break;
 
-            case 'setMode':
+            case 'setReach':
                 await vscode.workspace.getConfiguration('smaran')
-                    .update('mode', String(message.mode), vscode.ConfigurationTarget.Global);
+                    .update('reach', String(message.reach), vscode.ConfigurationTarget.Global);
+                await this.announce();
+                break;
+
+            case 'setApproval':
+                await vscode.workspace.getConfiguration('smaran')
+                    .update('approval', String(message.approval), vscode.ConfigurationTarget.Global);
                 await this.announce();
                 break;
 
@@ -349,9 +357,33 @@ export class AgentPanel implements vscode.WebviewViewProvider {
         this.view?.webview.postMessage(message);
     }
 
-    private mode(): ModeId {
-        const set = vscode.workspace.getConfiguration('smaran').get<string>('mode') as ModeId;
-        return MODES.some((m) => m.id === set) ? set : 'manual';
+    /**
+     * The two dials, with the old single mode carried across.
+     *
+     * Somebody who chose "Auto" months ago meant something by it. Rather than
+     * dropping them at a default, the old value is read once and turned into
+     * the pair it always was; from then on the pair is what is stored, and the
+     * old setting is not consulted again.
+     */
+    private policy(): Policy {
+        const config = vscode.workspace.getConfiguration('smaran');
+        const reach = config.get<string>('reach') as ReachId | undefined;
+        const approval = config.get<string>('approval') as ApprovalId | undefined;
+
+        const known = REACHES.some((r) => r.id === reach)
+            && APPROVALS.some((a) => a.id === approval);
+        if (known) {
+            return { reach: reach as ReachId, approval: approval as ApprovalId };
+        }
+
+        const old = config.get<string>('mode') as ModeId | undefined;
+        const carried = old && FROM_MODE[old] ? FROM_MODE[old] : undefined;
+        if (carried) {
+            void config.update('reach', carried.reach, vscode.ConfigurationTarget.Global);
+            void config.update('approval', carried.approval, vscode.ConfigurationTarget.Global);
+            return carried;
+        }
+        return { reach: 'workspace', approval: 'always' };
     }
 
     private async announce(): Promise<void> {
@@ -364,8 +396,10 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             provider: provider?.label || choice.provider,
             model: choice.model,
             problem: choice.problem,
-            modes: MODES,
-            mode: this.mode(),
+            reaches: REACHES,
+            approvals: APPROVALS,
+            policy: this.policy(),
+            policyLabel: describePolicy(this.policy()),
         });
     }
 
@@ -431,8 +465,9 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             configured: await this.keys.configured(),
             provider,
             model: (config.get<string>('model') || '').trim(),
-            modes: MODES,
-            mode: this.mode(),
+            reaches: REACHES,
+            approvals: APPROVALS,
+            policy: this.policy(),
             ollamaUrl: ollamaUrl(),
         });
         await this.sendModels(provider);
@@ -693,7 +728,7 @@ ${words.slice(0, ATTACH_LIMIT)}`,
 
         this.busy = true;
         this.stopRequested = false;
-        const mode = this.mode();
+        const policy = this.policy();
         this.post({ type: 'started' });
 
         const history: Message[] = this.session?.history || [];
@@ -765,7 +800,7 @@ ${words.slice(0, ATTACH_LIMIT)}`,
 
             for await (const event of run(
                 composed, folder, history, choice, () => this.stopRequested,
-                mode, (call, because) => this.ask(call, because), this.mcp,
+                policy, (call, because) => this.ask(call, because), this.mcp,
                 this.attachments
                     .filter((a) => a.image && a.mime)
                     .map((a) => ({ data: a.image as string, mime: a.mime as string })),
@@ -789,7 +824,7 @@ ${words.slice(0, ATTACH_LIMIT)}`,
             this.pendingApproval = undefined;
             this.attachments = [];
             this.post({ type: 'attachments', files: [] });
-            this.post({ type: 'finished', mode });
+            this.post({ type: 'finished' });
         }
     }
 
@@ -927,7 +962,7 @@ ${words.slice(0, ATTACH_LIMIT)}`,
       placeholder="What should it do?  It can read the project, change files and run commands."></textarea>
     <div class="row">
       <button id="attach" class="ghost" title="Attach a file">+</button>
-      <button id="modeChip" class="ghost mode" title="How much it may do without asking">Manual</button>
+      <button id="modeChip" class="ghost mode" title="What it may touch, and when it asks">This project</button>
       <span class="spacer"></span>
       <button id="modelChip" class="ghost model" title="Provider and model">no model</button>
       <button id="send" title="Ctrl+Enter">Send</button>

@@ -40,14 +40,26 @@ function clip(text: string, limit = MAX_OUTPUT): string {
 }
 
 /**
- * An absolute path for `relative`, or a refusal.
+ * A path inside the open folder - or anywhere, when reach says so.
  *
- * realpath is applied to whatever already exists so that a symlink pointing
- * out of the tree is caught. A file that does not exist yet cannot be a
- * symlink, so its parent is what gets resolved.
+ * The check resolves symlinks first, so a link pointing out of the project is
+ * refused for where it lands rather than allowed for where it sits. When reach
+ * is set to Anywhere the check is skipped, which is what that setting means;
+ * the path is still resolved, so what runs is a real absolute path and not
+ * whatever relative string the model happened to write.
  */
+let confined = true;
+
+/** Set once per run, from the reach dial. */
+export function confineToFolder(on: boolean): void {
+    confined = on;
+}
+
 function resolveInside(root: string, relative: string): string {
     const candidate = path.resolve(root, relative || '.');
+    if (!confined) {
+        return candidate;
+    }
 
     let real = candidate;
     let realRoot = root;

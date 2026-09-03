@@ -19,11 +19,13 @@
  * and quietly fail for the rest.
  */
 
-import { decide, ModeId } from './modes';
+import { decide, Policy } from './modes';
 import { Choice, complete, Message } from './models';
 import { McpRegistry } from './mcpRegistry';
 import { readInstructions } from '../instructions';
-import { describeTools, execute, parseTodo, TodoItem, TOOLS } from './tools';
+import {
+    confineToFolder, describeTools, execute, parseTodo, TodoItem, TOOLS,
+} from './tools';
 
 /** Not a guess at how much work a task needs — a stop, so a model repeating
  *  itself cannot run forever on somebody's machine. Reaching it is reported. */
@@ -253,7 +255,7 @@ export async function* run(
     history: Message[],
     choice: Choice,
     stopped: () => boolean,
-    mode: ModeId,
+    policy: Policy,
     approve: Approver,
     /* Optional, so every existing caller and test keeps working and the agent
        behaves exactly as before when no server is configured. */
@@ -263,7 +265,7 @@ export async function* run(
        megabytes for every tool call. */
     images?: { data: string; mime: string }[],
 ): AsyncGenerator<AgentEvent> {
-    const preamble = mode === 'plan'
+    const preamble = policy.reach === 'read'
         // Told, as well as enforced. Refusing a write the model did not know
         // was forbidden wastes a step; refusing one it was warned about is a
         // backstop rather than the mechanism.
@@ -306,6 +308,11 @@ ${extra}`
     // What was actually done, so a claim of completion can be checked against
     // it. A small model will write one file and announce it wrote three.
     const performed: string[] = [];
+
+    /* The reach dial, applied where the paths are resolved. Set per run, so
+       changing it takes effect on the next question rather than on the next
+       window. */
+    confineToFolder(policy.reach !== 'full');
 
     yield { type: 'workspace', root };
 
@@ -371,7 +378,7 @@ ${extra}`
 
         // The mode is applied here, where the tool would run, rather than left
         // to the model to respect.
-        const decision = decide(mode, call.name, call.args);
+        const decision = decide(policy, call.name, call.args);
         let result: string;
 
         if (decision.act === 'refuse') {

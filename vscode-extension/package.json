@@ -2,7 +2,7 @@
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
   "description": "A coding agent that reads your project, changes files, runs commands and reads the results \u2014 one step at a time, in view.",
-  "version": "2.12.11",
+  "version": "2.13.0",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {
@@ -209,7 +209,8 @@
             "Changes files on its own. Still asks before running a command.",
             "Works on its own, and pauses for anything that looks risky."
           ],
-          "markdownDescription": "How much the agent may do without asking. Also switchable from the panel.\n\nThis is enforced where the tool would run, not asked of the model \u2014 in Plan mode the tools that change things refuse, whatever the model tries."
+          "markdownDescription": "How much the agent may do without asking. Also switchable from the panel.\n\nThis is enforced where the tool would run, not asked of the model \u2014 in Plan mode the tools that change things refuse, whatever the model tries.",
+          "description": "Superseded by smaran.reach and smaran.approval. Kept so an existing setting still means what it meant: it is read once, turned into that pair, and not consulted again."
         },
         "smaran.lmStudioUrl": {
           "type": "string",
@@ -254,6 +255,38 @@
               }
             }
           }
+        },
+        "smaran.reach": {
+          "type": "string",
+          "enum": [
+            "read",
+            "workspace",
+            "full"
+          ],
+          "enumDescriptions": [
+            "Looks at the code and changes nothing.",
+            "Writes only inside the open folder. A shell command can still go anywhere.",
+            "May read and write outside the open folder too."
+          ],
+          "default": "workspace",
+          "description": "What the agent may touch. File paths are checked in this extension and refused outside the allowed area; a shell command is not contained by anything and this setting does not pretend otherwise."
+        },
+        "smaran.approval": {
+          "type": "string",
+          "enum": [
+            "always",
+            "commands",
+            "risky",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Asks before every change and every command.",
+            "Edits files on its own. Asks before running anything.",
+            "Works on its own and stops at what is hard to undo.",
+            "Never asks."
+          ],
+          "default": "always",
+          "description": "When the agent must stop and ask. Independent of what it may touch: this can only slow it down, never widen its reach."
         }
       }
     },

@@ -20,8 +20,9 @@
     const attachments = $('attachments');
     const modeMenu = $('modeMenu');
 
-    let modes = [];
-    let currentMode = 'manual';
+    let reaches = [];
+    let approvals = [];
+    let policy = { reach: 'workspace', approval: 'always' };
 
     // ── small builders ────────────────────────────────────────────────────
 
@@ -349,24 +350,41 @@
 
     // ── the mode menu ─────────────────────────────────────────────────────
 
+    /* Two dials, in one menu, with the one that can lose work on top.
+       They are separate lists because they answer separate questions: no
+       choice in the second can widen what the first allows. */
     function drawModeMenu() {
         modeMenu.replaceChildren();
-        modeMenu.appendChild(el('div', 'menu-title', 'How much it may do without asking'));
-        modes.forEach((mode) => {
-            const row = el('button', 'menu-item' + (mode.id === currentMode ? ' on' : ''));
-            const line = el('div', 'menu-line');
-            line.appendChild(el('strong', null, mode.label));
-            if (mode.id === currentMode) line.appendChild(el('span', 'tick', '✓'));
-            row.appendChild(line);
-            row.appendChild(el('div', 'menu-note', mode.description));
-            row.addEventListener('click', () => {
-                currentMode = mode.id;
-                $('modeChip').textContent = mode.label;
-                modeMenu.hidden = true;
-                vscode.postMessage({ type: 'setMode', mode: mode.id });
+
+        const group = (title, options, current, note, send) => {
+            modeMenu.appendChild(el('div', 'menu-title', title));
+            if (note) modeMenu.appendChild(el('div', 'menu-note caution', note));
+            options.forEach((option) => {
+                const row = el('button', 'menu-item' + (option.id === current ? ' on' : ''));
+                const line = el('div', 'menu-line');
+                line.appendChild(el('strong', null, option.label));
+                if (option.id === current) line.appendChild(el('span', 'tick', '✓'));
+                row.appendChild(line);
+                row.appendChild(el('div', 'menu-note', option.description));
+                row.addEventListener('click', () => {
+                    modeMenu.hidden = true;
+                    send(option.id);
+                });
+                modeMenu.appendChild(row);
             });
-            modeMenu.appendChild(row);
-        });
+        };
+
+        group('What it may touch', reaches, policy.reach,
+            'File paths are checked here and refused outside the allowed area. '
+            + 'A shell command is not contained by anything - it starts in the '
+            + 'project and can go elsewhere.',
+            (id) => vscode.postMessage({ type: 'setReach', reach: id }));
+
+        // Nothing to approve when it cannot change anything.
+        if (policy.reach !== 'read') {
+            group('When it asks', approvals, policy.approval, null,
+                (id) => vscode.postMessage({ type: 'setApproval', approval: id }));
+        }
     }
 
     $('modeChip').addEventListener('click', () => {
@@ -910,10 +928,18 @@
                 $('modelChip').title = message.model
                     ? `${message.provider || 'Local'} · ${message.model}`
                     : 'Pick where the model runs, and which one';
-                modes = message.modes || [];
-                currentMode = message.mode;
-                const active = modes.find((m) => m.id === currentMode);
-                $('modeChip').textContent = active ? active.label : 'Manual';
+                reaches = message.reaches || [];
+                approvals = message.approvals || [];
+                policy = message.policy || policy;
+                /* The chip has room for one of the two. Reach is the one that
+                   can lose work, so that is the one on the button; both are
+                   on the tooltip and both are in the menu. */
+                const reach = reaches.find((r) => r.id === policy.reach);
+                const approval = approvals.find((a) => a.id === policy.approval);
+                $('modeChip').textContent = reach ? reach.label : policy.reach;
+                $('modeChip').title = (reach ? reach.label : policy.reach)
+                    + (policy.reach === 'read' ? ''
+                        : ' · asks ' + (approval ? approval.label.toLowerCase() : policy.approval));
                 if (message.problem) show('setup');
                 break;
 
