@@ -106,15 +106,31 @@ const App = () => {
   useEffect(() => {
     if (isNativeApp()) return undefined;
 
+    /* Width alone was never the signal, and guarding on the packaged app was
+       not enough. A phone pointed at a paired computer - 192.168.1.5:3003 in
+       a browser - is not the packaged app, so it matched again: 375px wide,
+       html.sm-pip applied, and display:none on the composer, the pet and
+       everything marked pip-hide. Tapping the input made the input vanish.
+       Same bug, one guard short.
+    
+       A pinned window is small AND driven by a mouse. A phone is small and
+       driven by a finger, and no phone is ever a picture-in-picture window.
+       Pointer type separates the two honestly, where width cannot. */
     const PINNED_MAX_WIDTH = 460;
+    const mouse = window.matchMedia('(pointer: fine)');
+
     const apply = () => {
       document.documentElement.classList.toggle(
-        'sm-pip', window.innerWidth <= PINNED_MAX_WIDTH,
+        'sm-pip', window.innerWidth <= PINNED_MAX_WIDTH && mouse.matches,
       );
     };
     apply();
     window.addEventListener('resize', apply);
-    return () => window.removeEventListener('resize', apply);
+    mouse.addEventListener('change', apply);
+    return () => {
+      window.removeEventListener('resize', apply);
+      mouse.removeEventListener('change', apply);
+    };
   }, []);
 
   // Refine the local user from the backend when reachable, but never gate or
@@ -409,8 +425,6 @@ const App = () => {
       setSettingsTab('updates');
       setIsSettingsOpen(true);
     } else if (view === 'models') {
-      // The model chip in the header sends this. The Model Hub is where the
-      // models this machine can run are listed and downloaded.
       setIsModelHubOpen(true);
     } else if (view === 'terminal') {
       // Not a view - a panel over whatever you were doing. Without this the

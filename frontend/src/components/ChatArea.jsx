@@ -3701,7 +3701,12 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                  are listed. */
               <button
                 type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('smaran:navigate', { detail: { view: 'models' } }))}
+                /* onOpenModelHub, not a custom event. The event I first used
+                   here - smaran:navigate - already had a listener that sends
+                   the app back to the conversation, so clicking the chip on a
+                   phone-width window emptied the screen and left a lone Back
+                   bar. The prop was there all along. */
+                onClick={onOpenModelHub}
                 className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0"
                 title={`${activeModelDisplay} — click to choose a model`}
               >
