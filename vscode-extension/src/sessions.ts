@@ -15,7 +15,10 @@ import * as vscode from 'vscode';
 /** One thing that appeared in the panel, stored exactly as it was shown. */
 export interface Entry {
     /** 'skip' is thrown away rather than shown or stored. */
-    kind: 'you' | 'says' | 'tool' | 'result' | 'done' | 'error' | 'note' | 'plan' | 'skip';
+    /* 'thinking' is transient - shown while a request is in flight and
+       replaced by whatever the model actually said. It is not written to
+       a saved transcript. */
+    kind: 'you' | 'says' | 'tool' | 'result' | 'done' | 'error' | 'note' | 'plan' | 'skip' | 'thinking';
     title?: string;
     body?: string;
 }

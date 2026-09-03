@@ -74,6 +74,27 @@ export interface ToolCall {
     raw: string;
 }
 
+/**
+ * A tool call that started and never finished.
+ *
+ * The model's reply can be cut off mid-call - it runs into max_tokens, or it
+ * simply stops. TOOL_CALL needs the closing tag, so a truncated call does not
+ * match, and the whole reply was then treated as ordinary prose: the raw
+ * `<tool_call name="read_file"><path>...` was printed at the person as if it
+ * were an answer, and the run ended there.
+ *
+ * It is not an answer. It is a step that did not survive the trip.
+ */
+export function looksTruncated(text: string): boolean {
+    return /<tool_call\s+name=/i.test(text || '') && !/<\/tool_call>/i.test(text || '');
+}
+
+/** Whatever the model said before it started calling a tool. */
+export function proseBefore(text: string): string {
+    const start = (text || '').search(/<tool_call\s+name=/i);
+    return (start >= 0 ? text.slice(0, start) : text || '').trim();
+}
+
 export function parseToolCall(text: string): ToolCall | undefined {
     const match = TOOL_CALL.exec(text || '');
     if (!match) {
@@ -96,6 +117,10 @@ export function parseToolCall(text: string): ToolCall | undefined {
 export type AgentEvent =
     | { type: 'workspace'; root: string }
     | { type: 'message'; text: string }
+    /* Said before every request to the model. Without it the panel sat still
+       for the whole wait, which on a slow free model is most of the run. */
+    | { type: 'thinking'; step: number }
+    | { type: 'note'; text: string }
     | { type: 'tool_call'; name: string; args: Record<string, string>; step: number }
     | { type: 'tool_result'; name: string; result: string; step: number }
     | { type: 'refused'; name: string; because: string; step: number }
@@ -191,6 +216,8 @@ ${extra}`
             return;
         }
 
+        yield { type: 'thinking', step };
+
         let reply: string;
         try {
             reply = await complete(messages, choice);
@@ -205,6 +232,25 @@ ${extra}`
 
         const call = parseToolCall(reply);
         if (!call) {
+            /* Cut off mid-call. Ask for it again rather than printing the
+               half-written tag and stopping - the person did not ask for XML,
+               and the work was not finished. */
+            if (looksTruncated(reply)) {
+                const said = proseBefore(reply);
+                if (said) yield { type: 'message', text: said };
+                yield {
+                    type: 'note',
+                    text: 'That tool call was cut off before it finished. Asking again.',
+                };
+                messages.push({ role: 'assistant', content: reply });
+                messages.push({
+                    role: 'user',
+                    content: 'Your last message ended in the middle of a tool call, so it '
+                        + 'could not be run. Send that one tool call again, complete, with '
+                        + 'its closing </tool_call> tag and nothing after it.',
+                });
+                continue;
+            }
             yield { type: 'message', text: reply };
             yield { type: 'done', steps: step, toolsUsed: performed, text: reply };
             return;

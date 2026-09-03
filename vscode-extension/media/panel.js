@@ -80,7 +80,16 @@
         });
     }
 
+    /** The transient "thinking" row, so the next entry can replace it. */
+    let thinkingRow = null;
+
     function addEntry(entry) {
+        // Whatever arrives next is the answer to the wait, so the wait goes.
+        if (thinkingRow && entry.kind !== 'thinking') {
+            thinkingRow.remove();
+            thinkingRow = null;
+        }
+
         const item = el('div', 'item ' + entry.kind);
 
         if (entry.title) {
@@ -108,6 +117,7 @@
         }
 
         log.appendChild(item);
+        if (entry.kind === 'thinking') thinkingRow = item;
         scroll();
         return item;
     }

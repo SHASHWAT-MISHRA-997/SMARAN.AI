@@ -744,3 +744,24 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
     font-size: 11px;
     color: var(--ink-far);
 }
+
+/* The wait, made visible.
+ *
+ * A run spent most of its time with nothing on screen changing: a step card,
+ * then a long gap while the model thought, then the next card. On a slow free
+ * model that gap is most of the run, and silence is indistinguishable from
+ * being stuck. This is replaced the moment anything real arrives. */
+.item.thinking {
+    border-left-color: var(--violet);
+    color: var(--ink-dim);
+}
+.item.thinking .title span::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 8px;
+    border-radius: 50%;
+    background: var(--violet);
+    animation: pulse 1.1s ease-in-out infinite;
+}

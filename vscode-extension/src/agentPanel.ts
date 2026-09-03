@@ -628,6 +628,14 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             case 'workspace':
                 return { kind: 'note', title: `Working in ${event.root}` };
 
+            case 'thinking':
+                // Something on screen for the part of a run that is just
+                // waiting. On a slow free model this is most of it.
+                return { kind: 'thinking', title: `Step ${event.step} · thinking…` };
+
+            case 'note':
+                return { kind: 'note', title: event.text };
+
             case 'message':
                 // An empty one was drawn as an empty box - a question asked,
                 // a box, and nothing in it. The parser refuses empty replies
