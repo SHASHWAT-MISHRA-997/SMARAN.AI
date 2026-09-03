@@ -68,6 +68,28 @@ Keep it under ten lines.`;
 const TOOL_CALL = /<tool_call\s+name=["']([a-z_]+)["']\s*>([\s\S]*?)<\/tool_call>/i;
 const ARGUMENT = /<([a-z_]+)>([\s\S]*?)<\/\1>/gi;
 
+/**
+ * The other syntax models use to call a tool.
+ *
+ * The prompt asks for `<tool_call name="…">`, and most models do as they are
+ * asked. Some do not: a model fine-tuned on its own calling format emits that
+ * format whatever the prompt says. dots-3 replied with
+ *
+ *     <dots_function_call><invoke name="list_files"></invoke></dots_function_call>
+ *
+ * which matched nothing here, so it was treated as ordinary prose and the raw
+ * XML was printed at the person as the answer. It was never an answer - it was
+ * a tool call in a spelling this parser did not know.
+ *
+ * The wrapper is whatever the model calls it; the part that matters is the
+ * `<invoke name="…">` inside, with `<parameter name="…">` arguments. Both are
+ * read now, so a model's own habit is understood instead of leaking on screen.
+ */
+const INVOKE = /<invoke\s+name=["']([A-Za-z0-9_.-]+)["']\s*>([\s\S]*?)<\/invoke>/i;
+const NAMED_ARGUMENT = /<parameter\s+name=["']([A-Za-z0-9_.-]+)["']\s*>([\s\S]*?)<\/parameter>/gi;
+/** The wrapper some models put around an invoke, so it goes with it. */
+const WRAPPER = /<([a-z0-9_]*function_call|tool_use|function_calls)>\s*$/i;
+
 export interface ToolCall {
     name: string;
     args: Record<string, string>;
@@ -86,32 +108,87 @@ export interface ToolCall {
  * It is not an answer. It is a step that did not survive the trip.
  */
 export function looksTruncated(text: string): boolean {
-    return /<tool_call\s+name=/i.test(text || '') && !/<\/tool_call>/i.test(text || '');
+    const body = text || '';
+    if (/<tool_call\s+name=/i.test(body) && !/<\/tool_call>/i.test(body)) return true;
+    return /<invoke\s+name=/i.test(body) && !/<\/invoke>/i.test(body);
+}
+
+/** Where a tool call starts, in either spelling, or -1. */
+function callStarts(text: string): number {
+    const starts = [
+        (text || '').search(/<tool_call\s+name=/i),
+        (text || '').search(/<(?:[a-z0-9_]*function_call|function_calls|tool_use)>/i),
+        (text || '').search(/<invoke\s+name=/i),
+    ].filter((at) => at >= 0);
+    return starts.length ? Math.min(...starts) : -1;
 }
 
 /** Whatever the model said before it started calling a tool. */
 export function proseBefore(text: string): string {
-    const start = (text || '').search(/<tool_call\s+name=/i);
+    const start = callStarts(text);
     return (start >= 0 ? text.slice(0, start) : text || '').trim();
 }
 
+/** Argument values: code must survive exactly, a path must not keep a newline. */
+function keep(key: string, value: string): string {
+    return key === 'content' ? value : value.trim();
+}
+
 export function parseToolCall(text: string): ToolCall | undefined {
-    const match = TOOL_CALL.exec(text || '');
-    if (!match) {
+    const body = text || '';
+    const match = TOOL_CALL.exec(body);
+    if (match) {
+        const args: Record<string, string> = {};
+        ARGUMENT.lastIndex = 0;
+        let found = ARGUMENT.exec(match[2]);
+        while (found) {
+            const key = found[1].toLowerCase();
+            args[key] = keep(key, found[2]);
+            found = ARGUMENT.exec(match[2]);
+        }
+        return { name: match[1].toLowerCase(), args, raw: match[0] };
+    }
+
+    const invoked = INVOKE.exec(body);
+    if (!invoked) {
         return undefined;
     }
+
     const args: Record<string, string> = {};
-    ARGUMENT.lastIndex = 0;
-    let found = ARGUMENT.exec(match[2]);
-    while (found) {
-        // Content is code and must survive exactly. Everything else is a path
-        // or a command, where a stray newline is the model's formatting rather
-        // than part of the value.
-        const key = found[1].toLowerCase();
-        args[key] = key === 'content' ? found[2] : found[2].trim();
-        found = ARGUMENT.exec(match[2]);
+    NAMED_ARGUMENT.lastIndex = 0;
+    let named = NAMED_ARGUMENT.exec(invoked[2]);
+    while (named) {
+        const key = named[1].toLowerCase();
+        args[key] = keep(key, named[2]);
+        named = NAMED_ARGUMENT.exec(invoked[2]);
     }
-    return { name: match[1].toLowerCase(), args, raw: match[0] };
+    // Some write <path>…</path> inside the invoke instead. Read those too,
+    // but never over a <parameter> of the same name, which is the explicit one.
+    ARGUMENT.lastIndex = 0;
+    let plain = ARGUMENT.exec(invoked[2]);
+    while (plain) {
+        const key = plain[1].toLowerCase();
+        if (key !== 'parameter' && !(key in args)) {
+            args[key] = keep(key, plain[2]);
+        }
+        plain = ARGUMENT.exec(invoked[2]);
+    }
+
+    /* The wrapper, if there is one, is part of the call and not part of what
+       the model said - otherwise `<dots_function_call>` is left behind on
+       screen as the prose before the call. */
+    const at = body.indexOf(invoked[0]);
+    const before = body.slice(0, at);
+    const wrapper = WRAPPER.exec(before.trimEnd());
+    let raw = invoked[0];
+    if (wrapper) {
+        const from = before.trimEnd().length - wrapper[0].length;
+        const closing = new RegExp(`^\\s*</${wrapper[1]}>`, 'i')
+            .exec(body.slice(at + invoked[0].length));
+        raw = body.slice(from, at + invoked[0].length + (closing ? closing[0].length : 0));
+    }
+
+    return { name: invoked[1].toLowerCase(), args, raw };
 }
 
 export type AgentEvent =
@@ -239,19 +316,27 @@ ${extra}`
             /* Cut off mid-call. Ask for it again rather than printing the
                half-written tag and stopping - the person did not ask for XML,
                and the work was not finished. */
-            if (looksTruncated(reply)) {
+            /* Either it stopped mid-call, or it called in a spelling that
+               could not be read. Both look the same from here and both have
+               the same answer: show what it said in words, keep the XML off
+               the screen, and ask for the call again in the one form this
+               understands. What must never happen is the tag itself being
+               printed as though it were the reply. */
+            if (looksTruncated(reply) || callStarts(reply) >= 0) {
                 const said = proseBefore(reply);
                 if (said) yield { type: 'message', text: said };
                 yield {
                     type: 'note',
-                    text: 'That tool call was cut off before it finished. Asking again.',
+                    text: 'That tool call did not arrive in a form it could run. Asking again.',
                 };
                 messages.push({ role: 'assistant', content: reply });
                 messages.push({
                     role: 'user',
-                    content: 'Your last message ended in the middle of a tool call, so it '
-                        + 'could not be run. Send that one tool call again, complete, with '
-                        + 'its closing </tool_call> tag and nothing after it.',
+                    content: 'That tool call could not be run - it was either cut off or '
+                        + 'written in another format. Send exactly one call, in this form '
+                        + 'and no other, with nothing after it:\n\n'
+                        + '<tool_call name="read_file">\n<path>src/main.py</path>\n'
+                        + '</tool_call>',
                 });
                 continue;
             }

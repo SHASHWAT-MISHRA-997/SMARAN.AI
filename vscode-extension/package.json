@@ -1,8 +1,8 @@
 {
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
-  "description": "A coding agent that reads your project, changes files, runs commands and reads the results — one step at a time, in view.",
-  "version": "2.12.8",
+  "description": "A coding agent that reads your project, changes files, runs commands and reads the results \u2014 one step at a time, in view.",
+  "version": "2.12.9",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {
@@ -189,7 +189,7 @@
           "type": "object",
           "default": {},
           "deprecationMessage": "Keys now live in your operating system's keychain. Anything here is moved there once, and this is emptied. Use the Setup tab in the panel.",
-          "markdownDescription": "Your provider keys. They stay in your VS Code settings and are sent to the provider you chose and nowhere else — there is no server of ours in between. If you already entered keys in the SMARAN.AI app, those are picked up too, without the app needing to run.\n\n**Free tiers:** [Groq](https://console.groq.com/keys) · [Google Gemini](https://aistudio.google.com/app/apikey) · [OpenRouter](https://openrouter.ai/keys) · [NVIDIA NIM](https://build.nvidia.com/)\n\n**Paid:** [Anthropic](https://console.anthropic.com/settings/keys) · [OpenAI](https://platform.openai.com/api-keys) · [DeepSeek](https://platform.deepseek.com/api_keys)",
+          "markdownDescription": "Your provider keys. They stay in your VS Code settings and are sent to the provider you chose and nowhere else \u2014 there is no server of ours in between. If you already entered keys in the SMARAN.AI app, those are picked up too, without the app needing to run.\n\n**Free tiers:** [Groq](https://console.groq.com/keys) \u00b7 [Google Gemini](https://aistudio.google.com/app/apikey) \u00b7 [OpenRouter](https://openrouter.ai/keys) \u00b7 [NVIDIA NIM](https://build.nvidia.com/)\n\n**Paid:** [Anthropic](https://console.anthropic.com/settings/keys) \u00b7 [OpenAI](https://platform.openai.com/api-keys) \u00b7 [DeepSeek](https://platform.deepseek.com/api_keys)",
           "additionalProperties": {
             "type": "string"
           }
@@ -209,7 +209,7 @@
             "Changes files on its own. Still asks before running a command.",
             "Works on its own, and pauses for anything that looks risky."
           ],
-          "markdownDescription": "How much the agent may do without asking. Also switchable from the panel.\n\nThis is enforced where the tool would run, not asked of the model — in Plan mode the tools that change things refuse, whatever the model tries."
+          "markdownDescription": "How much the agent may do without asking. Also switchable from the panel.\n\nThis is enforced where the tool would run, not asked of the model \u2014 in Plan mode the tools that change things refuse, whatever the model tries."
         },
         "smaran.lmStudioUrl": {
           "type": "string",

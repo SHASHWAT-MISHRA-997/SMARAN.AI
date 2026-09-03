@@ -98,8 +98,19 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 const text = String(message.text || '');
                 if (text.trim()) {
                     // Recorded before anything is attempted, so the question
-                    // is in the transcript even if the answer fails.
-                    this.record({ kind: 'you', title: 'You', body: text });
+                    // is in the transcript even if the answer fails - and
+                    // with whatever was attached to it, which the composer is
+                    // about to clear.
+                    this.record({
+                        kind: 'you',
+                        title: 'You',
+                        body: text,
+                        files: this.attachments.map((a) => ({
+                            name: path.basename(a.path),
+                            image: a.image,
+                            mime: a.mime,
+                        })),
+                    });
                 }
                 await this.start(text);
                 break;
@@ -680,26 +691,25 @@ ${words.slice(0, ATTACH_LIMIT)}`,
                rather than discovered halfway through. A server that will not
                start is not fatal: its tools are absent and the panel says
                why, which beats an agent quietly missing half its abilities. */
-            /* What this mode will and will not do, before it does anything.
-               A mode that never interrupts looks like a mode that does
-               nothing - the run that prompted this only read files, which no
-               mode gates, so Manual sat silent throughout and read as fake. */
-            const active = MODES.find((m) => m.id === mode);
-            if (active) {
-                this.record({
-                    kind: 'note',
-                    title: `${active.label} — ${active.description}`,
-                });
-            }
+            /* The mode is not announced in the transcript.
+               It was, on the reasoning that a mode which never interrupts
+               looks like one that does nothing. But it is the same sentence
+               above every run, about a setting that is already on a chip two
+               inches away, and repeated between question and answer it became
+               noise sitting where the reply should be. The chip says it. */
 
             /* A picture needs a model with eyes.
              *
              * Sending one to a model without them produced "openrouter refused
              * the request (HTTP 404). No endpoints found that support image
              * input" - true, and no use to anybody. The provider knows which
-             * of its models can see, so it is asked, and the swap is announced
-             * rather than done quietly: it changes what answers, and that is
-             * worth a line. */
+             * of its models can see, so it is asked.
+             *
+             * The swap used to be announced in the transcript. It is not any
+             * more - it landed between the question and the answer, which is
+             * where the answer should be. It is not hidden either: the chip
+             * shows the model that is actually answering, which is the thing
+             * the sentence was for. */
             const pictures = this.attachments.filter((a) => a.image && a.mime);
             if (pictures.length) {
                 const current = (await listModels(
@@ -716,11 +726,9 @@ ${words.slice(0, ATTACH_LIMIT)}`,
                         ollamaUrl(), lmStudioUrl(),
                     );
                     if (seeing) {
-                        this.record({
-                            kind: 'note',
-                            title: `${choice.model} cannot read pictures, so this one is going to ${seeing}`,
-                        });
                         choice.model = seeing;
+                        // What is answering, on the chip, while it answers.
+                        this.post({ type: 'usingModel', model: seeing, provider: choice.provider });
                     } else {
                         this.record({
                             kind: 'note',
@@ -777,7 +785,10 @@ ${words.slice(0, ATTACH_LIMIT)}`,
     private asEntry(event: AgentEvent, folder: string): Entry {
         switch (event.type) {
             case 'workspace':
-                return { kind: 'note', title: `Working in ${event.root}` };
+                /* The folder is in the header, above this list, at all times.
+                   Repeating it into the transcript once per run put the same
+                   path between every question and its answer. */
+                return { kind: 'skip' };
 
             case 'thinking':
                 // Something on screen for the part of a run that is just

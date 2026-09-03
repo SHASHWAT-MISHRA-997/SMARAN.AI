@@ -21,6 +21,16 @@ export interface Entry {
     kind: 'you' | 'says' | 'tool' | 'result' | 'done' | 'error' | 'note' | 'plan' | 'skip' | 'thinking';
     title?: string;
     body?: string;
+    /**
+     * What was attached to the message, kept with the message.
+     *
+     * A pasted screenshot showed as a chip above the composer, and the
+     * composer clears when the run starts - so the picture disappeared the
+     * moment it was sent, and the transcript showed a question about an image
+     * with no image anywhere near it. It was sent; it just could not be seen.
+     * Images carry their data so they still draw when a session is reopened.
+     */
+    files?: { name: string; image?: string; mime?: string }[];
 }
 
 export interface Session {

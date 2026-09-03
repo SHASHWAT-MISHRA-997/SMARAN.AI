@@ -143,6 +143,25 @@
             }
         }
 
+        /* What was attached, shown with the message it was attached to.
+           The chip above the composer goes when the run starts, so without
+           this a question about a screenshot had no screenshot in sight. */
+        if (entry.files && entry.files.length) {
+            const strip = el('div', 'files');
+            entry.files.forEach((file) => {
+                if (file.image && file.mime) {
+                    const shot = el('img', 'shot');
+                    shot.src = 'data:' + file.mime + ';base64,' + file.image;
+                    shot.alt = file.name || 'attached image';
+                    shot.title = file.name || '';
+                    strip.appendChild(shot);
+                } else {
+                    strip.appendChild(el('span', 'file', file.name || 'attachment'));
+                }
+            });
+            item.appendChild(strip);
+        }
+
         const said = statusFor(entry);
         if (said) setStatus(said);
 
@@ -856,6 +875,13 @@
                 const active = modes.find((m) => m.id === currentMode);
                 $('modeChip').textContent = active ? active.label : 'Manual';
                 if (message.problem) show('setup');
+                break;
+
+            /* A run that had to change model to read a picture. The chip is
+               how the panel says what is answering, so it says this too. */
+            case 'usingModel':
+                $('modelChip').textContent = message.model;
+                $('modelChip').title = `${message.provider || 'Local'} · ${message.model}`;
                 break;
 
             case 'entry':
