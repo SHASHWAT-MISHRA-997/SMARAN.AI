@@ -769,8 +769,12 @@ export class AgentPanel implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<!-- data: is on img-src for the attachment thumbnails. A pasted screenshot is
+     held as base64 and shown as a data URL; without it the policy blocked the
+     thumbnail and the chip drew a broken-image box beside "29 KB image".
+     Everything else stays shut. -->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; img-src ${webview.cspSource}; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+      content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link href="${asset('panel.css')}" rel="stylesheet">
 </head>
 <body>
