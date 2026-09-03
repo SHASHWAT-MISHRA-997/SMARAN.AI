@@ -1,0 +1,24 @@
+# Line endings.
+#
+# These files are read by a Linux shell, and a shell will not run a script
+# whose lines end in CRLF - it fails with "bad interpreter: no such file or
+# directory", which names the interpreter and not the real problem. This
+# repository is edited on Windows, where git's default is to store what the
+# working copy has, so without this a routine edit could commit a build
+# script that only fails on the machine it exists for.
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+Dockerfile  text eol=lf
+*.desktop   text eol=lf
+
+# Binary, so git never tries to translate anything inside them.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.mp4 binary
+*.apk binary
+*.exe binary
+*.vsix binary
