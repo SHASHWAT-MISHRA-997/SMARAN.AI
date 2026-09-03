@@ -18,7 +18,7 @@ export interface Entry {
     /* 'thinking' is transient - shown while a request is in flight and
        replaced by whatever the model actually said. It is not written to
        a saved transcript. */
-    kind: 'you' | 'says' | 'tool' | 'result' | 'done' | 'error' | 'note' | 'plan' | 'skip' | 'thinking';
+    kind: 'you' | 'says' | 'tool' | 'result' | 'done' | 'error' | 'note' | 'plan' | 'skip' | 'thinking' | 'steps';
     title?: string;
     body?: string;
     /**
@@ -31,6 +31,8 @@ export interface Entry {
      * Images carry their data so they still draw when a session is reopened.
      */
     files?: { name: string; image?: string; mime?: string }[];
+    /** A published step list, drawn as a checklist and replaced in place. */
+    steps?: { state: 'todo' | 'doing' | 'done'; text: string }[];
 }
 
 export interface Session {

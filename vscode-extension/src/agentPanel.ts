@@ -639,7 +639,19 @@ ${words.slice(0, ATTACH_LIMIT)}`,
         if (!this.session) {
             this.session = this.sessions.create(entry.kind === 'you' ? entry.body || '' : 'Untitled');
         }
-        this.session.entries.push(entry);
+        /* The step list is one thing that changes, not a series of things.
+           Appending each update would leave a reopened conversation holding
+           six copies of the same five steps, in six states of doneness. */
+        if (entry.kind === 'steps') {
+            const at = this.session.entries.map((e) => e.kind).lastIndexOf('steps');
+            if (at >= 0) {
+                this.session.entries[at] = entry;
+            } else {
+                this.session.entries.push(entry);
+            }
+        } else {
+            this.session.entries.push(entry);
+        }
         void this.sessions.save(this.session);
     }
 
@@ -823,7 +835,15 @@ ${words.slice(0, ATTACH_LIMIT)}`,
             }
 
             case 'tool_result':
-                return { kind: 'result', body: event.result };
+                /* The step list has already been drawn as a checklist. Its
+                   text result would be the same list again, immediately
+                   underneath itself. */
+                return event.name === 'todo'
+                    ? { kind: 'skip' }
+                    : { kind: 'result', body: event.result };
+
+            case 'todo':
+                return { kind: 'steps', steps: event.items };
 
             case 'refused':
                 return { kind: 'note', title: `${event.name} was not run`, body: event.because };

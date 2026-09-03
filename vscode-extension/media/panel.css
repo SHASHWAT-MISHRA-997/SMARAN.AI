@@ -825,6 +825,31 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
     white-space: nowrap;
 }
 
+/* The published step list.
+ * One block that is replaced in place as the run goes, so the shape of the
+ * work stays visible instead of scrolling away under the steps themselves. */
+.steplist {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+}
+.step {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 7px;
+    align-items: start;
+    font-size: 11.5px;
+    line-height: 1.45;
+}
+.step-mark { color: var(--ink-far); text-align: center; }
+.step-text { min-width: 0; overflow-wrap: anywhere; }
+.step.done .step-mark { color: var(--lime); }
+.step.done .step-text { color: var(--ink-far); text-decoration: line-through; }
+.step.doing .step-mark { color: var(--violet); }
+.step.doing .step-text { color: var(--ink); }
+.step.todo .step-text { color: var(--ink-dim); }
+
 /* A folded tool result.
  * The summary is the row; the output is underneath it when asked for. */
 .fold { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }

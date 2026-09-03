@@ -22,7 +22,8 @@
 import { decide, ModeId } from './modes';
 import { Choice, complete, Message } from './models';
 import { McpRegistry } from './mcpRegistry';
-import { describeTools, execute, TOOLS } from './tools';
+import { readInstructions } from '../instructions';
+import { describeTools, execute, parseTodo, TodoItem, TOOLS } from './tools';
 
 /** Not a guess at how much work a task needs — a stop, so a model repeating
  *  itself cannot run forever on somebody's machine. Reaching it is reported. */
@@ -49,6 +50,8 @@ To use a tool, emit exactly this and nothing after it in that message:
 </tool_call>
 
 One tool per message. You will be given the result and can then continue.
+
+If the task needs more than two steps, call the todo tool first with the \nsteps you intend to take, and call it again as each one is finished. The \nperson watching sees that list; it is how they know what you are doing and \nwhat is left.
 
 %TOOLS%
 
@@ -200,6 +203,10 @@ export type AgentEvent =
     | { type: 'note'; text: string }
     | { type: 'tool_call'; name: string; args: Record<string, string>; step: number }
     | { type: 'tool_result'; name: string; result: string; step: number }
+    /* The step list, as the model last published it. Sent as its own
+       event rather than as a tool result, because the panel replaces
+       the list in place instead of adding another copy of it. */
+    | { type: 'todo'; items: TodoItem[] }
     | { type: 'refused'; name: string; because: string; step: number }
     | { type: 'done'; steps: number; toolsUsed: string[]; text: string }
     | { type: 'error'; message: string };
@@ -277,10 +284,20 @@ From connected MCP servers:
 ${extra}`
         : describeTools();
 
+    /* What the project itself says. Read here rather than passed in, so it is
+       whatever is on disk at the moment the run starts - somebody who corrects
+       these instructions because the agent got something wrong expects the
+       next run to know, not the next window. */
+    const house = readInstructions(root);
+    if (house.from.length) {
+        yield { type: 'note', text: `Following ${house.from.join(' and ')}` };
+    }
+
     const messages: Message[] = [
         {
             role: 'system',
-            content: SYSTEM.replace('%TOOLS%', toolList) + preamble + identify(choice),
+            content: SYSTEM.replace('%TOOLS%', toolList) + preamble + identify(choice)
+                + (house.text ? `\n\n${house.text}` : ''),
         },
         ...history,
         { role: 'user', content: task, images: images?.length ? images : undefined },
@@ -373,6 +390,14 @@ ${extra}`
                 ? await mcp.call(call.name, call.args)
                 : await execute(call.name, call.args, root);
             performed.push(call.name);
+            if (call.name === 'todo') {
+                // The list itself, for the panel to draw in place. The result
+                // still goes to the model in the normal way below.
+                const items = parseTodo(call.args.items);
+                if (items.length) {
+                    yield { type: 'todo', items };
+                }
+            }
             yield { type: 'tool_result', name: call.name, result, step };
         }
 

@@ -110,7 +110,64 @@ export const TOOLS: Record<string, { args: string[]; description: string; change
     search: { args: ['query'], description: 'Find which files contain a piece of text.', changes: false },
     run_command: { args: ['command'], description: 'Run a shell command in the project and read its output.', changes: true },
     git: { args: ['subcommand'], description: 'Run a git command, for example: status, add -A, commit -m "...", push.', changes: true },
+    /* The step list, published by the model and kept on screen.
+     *
+     * A long run was a scrolling column of tool calls: every step visible, the
+     * shape of the work not. Watching it, you could not tell whether the agent
+     * was on its second step of five or its fifth of five, or whether it had
+     * quietly dropped the half of the task you cared about.
+     *
+     * Antigravity calls this a Task List and writes it before any code;
+     * Claude Code keeps a todo list through the run. Same idea both times, and
+     * the value is the same: the plan is stated where it can be checked
+     * against what actually happens.
+     *
+     * It changes nothing on disk, so it is never gated by a mode. */
+    todo: {
+        args: ['items'],
+        description: 'Publish or update your step list. items is one step per line, each '
+            + 'starting with [ ] for not done, [~] for in progress, or [x] for done. '
+            + 'Send the whole list every time, not just what changed. Use it at the '
+            + 'start of anything with more than two steps, and again as each one is done.',
+        changes: false,
+    },
 };
+
+/** One published step. */
+export interface TodoItem {
+    state: 'todo' | 'doing' | 'done';
+    text: string;
+}
+
+/**
+ * Read the model's step list.
+ *
+ * Deliberately forgiving about the marker: models write `[ ]`, `[]`, `- [ ]`,
+ * `1. [x]`, and a bullet with no box at all. A list that renders as nothing
+ * because a dash was missing would be worse than no list, so anything with
+ * text on the line becomes an item, and only the marker decides its state.
+ */
+export function parseTodo(text: string): TodoItem[] {
+    const items: TodoItem[] = [];
+    for (const line of String(text || '').split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const marked = /^(?:[-*]\s*|\d+[.)]\s*)?\[([ x~*-]?)\]\s*(.+)$/i.exec(trimmed);
+        if (marked) {
+            const mark = marked[1].toLowerCase();
+            items.push({
+                state: mark === 'x' ? 'done' : (mark === '~' || mark === '*') ? 'doing' : 'todo',
+                text: marked[2].trim(),
+            });
+            continue;
+        }
+        const bare = /^(?:[-*]\s+|\d+[.)]\s+)(.+)$/.exec(trimmed);
+        if (bare) {
+            items.push({ state: 'todo', text: bare[1].trim() });
+        }
+    }
+    return items;
+}
 
 export function describeTools(): string {
     return Object.entries(TOOLS)
@@ -251,6 +308,22 @@ export async function execute(
             case 'search': return search(root, args);
             case 'run_command': return await runCommand(root, args);
             case 'git': return await runCommand(root, { command: `git ${args.subcommand ?? ''}` });
+            case 'todo': {
+                /* The list is shown by the panel, from the event the loop
+                   emits. What goes back to the model is the list as it was
+                   understood - so a model whose formatting was not read the
+                   way it meant can see that and correct it, instead of
+                   ticking items in its head that nobody else can see. */
+                const items = parseTodo(args.items);
+                if (!items.length) {
+                    return 'No steps were read from that. Put one step per line, each '
+                        + 'starting with [ ], [~] or [x].';
+                }
+                const done = items.filter((i) => i.state === 'done').length;
+                return `Step list updated - ${done} of ${items.length} done:\n`
+                    + items.map((i) => `${i.state === 'done' ? '[x]'
+                        : i.state === 'doing' ? '[~]' : '[ ]'} ${i.text}`).join('\n');
+            }
             default: return `${name} is listed but not implemented.`;
         }
     } catch (error) {

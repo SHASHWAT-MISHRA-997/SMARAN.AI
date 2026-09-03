@@ -83,11 +83,50 @@
     /** The transient "thinking" row, so the next entry can replace it. */
     let thinkingRow = null;
 
+    /** The published step list, drawn in place. */
+    let stepsRow = null;
+
+    function drawSteps(items) {
+        const fresh = el('div', 'item steps');
+        const done = items.filter((s) => s.state === 'done').length;
+        const head = el('div', 'title');
+        head.appendChild(el('span', null, `Steps · ${done} of ${items.length} done`));
+        fresh.appendChild(head);
+
+        const list = el('div', 'steplist');
+        items.forEach((step) => {
+            const row = el('div', 'step ' + step.state);
+            row.appendChild(el('span', 'step-mark',
+                step.state === 'done' ? '✓' : step.state === 'doing' ? '▸' : '○'));
+            row.appendChild(el('span', 'step-text', step.text));
+            list.appendChild(row);
+        });
+        fresh.appendChild(list);
+
+        if (stepsRow && stepsRow.isConnected) {
+            stepsRow.replaceWith(fresh);
+        } else {
+            log.appendChild(fresh);
+        }
+        stepsRow = fresh;
+        scroll();
+    }
+
     function addEntry(entry) {
         // Whatever arrives next is the answer to the wait, so the wait goes.
         if (thinkingRow && entry.kind !== 'thinking') {
             thinkingRow.remove();
             thinkingRow = null;
+        }
+
+        /* The step list is drawn once and then updated where it stands.
+           Adding a new copy for every tick would bury the run under its own
+           progress - the thing the list exists to prevent. */
+        if (entry.kind === 'steps') {
+            drawSteps(entry.steps || []);
+            const said = statusFor(entry);
+            if (said) setStatus(said);
+            return;
         }
 
         const item = el('div', 'item ' + entry.kind);
@@ -215,6 +254,7 @@
         if (entry.kind === 'tool') return 'Running ' + (entry.title || 'a tool');
         if (entry.kind === 'result') return 'Reading the result';
         if (entry.kind === 'says') return 'Writing an answer';
+        if (entry.kind === 'steps') return 'Working through the steps';
         return null;
     }
 
@@ -890,11 +930,13 @@
 
             case 'restore':
                 log.replaceChildren();
+                stepsRow = null;
                 (message.entries || []).forEach(addEntry);
                 break;
 
             case 'cleared':
                 log.replaceChildren();
+                stepsRow = null;
                 break;
 
             case 'thinking':
