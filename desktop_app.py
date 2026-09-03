@@ -80,11 +80,32 @@ def _user_data_dir() -> str:
     """Writable directory for the database, uploads, models and vector store.
 
     Kept out of the read-only bundle so data survives upgrades.
+
+    One place per platform, and each one is where that platform expects an
+    application to keep things. The fallback used to be the home directory on
+    anything that was not Windows, which on Linux means a bare ~/SMARAN.AI
+    folder sitting among somebody's own files - the same rudeness this project
+    already refuses when it declines to drop a 267 MB installer in Downloads.
+
+    DATA_DIR wins if it is set. It is how this is pointed somewhere else for a
+    test, and how somebody keeps their data on another disk.
     """
-    if _is_frozen():
+    told = os.environ.get("DATA_DIR")
+    if told:
+        return told
+    if not _is_frozen():
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
         return os.path.join(base, "SMARAN.AI", "data")
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library",
+                            "Application Support", "SMARAN.AI", "data")
+    # Linux and the rest: the XDG base directory, which is what a desktop
+    # environment backs up, syncs and shows in its own tools.
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "SMARAN.AI", "data")
 
 
 def _prepare_environment() -> None:
