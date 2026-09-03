@@ -2,7 +2,7 @@
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
   "description": "A coding agent that reads your project, changes files, runs commands and reads the results \u2014 one step at a time, in view.",
-  "version": "2.12.9",
+  "version": "2.12.10",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {

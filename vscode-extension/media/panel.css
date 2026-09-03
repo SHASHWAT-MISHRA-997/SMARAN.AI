@@ -10,6 +10,21 @@
  * when the operating system says the person does not want motion.
  */
 
+/* Hidden means hidden.
+ *
+ * The browser's own rule for this is `[hidden] { display: none }`, which any
+ * class here with a `display` of its own beats - same specificity, and an
+ * author stylesheet outranks the browser's. So `.status { display: flex }`
+ * quietly made the progress strip unhideable: `statusBar.hidden = true` ran,
+ * changed nothing, and the strip kept showing "Step 1 · thinking…" long after
+ * the run had stopped - including on a freshly opened panel, which is how a
+ * finished run came to look like one still going. `.menu` had the same shape.
+ *
+ * One rule, above everything, so no later `display` can reintroduce this. */
+[hidden] {
+    display: none !important;
+}
+
 :root {
     --cyan:     #00e5ff;
     --magenta:  #ff2d95;
