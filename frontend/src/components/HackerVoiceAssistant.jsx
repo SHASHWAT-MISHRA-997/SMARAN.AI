@@ -36,7 +36,7 @@ import { LiveVoiceSession } from '../utils/liveVoice';
 import { Ambience } from '../utils/ambience';
 import * as nativeSpeech from '../utils/nativeSpeech';
 import { isNativeApp, loadLink } from '../utils/hostLink';
-import { isPhone } from '../utils/device';
+import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 
 /** No computer behind the phone: the live session these controls need. */
 const noBackend = () => isNativeApp() && !loadLink()?.url;
@@ -1070,6 +1070,16 @@ export const HackerVoiceAssistant = ({
   const startRecognition = useCallback(() => {
     if (!isOpen || isMutedRef.current) return;
     stopRecognition();
+
+    /* There is no microphone on this origin. SpeechRecognition is still
+       defined here, so every check below concludes it can listen - which is
+       how this ended on "voice input unavailable" with a Try again button for
+       something retrying cannot change. */
+    if (micIsBlockedByOrigin()) {
+      setRecognizerStatus('unavailable');
+      setRecognizerIssue(MIC_BLOCKED_REASON);
+      return;
+    }
 
     // Android WebView repeatedly tears down its hosted SpeechRecognition
     // service, producing the audible mic on/off loop. Mobile already has the
@@ -2230,7 +2240,11 @@ export const HackerVoiceAssistant = ({
                 desktop shell grants WebView2 the microphone a second or two
                 after the window appears, and a request made before that is
                 denied by default. Asking again usually just works. */}
-            {(micStatus === 'denied' || micStatus === 'error' || micStatus === 'unavailable') && (
+            {/* Not offered when the origin is the reason. Asking again cannot
+                make http into https, and a button that will never work is
+                worse than no button. */}
+            {!micIsBlockedByOrigin()
+              && (micStatus === 'denied' || micStatus === 'error' || micStatus === 'unavailable') && (
               <button
                 type="button"
                 onClick={() => setMicRetry((n) => n + 1)}

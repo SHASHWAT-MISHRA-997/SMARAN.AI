@@ -37,3 +37,37 @@ export const couldBePinned = (maxWidth = 460) => (
   && window.innerWidth <= maxWidth
   && query('(pointer: fine)')
 );
+
+/**
+ * Can this page use a microphone at all?
+ *
+ * Browsers only expose the microphone on a secure origin - https, or
+ * localhost. A phone opening the paired computer at http://192.168.1.5:3003
+ * is neither, and there `navigator.mediaDevices` simply does not exist.
+ * Measured, not assumed:
+ *
+ *     origin            http://192.168.1.5:8805
+ *     isSecureContext   false
+ *     mediaDevices      undefined
+ *     SpeechRecognition function
+ *
+ * That last line is the trap. Recognition is still defined, so code that
+ * checks whether it exists concludes it can listen, starts it, and gets
+ * nothing - which is how "voice input unavailable, try again" happened for a
+ * condition retrying cannot change.
+ *
+ * Nothing in this app can grant itself the microphone. What it can do is say
+ * which of the two doors is shut.
+ */
+export const micIsBlockedByOrigin = () => (
+  typeof window !== 'undefined'
+  && !window.isSecureContext
+  && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname)
+);
+
+/** Why, in the words of the thing that is actually refusing. */
+export const MIC_BLOCKED_REASON =
+  'This page is open over http, and browsers only allow the microphone on '
+  + 'https or on localhost - so there is no microphone to reach from here. '
+  + 'Typing works. For talking, use the SMARAN.AI app on this phone, where '
+  + 'the microphone is available.';

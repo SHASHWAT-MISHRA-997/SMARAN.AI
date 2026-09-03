@@ -3,6 +3,7 @@ import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, Boo
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
+import { micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
 import * as nativeSpeech from '../utils/nativeSpeech';
@@ -2038,7 +2039,13 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     };
     const startRecordedDictation = async () => {
       if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-        window.dispatchEvent(new CustomEvent('smaran:dictation-error', { detail: { message: 'This browser cannot access a microphone for dictation.' } }));
+        window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
+          detail: {
+            message: micIsBlockedByOrigin()
+              ? MIC_BLOCKED_REASON
+              : 'This browser cannot access a microphone for dictation.',
+          },
+        }));
         return;
       }
       try {
@@ -2105,6 +2112,17 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
     const toggle = async () => {
       if (sidebarDictationRef.current) { stop(); return; }
+
+      /* No microphone exists on this origin, so nothing below can work.
+         Said first, and said exactly, because the failure it used to produce -
+         "voice input unavailable", with a Try again button - is for something
+         that might work next time, and this will not. */
+      if (micIsBlockedByOrigin()) {
+        window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
+          detail: { message: MIC_BLOCKED_REASON },
+        }));
+        return;
+      }
 
       if (isNativeApp() && await nativeSpeech.available()) {
         await startNativeDictation();
