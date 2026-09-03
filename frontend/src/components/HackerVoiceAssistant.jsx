@@ -36,6 +36,7 @@ import { LiveVoiceSession } from '../utils/liveVoice';
 import { Ambience } from '../utils/ambience';
 import * as nativeSpeech from '../utils/nativeSpeech';
 import { isNativeApp, loadLink } from '../utils/hostLink';
+import { isPhone } from '../utils/device';
 
 /** No computer behind the phone: the live session these controls need. */
 const noBackend = () => isNativeApp() && !loadLink()?.url;
@@ -2255,7 +2256,7 @@ export const HackerVoiceAssistant = ({
           {/* Vision needs the live session, which needs a computer. On a
               phone with none it was a permanently grey button with nothing
               saying why - the same as Gesture, and gone for the same reason. */}
-          {!noBackend() && (
+          {!noBackend() && !isPhone() && (
           <div className="relative">
             <CallToggle
               icon={visionMode === 'camera' ? Camera : Monitor}
@@ -2339,7 +2340,11 @@ export const HackerVoiceAssistant = ({
               your face from six inches away and the hands holding it are not
               in frame. The HUD was already suppressed there; the button that
               turned on nothing is gone with it. */}
-          {!isNativeApp() && (
+          {/* isPhone, not isNativeApp. The packaged app was excluded and the
+              same phone in a browser was not, so Gesture came back the moment
+              you paired a computer - on a device whose camera is six inches
+              from your face and whose hands are holding it. */}
+          {!isPhone() && (
             <span className="contents"><CallToggle icon={Hand} label="Gesture" active={gestureMode} onClick={() => setGestureMode((v) => !v)} /></span>
           )}
           {Ambience.isSupported() && (

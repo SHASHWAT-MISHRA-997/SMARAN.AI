@@ -881,12 +881,21 @@ const MediaPreviewCard = ({ text }) => {
 
 const extractBackendMeasurements = (payload = {}) => {
   const hasOwn = (key) => Object.prototype.hasOwnProperty.call(payload, key);
+  /* A placeholder is not an answer.
+   *
+   * This took the first non-empty of the three, and the local path always
+   * sends token_measurement_source - set to the literal string "unavailable"
+   * when nothing local measured anything. A non-empty string wins a truthiness
+   * test, so "unavailable" beat the real execution_source sitting behind it,
+   * and every cloud answer reported its source as Unavailable. The provider
+   * that answered was in the payload the whole time. */
+  const PLACEHOLDER = /^(unavailable|unknown|none|not[_ -]?measured)$/i;
   const measurementSource = [
     payload.token_measurement_source,
     payload.measurement_source,
     payload.execution_source,
-  ].find((value) => typeof value === 'string' && value.trim())?.trim() || '';
-  const hasVerifiedSource = Boolean(measurementSource) && !/^(unavailable|unknown|none|not[_ -]?measured)$/i.test(measurementSource);
+  ].find((value) => typeof value === 'string' && value.trim() && !PLACEHOLDER.test(value.trim()))?.trim() || '';
+  const hasVerifiedSource = Boolean(measurementSource);
   const messagePatch = {};
   const fieldMap = {
     token_count: 'backendTokenCount',
@@ -1276,6 +1285,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [activeModelDisplay, setActiveModelDisplay] = useState('Llama 3.1 8B (Core)');
   const [lastUsedModel, setLastUsedModel] = useState('');
+  /* Where the last answer actually came from, in the backend's own words -
+     "Cloud API - Groq", "ollama_runtime". The chip said LOCAL whatever
+     answered, which on a machine with no local chat model was simply wrong. */
+  const [lastSource, setLastSource] = useState('');
   const [directUploading, setDirectUploading] = useState(false);
   const [directUploadMessage, setDirectUploadMessage] = useState(null);
   // Gemini-style Live Web Search Toggle
@@ -2351,9 +2364,27 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     'qwen3:8b': 'Qwen 3 8B (High Precision Reasoning)',
   };
 
+  /* "Cloud API - Groq" -> "GROQ". "ollama_runtime" -> "LOCAL". */
+  const sourceLabel = (source) => {
+    const text = String(source || '');
+    if (!text) return '';
+    const cloud = /cloud api\s*[-–]\s*(.+)/i.exec(text);
+    if (cloud) return cloud[1].trim().toUpperCase();
+    if (/ollama|vllm|local/i.test(text)) return 'LOCAL';
+    return text.replace(/_/g, ' ').toUpperCase();
+  };
+
   const resolveDisplayName = (modelId) => {
     if (!modelId) return activeModelDisplay;
-    if (modelId === 'auto') return 'LOCAL · Auto Router';
+    /* "LOCAL · Auto Router" was printed for the auto setting whatever ended up
+       answering. On a machine with no local chat model pulled, every answer
+       came from a cloud provider and the header still said LOCAL. Auto routing
+       is a setting; where the answer came from is a fact, and once there is a
+       fact it is the one shown. */
+    if (modelId === 'auto') {
+      const where = sourceLabel(lastSource);
+      return where ? `${where} · Auto Router` : 'Auto Router · not used yet';
+    }
     if (modelId.startsWith('cloud:')) {
       const [, provider, ...parts] = modelId.split(':');
       return `Cloud API · ${provider.toUpperCase()} · ${parts.join(':')}`;
@@ -2377,8 +2408,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   useEffect(() => {
     if (lastUsedModel && lastUsedModel !== selectedModel) {
       setActiveModelDisplay(resolveDisplayName(lastUsedModel));
+    } else if (selectedModel === 'auto') {
+      // The source arrives after the model on the auto route.
+      setActiveModelDisplay(resolveDisplayName('auto'));
     }
-  }, [lastUsedModel]);
+  }, [lastUsedModel, lastSource]);
 
   // Poll model download status every 5s until ready
   useEffect(() => {
@@ -2873,6 +2907,15 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                       )
                     );
                   }
+                  /* Whatever the backend says about where this came from,
+                     kept so the header can stop guessing. */
+                  const reportedSource = [
+                    parsed.execution_source,
+                    parsed.token_measurement_source,
+                    parsed.measurement_source,
+                  ].find((v) => typeof v === 'string' && v.trim()
+                          && !/^(unavailable|unknown|none)$/i.test(v.trim()));
+                  if (reportedSource) setLastSource(reportedSource.trim());
                   if (parsed.model_routed) {
                     setLastUsedModel(parsed.model_routed);
                     setMessages((prev) =>

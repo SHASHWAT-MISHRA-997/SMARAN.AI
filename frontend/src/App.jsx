@@ -12,6 +12,7 @@ import ModelHubModal from './components/ModelHubModal';
 import DeveloperModal from './components/DeveloperModal';
 import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
+import { couldBePinned } from './utils/device';
 import AuthModal from './components/AuthModal';
 import UpdateNotice from './components/UpdateNotice';
 import ExtensionsHub from './components/ExtensionsHub';
@@ -116,13 +117,9 @@ const App = () => {
        A pinned window is small AND driven by a mouse. A phone is small and
        driven by a finger, and no phone is ever a picture-in-picture window.
        Pointer type separates the two honestly, where width cannot. */
-    const PINNED_MAX_WIDTH = 460;
     const mouse = window.matchMedia('(pointer: fine)');
-
     const apply = () => {
-      document.documentElement.classList.toggle(
-        'sm-pip', window.innerWidth <= PINNED_MAX_WIDTH && mouse.matches,
-      );
+      document.documentElement.classList.toggle('sm-pip', couldBePinned());
     };
     apply();
     window.addEventListener('resize', apply);
