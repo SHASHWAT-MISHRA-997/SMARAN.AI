@@ -680,13 +680,60 @@
           Android will ask you to allow installing from your browser. When download finishes, swipe down your notification shade or open your phone's <b>Downloads</b> app to tap and install.
         </p>
       </article>
+      <!-- Linux. The version number is not in the file name here because the
+           href goes through releases/latest/download, which needs the exact
+           name - so the .deb is republished under a fixed name by the release
+           job rather than carrying its version in the link. -->
+      <article class="dl-card reveal" data-delay="2">
+        <div class="dl-halo"></div>
+        <div class="dl-top">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M12 2c-2 0-3.2 1.6-3.2 3.6 0 1.3.2 2 .2 2.8 0 .9-.8 1.7-1.6 3-.8 1.2-1.7 2.6-2.2 4-.3.9-.3 1.8.1 2.4.4.6 1.1.9 1.9.9.5 0 .8.3 1.2.7.5.5 1.2 1 2.6 1h2c1.4 0 2.1-.5 2.6-1 .4-.4.7-.7 1.2-.7.8 0 1.5-.3 1.9-.9.4-.6.4-1.5.1-2.4-.5-1.4-1.4-2.8-2.2-4-.8-1.3-1.6-2.1-1.6-3 0-.8.2-1.5.2-2.8C15.2 3.6 14 2 12 2Zm-1.6 3.1c.4 0 .7.4.7 1 0 .5-.3.9-.7.9-.4 0-.7-.4-.7-1 0-.5.3-.9.7-.9Zm3.2 0c.4 0 .7.4.7 1 0 .5-.3.9-.7.9-.4 0-.7-.4-.7-1 0-.5.3-.9.7-.9ZM12 8.2c.8 0 1.7.4 2.2.9.3.3.2.6-.2.8l-1.7.8c-.2.1-.4.1-.6 0l-1.7-.8c-.4-.2-.5-.5-.2-.8.5-.5 1.4-.9 2.2-.9Z"/></svg>
+          <div>
+            <h3>Linux</h3>
+            <p class="dl-meta">Debian &middot; Ubuntu &middot; 64-bit</p>
+          </div>
+        </div>
+        <a class="btn btn-primary block no-lift" id="dlDeb"
+           download="smaran-ai.deb"
+           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran-ai_amd64.deb">
+          Download .deb
+        </a>
+        <p class="dl-note">
+          Double-click it, or:
+          <code>sudo apt install ./smaran-ai.deb</code>. It appears in your
+          applications menu, and <code>smaran-ai</code> starts it from a
+          terminal.
+        </p>
+        <ul class="dl-list">
+          <li>Built on Ubuntu 22.04, so it runs on 22.04 and anything newer</li>
+          <li>Not Debian-based? Take the
+            <a href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran-ai-linux-x86_64.tar.gz">portable archive</a>
+            and run <code>./run.sh</code></li>
+          <li>Same app as Windows: local models, your own keys, nothing sent anywhere you did not choose</li>
+        </ul>
+        <!-- Said here rather than found out after installing. The Windows build
+             opens in a native window because that webview ships with Windows;
+             the Linux equivalent cannot be bundled portably, and pretending
+             otherwise would just mean a package that fails on half the
+             distributions it is offered to. -->
+        <p class="dl-note">
+          <b>One difference from the Windows build.</b> On Linux the app opens
+          in a browser window with no address bar and no tabs, rather than in a
+          native window. Windows has a webview built into the system; the Linux
+          equivalent, WebKit2GTK, ships in two incompatible versions across
+          distributions and cannot be bundled to work on all of them. Chromium,
+          Chrome, Brave, Edge or Vivaldi will each give you that clean window;
+          with none of them installed it opens in your default browser instead.
+        </p>
+      </article>
+
       <article class="dl-card reveal" data-delay="2">
         <div class="dl-halo"></div>
         <div class="dl-top">
           <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M13 15h5"/></svg>
           <div>
             <h3>Command line</h3>
-            <p class="dl-meta">Windows &middot; 9.5 MB &middot; no Python needed</p>
+            <p class="dl-meta">Windows &amp; Linux &middot; 9.5 MB &middot; no Python needed</p>
           </div>
         </div>
         <!-- Same as the APK above: a copy on the site, updated by hand or not

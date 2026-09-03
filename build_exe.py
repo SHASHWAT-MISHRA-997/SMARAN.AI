@@ -26,6 +26,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 APP_NAME = "SMARAN.AI"
 ENTRY = os.path.join(ROOT, "desktop_app.py")
 ICON = os.path.join(ROOT, "smaran.ico")
+PNG_ICON = os.path.join(ROOT, "website", "assets", "logo.png")
 FRONTEND_DIST = os.path.join(ROOT, "backend", "frontend_dist")
 
 # Packages PyInstaller cannot discover through dynamic imports.
@@ -170,8 +171,12 @@ def _extra_binaries() -> list:
         import onnxruntime
 
         capi = os.path.join(os.path.dirname(onnxruntime.__file__), "capi")
+        # .pyd on Windows, .so on Linux. Looking only for .pyd on Linux found
+        # nothing and said nothing, which is the same silent half-built voice
+        # this whole function exists to prevent.
+        suffix = ".pyd" if os.name == "nt" else ".so"
         for name in os.listdir(capi):
-            if name.endswith(".pyd"):
+            if name.endswith(suffix):
                 found.append((os.path.join(capi, name), os.path.join("onnxruntime", "capi")))
     except Exception as exc:
         print(f"[build] onnxruntime binaries not located ({exc}); "
@@ -294,8 +299,11 @@ def build(onefile: bool = False) -> int:
         "--add-data", f"{FRONTEND_DIST}{sep}frontend_dist",
     ]
 
-    if os.path.isfile(ICON):
-        cmd += ["--icon", ICON]
+    # PyInstaller wants a .ico on Windows and a .png elsewhere; handing it the
+    # wrong one is a warning at best and a failed build at worst.
+    art = ICON if os.name == "nt" else PNG_ICON
+    if os.path.isfile(art):
+        cmd += ["--icon", art]
 
     for source, destination in _extra_binaries():
         cmd += ["--add-binary", f"{source}{sep}{destination}"]
@@ -326,17 +334,20 @@ def build(onefile: bool = False) -> int:
                     shutil.copytree(source, target, dirs_exist_ok=True)
                 else:
                     shutil.copy2(source, target)
-        elif os.path.isfile(produced + ".exe"):
-            shutil.copy2(produced + ".exe",
-                         os.path.join(ROOT, "dist", APP_NAME + ".exe"))
+        else:
+            tail = ".exe" if os.name == "nt" else ""
+            if os.path.isfile(produced + tail):
+                shutil.copy2(produced + tail,
+                             os.path.join(ROOT, "dist", APP_NAME + tail))
         shutil.rmtree(scratch, ignore_errors=True)
 
     if result.returncode != 0:
         print("[build] FAILED", file=sys.stderr)
         return result.returncode
 
-    target = (os.path.join(ROOT, "dist", f"{APP_NAME}.exe") if onefile
-              else os.path.join(ROOT, "dist", APP_NAME, f"{APP_NAME}.exe"))
+    tail = ".exe" if os.name == "nt" else ""
+    target = (os.path.join(ROOT, "dist", f"{APP_NAME}{tail}") if onefile
+              else os.path.join(ROOT, "dist", APP_NAME, f"{APP_NAME}{tail}"))
     print(f"[build] done -> {target}")
     return 0
 

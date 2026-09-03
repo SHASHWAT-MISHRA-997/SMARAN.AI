@@ -459,7 +459,7 @@ def _open_window(url: str) -> bool:
     import shutil
     import subprocess
 
-    for browser in ("chrome", "msedge", "brave"):
+    for browser in _BROWSERS:
         binary = shutil.which(browser)
         if binary:
             try:
@@ -472,6 +472,23 @@ def _open_window(url: str) -> bool:
 
     webbrowser.open(url)
     return False
+
+
+# Browsers that can open a window with no address bar, by the names they
+# actually have on each platform.
+#
+# The list used to be ("chrome", "msedge", "brave") everywhere. On Linux none
+# of those three names exist - the binaries are google-chrome, chromium,
+# brave-browser - so on a machine with Chrome installed the search found
+# nothing and the app opened in an ordinary tab with the browser's whole
+# interface around it. It worked, and it looked like something else's website.
+_BROWSERS = (
+    ("chrome", "msedge", "brave") if sys.platform == "win32"
+    else ("google-chrome-stable", "google-chrome", "chromium-browser", "chromium",
+          "brave-browser", "microsoft-edge-stable", "microsoft-edge", "vivaldi")
+    if sys.platform.startswith("linux")
+    else ("Google Chrome", "chrome", "Brave Browser", "Microsoft Edge")
+)
 
 
 def _report_fatal(message: str) -> None:

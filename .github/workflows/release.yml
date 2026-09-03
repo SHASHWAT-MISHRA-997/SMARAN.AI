@@ -120,6 +120,91 @@ jobs:
             cli/dist/smaran.exe
           if-no-files-found: error
 
+  linux:
+    name: Linux package
+    # Not windows-latest with a flag. PyInstaller cannot cross-compile: it
+    # bundles the interpreter and the native extensions of the machine it runs
+    # on, so a Linux build has to happen on Linux.
+    #
+    # 22.04 rather than latest, deliberately. A binary built against a newer
+    # glibc will not start on an older distribution, and the message it gives -
+    # "version GLIBC_2.38 not found" - is the kind of thing somebody gives up
+    # over rather than reports. Building on the oldest release still supported
+    # means the result runs on that one and on every newer one.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Fetch nltk data for the offline voice
+        run: python -c "import nltk; [nltk.download(p, quiet=True) for p in ('cmudict','averaged_perceptron_tagger','averaged_perceptron_tagger_eng')]"
+
+      - name: Build the interface
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the executable
+        run: python build_exe.py
+
+      # Two questions: does it contain what the voice needs, and does it start.
+      # The script is a file rather than lines in here because shell quoting
+      # inside YAML is its own source of bugs.
+      - name: Check the build, and that it actually runs
+        run: |
+          chmod +x packaging/linux/check_build.sh
+          packaging/linux/check_build.sh
+
+      - name: Build the .deb and the portable archive
+        run: |
+          chmod +x packaging/linux/build_linux.sh
+          packaging/linux/build_linux.sh
+
+      # A package that will not install is worse than no package. This installs
+      # it the way a person would, and checks the files landed where the
+      # desktop entry claims they are.
+      - name: Install the .deb and check it
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y desktop-file-utils
+          sudo apt-get install -y ./dist/linux/smaran-ai_*_amd64.deb
+          test -x /usr/bin/smaran-ai
+          test -f /usr/share/applications/smaran-ai.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/smaran-ai.png
+          desktop-file-validate /usr/share/applications/smaran-ai.desktop
+          echo "Installed cleanly, and the desktop entry is valid."
+          sudo apt-get remove -y smaran-ai
+
+      - name: Build the command line tool
+        working-directory: cli
+        run: python -m PyInstaller --noconfirm --clean smaran.spec
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/linux/*.deb
+            dist/linux/*.tar.gz
+            cli/dist/smaran
+          if-no-files-found: error
+
   android:
     name: Android APK
     runs-on: ubuntu-latest
@@ -203,7 +288,7 @@ jobs:
 
   publish:
     name: Attach to the release
-    needs: [windows, android]
+    needs: [windows, linux, android]
     if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
     runs-on: ubuntu-latest
 
@@ -218,6 +303,16 @@ jobs:
           cp artifacts/windows/installer/output/SMARAN.AI-Setup.exe release/
           cp artifacts/windows/cli/dist/smaran.exe release/
           cp artifacts/android/app-release.apk release/SMARAN.AI.apk
+          # Fixed names, because the website links through
+          # releases/latest/download/<name> and that needs the name to be the
+          # same every release. The version is inside the package either way.
+          cp artifacts/linux/dist/linux/*.deb release/smaran-ai_amd64.deb
+          cp artifacts/linux/dist/linux/*.tar.gz release/smaran-ai-linux-x86_64.tar.gz
+          # The Linux command line tool has no extension, so it would collide
+          # with nothing - but a file called "smaran" beside "smaran.exe" is
+          # ambiguous on a download page. It says which one it is.
+          cp artifacts/linux/cli/dist/smaran release/smaran-linux-x86_64
+          chmod +x release/smaran-linux-x86_64
           ls -la release
 
       # The downloads repository is what the website links to. Publishing
