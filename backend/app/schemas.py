@@ -74,6 +74,9 @@ class ChatSessionResponse(BaseModel):
     title: str
     created_at: datetime
     updated_at: datetime
+    # How many messages are in it, so the app can reopen the conversation you
+    # were actually having rather than the newest empty shell.
+    message_count: int = 0
 
     class Config:
         from_attributes = True

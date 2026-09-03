@@ -211,7 +211,14 @@ const App = () => {
         setSessions(sessionList);
         if (sessionList.length > 0) {
           if (!activeSessionId) {
-            setActiveSessionId(sessionList[0].id);
+            /* The conversation you were having, not the newest row.
+               Sessions are ordered by when they were touched, and the newest
+               is very often an empty one - 49 of 53 on this machine had no
+               messages in them. Opening that puts you in a blank screen and
+               makes everything you wrote look lost, which is exactly how it
+               was reported. */
+            const withContent = sessionList.find((item) => (item.message_count || 0) > 0);
+            setActiveSessionId((withContent || sessionList[0]).id);
           }
           return;
         }
@@ -219,11 +226,17 @@ const App = () => {
     } catch (err) {
       console.error(err);
     }
-    // Reached when the server said no, or could not be reached at all.
-    // handleCreateSession keeps a local fallback of its own, so this always
-    // leaves the user something they can actually type into.
+
+    /* Nothing is created here.
+     *
+     * This used to call handleCreateSession when the request failed - and at
+     * launch it fails routinely, because the window is up before the backend
+     * is listening. Every start that lost that race minted an empty session:
+     * fifteen of them in one day. The app can sit with no session at all;
+     * sending a message creates one, which is the moment it is actually
+     * needed. */
     if (!activeSessionId) {
-      await handleCreateSession();
+      setTimeout(() => { void fetchSessions(); }, 2000);
     }
   }
 

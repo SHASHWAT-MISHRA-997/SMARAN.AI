@@ -42,6 +42,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from app.database import engine, Base, SessionLocal, get_db
 from app.config import settings
 from app.models import User, Collection, Document, DocumentChunk, AuditLog, ChatSession, ChatMessage, UserMemory, CustomPlugin
@@ -1539,7 +1540,30 @@ def create_session(session_data: Optional[ChatSessionCreate] = None, db: Session
 
 @app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
 def list_sessions(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return db.query(ChatSession).filter(ChatSession.user_id == current_user.id).order_by(ChatSession.updated_at.desc()).all()
+    """Every conversation, newest first, each with how much is in it.
+
+    The count is here because the app has to choose one to reopen, and the
+    newest row is very often an empty one: 49 of 53 sessions on this machine
+    had no messages at all. Choosing by date alone lands you in a blank
+    conversation and makes the real one look lost.
+    """
+    counts = dict(
+        db.query(ChatMessage.session_id, func.count(ChatMessage.id))
+        .group_by(ChatMessage.session_id)
+        .all()
+    )
+    rows = (db.query(ChatSession)
+            .filter(ChatSession.user_id == current_user.id)
+            .order_by(ChatSession.updated_at.desc())
+            .all())
+    return [
+        ChatSessionResponse(
+            id=row.id, title=row.title,
+            created_at=row.created_at, updated_at=row.updated_at,
+            message_count=counts.get(row.id, 0),
+        )
+        for row in rows
+    ]
 
 @app.delete("/api/chat/sessions/{session_id}")
 def delete_session(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
