@@ -58,6 +58,9 @@ HIDDEN_IMPORTS = [
     # whole feature out of the build.
     "app.companion",
     "app.app_lock",
+    # Imported inside a try, so a miss here would disable the store check
+    # silently in the frozen build - which is the one that matters.
+    "app.db_guard",
     "app.web_intents",
     "app.analytics_config",
     "app.password_policy",
