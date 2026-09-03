@@ -110,3 +110,51 @@ export const removeFact = (id) => {
   saveFacts(all);
   return all;
 };
+
+/* ── merging what the other device wrote ───────────────────────────────── */
+
+/**
+ * Fold messages from the paired computer into what is stored here.
+ *
+ * Matched on role, content and the minute they were written, because the two
+ * sides generate ids independently while apart - the desktop's id for a
+ * message is not the phone's, so ids cannot be compared. The minute is enough:
+ * the same person does not send the same text twice in the same minute, and
+ * being slightly conservative here duplicates nothing.
+ */
+export const mergeRemote = (incoming = []) => {
+  const touched = new Set();
+  const sessions = loadSessions();
+  const known = new Map(sessions.map((s) => [s.id, s]));
+
+  for (const item of incoming) {
+    if (!item?.session_id || !item?.content) continue;
+    const id = item.session_id;
+
+    if (!known.has(id)) {
+      const created = { id, title: item.session_title || 'Conversation', created_at: item.created_at };
+      known.set(id, created);
+    }
+
+    const mine = loadMessages(id);
+    const minute = String(item.created_at || '').slice(0, 16);
+    const already = mine.some((m) => m.role === item.role
+      && m.content === item.content
+      && String(m.created_at || '').slice(0, 16) === minute);
+    if (already) continue;
+
+    mine.push({
+      id: `remote-${item.created_at}-${mine.length}`,
+      role: item.role,
+      content: item.content,
+      model_used: item.model_used || undefined,
+      created_at: item.created_at,
+    });
+    mine.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    saveMessages(id, mine);
+    touched.add(id);
+  }
+
+  if (touched.size) saveSessions([...known.values()]);
+  return touched;
+};

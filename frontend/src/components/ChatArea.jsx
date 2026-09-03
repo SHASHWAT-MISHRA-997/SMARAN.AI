@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch, PictureInPicture2,} from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
-import { isNativeApp, loadLink, probeHost } from '../utils/hostLink';
+import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
 import * as nativeSpeech from '../utils/nativeSpeech';
@@ -1378,6 +1378,29 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
    * speak, nothing; and the desktop app working perfectly, because on the
    * desktop the backend is right there. */
   const [hostAlive, setHostAlive] = useState(null);
+
+  /* Mirror the conversation with the paired computer, while it is paired.
+     Sync only ran when the pairing screen was opened, so what was said on
+     either side stayed on that side. */
+  useEffect(() => {
+    const link = loadLink();
+    if (!isNativeApp() || !link?.url || !link?.token) return undefined;
+    let stopped = false;
+
+    const run = async () => {
+      const data = await syncWithHost(link);
+      if (stopped || !data?.messages?.length) return;
+      const touched = localChat.mergeRemote(data.messages);
+      // Only redraw if this conversation is one of the ones that changed.
+      if (activeSessionId && touched.has(activeSessionId)) {
+        setMessages(localChat.loadMessages(activeSessionId));
+      }
+    };
+
+    run();
+    const timer = setInterval(run, 20000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [activeSessionId]);
   useEffect(() => {
     const link = loadLink();
     if (!isNativeApp() || !link?.url) return undefined;
@@ -3156,6 +3179,28 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       // Kept on the device, so the conversation is still here tomorrow.
       localChat.saveMessages(sessionId, messagesRef.current.map((m) =>
         (m.id === assistantId ? { ...m, content: sofar, isLoading: false } : m)));
+
+      /* Queued for the paired computer.
+         queueForSync has existed with no callers at all, so the sync endpoint
+         - which merges both ways and is perfectly real - was only ever handed
+         an empty list. Nothing written on the phone had a way of reaching the
+         desktop, which is why a conversation could not be picked up there. */
+      const stamp = new Date().toISOString();
+      queueForSync({
+        session_id: sessionId,
+        session_title: localChat.titleFrom(prompt),
+        role: 'user',
+        content: prompt,
+        created_at: stamp,
+      });
+      queueForSync({
+        session_id: sessionId,
+        session_title: localChat.titleFrom(prompt),
+        role: 'assistant',
+        content: sofar,
+        model_used: model,
+        created_at: new Date().toISOString(),
+      });
 
       if (spoken) {
         setVoiceAiResponse(sofar);
