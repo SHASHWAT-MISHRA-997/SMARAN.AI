@@ -221,6 +221,19 @@ export function deleteOllamaModel(ollamaUrl: string, model: string): Promise<voi
 /** A model as the panel shows it. */
 export interface ModelOption {
     id: string;
+    /**
+     * Whether the provider says this model accepts pictures.
+     *
+     * The provider's own word, never a guess from the name. OpenRouter states
+     * it as architecture.input_modalities; where a provider does not say,
+     * this stays undefined and the model is simply tried - a wrong guess
+     * either refuses a model that can see or sends a picture to one that
+     * cannot, and the second is what produced "No endpoints found that
+     * support image input".
+     */
+    vision?: boolean;
+    /** What the provider says it emits. Used to prefer a plain text answer. */
+    outputs?: string[];
     /** Marked so the free ones are findable in a list of three hundred. */
     free?: boolean;
     /** Roughly how much it can hold, when the provider says. */
@@ -311,10 +324,24 @@ export async function listModels(
                 throw new Error(`OpenRouter would not list its models (HTTP ${status}).`);
             }
             const data = JSON.parse(body).data || [];
-            return CODING_FIRST(data.map((m: { id: string; pricing?: { prompt?: string }; context_length?: number }) => ({
+            return CODING_FIRST(data.map((m: {
+                id: string;
+                pricing?: { prompt?: string };
+                context_length?: number;
+                architecture?: { input_modalities?: string[]; output_modalities?: string[] };
+            }) => ({
                 id: m.id,
                 free: String(m.pricing?.prompt ?? '') === '0' || m.id.endsWith(':free'),
                 context: m.context_length,
+                /* Reads a picture AND answers in words.
+                 *
+                 * Input alone is not enough. Filtering on it picked
+                 * google/lyria-3-pro-preview, which is a music model: it takes
+                 * an image and returns audio, so a screenshot sent there comes
+                 * back as nothing you asked for. Both ends have to match. */
+                vision: (m.architecture?.input_modalities || []).includes('image')
+                    && (m.architecture?.output_modalities || ['text']).includes('text'),
+                outputs: m.architecture?.output_modalities || ['text'],
             })));
         }
 
@@ -329,4 +356,45 @@ export async function listModels(
         case 'siliconflow': return openAiStyleModels('https://api.siliconflow.cn/v1', key, 'SiliconFlow');
         default: throw new Error(`${provider} is not a provider this knows.`);
     }
+}
+
+
+/**
+ * A model from this provider that can actually look at a picture.
+ *
+ * Attaching a screenshot to a model without eyes produced "openrouter refused
+ * the request (HTTP 404). No endpoints found that support image input" - a
+ * true sentence that helps nobody. The provider knows which of its models can
+ * see; this asks it.
+ *
+ * Returns undefined when the provider does not say, which is most of them.
+ * That is not the same as "none can": it means guessing would be the only way
+ * to answer, and a guess here sends a picture somewhere it cannot go.
+ */
+export async function firstVisionModel(
+    provider: string,
+    key: string,
+    ollamaUrl: string,
+    lmStudioUrl?: string,
+    preferFree = true,
+): Promise<string | undefined> {
+    let models: ModelOption[];
+    try {
+        models = await listModels(provider, key, ollamaUrl, lmStudioUrl);
+    } catch {
+        return undefined;
+    }
+    const seeing = models.filter((m) => m.vision);
+    if (!seeing.length) return undefined;
+
+    /* A plain text answer, not a song about the picture.
+     *
+     * google/lyria-3-pro-preview reads an image and its outputs are
+     * ['text', 'audio'] - it is a music model, and it passed a filter that
+     * only asked whether text was among them. Anything that also emits audio
+     * or images goes to the back. */
+    const rank = (m: ModelOption) => ((m.outputs || ['text']).length === 1 ? 0 : 1);
+    const ordered = [...seeing].sort((a, b) => rank(a) - rank(b));
+    const free = ordered.filter((m) => m.free);
+    return ((preferFree && free.length) ? free[0] : ordered[0]).id;
 }

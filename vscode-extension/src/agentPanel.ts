@@ -26,8 +26,10 @@ import { AgentEvent, run, ToolCall } from './agent/loop';
 import { MODES, ModeId } from './agent/modes';
 import { Message } from './agent/models';
 import {
-    deleteOllamaModel, listModels, ModelOption, PROVIDERS, pullOllamaModel,
+    deleteOllamaModel, firstVisionModel, listModels, ModelOption, PROVIDERS,
+    pullOllamaModel,
 } from './providers';
+import { isOfficeFile, officeText } from './office';
 import { Entry, Session, SessionStore } from './sessions';
 import { McpRegistry } from './agent/mcpRegistry';
 import { Keys, lmStudioUrl, mcpServers, ollamaUrl, resolveChoice } from './settings';
@@ -159,12 +161,22 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 void this.handle({ type: 'listSessions' });
                 break;
 
-            case 'clearSessions':
+            case 'clearSessions': {
+                /* The confirmation lives here because the webview has none:
+                   window.confirm is blocked there, so the panel's own guard
+                   never fired and this arrived unasked. */
+                const answer = await vscode.window.showWarningMessage(
+                    'Delete every saved conversation for this project?',
+                    { modal: true },
+                    'Delete all',
+                );
+                if (answer !== 'Delete all') break;
                 await this.sessions.clear();
                 this.session = undefined;
                 this.post({ type: 'cleared' });
                 void this.handle({ type: 'listSessions' });
                 break;
+            }
 
             case 'attach': await this.attach(); break;
 
@@ -517,6 +529,24 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                         path: shown, text: '', truncated: false,
                         image: bytes.toString('base64'), mime,
                     });
+                } else if (isOfficeFile(path.extname(uri.fsPath))) {
+                    /* A .docx read as UTF-8 is a page of binary, and that is
+                       what used to be attached. These are zips of XML; the
+                       words are pulled out of the parts that hold them. */
+                    const words = officeText(path.extname(uri.fsPath), bytes);
+                    if (!words) {
+                        void vscode.window.showWarningMessage(
+                            `${shown} has no readable text in it.`);
+                        continue;
+                    }
+                    this.attachments.push({
+                        path: shown,
+                        text: `[text extracted from ${shown}; layout, tables and images `
+                            + `are not preserved]
+
+${words.slice(0, ATTACH_LIMIT)}`,
+                        truncated: words.length > ATTACH_LIMIT,
+                    });
                 } else {
                     const raw = bytes.toString('utf8');
                     this.attachments.push({
@@ -589,6 +619,12 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             return;
         }
         this.post({ type: 'entry', entry });
+        /* Shown, not kept. "thinking" is replaced by whatever the model says,
+           so writing it to the transcript would fill a reopened conversation
+           with a row per step saying it was about to do something. */
+        if (entry.kind === 'thinking') {
+            return;
+        }
         if (!this.session) {
             this.session = this.sessions.create(entry.kind === 'you' ? entry.body || '' : 'Untitled');
         }
@@ -654,6 +690,46 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                     kind: 'note',
                     title: `${active.label} — ${active.description}`,
                 });
+            }
+
+            /* A picture needs a model with eyes.
+             *
+             * Sending one to a model without them produced "openrouter refused
+             * the request (HTTP 404). No endpoints found that support image
+             * input" - true, and no use to anybody. The provider knows which
+             * of its models can see, so it is asked, and the swap is announced
+             * rather than done quietly: it changes what answers, and that is
+             * worth a line. */
+            const pictures = this.attachments.filter((a) => a.image && a.mime);
+            if (pictures.length) {
+                const current = (await listModels(
+                    choice.provider, await this.keys.get(choice.provider),
+                    ollamaUrl(), lmStudioUrl(),
+                ).catch(() => [] as ModelOption[])).find((m) => m.id === choice.model);
+
+                // Only swap when the provider has actually said it cannot see.
+                // Where nothing is said, the model is tried and the provider
+                // gets to answer for itself.
+                if (current && current.vision === false) {
+                    const seeing = await firstVisionModel(
+                        choice.provider, await this.keys.get(choice.provider),
+                        ollamaUrl(), lmStudioUrl(),
+                    );
+                    if (seeing) {
+                        this.record({
+                            kind: 'note',
+                            title: `${choice.model} cannot read pictures, so this one is going to ${seeing}`,
+                        });
+                        choice.model = seeing;
+                    } else {
+                        this.record({
+                            kind: 'note',
+                            title: `${choice.provider || 'This provider'} has no model that reads pictures`,
+                            body: 'The screenshot is attached and will be sent; the model will '
+                                + 'say for itself whether it can see it.',
+                        });
+                    }
+                }
             }
 
             await this.mcp.use(mcpServers());
@@ -798,6 +874,17 @@ export class AgentPanel implements vscode.WebviewViewProvider {
   <!-- Shown only while a run is in flight, so "is it doing anything" never
        has to be answered by watching for new text to appear. -->
   <div id="beam" class="beam" hidden aria-hidden="true"></div>
+
+  <!-- What it is doing, right now, pinned.
+       The transcript scrolls; this does not. A run that reads twenty files
+       pushes its own progress off the screen, and then the only way to know
+       whether anything is happening is to watch for new text - which is the
+       thing people said was missing. -->
+  <div id="status" class="status" hidden>
+    <span class="status-dot" aria-hidden="true"></span>
+    <span id="statusText">Working…</span>
+    <span id="statusTime" class="status-time"></span>
+  </div>
 
   <main id="log" class="screen"></main>
   <section id="history" class="screen" hidden></section>

@@ -109,17 +109,94 @@
         }
 
         if (entry.body) {
-            if (entry.kind === 'result' || entry.kind === 'tool') {
+            if (entry.kind === 'result') {
+                /* A result is folded to one line by default.
+                 *
+                 * "list_files" on a real project is two hundred paths, and
+                 * printing all of it pushed the answer off the screen and made
+                 * a run look like a wall of output rather than a sequence of
+                 * steps. The whole thing is still here, one click away - it is
+                 * hidden, not thrown away. */
+                const lines = String(entry.body).split(String.fromCharCode(10));
+                const size = entry.body.length < 1024
+                    ? entry.body.length + ' characters'
+                    : Math.round(entry.body.length / 1024) + ' KB';
+                const summary = lines.length > 1
+                    ? lines.length + ' lines · ' + size
+                    : size;
+
+                const fold = el('div', 'fold');
+                const pre = el('pre', null, entry.body);
+                pre.hidden = true;
+                const toggle = button('▸ ' + summary, 'tiny', () => {
+                    pre.hidden = !pre.hidden;
+                    toggle.textContent = (pre.hidden ? '▸ ' : '▾ ') + summary;
+                    if (!pre.hidden) scroll();
+                });
+                fold.appendChild(toggle);
+                fold.appendChild(pre);
+                item.appendChild(fold);
+            } else if (entry.kind === 'tool') {
                 item.appendChild(el('pre', null, entry.body));
             } else {
                 renderBody(item, entry.body);
             }
         }
 
+        const said = statusFor(entry);
+        if (said) setStatus(said);
+
         log.appendChild(item);
-        if (entry.kind === 'thinking') thinkingRow = item;
+        if (entry.kind === 'thinking') {
+            thinkingRow = item;
+            /* Counted, so it is visibly alive.
+             *
+             * A line that says "thinking" and then does not change for forty
+             * seconds is indistinguishable from one that has stopped. The
+             * seconds are the difference between waiting and wondering. */
+            const started = Date.now();
+            const label = item.querySelector('.title span');
+            const base = label ? label.textContent : '';
+            const tick = setInterval(() => {
+                if (!item.isConnected) { clearInterval(tick); return; }
+                const seconds = Math.round((Date.now() - started) / 1000);
+                if (label) label.textContent = `${base}  ${seconds}s`;
+            }, 1000);
+        }
         scroll();
         return item;
+    }
+
+    /* The pinned strip: one line saying what is happening now. */
+    const statusBar = $('status');
+    const statusText = $('statusText');
+    const statusTime = $('statusTime');
+    let statusSince = 0;
+    let statusTicker = null;
+
+    function setStatus(text) {
+        if (!text) {
+            statusBar.hidden = true;
+            if (statusTicker) { clearInterval(statusTicker); statusTicker = null; }
+            return;
+        }
+        statusText.textContent = text;
+        statusBar.hidden = false;
+        statusSince = Date.now();
+        statusTime.textContent = '0s';
+        if (statusTicker) clearInterval(statusTicker);
+        statusTicker = setInterval(() => {
+            statusTime.textContent = Math.round((Date.now() - statusSince) / 1000) + 's';
+        }, 1000);
+    }
+
+    /** What an entry means, in the words the strip should show. */
+    function statusFor(entry) {
+        if (entry.kind === 'thinking') return entry.title || 'Thinking…';
+        if (entry.kind === 'tool') return 'Running ' + (entry.title || 'a tool');
+        if (entry.kind === 'result') return 'Reading the result';
+        if (entry.kind === 'says') return 'Writing an answer';
+        return null;
     }
 
     function busy(on) {
@@ -127,6 +204,8 @@
         $('stop').hidden = !on;
         $('attach').disabled = on;
         $('beam').hidden = !on;
+        // The strip belongs to a run, and goes when the run does.
+        if (!on) setStatus('');
     }
 
     // ── screens ───────────────────────────────────────────────────────────
@@ -357,10 +436,14 @@
         const head = el('div', 'screen-head');
         head.appendChild(el('h3', null, 'Past conversations'));
         if (sessions.length) {
+            /* Asked by the editor, not by confirm().
+             *
+             * window.confirm does not exist in a webview - it is blocked, and
+             * the call simply returns - so the branch below it never ran and
+             * Clear all did nothing at all. The extension asks with a real
+             * dialog, where an answer actually comes back. */
             head.appendChild(button('Clear all', 'tiny', () => {
-                if (confirm('Delete every saved conversation for this project?')) {
-                    vscode.postMessage({ type: 'clearSessions' });
-                }
+                vscode.postMessage({ type: 'clearSessions' });
             }));
         }
         history.appendChild(head);

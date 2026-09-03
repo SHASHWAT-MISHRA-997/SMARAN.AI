@@ -781,3 +781,47 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
     font-size: 9.5px;
     letter-spacing: .04em;
 }
+
+/* A folded tool result.
+ * The summary is the row; the output is underneath it when asked for. */
+.fold { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.fold > pre { align-self: stretch; margin: 0; }
+
+/* The pinned status strip.
+ *
+ * Sits between the header and the transcript and does not scroll with it, so
+ * "what is it doing" is answerable at a glance however far down the log has
+ * gone. Hidden entirely when nothing is running - a permanent bar that says
+ * "idle" is furniture. */
+.status {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    font-size: 11px;
+    color: var(--ink-dim);
+    background: rgba(139, 92, 246, .08);
+    border-bottom: 1px solid rgba(139, 92, 246, .22);
+}
+.status-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--violet);
+    animation: pulse 1.1s ease-in-out infinite;
+}
+#statusText {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.status-time {
+    flex: none;
+    color: var(--ink-far);
+    font-family: var(--vscode-editor-font-family);
+}
