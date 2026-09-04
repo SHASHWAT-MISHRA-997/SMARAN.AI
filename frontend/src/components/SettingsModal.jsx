@@ -10,6 +10,7 @@ import { PET_FORMS, PetAvatar } from "./DesktopPet";
 import { useTheme } from "../context/ThemeContext";
 
 import { detectClientDevice } from './RightPanel';
+import { isPhone } from '../utils/device';
 import { isNativeApp, loadLink } from '../utils/hostLink';
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
@@ -443,7 +444,32 @@ const SettingsModal = ({
     .split(/[\s._-]+/).filter(Boolean).slice(0, 2)
     .map((part) => part[0].toUpperCase()).join('') || 'Y';
 
-  const isMobile = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+  /* A narrow window is not a phone.
+   *
+   * This asked only about width, so dragging the desktop window to half the
+   * screen turned it into a phone: "Desktop Pets" became "Mobile Pets" and
+   * Software Updates vanished from the list entirely, on the machine that is
+   * the only one that can install an update.
+   *
+   * utils/device answers this properly and its comment already described this
+   * exact case - small and driven by a mouse is a narrow window, small and
+   * driven by a finger is a phone. It simply was not being used here.
+   *
+   * Re-asked on resize, so the tabs come back the moment the window widens
+   * rather than on the next time something else happens to redraw. */
+  const [isMobile, setIsMobile] = useState(() => isPhone());
+  useEffect(() => {
+    const recheck = () => setIsMobile(isPhone());
+    window.addEventListener('resize', recheck);
+    // Not only width: a tablet switching between a keyboard and a finger
+    // changes the answer without changing a single pixel.
+    const pointer = window.matchMedia?.('(pointer: coarse)');
+    pointer?.addEventListener?.('change', recheck);
+    return () => {
+      window.removeEventListener('resize', recheck);
+      pointer?.removeEventListener?.('change', recheck);
+    };
+  }, []);
 
   /* Something can still ask for a tab that no longer exists here - a saved
      initialTab, or a navigation from elsewhere. Without this the panel would
