@@ -1,4 +1,23 @@
 import logging
+import sys
+
+# chromadb needs SQLite 3.35 or newer, and takes it from whatever the Python
+# it is running under was linked against. On Windows that is recent enough.
+# The Linux build is frozen on Rocky 8 - which is where glibc 2.28 comes from,
+# and which ships SQLite 3.26 - so the bundled library was too old and chromadb
+# refused to start with "Your system has an unsupported version of sqlite3".
+# The whole document store then quietly fell over on Linux and nowhere else.
+#
+# pysqlite3-binary carries its own recent SQLite, so the answer does not depend
+# on the machine underneath. Swapped in before chromadb is imported, because it
+# reads the version at import time. Absent - on Windows, where it is neither
+# needed nor installed - nothing changes.
+try:
+    __import__("pysqlite3")
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except ImportError:
+    pass
+
 import chromadb
 from app.config import settings
 

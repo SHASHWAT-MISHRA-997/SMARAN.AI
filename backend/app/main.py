@@ -33,7 +33,20 @@ import magic
 import hashlib
 import secrets
 from datetime import datetime, timedelta
-from typing import Generator, List, Optional
+# Tuple was missing, and why it went unnoticed is worth writing down.
+#
+# `_UI_COMMAND_PATTERNS: List[Tuple[...]]` is a module-level annotation. Up to
+# Python 3.13 those are evaluated while the module is imported, so a missing
+# name is a NameError before the app can start. Python 3.14 defers annotation
+# evaluation, so the same line is never evaluated and the missing import costs
+# nothing. Confirmed on this machine: on 3.14 the equivalent line raises no
+# error at all.
+#
+# The Windows build is 3.14 and never saw it. The Linux build is 3.12 - the
+# price of reaching glibc 2.28 - and died on startup with "The local engine
+# could not start: name Tuple is not defined". The bug was always there; one
+# interpreter was hiding it.
+from typing import Generator, List, Optional, Tuple
 from pydantic import BaseModel as PydanticBaseModel, BaseModel, EmailStr, validator
 import requests
 import httpx

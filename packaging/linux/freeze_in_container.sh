@@ -82,6 +82,12 @@ echo "[freeze] using $("$PY" -V) at $PY"
 "$PY" -m pip install --upgrade pip -q
 "$PY" -m pip install -q -r requirements-build.txt
 
+# Rocky 8 ships SQLite 3.26 and chromadb needs 3.35. This wheel carries its
+# own, so the document store works on every machine rather than on whichever
+# ones happen to have a new enough system library. Linux only - Windows has
+# no such problem and does not install it.
+"$PY" -m pip install -q pysqlite3-binary
+
 # The corpora the offline voice needs. Fetched here rather than left to the
 # build script so that a network failure is its own visible error.
 "$PY" -c "import nltk; [nltk.download(p, quiet=True) for p in (\"cmudict\",\"averaged_perceptron_tagger\",\"averaged_perceptron_tagger_eng\")]"

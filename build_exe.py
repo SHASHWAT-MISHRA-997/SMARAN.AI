@@ -62,6 +62,8 @@ HIDDEN_IMPORTS = [
     # Imported inside a try, so a miss here would disable the store check
     # silently in the frozen build - which is the one that matters.
     "app.db_guard",
+    # Linux only, and absent on Windows - the import that uses it is guarded.
+    "pysqlite3",
     "app.web_intents",
     "app.analytics_config",
     "app.password_policy",
