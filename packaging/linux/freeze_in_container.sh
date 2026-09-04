@@ -59,6 +59,17 @@ set -euo pipefail
 # Named, not discovered. An earlier version of this took "the newest Python in
 # the image" and got 3.15.0rc2 free-threaded - a release candidate with a
 # different ABI that no dependency has wheels for.
+# expat first, and on purpose.
+#
+# Rocky 8 ships an expat older than the one its python3.12 was compiled
+# against, so pyexpat loads and immediately fails with
+#
+#     undefined symbol: XML_SetBillionLaughsAttackProtectionMaximumAmplification
+#
+# which surfaces from inside pip, three imports deep, and looks like pip is
+# broken. Updating expat first is the whole fix.
+dnf update -y -q expat >/dev/null
+
 # python3.12-pip is a separate package here. Without it the interpreter
 # installs fine and then answers "No module named pip", which reads like a
 # broken image rather than a missing package.
