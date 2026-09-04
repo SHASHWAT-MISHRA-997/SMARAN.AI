@@ -58,7 +58,7 @@ except ImportError:  # a source checkout has no generated config
 ENDPOINT = (os.getenv("SMARAN_ANALYTICS_URL") or getattr(_baked, "ENDPOINT", "") or "").strip()
 INGEST_KEY = (os.getenv("SMARAN_ANALYTICS_KEY") or getattr(_baked, "INGEST_KEY", "") or "").strip()
 
-APP_VERSION = os.getenv("SMARAN_APP_VERSION", "2.10.21")
+APP_VERSION = os.getenv("SMARAN_APP_VERSION", "2.10.22")
 HEARTBEAT_HOURS = 12
 
 _PLATFORMS = {"Windows": "windows", "Darwin": "macos", "Linux": "linux"}
