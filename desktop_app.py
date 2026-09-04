@@ -270,6 +270,56 @@ def _wait_until_ready(port: int, timeout: float = STARTUP_TIMEOUT_SECONDS,
     return False
 
 
+#: One name, so a second copy can find the first before either does anything.
+#: Windows keeps this in the kernel, which is what makes the check atomic -
+#: two copies starting in the same instant cannot both win it.
+SINGLE_INSTANCE_MUTEX = r"Global\SMARAN.AI.SingleInstance"
+
+_instance_handle = None
+
+
+def _claim_single_instance() -> bool:
+    """True if this process is the only copy. False if another already holds it.
+
+    The check that was here read a file and then pinged a port - two steps
+    with a gap between them, and during "Restart & Install" that gap is
+    exactly when a second copy starts. Both would read "nothing running" and
+    both would carry on. That is how several windows ended up in the taskbar.
+
+    A named mutex has no gap. Creating it and learning that it already existed
+    is one operation inside the kernel, so of two copies starting together,
+    exactly one wins.
+
+    The handle is kept in a module-level name on purpose: dropping it would
+    let Python collect it and release the mutex while the app is still
+    running, which would put the race straight back.
+    """
+    global _instance_handle
+
+    if sys.platform != "win32":
+        # No equivalent kernel object here. The port check below is what this
+        # falls back to, and it is honest about being weaker.
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        ERROR_ALREADY_EXISTS = 183
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        handle = kernel32.CreateMutexW(None, wintypes.BOOL(True), SINGLE_INSTANCE_MUTEX)
+        if not handle:
+            return True
+        if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+            kernel32.CloseHandle(handle)
+            return False
+        _instance_handle = handle
+        return True
+    except Exception:
+        # A guard that cannot be set up must not stop the app from starting.
+        return True
+
+
 def _existing_instance() -> "int | None":
     """The port of a copy that is already running, if one is answering.
 
@@ -581,6 +631,14 @@ def main() -> int:
     # feature as unavailable. Double-clicking the shortcut twice was enough
     # to produce it, and there was nothing on screen to say which window was
     # the broken one.
+    # Asked first, because it cannot be raced. The port check underneath is
+    # still useful on platforms with no mutex, and for a copy that is running
+    # from a different install.
+    if not _claim_single_instance():
+        _raise_existing_window()
+        print(f"{APP_NAME} is already running.")
+        return 0
+
     running = _existing_instance()
     if running is not None:
         _raise_existing_window()

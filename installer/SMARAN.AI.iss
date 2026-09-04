@@ -37,6 +37,21 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
+; The installer must not start the app itself.
+;
+; Inno closes an application holding files it needs to replace, and by
+; default starts that application again afterwards. The [Run] entry then
+; starts it a second time, so "Restart & Install" left two SMARAN.AI
+; windows in the taskbar - and a third if the shortcut was clicked while
+; that was happening.
+;
+; AppMutex names the same kernel object the app itself claims, so Inno
+; recognises the running copy and can ask for it to be closed rather than
+; guessing from open file handles.
+AppMutex=Global\SMARAN.AI.SingleInstance
+CloseApplications=yes
+RestartApplications=no
+
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
