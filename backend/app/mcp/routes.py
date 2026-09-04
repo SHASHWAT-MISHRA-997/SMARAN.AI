@@ -147,6 +147,50 @@ async def probe_server(name: str):
     return status
 
 
+@router.post("/servers/{name}/sign-in")
+async def sign_in_server(name: str):
+    """Take the person through a hosted server's sign-in.
+
+    A hosted MCP server does not take an API key; it answers 401 and points at
+    an authorization server. This opens the browser, waits for the approval,
+    and keeps the token - after which the server works like any other.
+
+    It blocks while the browser is open, deliberately. Approving is a thing
+    somebody is doing right now, and a request that returned immediately would
+    leave the interface guessing whether it had worked.
+    """
+    from app.mcp import oauth
+
+    entry = manager.load().get(name)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No server named %r." % name)
+
+    target = str(entry.get("target") or "")
+    if not target.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=400,
+            detail="%s runs as a command on this machine, so it takes its credentials "
+                   "from the environment rather than from a sign-in." % name)
+
+    try:
+        await oauth.sign_in(target)
+    except Exception as exc:  # noqa: BLE001 - the reason is the useful part
+        raise HTTPException(status_code=502, detail=str(exc)[:400])
+    return await manager.status(name, probe=True)
+
+
+@router.post("/servers/{name}/sign-out")
+async def sign_out_server(name: str):
+    """Forget the tokens for one server, keeping how to reach it."""
+    from app.mcp import oauth
+
+    entry = manager.load().get(name)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No server named %r." % name)
+    oauth.sign_out(str(entry.get("target") or ""))
+    return {"name": name, "signed_in": False}
+
+
 class SetEnabled(BaseModel):
     enabled: bool
 

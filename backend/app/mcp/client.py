@@ -40,6 +40,21 @@ class MCPError(RuntimeError):
     """A failure worth showing the user in the words it happened in."""
 
 
+class MCPAuthRequired(MCPError):
+    """The server wants a sign-in, not a fix.
+
+    Separate from MCPError because it is not a failure: a hosted server
+    answering 401 is asking who this is, and the answer is a browser and
+    somebody's consent. Reported as a fault, it read as a broken server and
+    there was nothing to click.
+    """
+
+    def __init__(self, message: str, url: str = "", www_authenticate: str = "") -> None:
+        super().__init__(message)
+        self.url = url
+        self.www_authenticate = www_authenticate
+
+
 class MCPSession:
     """One connection to one server.
 
@@ -269,6 +284,10 @@ class HttpSession(MCPSession):
         self.url = url
         self.headers = headers or {}
         self._session_header: Optional[str] = None
+        #: Set once a stored sign-in has been found, so it is looked up once
+        #: per session rather than on every message.
+        self._bearer: Optional[str] = None
+        self._looked_for_token = False
 
     async def _send(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         import httpx
@@ -281,9 +300,40 @@ class HttpSession(MCPSession):
         if self._session_header:
             headers["mcp-session-id"] = self._session_header
 
-        try:
+        # A hosted server takes a token rather than a fixed header. If one has
+        # been signed in for, it goes on every request - the spec is explicit
+        # that it must, even within one session.
+        if not self._looked_for_token and "authorization" not in {k.lower() for k in headers}:
+            self._looked_for_token = True
+            try:
+                from app.mcp import oauth
+
+                self._bearer = await oauth.token_for(self.url)
+            except Exception as exc:  # noqa: BLE001 - no sign-in is not a crash
+                logger.info("%s: no stored sign-in (%s)", self.name, exc)
+        if self._bearer:
+            headers["authorization"] = "Bearer %s" % self._bearer
+
+        async def post():
             async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(self.url, json=payload, headers=headers)
+                return await client.post(self.url, json=payload, headers=headers)
+
+        try:
+            response = await post()
+            # Expired between the check and the request, or never signed in.
+            # One retry, with a token, so an expiry is invisible rather than an
+            # error somebody has to act on.
+            if response.status_code == 401 and self._bearer:
+                try:
+                    from app.mcp import oauth
+
+                    fresh = await oauth.token_for(self.url)
+                except Exception:  # noqa: BLE001
+                    fresh = None
+                if fresh and fresh != self._bearer:
+                    self._bearer = fresh
+                    headers["authorization"] = "Bearer %s" % fresh
+                    response = await post()
         except httpx.ConnectError as exc:
             raise MCPError("%s: could not reach %s (%s)" % (self.name, self.url, exc))
         except httpx.TimeoutException:
@@ -295,6 +345,15 @@ class HttpSession(MCPSession):
 
         if "id" not in payload:
             return None
+        if response.status_code == 401:
+            # Not a fault to report as one. The server is asking who this is,
+            # and the answer is a sign-in the person has to agree to. The
+            # header is carried up so the sign-in knows where to look.
+            raise MCPAuthRequired(
+                "%s needs you to sign in." % self.name,
+                url=self.url,
+                www_authenticate=response.headers.get("www-authenticate", ""),
+            )
         if response.status_code >= 400:
             raise MCPError(
                 "%s: HTTP %s from %s — %s"
