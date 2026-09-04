@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 #
-# Package SMARAN.AI for Linux: a .deb for Debian and Ubuntu, and a .tar.gz for
-# everything else.
+# Package SMARAN.AI for Linux, for any distribution:
+#
+#   .AppImage   one file, made executable and run. No package manager, no
+#               install, no distribution of its own. This is the one that
+#               works everywhere and the one the website leads with.
+#   .deb        Debian, Ubuntu, Mint, Pop!_OS - for people who would rather
+#               it appeared in their package list.
+#   .rpm        Fedora, RHEL, Rocky, Alma, openSUSE, for the same reason.
+#   .tar.gz     unpack anywhere and run ./run.sh.
+#
+# All four hold the same frozen application, built once.
 #
 # WHY THERE IS NO NATIVE WINDOW HERE
 #
@@ -109,7 +118,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: Shashwat Mishra <shashwatmba209@gmail.com>
 Installed-Size: $INSTALLED_KB
-Depends: libc6 (>= 2.35)
+Depends: libc6 (>= 2.28)
 Recommends: chromium | chromium-browser | google-chrome-stable | brave-browser
 Description: SMARAN.AI - a local-first AI assistant
  Runs on your own machine. Bring an API key or a model in Ollama; nothing
@@ -138,7 +147,57 @@ exec "./$APP_NAME" "\$@"
 EOF
 chmod 755 "$PORTABLE/run.sh" "$PORTABLE/$APP_NAME"
 tar -C "$OUT/portable" -czf "$OUT/${APP_ID}-${VERSION}-linux-x86_64.tar.gz" "$APP_ID-$VERSION"
-rm -rf "$OUT/portable" "$TREE"
+rm -rf "$OUT/portable"
 echo "[linux] built $(basename "$OUT/${APP_ID}-${VERSION}-linux-x86_64.tar.gz")"
+
+# ── an rpm, for Fedora, RHEL and openSUSE ─────────────────────────────────
+# Built from the same tree the .deb was built from, so the two packages can
+# never drift apart in what they contain or where they put it.
+if command -v rpmbuild >/dev/null 2>&1; then
+    RPMROOT="$OUT/rpmbuild"
+    mkdir -p "$RPMROOT/BUILD" "$RPMROOT/RPMS" "$RPMROOT/SPECS"
+    cat > "$RPMROOT/SPECS/$APP_ID.spec" <<EOF
+Name:           $APP_ID
+Version:        $VERSION
+Release:        1
+Summary:        SMARAN.AI - a local-first AI assistant
+License:        MIT
+BuildArch:      x86_64
+AutoReqProv:    no
+Recommends:     (chromium or chromium-browser or google-chrome-stable)
+
+%description
+Runs on your own machine. Bring an API key or a model in Ollama; nothing else
+has to be installed and nothing is sent anywhere you did not choose.
+
+On Linux the interface opens in a browser window with no address bar and no
+tabs rather than in a native window, because the Linux equivalent of the
+webview Windows ships with cannot be bundled to work across distributions.
+
+%files
+/opt/$APP_ID
+/usr/bin/$APP_ID
+/usr/share/applications/$APP_ID.desktop
+/usr/share/icons/hicolor/256x256/apps/$APP_ID.png
+
+%post
+/usr/bin/update-desktop-database >/dev/null 2>&1 || :
+EOF
+    # AutoReqProv is off deliberately. Left on, rpmbuild scans every bundled
+    # shared object and writes a Requires for each one - including the private
+    # copies this bundle carries - and the package then refuses to install on
+    # the machine it was built for.
+    rpmbuild --quiet         --define "_topdir $RPMROOT"         --define "_rpmdir $OUT"         --define "_build_id_links none"         --buildroot "$TREE"         -bb "$RPMROOT/SPECS/$APP_ID.spec"
+    find "$OUT" -name '*.rpm' -exec mv -f {} "$OUT/" ';' 2>/dev/null || true
+    rm -rf "$RPMROOT" "$OUT/x86_64"
+    echo "[linux] built $(cd "$OUT" && ls *.rpm)"
+else
+    echo "[linux] rpmbuild is not here, so no .rpm was built"
+fi
+
+rm -rf "$TREE"
+
+# ── the AppImage, which is the one that runs anywhere ─────────────────────
+"$ROOT/packaging/linux/make_appimage.sh"
 
 ls -la "$OUT"

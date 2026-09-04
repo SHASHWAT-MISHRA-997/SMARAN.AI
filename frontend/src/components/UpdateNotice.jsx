@@ -71,17 +71,18 @@ const UpdateNotice = () => {
 
   const target = info.windows_url || info.release_page;
 
-  /* Release notes are markdown, written for the releases page. Rendering
-     the raw source put literal asterisks and backticks in front of people,
-     so the markup is stripped rather than rendered - a notice this small
-     wants a sentence, not a document. */
-  const summary = (info.notes || '')
-    .replace(/```[^`]*```/g, ' ')
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`>#]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 150);
+  /* The release notes are not shown here.
+   *
+   * They were: markdown, stripped of its markup and cut at 150 characters.
+   * Which meant the corner of the screen carried half a sentence with its
+   * punctuation removed, ending mid-clause - "and this one is the cause
+   * rather than the". Notes written as paragraphs for a releases page do not
+   * survive being squeezed into three lines, and a fragment that stops in the
+   * middle of a thought reads as something broken rather than as news.
+   *
+   * What is left is what this notice is for: which version is out, which one
+   * you are on, and the two buttons. Anyone who wants the detail can follow
+   * the link, where the notes are whole. */
 
   return (
     <div
@@ -123,12 +124,6 @@ const UpdateNotice = () => {
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
-
-        {summary && (
-          <p className="mt-3 max-h-20 overflow-hidden text-[11px] leading-relaxed text-zinc-400">
-            {summary}
-          </p>
-        )}
 
         <div className="mt-3 flex items-center gap-2">
           {/* If the installer is already on disk, asking again to download it

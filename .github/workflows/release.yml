@@ -121,39 +121,33 @@ jobs:
           if-no-files-found: error
 
   linux:
-    name: Linux package
-    # Not windows-latest with a flag. PyInstaller cannot cross-compile: it
-    # bundles the interpreter and the native extensions of the machine it runs
-    # on, so a Linux build has to happen on Linux.
+    name: Linux packages
+    # The runner is Ubuntu, but the application is not built on it.
     #
-    # 22.04 rather than latest, deliberately. A binary built against a newer
-    # glibc will not start on an older distribution, and the message it gives -
-    # "version GLIBC_2.38 not found" - is the kind of thing somebody gives up
-    # over rather than reports. Building on the oldest release still supported
-    # means the result runs on that one and on every newer one.
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    # A binary is only as portable as the glibc it was compiled against: build
+    # on Ubuntu 24.04 and it refuses to start on Ubuntu 22.04, with "version
+    # GLIBC_2.39 not found" - a message naming a library rather than the
+    # problem, and where most people give up. So the freeze happens inside a
+    # container old enough that the result runs on anything newer.
+    #
+    # manylinux_2_28 means glibc 2.28: Debian 10, Ubuntu 18.10, RHEL and Rocky
+    # and Alma 8, Fedora 29, openSUSE 15.1, and everything after any of those.
+    # It is also exactly as far back as this can go - onnxruntime, which the
+    # dictation and the offline voice both need, publishes no wheel older than
+    # manylinux_2_28, so nothing here could reach further even if it tried.
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.14'
-
+      # The interface is built out here, where node is. It is just files; the
+      # container only needs the finished folder.
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-build.txt
-
-      - name: Fetch nltk data for the offline voice
-        run: python -c "import nltk; [nltk.download(p, quiet=True) for p in ('cmudict','averaged_perceptron_tagger','averaged_perceptron_tagger_eng')]"
 
       - name: Build the interface
         working-directory: frontend
@@ -161,46 +155,51 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build the executable
-        run: python build_exe.py
+      - name: Freeze the application against glibc 2.28
+        run: |
+          chmod +x packaging/linux/freeze_in_container.sh
+          packaging/linux/freeze_in_container.sh
 
-      # Two questions: does it contain what the voice needs, and does it start.
-      # The script is a file rather than lines in here because shell quoting
-      # inside YAML is its own source of bugs.
+      # What it was actually built against, read out of the binary rather than
+      # assumed from the image name.
+      - name: Report the oldest glibc this build needs
+        run: |
+          chmod +x packaging/linux/glibc_floor.sh
+          packaging/linux/glibc_floor.sh
+
       - name: Check the build, and that it actually runs
         run: |
           chmod +x packaging/linux/check_build.sh
           packaging/linux/check_build.sh
 
-      - name: Build the .deb and the portable archive
-        run: |
-          chmod +x packaging/linux/build_linux.sh
-          packaging/linux/build_linux.sh
-
-      # A package that will not install is worse than no package. This installs
-      # it the way a person would, and checks the files landed where the
-      # desktop entry claims they are.
-      - name: Install the .deb and check it
+      - name: Build the AppImage, .deb, .rpm and .tar.gz
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y desktop-file-utils
-          sudo apt-get install -y ./dist/linux/smaran-ai_*_amd64.deb
-          test -x /usr/bin/smaran-ai
-          test -f /usr/share/applications/smaran-ai.desktop
-          test -f /usr/share/icons/hicolor/256x256/apps/smaran-ai.png
-          desktop-file-validate /usr/share/applications/smaran-ai.desktop
-          echo "Installed cleanly, and the desktop entry is valid."
-          sudo apt-get remove -y smaran-ai
+          sudo apt-get install -y rpm desktop-file-utils
+          chmod +x packaging/linux/build_linux.sh packaging/linux/make_appimage.sh
+          packaging/linux/build_linux.sh
+
+      # Every package is opened and checked, because a package that will not
+      # install is worse than no package at all.
+      - name: Check every package
+        run: |
+          chmod +x packaging/linux/check_packages.sh
+          packaging/linux/check_packages.sh
 
       - name: Build the command line tool
         working-directory: cli
-        run: python -m PyInstaller --noconfirm --clean smaran.spec
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r ../requirements-build.txt
+          python3 -m PyInstaller --noconfirm --clean smaran.spec
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux
           path: |
+            dist/linux/*.AppImage
             dist/linux/*.deb
+            dist/linux/*.rpm
             dist/linux/*.tar.gz
             cli/dist/smaran
           if-no-files-found: error
@@ -305,9 +304,12 @@ jobs:
           cp artifacts/android/app-release.apk release/SMARAN.AI.apk
           # Fixed names, because the website links through
           # releases/latest/download/<name> and that needs the name to be the
-          # same every release. The version is inside the package either way.
+          # same every release. The version is inside each package.
+          cp artifacts/linux/dist/linux/*.AppImage release/SMARAN.AI-x86_64.AppImage
           cp artifacts/linux/dist/linux/*.deb release/smaran-ai_amd64.deb
+          cp artifacts/linux/dist/linux/*.rpm release/smaran-ai.x86_64.rpm
           cp artifacts/linux/dist/linux/*.tar.gz release/smaran-ai-linux-x86_64.tar.gz
+          chmod +x release/SMARAN.AI-x86_64.AppImage
           # The Linux command line tool has no extension, so it would collide
           # with nothing - but a file called "smaran" beside "smaran.exe" is
           # ambiguous on a download page. It says which one it is.
