@@ -13,14 +13,31 @@
 # wheel for anything older, and the dictation and the offline voice both need
 # it.
 #
-# The image is the one the Python packaging authority use to build the wheels
-# on PyPI, which is the same problem this is: one binary, every distribution.
+# WHY NOT THE MANYLINUX IMAGE
+#
+# That was the obvious choice - it is what the Python packaging authority use
+# to build the wheels on PyPI, which is the same problem this is. It does not
+# work: manylinux builds its CPythons statically, and PyInstaller needs a
+# shared libpython. The build gets all the way through collecting every
+# dependency and then says
+#
+#     Python was built without a shared library, which is required by
+#     PyInstaller
+#
+# Rocky 8 is the same glibc - 2.28, both being RHEL 8 underneath - and its
+# python3.12 is a normal shared build. Same floor, and PyInstaller can use it.
+#
+# So Linux is built with 3.12 while Windows is built with 3.14. That is a real
+# difference and worth stating: it is the price of reaching back to glibc 2.28
+# at all. Every dependency here supports both, and the two youngest constraints
+# in the tree - youtube-transcript-api at >=3.8,<3.15 and onnxruntime, which
+# publishes cp312 manylinux_2_28 wheels - were checked on PyPI before choosing.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-IMAGE="quay.io/pypa/manylinux_2_28_x86_64:latest"
+IMAGE="rockylinux:8"
 echo "[freeze] pulling $IMAGE"
 docker pull -q "$IMAGE"
 
@@ -39,23 +56,12 @@ docker run --rm \
     "$IMAGE" bash -c '
 set -euo pipefail
 
-# The Python version is named, not discovered.
-#
-# It was discovered - "take the newest" - and the newest in this image is
-# /opt/python/cp315-cp315t: Python 3.15.0rc2, and the free-threaded build of
-# it. A release candidate with a different ABI, which no dependency here has
-# wheels for, so the install died on youtube-transcript-api and would have
-# died on something else after that.
-#
-# 3.14 is what the Windows installer is built with. Two builds of the same
-# release should not be running different interpreters, and the -t suffix is
-# a different ABI rather than a newer version.
-PY=/opt/python/cp314-cp314/bin/python
-test -x "$PY" || {
-    echo "[freeze] no Python 3.14 in this image. What it does have:" >&2
-    ls -d /opt/python/cp3*-cp3* >&2
-    exit 1
-}
+# Named, not discovered. An earlier version of this took "the newest Python in
+# the image" and got 3.15.0rc2 free-threaded - a release candidate with a
+# different ABI that no dependency has wheels for.
+dnf install -y -q python3.12 python3.12-devel gcc make >/dev/null
+PY=/usr/bin/python3.12
+test -x "$PY" || { echo "[freeze] python3.12 did not install" >&2; exit 1; }
 echo "[freeze] using $("$PY" -V) at $PY"
 
 "$PY" -m pip install --upgrade pip -q
