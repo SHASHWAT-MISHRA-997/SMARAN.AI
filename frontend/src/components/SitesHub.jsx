@@ -439,12 +439,19 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
       });
       if (response.ok) {
         const backendSite = await response.json();
-        onCreated({ ...siteObj, ...backendSite, html: generatedHTML });
+        /* The page the model actually made, not the one drawn here.
+         *
+         * This used to spread backendSite and then put `html: generatedHTML`
+         * after it - so the generated site arrived and was immediately
+         * thrown away, and what appeared was the local template with the
+         * prompt printed into its body. */
+        onCreated({ ...siteObj, ...backendSite, html: backendSite.html || generatedHTML });
         return;
       }
     } catch (_) {}
 
-    onCreated(siteObj);
+    // Only when the request itself did not get through.
+    onCreated({ ...siteObj, generatedLocally: true });
   };
 
   return (
@@ -548,25 +555,29 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
     if (!prompt.trim() || prompt.trim().length < 3) return;
     setBusy(true);
 
-    const nextVer = (site.version || 1) + 1;
-    const newHTML = generateSiteHTML(site.name, prompt, nextVer);
-    const updated = {
-      ...site,
-      prompt: prompt.trim(),
-      version: nextVer,
-      html: newHTML,
-      updated_at: new Date().toISOString(),
-    };
-
+    /* Wait for the new version and show it.
+     *
+     * This fired the request with .catch(() => {}) and never read the reply,
+     * then displayed a template built here instead. So "Apply as Version 3"
+     * always produced the same page whatever was asked for, with the prompt
+     * pasted into the body as text. The generation was happening; nothing
+     * was ever looking at it. */
     try {
-      await fetch(`${API_BASE}/api/sites/${site.id}/refine`, {
+      const response = await fetch(`${API_BASE}/api/sites/${site.id}/refine`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ prompt: prompt.trim() }),
-      }).catch(() => {});
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const next = await response.json();
+      onChanged({ ...site, ...next, html: next.html || site.html });
+      setError('');
+    } catch (err) {
+      // Said out loud rather than replaced with a page nobody asked for.
+      setError('That version could not be generated: '
+        + String(err.message || err).slice(0, 200));
     } finally {
-      onChanged(updated);
       setBusy(false);
     }
   };

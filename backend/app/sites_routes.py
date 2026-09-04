@@ -106,7 +106,7 @@ nav{{display:flex;justify-content:space-between;align-items:center;padding:24px 
 main{{max-width:1100px;margin:auto;padding:clamp(70px,13vw,150px) 24px}} .eyebrow{{color:#fb7185;font-weight:800;text-transform:uppercase;letter-spacing:.16em;font-size:12px}} h1{{max-width:880px;font-size:clamp(44px,8vw,92px);line-height:.95;margin:18px 0 26px;letter-spacing:-.055em}} .lead{{max-width:720px;color:var(--muted);font-size:clamp(17px,2vw,22px);line-height:1.7}} .cta{{display:inline-block;margin-top:34px;padding:14px 22px;border-radius:999px;background:#f4f4f5;color:#09090b;text-decoration:none;font-weight:800}}
 .grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:90px}} article{{padding:28px;border:1px solid #3f3f46;border-radius:22px;background:var(--panel);backdrop-filter:blur(12px)}} article span{{color:#fb7185;font-weight:900}} article h2{{margin:18px 0 10px;font-size:20px}} article p{{color:var(--muted);line-height:1.65;margin:0}} footer{{padding:32px;text-align:center;color:#71717a;border-top:1px solid #27272a}} @media(max-width:720px){{.grid{{grid-template-columns:1fr;margin-top:60px}}}}
 .notice{{margin:0;padding:14px clamp(24px,7vw,96px);background:#422006;color:#fed7aa;border-bottom:1px solid #78350f;font-size:14px;line-height:1.6}}.notice strong{{color:#fdba74}}
-</style></head><body>{banner}<nav><div class="brand">{title}<span class="dot">.</span></div><div>Built with SMARAN.AI</div></nav><main><p class="eyebrow">A new digital experience</p><h1>{title}</h1><p class="lead">{summary}</p><a class="cta" href="#explore">Explore the site</a><section class="grid" id="explore"><article><span>01</span><h2>Clear purpose</h2><p>The experience is structured around your brief, with a focused story and responsive layout.</p></article><article><span>02</span><h2>Built for every screen</h2><p>Typography, spacing and content adapt cleanly from desktop monitors to mobile devices.</p></article><article><span>03</span><h2>Ready to refine</h2><p>Return to SMARAN.AI Sites and describe the next change to create a new local version.</p></article></section></main><footer>{title} · SMARAN.AI Sites placeholder</footer></body></html>"""
+</style></head><body>{banner}<nav><div class="brand">{title}<span class="dot">.</span></div></nav><main><p class="eyebrow">A new digital experience</p><h1>{title}</h1><p class="lead">{summary}</p><a class="cta" href="#explore">Explore the site</a><section class="grid" id="explore"><article><span>01</span><h2>Clear purpose</h2><p>The experience is structured around your brief, with a focused story and responsive layout.</p></article><article><span>02</span><h2>Built for every screen</h2><p>Typography, spacing and content adapt cleanly from desktop monitors to mobile devices.</p></article><article><span>03</span><h2>Ready to refine</h2><p>Return to SMARAN.AI Sites and describe the next change to create a new local version.</p></article></section></main><footer>{title}</footer></body></html>"""
 
 
 BUILD_INSTRUCTIONS = (
@@ -283,6 +283,15 @@ def list_sites():
     return _read_registry()
 
 
+def _current_html(site: dict) -> str:
+    """The page as it stands on disk, or empty if it has not been written."""
+    page = _site_dir(site["id"]) / "index.html"
+    try:
+        return page.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 @router.post("", status_code=201)
 def create_site(body: SiteCreate):
     site = {"id": uuid.uuid4().hex[:12], "name": body.name.strip(), "prompt": body.prompt.strip(),
@@ -291,7 +300,9 @@ def create_site(body: SiteCreate):
     items = _read_registry()
     items.insert(0, site)
     _write_registry(items)
-    return site
+    # With the page, so the screen shows what was generated rather than
+    # falling back to a template of its own.
+    return {**site, "html": _current_html(site)}
 
 
 @router.get("/{site_id}")
@@ -314,7 +325,12 @@ def refine_site(site_id: str, body: SiteRefine):
     _write_version(site, body.prompt.strip())
     items[index] = site
     _write_registry(items)
-    return site
+    # The page itself, not just its record.
+    #
+    # This returned only the record, so the screen had nothing to show and
+    # drew its own template instead - which is why "Apply as Version 3" put
+    # up a page nobody generated, with the prompt printed into the body.
+    return {**site, "html": _current_html(site)}
 
 
 @router.post("/{site_id}/publish")
