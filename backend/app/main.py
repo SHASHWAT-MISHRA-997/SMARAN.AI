@@ -2573,6 +2573,31 @@ async def list_cloud_models(request: Request, current_user: User = Depends(get_c
 _CLOUD_KEYS_FILE = os.path.join(settings.DATA_DIR, "cloud_keys.json")
 
 
+def _clean_key(value) -> str:
+    """A provider key with nothing around it.
+
+    A key pasted from a file, or with Enter pressed after it, carries a newline.
+    That newline goes into the Authorization header, and Python refuses to send
+    it - every request then fails with
+
+        Illegal header value b'Bearer sk-...
+'
+
+    which names neither the provider nor the key nor anything the person can
+    act on. It looked like the model was broken. The key was fine; it had a
+    line break on the end.
+
+    Stripped on the way in and on the way out, so a key saved wrong before this
+    is repaired the next time it is read rather than needing to be pasted
+    again.
+    """
+    if not value:
+        return ""
+    # Every kind of whitespace, not just spaces: a newline is the one that
+    # actually causes this, and a tab would do it too.
+    return "".join(str(value).split())
+
+
 def _load_persisted_cloud_keys() -> None:
     """Restore provider keys saved on this machine into the process environment.
 
@@ -2587,8 +2612,9 @@ def _load_persisted_cloud_keys() -> None:
         for provider, api_key in (stored or {}).items():
             env_name = _CLOUD_PROVIDER_ENV_VARS.get(provider)
             # An explicit environment variable always wins over the saved file.
-            if env_name and api_key and not os.getenv(env_name, "").strip():
-                os.environ[env_name] = str(api_key)
+            cleaned = _clean_key(api_key)
+            if env_name and cleaned and not os.getenv(env_name, "").strip():
+                os.environ[env_name] = cleaned
     except Exception as exc:  # noqa: BLE001 - never block startup on this
         logger.warning(f"Saved provider keys could not be read: {exc}")
 
@@ -2600,8 +2626,9 @@ def _persist_cloud_key(provider: str, api_key: Optional[str]) -> None:
         if os.path.isfile(_CLOUD_KEYS_FILE):
             with open(_CLOUD_KEYS_FILE, "r", encoding="utf-8") as handle:
                 stored = json.load(handle) or {}
-        if api_key:
-            stored[provider] = api_key
+        cleaned = _clean_key(api_key)
+        if cleaned:
+            stored[provider] = cleaned
         else:
             stored.pop(provider, None)
         os.makedirs(os.path.dirname(_CLOUD_KEYS_FILE), exist_ok=True)
@@ -4288,9 +4315,26 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             yield json.dumps({"response_time_ms": 0, "model_routed": "Local File Counter", "token_count": len(exact_count.split()), "prompt_tokens": 0, "total_context": int(settings.MAX_MODEL_LEN), "context_remaining": int(settings.MAX_MODEL_LEN), "execution_time_sec": 0, "tokens_per_sec": 0, "local_datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}) + "\n"
             return
 
-        # Hard gate: with no uploaded-file evidence, only gate if session actually has active uploaded documents
-        if chat_req.rag_enabled and not context_str and not web_references and (rag_session_docs and len(rag_session_docs) > 0):
-            strict_msg = "No supported answer was found in the uploaded files. RAG mode will not use general knowledge or guess."
+        # Hard gate: RAG on means answers come from the uploaded files.
+        #
+        # This used to gate only when the session already had documents in it.
+        # So with RAG on and nothing uploaded, the gate was skipped entirely
+        # and the model answered from general knowledge - under a box that
+        # says "Ask from uploaded files", with the RAG badge lit. The answer
+        # looked like it had come from a document. It had not, and nothing on
+        # screen said so.
+        #
+        # Both cases are gated now, and they are told apart, because "your
+        # files do not answer this" and "there are no files" are different
+        # problems with different fixes.
+        if chat_req.rag_enabled and not context_str and not web_references:
+            has_documents = bool(rag_session_docs)
+            strict_msg = (
+                "No supported answer was found in the uploaded files. RAG mode will not use general knowledge or guess."
+                if has_documents else
+                "RAG is on, so answers come only from files you have uploaded - and this chat has none yet. "
+                "Upload a document, or turn RAG off to ask normally."
+            )
             accumulated_response = strict_msg
             yield json.dumps({"token": strict_msg}) + "\n"
 
@@ -6343,9 +6387,30 @@ async def compare_models_endpoint(
     async def _query_single_model(cfg: dict) -> dict:
         provider = str(cfg.get("provider", "")).lower().strip()
         model = str(cfg.get("model", "")).strip()
-        api_key = str(cfg.get("api_key", "")).strip()
+        api_key = "".join(str(cfg.get("api_key", "")).split())
         start_t = time.time()
-        
+
+        # No key means no request.
+        #
+        # Without this the empty key went into the header anyway, and every
+        # model in the comparison came back with
+        #
+        #     Provider request failed
+        #     Illegal header value b'Bearer '
+        #
+        # which is Python refusing to send a malformed header, shown to the
+        # person as though the provider had said it. It names nothing they can
+        # act on. This does.
+        if not api_key and provider not in ("ollama", "lmstudio", "local"):
+            return {
+                "provider": provider,
+                "model": model,
+                "content": f"No {provider} key is set, so this model was not asked. "
+                           f"Add one under Provider keys and run the comparison again.",
+                "status": "error",
+                "latency_ms": 0,
+            }
+
         try:
             if provider == "huggingface":
                 from huggingface_hub import InferenceClient

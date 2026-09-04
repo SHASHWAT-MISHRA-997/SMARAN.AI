@@ -39,12 +39,23 @@ docker run --rm \
     "$IMAGE" bash -c '
 set -euo pipefail
 
-# The image ships several CPythons under /opt/python. Take the newest rather
-# than naming one: a hard-coded path breaks silently the day the image drops
-# that version, and "python3 not found" is a clearer failure than a build that
-# quietly used a different interpreter than intended.
-PY=$(ls -d /opt/python/cp3*-cp3* 2>/dev/null | sort -V | tail -1)/bin/python
-test -x "$PY" || { echo "[freeze] no CPython in the image" >&2; exit 1; }
+# The Python version is named, not discovered.
+#
+# It was discovered - "take the newest" - and the newest in this image is
+# /opt/python/cp315-cp315t: Python 3.15.0rc2, and the free-threaded build of
+# it. A release candidate with a different ABI, which no dependency here has
+# wheels for, so the install died on youtube-transcript-api and would have
+# died on something else after that.
+#
+# 3.14 is what the Windows installer is built with. Two builds of the same
+# release should not be running different interpreters, and the -t suffix is
+# a different ABI rather than a newer version.
+PY=/opt/python/cp314-cp314/bin/python
+test -x "$PY" || {
+    echo "[freeze] no Python 3.14 in this image. What it does have:" >&2
+    ls -d /opt/python/cp3*-cp3* >&2
+    exit 1
+}
 echo "[freeze] using $("$PY" -V) at $PY"
 
 "$PY" -m pip install --upgrade pip -q
