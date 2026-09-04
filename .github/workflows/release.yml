@@ -176,6 +176,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y rpm desktop-file-utils
+          # The packaging runs out here, not in the container, so it needs its
+          # own Pillow - the icon is scaled to an exact 256x256 rather than
+          # shipped stretched.
+          python3 -m pip install --quiet --break-system-packages pillow
           chmod +x packaging/linux/build_linux.sh packaging/linux/make_appimage.sh
           packaging/linux/build_linux.sh
 
