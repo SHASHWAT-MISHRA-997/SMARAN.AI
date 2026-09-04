@@ -119,6 +119,26 @@ def check(force: bool = False) -> dict:
         entry = assets.get(name)
         return entry.get("size") if entry else None
 
+    def apk_url() -> Optional[str]:
+        """The Android build, whatever the release happened to call it.
+
+        This asked for an asset named exactly "SMARAN.AI.apk". No release has
+        ever contained that name - they carry app-release.apk - so android_url
+        was null on every single one, and the phone was offered the release
+        page instead of the file. A lookup by exact name is a promise that the
+        publishing step will never be renamed, and it was broken from the
+        first release that used it.
+
+        A name without a dot in its base is preferred where one exists: some
+        Android download handlers read the type from the name, and a dot
+        inside it makes them mis-read a perfectly good package.
+        """
+        apks = [a for name, a in assets.items() if str(name).lower().endswith(".apk")]
+        if not apks:
+            return None
+        apks.sort(key=lambda a: str(a.get("name", "")).count("."))
+        return apks[0].get("browser_download_url")
+
     payload = {
         "current_version": APP_VERSION,
         "latest_version": tag or None,
@@ -131,7 +151,7 @@ def check(force: bool = False) -> dict:
         # What the release says the installer weighs, so a part-finished file
         # on disk can be told apart from a complete one.
         "windows_size": asset_size("SMARAN.AI-Setup.exe"),
-        "android_url": asset_url("SMARAN.AI.apk"),
+        "android_url": apk_url(),
         "vsix_url": asset_url("smaran-ai-codex.vsix"),
     }
 

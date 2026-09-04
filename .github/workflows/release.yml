@@ -305,7 +305,10 @@ jobs:
           mkdir -p release
           cp artifacts/windows/installer/output/SMARAN.AI-Setup.exe release/
           cp artifacts/windows/cli/dist/smaran.exe release/
-          cp artifacts/android/app-release.apk release/SMARAN.AI.apk
+          # SMARAN-AI.apk, not SMARAN.AI.apk. A dot inside the base name
+          # makes some Android download handlers read the type wrongly:
+          # the download finishes and the install never starts.
+          cp artifacts/android/app-release.apk release/SMARAN-AI.apk
           # Fixed names, because the website links through
           # releases/latest/download/<name> and that needs the name to be the
           # same every release. The version is inside each package.

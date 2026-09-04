@@ -661,8 +661,15 @@
              downloaded the Android app from here got a build five releases
              old. The Windows installer beside it has always used
              releases/latest, which cannot go stale. Both do now. -->
+        <!-- No download attribute, deliberately.
+             It said download="SMARAN.AI.apk", which renamed the file on the
+             way to the phone and put a dot back in the base name - the exact
+             thing the comment above warns about, and the reason the file is
+             served as SMARAN-AI.apk in the first place. Android's package
+             installer then refuses what it was handed, so the download
+             finishes and the install never starts. Without the attribute the
+             browser keeps the served name, which is already the safe one. -->
         <a class="btn btn-primary block no-lift" id="dlApk"
-           download="SMARAN.AI.apk"
            href="/downloads/SMARAN-AI.apk">
           Download APK
         </a>
