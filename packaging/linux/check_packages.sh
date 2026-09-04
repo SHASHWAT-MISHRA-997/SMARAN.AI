@@ -74,7 +74,8 @@ else
                                   || say "removes cleanly: yes"
     else
         say "no passwordless sudo here, so it was inspected but not installed"
-        dpkg-deb -c "$DEB" | grep -q 'usr/bin/smaran-ai' \
+        dpkg-deb -c "$DEB" > /tmp/deb-list.txt 2>/dev/null
+        grep -q 'usr/bin/smaran-ai' /tmp/deb-list.txt \
             && say "contains the launcher" || { say "MISSING the launcher"; fail=1; }
     fi
 fi
@@ -89,7 +90,8 @@ if [ -z "$RPM" ]; then
 else
     say "file: $RPM"
     rpm -qip "$RPM" 2>/dev/null | sed -n '1,6p' | sed 's/^/    /'
-    rpm -qlp "$RPM" 2>/dev/null | grep -q '/usr/bin/smaran-ai' \
+    rpm -qlp "$RPM" > /tmp/rpm-list.txt 2>/dev/null
+    grep -q '/usr/bin/smaran-ai' /tmp/rpm-list.txt \
         && say "contains the launcher" || { say "MISSING the launcher"; fail=1; }
 fi
 
@@ -102,7 +104,15 @@ if [ -z "$TAR" ]; then
     fail=1
 else
     say "file: $TAR"
-    tar -tzf "$TAR" | grep -q 'run.sh' \
+    # Listed to a file rather than piped into grep -q.
+    #
+    # Under set -o pipefail, tar piped into grep -q fails even when the file
+    # is there: grep exits the moment it matches, tar writes into a closed
+    # pipe and dies with "tar: stdout: write error", and pipefail takes tar
+    # status for the whole pipeline. The archive was fine; the check said
+    # MISSING run.sh and failed the build.
+    tar -tzf "$TAR" > /tmp/tar-list.txt
+    grep -q 'run.sh' /tmp/tar-list.txt \
         && say "contains run.sh" || { say "MISSING run.sh"; fail=1; }
 fi
 
