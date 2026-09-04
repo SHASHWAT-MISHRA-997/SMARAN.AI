@@ -4,6 +4,14 @@ import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
 import { micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
+
+/* How often dictation reads back what has been said so far.
+ *
+ * 1200ms is a compromise with two hard edges. Faster than about a second and
+ * the machine spends its whole time decoding the same audio again, and the
+ * readings fall behind anyway. Slower than about two and the text visibly
+ * lags the voice, which is the complaint this exists to answer. */
+const LIVE_DICTATION_MS = 1200;
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
 import * as nativeSpeech from '../utils/nativeSpeech';
@@ -1931,7 +1939,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     setIsSpeakingAudio(false);
   };
 
-  const transcribeRecordedAudio = async () => {
+  /**
+   * Send what has been recorded so far and get the text back.
+   *
+   * `keep` leaves the audio in place instead of consuming it, which is what
+   * makes a live reading possible: the same growing recording is sent again a
+   * second later, so the transcript is of the whole utterance every time and
+   * no words are lost at a chunk boundary. MediaRecorder only puts container
+   * headers in its first chunk, so the pieces cannot be decoded on their own
+   * anyway - re-sending the whole thing is not a shortcut, it is the only
+   * correct way to do this with what the browser gives us.
+   *
+   * `live` asks the backend to decode for speed rather than for accuracy,
+   * because this reading is about to be replaced by the next one.
+   */
+  const transcribeRecordedAudio = async ({ keep = false, live = false } = {}) => {
     if (!audioChunksRef.current || audioChunksRef.current.length === 0) return '';
     /* There is no backend to send this to. Posting anyway reached the app's
        own file server, which answers every path with index.html and a 200, so
@@ -1950,12 +1972,13 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           ? 'audio/webm'
           : 'audio/mp4';
       const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-      audioChunksRef.current = [];
+      if (!keep) audioChunksRef.current = [];
       if (audioBlob.size < 500) return '';
       const formData = new FormData();
       formData.append('file', audioBlob, 'voice_query.webm');
       formData.append('language', selectedLanguage || 'auto');
       formData.append('request_id', window.crypto?.randomUUID?.() || `${Date.now()}`);
+      if (live) formData.append('live', '1');
       const res = await fetch(`${API_BASE}/api/voice/transcribe`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -2043,6 +2066,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     const stop = () => {
       const active = sidebarDictationRef.current;
       if (active?.kind === 'recording') {
+        // Before the recorder, so no further live reading is started for a
+        // recording that is ending.
+        if (active.live) window.clearInterval(active.live);
         try { active.recorder.stop(); } catch (_) {}
         active.stream?.getTracks?.().forEach((track) => track.stop());
       } else {
@@ -2089,7 +2115,35 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             },
           }));
         };
-        sidebarDictationRef.current = { kind: 'recording', recorder, stream };
+        /* Read it back while it is still being spoken.
+         *
+         * Before this, nothing was transcribed until the recorder stopped:
+         * you spoke, pressed stop, waited for the whole recording to upload
+         * and decode, and only then saw text. That wait is the whole of what
+         * made dictation here feel slow next to tools that type as you talk.
+         *
+         * Every tick sends the recording so far. One request is in flight at
+         * a time - a slow machine must fall behind by showing fewer readings,
+         * never by queueing up a backlog of them - and the newest answer wins.
+         * When the recorder stops, one last full-quality pass replaces the
+         * provisional text. */
+        let inFlight = false;
+        const live = window.setInterval(async () => {
+          if (inFlight || !sidebarDictationRef.current) return;
+          inFlight = true;
+          try {
+            const partial = await transcribeRecordedAudio({ keep: true, live: true });
+            // Discarded if dictation ended while this was in the air, so a
+            // late answer cannot overwrite the finished text.
+            if (partial && sidebarDictationRef.current) {
+              setInput([startingText, partial].filter(Boolean).join(' ').trim());
+            }
+          } finally {
+            inFlight = false;
+          }
+        }, LIVE_DICTATION_MS);
+
+        sidebarDictationRef.current = { kind: 'recording', recorder, stream, live };
         recorder.start(250);
         setIsDictating(true);
         composerRef.current?.focus?.();

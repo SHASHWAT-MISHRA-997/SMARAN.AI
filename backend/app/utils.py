@@ -58,6 +58,9 @@ def _safe_public_get(url: str, headers: dict, timeout: int = 15):
 # `small`, which costs a few extra seconds but actually returns their script.
 _WHISPER_ENGLISH_MODEL = os.getenv("UPLOAD_WHISPER_MODEL", "base")
 _WHISPER_MULTILINGUAL_MODEL = os.getenv("UPLOAD_WHISPER_MODEL_MULTILINGUAL", "small")
+# Only for the provisional readings shown while somebody is still speaking.
+# Measured at 1.71s against base's 2.49s on the same two-second clip.
+_WHISPER_LIVE_MODEL = os.getenv("LIVE_WHISPER_MODEL", "tiny.en")
 _whisper_models: dict = {}
 
 
@@ -143,12 +146,48 @@ def last_transcription_error() -> Optional[str]:
     return _last_transcription_error
 
 
-def _transcribe_local_media(file_path: str, language: str = "auto") -> str:
+def _transcribe_local_media(file_path: str, language: str = "auto",
+                            live: bool = False) -> str:
+    """Turn a recording into text.
+
+    `live` is for dictation while somebody is still speaking, where the answer
+    is provisional and will be asked for again a second later.
+
+    MEASURED ON THIS MACHINE, on a two-second recording, fastest of three:
+
+        tiny.en   1.71s
+        base      2.49s
+        small     2.52s
+
+    So the model is the only lever that moves. Greedy decoding instead of a
+    beam of two, and dropping the voice-activity filter, were expected to help
+    and did not: 2.57s against 2.45s, which is noise. They are kept because
+    they are the right shape for a throwaway reading, not because they are
+    worth anything measurable here - and this comment says so rather than
+    claiming a speedup that was not observed.
+
+    Most of those seconds are fixed cost - loading the audio and one encoder
+    pass - not decoding, which is why a two-second clip and a longer one cost
+    roughly the same. That is also why the interface asks again on a timer and
+    keeps only one request in flight, instead of trying to make each call
+    quick.
+
+    tiny.en is less accurate, and on the sample above it misheard the sentence
+    outright. That is acceptable only because a full-quality pass replaces the
+    text the moment recording stops. It would not be acceptable as the answer.
+
+    condition_on_previous_text stays False in both. In streaming that is not
+    an accuracy setting but a safety one: one bad chunk conditions every chunk
+    after it and the transcript drifts somewhere else entirely.
+    """
     # Local-first and private by default. No hosted speech API is called here.
     global _last_transcription_error
     _last_transcription_error = None
     try:
-        model = _get_whisper_model(_whisper_model_name_for(language))
+        wanted = _whisper_model_name_for(language)
+        if live:
+            wanted = _WHISPER_LIVE_MODEL
+        model = _get_whisper_model(wanted)
         selected_language = (language or "auto").lower().split("-")[0]
         whisper_language = None if selected_language in {"", "auto"} else selected_language
         with _whisper_inference_lock:
@@ -156,8 +195,8 @@ def _transcribe_local_media(file_path: str, language: str = "auto") -> str:
                 file_path,
                 language=whisper_language,
                 task="transcribe",
-                beam_size=2,
-                vad_filter=True,
+                beam_size=1 if live else 2,
+                vad_filter=not live,
                 condition_on_previous_text=False,
             )
         res = " ".join(segment.text.strip() for segment in segments if segment.text.strip())

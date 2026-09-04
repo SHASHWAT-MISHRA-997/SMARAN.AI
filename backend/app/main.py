@@ -3396,6 +3396,9 @@ async def transcribe_audio_endpoint(
     file: UploadFile = File(...),
     language: str = Form("auto"),
     request_id: str = Form(""),
+    # Set while somebody is still speaking. The reading is provisional and
+    # will be asked for again in a second, so it is decoded for speed.
+    live: str = Form(""),
     current_user: User = Depends(get_current_user)
 ):
     """Transcribe user microphone audio recording into text."""
@@ -3420,7 +3423,9 @@ async def transcribe_audio_endpoint(
         try:
             from app.utils import _transcribe_local_media, last_transcription_error
             started = time.perf_counter()
-            transcript = await asyncio.to_thread(_transcribe_local_media, temp_path, language)
+            is_live = str(live).lower() in {"1", "true", "yes"}
+            transcript = await asyncio.to_thread(
+                _transcribe_local_media, temp_path, language, is_live)
             duration_ms = round((time.perf_counter() - started) * 1000, 1)
             reason = last_transcription_error()
         except Exception as e:
