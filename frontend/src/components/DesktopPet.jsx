@@ -38,6 +38,28 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
   const isJoyful = activity === 'waving' || activity === 'jumping';
   const isThinking = activity === 'waiting';
 
+  /* The face, decided in one place from what the app is doing.
+   *
+   * Before this there were three booleans and two of them only changed the
+   * mouth, so the companion had one expression: eyes that blinked, and a
+   * line that wobbled while text arrived. Thinking looked like idling, and
+   * a failed run looked like a good one.
+   *
+   * The states are real ones the app already dispatches - running, typing,
+   * waiting, waving, failed, review - so each of these is a face for a thing
+   * that is actually happening, not decoration on a timer. */
+  const FACES = {
+    idle:    { eyes: 'round',  brow: 'none',  mouth: 'smile',  blush: false },
+    typing:  { eyes: 'focus',  brow: 'flat',  mouth: 'talk',   blush: false },
+    running: { eyes: 'focus',  brow: 'flat',  mouth: 'talk',   blush: false },
+    review:  { eyes: 'curious',brow: 'one',   mouth: 'small',  blush: false },
+    waiting: { eyes: 'up',     brow: 'raise', mouth: 'small',  blush: false },
+    waving:  { eyes: 'happy',  brow: 'none',  mouth: 'open',   blush: true  },
+    jumping: { eyes: 'happy',  brow: 'none',  mouth: 'open',   blush: true  },
+    failed:  { eyes: 'sad',    brow: 'worry', mouth: 'frown',  blush: false },
+  };
+  const face = FACES[activity] || FACES.idle;
+
   const common = {
     width: size,
     height: size,
@@ -46,21 +68,67 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
     'aria-hidden': true,
   };
 
-  // Reusable Animated Blinking Eyes
-  const BlinkingEyes = ({ cx1 = 24, cx2 = 40, cy = 30, r = 3.5, color = '#0f172a' }) => (
-    <g className="pet-eyes">
-      {/* Left Eye */}
-      <circle cx={cx1} cy={cy} r={r} fill={color}>
-        <animate attributeName="ry" values={`${r};${r};${r};0.3;${r}`} keyTimes="0;0.85;0.9;0.95;1" dur="3.2s" repeatCount="indefinite" />
-      </circle>
-      <circle cx={cx1 + 1} cy={cy - 1} r={r * 0.4} fill="#ffffff" />
-      {/* Right Eye */}
-      <circle cx={cx2} cy={cy} r={r} fill={color}>
-        <animate attributeName="ry" values={`${r};${r};${r};0.3;${r}`} keyTimes="0;0.85;0.9;0.95;1" dur="3.2s" repeatCount="indefinite" />
-      </circle>
-      <circle cx={cx2 + 1} cy={cy - 1} r={r * 0.4} fill="#ffffff" />
-    </g>
-  );
+  /* Eyes that change shape, not only blink.
+   *
+   * Blinking alone reads as alive but never as feeling anything. The shape is
+   * what carries the expression: an arc for pleased, a narrowed lid for
+   * concentrating, a lowered one for a failure. The blink still runs
+   * underneath every shape that has a lid to close. */
+  const Eyes = ({ cx1 = 24, cx2 = 40, cy = 30, r = 3.5, color = '#0f172a', shape = 'round' }) => {
+    const blink = (
+      <animate attributeName="ry" values={`${r};${r};${r};0.3;${r}`}
+        keyTimes="0;0.85;0.9;0.95;1" dur="3.2s" repeatCount="indefinite" />
+    );
+
+    // Pleased: a closed upward arc, the way a smile reaches the eyes.
+    if (shape === 'happy') {
+      return (
+        <g className="pet-eyes" stroke={color} strokeWidth="1.9" fill="none" strokeLinecap="round">
+          <path d={`M ${cx1 - r} ${cy + 1} Q ${cx1} ${cy - r} ${cx1 + r} ${cy + 1}`} />
+          <path d={`M ${cx2 - r} ${cy + 1} Q ${cx2} ${cy - r} ${cx2 + r} ${cy + 1}`} />
+        </g>
+      );
+    }
+
+    // Downcast: the lid low and the eye small. Nothing else says "that did not
+    // work" without a word.
+    if (shape === 'sad') {
+      return (
+        <g className="pet-eyes">
+          <ellipse cx={cx1} cy={cy + 1} rx={r * 0.85} ry={r * 0.55} fill={color} />
+          <ellipse cx={cx2} cy={cy + 1} rx={r * 0.85} ry={r * 0.55} fill={color} />
+        </g>
+      );
+    }
+
+    const ry = shape === 'focus' ? r * 0.62 : r;      // concentrating: narrowed
+    const shiftX = shape === 'up' ? 1.4 : 0;          // thinking: looking away
+    const shiftY = shape === 'up' ? -1.2 : 0;
+    const wide = shape === 'curious' ? 1.15 : 1;      // curious: one eye wider
+
+    return (
+      <g className="pet-eyes">
+        <ellipse cx={cx1} cy={cy} rx={r} ry={ry} fill={color}>{blink}</ellipse>
+        <circle cx={cx1 + 1 + shiftX} cy={cy - 1 + shiftY} r={r * 0.4} fill="#ffffff" />
+        <ellipse cx={cx2} cy={cy} rx={r * wide} ry={ry * wide} fill={color}>{blink}</ellipse>
+        <circle cx={cx2 + 1 + shiftX} cy={cy - 1 + shiftY} r={r * 0.4} fill="#ffffff" />
+      </g>
+    );
+  };
+
+  /* Brows. Small marks, and most of what a face means.
+   * "one" raises a single brow, which is the whole of looking sceptical. */
+  const Brows = ({ cx1 = 24, cx2 = 40, cy = 24, color = '#0f172a', shape = 'none' }) => {
+    if (shape === 'none') return null;
+    const line = (x, dy, tilt) => (
+      <path d={`M ${x - 3.4} ${cy + dy + tilt} L ${x + 3.4} ${cy + dy - tilt}`}
+        stroke={color} strokeWidth="1.6" strokeLinecap="round" fill="none" />
+    );
+    if (shape === 'raise') return <g>{line(cx1, -1.6, 0)}{line(cx2, -1.6, 0)}</g>;
+    if (shape === 'one') return <g>{line(cx1, 0, 0)}{line(cx2, -2.2, 0.6)}</g>;
+    if (shape === 'worry') return <g>{line(cx1, 0, -1.5)}{line(cx2, 0, 1.5)}</g>;
+    return <g>{line(cx1, 0, 0)}{line(cx2, 0, 0)}</g>;
+  };
 
   // Reusable Rosy Blushing Cheeks
   const Cheeks = ({ cx1 = 18, cx2 = 46, cy = 34, r = 3, fill = '#fb7185' }) => (
@@ -70,19 +138,34 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
     </g>
   );
 
-  // Animated Smiling / Talking Mouth
-  const Mouth = ({ cx = 32, cy = 38, isTalking = false, isJoy = false, stroke = '#0f172a' }) => {
-    if (isJoy) {
-      return <path d={`M ${cx - 4} ${cy - 1} Q ${cx} ${cy + 5} ${cx + 4} ${cy - 1} Z`} fill="#ef4444" stroke={stroke} strokeWidth="1.2" />;
+  /* The mouth, one shape per expression.
+   *
+   * It had three: a talking wobble, a joyful open one, and a smile. Which
+   * meant thinking and failing and reviewing all wore the same smile. */
+  const Mouth = ({ cx = 32, cy = 38, stroke = '#0f172a', shape = 'smile' }) => {
+    if (shape === 'open') {
+      return <path d={`M ${cx - 4} ${cy - 1} Q ${cx} ${cy + 5} ${cx + 4} ${cy - 1} Z`}
+        fill="#ef4444" stroke={stroke} strokeWidth="1.2" />;
     }
-    if (isTalking) {
+    if (shape === 'talk') {
       return (
         <ellipse cx={cx} cy={cy + 1} rx="3" ry="2.5" fill="#e11d48">
           <animate attributeName="ry" values="1;3.5;1.5;3;1" dur="0.32s" repeatCount="indefinite" />
         </ellipse>
       );
     }
-    return <path d={`M ${cx - 4} ${cy} Q ${cx} ${cy + 3.5} ${cx + 4} ${cy}`} stroke={stroke} strokeWidth="1.8" fill="none" strokeLinecap="round" />;
+    // Frowning: the same arc as the smile, turned over.
+    if (shape === 'frown') {
+      return <path d={`M ${cx - 4} ${cy + 2} Q ${cx} ${cy - 2} ${cx + 4} ${cy + 2}`}
+        stroke={stroke} strokeWidth="1.8" fill="none" strokeLinecap="round" />;
+    }
+    // Small and closed - listening, or waiting on somebody.
+    if (shape === 'small') {
+      return <ellipse cx={cx} cy={cy} rx="1.8" ry="1.6" fill="none"
+        stroke={stroke} strokeWidth="1.5" />;
+    }
+    return <path d={`M ${cx - 4} ${cy} Q ${cx} ${cy + 3.5} ${cx + 4} ${cy}`}
+      stroke={stroke} strokeWidth="1.8" fill="none" strokeLinecap="round" />;
   };
 
   const wrapFrame = (children) => (
@@ -113,24 +196,13 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
         <rect x="15" y="18" width="34" height="28" rx="10" fill="#1e1b4b" stroke="#818cf8" strokeWidth="2" />
         {/* Visor Screen */}
         <rect x="19" y="23" width="26" height="18" rx="6" fill="#030712" />
-        {/* Glowing Visor Eyes */}
-        <g>
-          <ellipse cx="26" cy="30" rx="3.5" ry="3.5" fill="#38bdf8">
-            <animate attributeName="ry" values="3.5;3.5;3.5;0.3;3.5" keyTimes="0;0.85;0.9;0.95;1" dur="2.8s" repeatCount="indefinite" />
-          </ellipse>
-          <ellipse cx="38" cy="30" rx="3.5" ry="3.5" fill="#38bdf8">
-            <animate attributeName="ry" values="3.5;3.5;3.5;0.3;3.5" keyTimes="0;0.85;0.9;0.95;1" dur="2.8s" repeatCount="indefinite" />
-          </ellipse>
-        </g>
-        {/* Cute Smile / Voice Visualizer Line */}
-        {isTalking ? (
-          <path d="M 27 36 Q 32 40 37 36" stroke="#22d3ee" strokeWidth="2" fill="none" strokeLinecap="round">
-            <animate attributeName="d" values="M 27 36 Q 32 39 37 36; M 27 36 Q 32 34 37 36; M 27 36 Q 32 39 37 36" dur="0.3s" repeatCount="indefinite" />
-          </path>
-        ) : (
-          <path d="M 28 36 Q 32 39 36 36" stroke="#38bdf8" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-        )}
-        <Cheeks cx1="22" cx2="42" cy={33} r={2} fill="#38bdf8" />
+        {/* The visor is this one's face, so the expression is drawn on it.
+            It had two glowing dots that blinked and a line that wobbled while
+            text arrived - alive, but never anything in particular. */}
+        <Eyes cx1={26} cx2={38} cy={30} r={3.5} color="#38bdf8" shape={face.eyes} />
+        <Brows cx1={26} cx2={38} cy={24} color="#38bdf8" shape={face.brow} />
+        <Mouth cx={32} cy={36} stroke="#38bdf8" shape={face.mouth} />
+        {face.blush && <Cheeks cx1="22" cx2="42" cy={33} r={2} fill="#38bdf8" />}
         {/* Body & Arms */}
         <rect x="22" y="47" width="20" height="9" rx="4" fill="#312e81" />
         <circle cx="32" cy="51" r="2" fill="#22d3ee" />
@@ -151,11 +223,11 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
         <path d="M15 28 Q32 18 49 28 Q53 45 32 50 Q11 45 15 28 Z" fill="#ea580c" />
         {/* White Muzzle */}
         <path d="M22 36 Q32 48 42 36 Q38 49 32 50 Q26 49 22 36 Z" fill="#fff7ed" />
-        <BlinkingEyes cx1={24} cx2={40} cy={31} r={3.2} color="#1c1917" />
+        <Eyes cx1={24} cx2={40} cy={31} r={3.2} color="#1c1917" shape={face.eyes} />
         <Cheeks cx1={19} cx2={45} cy={35} r={2.8} fill="#f43f5e" />
         {/* Nose & Mouth */}
         <circle cx="32" cy="40" r="2" fill="#1c1917" />
-        <Mouth cx={32} cy={44} isTalking={isTalking} isJoy={isJoyful} stroke="#1c1917" />
+        <Mouth cx={32} cy={44} shape={face.mouth} stroke="#1c1917" />
       </>
     );
   }
@@ -172,7 +244,7 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
         {/* Big Owl Eye Rings */}
         <circle cx="23" cy="30" r="9" fill="#ffffff" stroke="#fde68a" strokeWidth="1.5" />
         <circle cx="41" cy="30" r="9" fill="#ffffff" stroke="#fde68a" strokeWidth="1.5" />
-        <BlinkingEyes cx1={23} cx2={41} cy={30} r={4} color="#1e1b4b" />
+        <Eyes cx1={23} cx2={41} cy={30} r={4} color="#1e1b4b" shape={face.eyes} />
         <Cheeks cx1={16} cx2={48} cy={37} r={2.5} fill="#f43f5e" />
         {/* Beak */}
         <polygon points="29,36 35,36 32,41" fill="#f59e0b" />
@@ -187,9 +259,9 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
     return wrapFrame(
       <>
         <path d="M16 42 C10 42 7 34 12 28 C10 20 20 14 26 19 C31 11 44 12 47 21 C54 20 58 27 55 35 C58 41 53 47 46 47 L19 47 C14 47 12 44 16 42 Z" fill="#bae6fd" stroke="#38bdf8" strokeWidth="1.5" />
-        <BlinkingEyes cx1={24} cx2={40} cy={30} r={3.2} color="#0369a1" />
+        <Eyes cx1={24} cx2={40} cy={30} r={3.2} color="#0369a1" shape={face.eyes} />
         <Cheeks cx1={18} cx2={46} cy={34} r={3} fill="#f472b6" />
-        <Mouth cx={32} cy={36} isTalking={isTalking} isJoy={isJoyful} stroke="#0369a1" />
+        <Mouth cx={32} cy={36} shape={face.mouth} stroke="#0369a1" />
       </>
     );
   }
@@ -208,9 +280,9 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
         <path d="M 41 32 L 49 32 L 49 26" stroke="#22c55e" strokeWidth="4.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
         {/* Blossom */}
         <circle cx="32" cy="14" r="3.5" fill="#f43f5e" />
-        <BlinkingEyes cx1={28} cx2={36} cy={27} r={2.5} color="#064e3b" />
+        <Eyes cx1={28} cx2={36} cy={27} r={2.5} color="#064e3b" shape={face.eyes} />
         <Cheeks cx1={25} cx2={39} cy={31} r={1.8} fill="#fda4af" />
-        <Mouth cx={32} cy={33} isTalking={isTalking} isJoy={isJoyful} stroke="#064e3b" />
+        <Mouth cx={32} cy={33} shape={face.mouth} stroke="#064e3b" />
       </>
     );
   }
@@ -221,9 +293,9 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
       <>
         {/* Bell Body */}
         <path d="M 14 36 C 14 18 50 18 50 36 C 50 42 45 44 41 40 C 37 44 33 44 32 40 C 31 44 27 44 23 40 C 19 44 14 42 14 36 Z" fill="#c084fc" stroke="#9333ea" strokeWidth="1.5" />
-        <BlinkingEyes cx1={25} cx2={39} cy={29} r={3.2} color="#3b0764" />
+        <Eyes cx1={25} cx2={39} cy={29} r={3.2} color="#3b0764" shape={face.eyes} />
         <Cheeks cx1={19} cx2={45} cy={33} r={2.8} fill="#f472b6" />
-        <Mouth cx={32} cy={34} isTalking={isTalking} isJoy={isJoyful} stroke="#3b0764" />
+        <Mouth cx={32} cy={34} shape={face.mouth} stroke="#3b0764" />
         {/* Floating Sparkles */}
         <circle cx="21" cy="22" r="1.5" fill="#ffffff" opacity="0.8" />
         <circle cx="43" cy="23" r="1" fill="#ffffff" opacity="0.8" />
@@ -239,8 +311,8 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
         <circle cx="32" cy="11" r="3" fill="#06b6d4" />
         <line x1="32" y1="11" x2="32" y2="16" stroke="#94a3b8" strokeWidth="2" />
         <rect x="19" y="22" width="26" height="18" rx="4" fill="#0f172a" />
-        <BlinkingEyes cx1={25} cx2={39} cy={30} r={3.5} color="#22d3ee" />
-        <Mouth cx={32} cy={36} isTalking={isTalking} isJoy={isJoyful} stroke="#22d3ee" />
+        <Eyes cx1={25} cx2={39} cy={30} r={3.5} color="#22d3ee" shape={face.eyes} />
+        <Mouth cx={32} cy={36} shape={face.mouth} stroke="#22d3ee" />
       </>
     );
   }
@@ -250,9 +322,9 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
     return wrapFrame(
       <>
         <polygon points="32,8 38,23 54,23 41,33 46,48 32,38 18,48 23,33 10,23 26,23" fill="#facc15" stroke="#eab308" strokeWidth="1.5" strokeLinejoin="round" />
-        <BlinkingEyes cx1={26} cx2={38} cy={28} r={2.8} color="#713f12" />
+        <Eyes cx1={26} cx2={38} cy={28} r={2.8} color="#713f12" shape={face.eyes} />
         <Cheeks cx1={21} cx2={43} cy={32} r={2.2} fill="#fb923c" />
-        <Mouth cx={32} cy={33} isTalking={isTalking} isJoy={isJoyful} stroke="#713f12" />
+        <Mouth cx={32} cy={33} shape={face.mouth} stroke="#713f12" />
       </>
     );
   }
@@ -268,7 +340,7 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
         <polygon points="46,24 44,14 38,20" fill="#fdf2f8" />
         {/* Head */}
         <ellipse cx="32" cy="34" rx="18" ry="16" fill="#f472b6" />
-        <BlinkingEyes cx1={24} cx2={40} cy={31} r={3.2} color="#831843" />
+        <Eyes cx1={24} cx2={40} cy={31} r={3.2} color="#831843" shape={face.eyes} />
         <Cheeks cx1={18} cx2={46} cy={36} r={2.8} fill="#fda4af" />
         {/* Nose & Whiskers */}
         <polygon points="30,36 34,36 32,38" fill="#be185d" />
@@ -276,7 +348,7 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
         <line x1="12" y1="39" x2="22" y2="38" stroke="#db2777" strokeWidth="1.2" />
         <line x1="52" y1="35" x2="42" y2="36" stroke="#db2777" strokeWidth="1.2" />
         <line x1="52" y1="39" x2="42" y2="38" stroke="#db2777" strokeWidth="1.2" />
-        <Mouth cx={32} cy={40} isTalking={isTalking} isJoy={isJoyful} stroke="#831843" />
+        <Mouth cx={32} cy={40} shape={face.mouth} stroke="#831843" />
       </>
     );
   }
@@ -285,9 +357,9 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
   return wrapFrame(
     <>
       <circle cx="32" cy="32" r="20" fill="#818cf8" />
-      <BlinkingEyes cx1={25} cx2={39} cy={29} r={3.5} color="#1e1b4b" />
+      <Eyes cx1={25} cx2={39} cy={29} r={3.5} color="#1e1b4b" shape={face.eyes} />
       <Cheeks cx1={19} cx2={45} cy={34} r={3} fill="#f472b6" />
-      <Mouth cx={32} cy={36} isTalking={isTalking} isJoy={isJoyful} stroke="#1e1b4b" />
+      <Mouth cx={32} cy={36} shape={face.mouth} stroke="#1e1b4b" />
     </>
   );
 };
