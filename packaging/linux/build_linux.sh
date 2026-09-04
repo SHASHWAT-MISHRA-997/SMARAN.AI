@@ -90,7 +90,7 @@ Comment=A local-first AI assistant
 Exec=/usr/bin/$APP_ID
 Icon=$APP_ID
 Terminal=false
-Categories=Utility;Development;
+Categories=Development;
 StartupWMClass=$APP_NAME
 EOF
 

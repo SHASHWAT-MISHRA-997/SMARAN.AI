@@ -75,7 +75,7 @@ Comment=A local-first AI assistant
 Exec=AppRun
 Icon=$APP_ID
 Terminal=false
-Categories=Utility;Development;
+Categories=Development;
 StartupWMClass=$APP_NAME
 EOF
 
