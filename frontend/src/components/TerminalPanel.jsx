@@ -20,6 +20,24 @@ const TerminalPanel = ({ isOpen, onClose }) => {
   const [command, setCommand] = useState('');
   const [running, setRunning] = useState(false);
   const [context, setContext] = useState(null);
+
+  /* The prompt, and the example, belong to the shell that is actually
+     running.
+     The prompt was a hardcoded ">" everywhere, and the placeholder suggested
+     `git status` whatever the machine was - so a Windows terminal and a Linux
+     one looked identical and neither looked like itself. The backend already
+     reports which shell it started; this uses it rather than guessing from
+     the browser, because the shell is the backend's fact and on a phone
+     paired to a PC the two are different machines. */
+  const shellName = String(context?.shell || '').toLowerCase();
+  const shellStyle = shellName.startsWith('pwsh') || shellName.startsWith('powershell')
+    ? { prompt: 'PS>', example: 'Get-ChildItem' }
+    : shellName.startsWith('cmd')
+      ? { prompt: 'C:\>', example: 'dir' }
+      : shellName
+        ? { prompt: '$', example: 'ls -la' }
+        // Nothing known yet. A neutral mark rather than a wrong one.
+        : { prompt: '>', example: 'git status' };
   const [pending, setPending] = useState(null);
   // Up and down through what you have typed, like any other shell.
   const [history, setHistory] = useState([]);
@@ -180,7 +198,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
         )}
 
         <form onSubmit={submit} className="flex items-center gap-2 border-t border-zinc-800 px-4 py-3">
-          <span className="font-mono text-sm font-bold text-emerald-400">&gt;</span>
+          <span className="shrink-0 font-mono text-sm font-bold text-emerald-400">{shellStyle.prompt}</span>
           <input
             ref={inputRef}
             value={command}
@@ -202,7 +220,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
             disabled={running}
             spellCheck={false}
             autoComplete="off"
-            placeholder={running ? 'waiting for the command to finish…' : 'git status'}
+            placeholder={running ? 'waiting for the command to finish…' : shellStyle.example}
             className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50"
           />
         </form>
