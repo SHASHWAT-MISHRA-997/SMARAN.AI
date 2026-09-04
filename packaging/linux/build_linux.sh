@@ -154,6 +154,13 @@ echo "[linux] built $(basename "$OUT/${APP_ID}-${VERSION}-linux-x86_64.tar.gz")"
 # Built from the same tree the .deb was built from, so the two packages can
 # never drift apart in what they contain or where they put it.
 if command -v rpmbuild >/dev/null 2>&1; then
+    # The Debian metadata has to go before rpmbuild sees this tree. rpmbuild
+    # treats anything in the buildroot that is not listed in %files as an
+    # error - "Installed (but unpackaged) file(s) found: /DEBIAN/control" -
+    # rather than ignoring it, which is the safer behaviour and not what I
+    # assumed when the two packages were made to share one tree.
+    rm -rf "$TREE/DEBIAN"
+
     RPMROOT="$OUT/rpmbuild"
     mkdir -p "$RPMROOT/BUILD" "$RPMROOT/RPMS" "$RPMROOT/SPECS"
     cat > "$RPMROOT/SPECS/$APP_ID.spec" <<EOF
