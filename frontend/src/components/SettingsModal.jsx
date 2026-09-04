@@ -1329,7 +1329,12 @@ const SettingsModal = ({
                       so pressing it again just said the same thing. The check
                       already returns the installer's URL - windows_url - and
                       nothing was using it. */}
-                  <div className="flex shrink-0 items-center gap-2">
+                  {/* The buttons wrap instead of running out of the card.
+                      This was `flex shrink-0`, so the group could neither
+                      shrink nor break: with both "Restart & Install v2.10.15"
+                      and "Check for Updates" present it simply overflowed the
+                      rounded border it sits inside. */}
+                  <div className="flex flex-wrap items-center justify-end gap-2 min-w-0 max-w-full">
                     {/* The build for the machine you are reading this on. A
                         phone offered the 267 MB Windows installer would have
                         downloaded something it cannot open. If the release is
@@ -1363,7 +1368,7 @@ const SettingsModal = ({
                       <button
                         type="button"
                         onClick={installUpdate}
-                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 transition shadow-lg shadow-emerald-600/25 cursor-pointer"
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 whitespace-nowrap transition shadow-lg shadow-emerald-600/25 cursor-pointer"
                       >
                         <ArrowDownToLine className="w-3.5 h-3.5" />
                         Restart &amp; Install v{updateInfo?.latest_version}
@@ -1373,7 +1378,7 @@ const SettingsModal = ({
                       type="button"
                       onClick={() => checkUpdates(true)}
                       disabled={checkingUpdate}
-                      className={`px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer ${
+                      className={`px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-bold flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
                         updateInfo?.update_available
                           ? "border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                           : "bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/25"
