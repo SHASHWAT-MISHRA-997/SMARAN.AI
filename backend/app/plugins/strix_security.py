@@ -291,11 +291,12 @@ class StrixSecurityPlugin(ToolPlugin):
 
 
 metadata = PluginMetadata(
-    name="strix-security",
+    name="code-risk-scan",
     version="2.0.0",
     description=(
-        "A pattern linter for dangerous code, and a check for whether the "
-        "real strix-agent is installed. Implements none of Strix itself."
+        "Scans code for patterns that are dangerous to run - shell injection, "
+        "unguarded routes, secrets in source. Also reports whether the separate "
+        "strix-agent is installed."
     ),
     # Written for SMARAN.AI. The earlier metadata credited "Strix Labs" and
     # linked their repository; none of this is their code.

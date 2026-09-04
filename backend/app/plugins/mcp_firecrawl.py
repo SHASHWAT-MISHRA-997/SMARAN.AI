@@ -194,12 +194,12 @@ class MCPFirecrawlPlugin(ConnectorPlugin):
         return {"error": f"Unknown operation: {operation_name}"}
 
 metadata = PluginMetadata(
-    name="mcp-firecrawl",
+    name="web-page-reader",
     version="1.0.0",
     description=(
-        "Fetches a page over HTTP and extracts its readable text, title "
-        "and links with BeautifulSoup. No JavaScript rendering, and not "
-        "an MCP server."
+        "Fetches a page over HTTP and extracts its readable text, title and "
+        "links. No JavaScript is run, so a page that builds itself in the "
+        "browser comes back nearly empty."
     ),
     # Written for SMARAN.AI. Firecrawl is a separate AGPL-3.0 project and
     # none of its code is here; the earlier metadata named its team as the

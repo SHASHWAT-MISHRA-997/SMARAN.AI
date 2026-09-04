@@ -256,11 +256,11 @@ class OmniRoutePlugin(ToolPlugin):
 
 
 metadata = PluginMetadata(
-    name="omni-route",
+    name="provider-latency",
     version="3.1.0",
     description=(
-        "Client for the OmniRoute gateway if you run it, plus SMARAN.AI's own "
-        "measured latency per provider. Implements none of OmniRoute itself."
+        "Measures how fast each provider actually answers, and picks between "
+        "them on that. Also talks to an OmniRoute gateway if you run one."
     ),
     # Written for SMARAN.AI. OmniRoute is a separate MIT project by Diego
     # Souza; this talks to it and does not reimplement or vendor it. The

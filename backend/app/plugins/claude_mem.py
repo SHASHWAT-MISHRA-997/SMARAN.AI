@@ -274,7 +274,7 @@ class ClaudeMemPlugin(ToolPlugin):
 
 
 metadata = PluginMetadata(
-    name="claude-mem",
+    name="long-term-memory",
     version="2.0.0",
     description=(
         "Long-term memory in the user_memory table, so it survives restarts. "

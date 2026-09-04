@@ -215,11 +215,12 @@ class MeetilyPlugin(ToolPlugin):
 
 
 metadata = PluginMetadata(
-    name="meetily",
+    name="meeting-notes-import",
     version="1.0.0",
     description=(
-        "Brings meeting notes exported from Meetily into your documents. "
-        "Reads exported files - Meetily has no supported API to call."
+        "Brings meeting notes into your documents by reading the files a "
+        "recorder exported, Meetily included. Nothing is fetched from a "
+        "service; there is no API to call."
     ),
     # Written for SMARAN.AI. Meetily is Zackriya Solutions' MIT project; this
     # reads files it exports and contains none of its code.

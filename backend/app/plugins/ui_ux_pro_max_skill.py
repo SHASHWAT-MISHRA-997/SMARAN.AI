@@ -433,11 +433,11 @@ class UIUXProMaxSkill(SkillPlugin):
 
 # Plugin metadata
 metadata = PluginMetadata(
-    name="ui-ux-pro-max-skill",
+    name="ui-ux-review",
     version="0.1.0",
     description=(
-        "UI/UX design guidance and review checklists. Not the "
-        "ui-ux-pro-max skill itself - that is a separate MIT project."
+        "Design guidance and review checklists for an interface - spacing, "
+        "contrast, hierarchy, states."
     ),
     # Written for SMARAN.AI. ui-ux-pro-max is a separate MIT project by
     # nextlevelbuilder, installed through Claude Code's plugin marketplace or

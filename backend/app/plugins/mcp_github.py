@@ -160,7 +160,7 @@ class MCPGitHubPlugin(ConnectorPlugin):
         return {"error": f"Unknown operation: {operation_name}"}
 
 metadata = PluginMetadata(
-    name="mcp-github",
+    name="github-reader",
     version="1.0.0",
     description=(
         "Reads public GitHub repositories, commits, issues, pull requests and "
