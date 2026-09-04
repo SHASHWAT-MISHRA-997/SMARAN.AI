@@ -860,9 +860,32 @@ Download it anyway?`)) {
                           <div className="mt-5 pt-3 border-t border-zinc-800/80 flex items-center justify-between gap-2">
                             {m.is_downloaded ? (
                               <div className="flex items-center justify-between w-full gap-2">
-                                <span className="text-xs font-extrabold text-emerald-400 flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl shrink-0">
-                                  <CheckCircle2 className="w-3.5 h-3.5" /> Ready & Downloaded
-                                </span>
+                                {/* A downloaded model had nowhere to go.
+                                    The card said "Ready & Downloaded" and
+                                    offered only to delete it - the cloud tab
+                                    has "Use selected Cloud API model in Chat"
+                                    and the local one had no equivalent, so a
+                                    model could be installed from here and
+                                    then never chosen from here.
+
+                                    The Ollama tag is what is sent, not the
+                                    catalog id. Checked rather than assumed,
+                                    against the backend's own resolver with
+                                    llama3.2:3b installed:
+
+                                      meta/llama-3.2-3b-instruct  -> None
+                                      llama3.2:3b                 -> llama3.2:3b
+
+                                    The id would have made this one more
+                                    button that does nothing. */}
+                                <button
+                                  type="button"
+                                  onClick={() => { onModelChange?.(m.ollama_tag || m.id); onClose?.(); }}
+                                  title="Use this model for new messages"
+                                  className="px-3 py-1.5 text-xs font-black text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" /> Use in chat
+                                </button>
 
                                 <button
                                   onClick={() => handleDelete(m.id)}
