@@ -204,30 +204,52 @@ const AvatarMMD = ({
 
     Object.assign(sceneRef.current, { renderer, scene, camera, clock: new THREE.Clock() });
 
-    const resize = () => {
-      const { clientWidth: w, clientHeight: h } = mount;
-      if (!w || !h) return;
-      renderer.setSize(w, h, false);
-      camera.aspect = w / h;
-
+    /* Put the camera where the orbit says, and never quietly decline to.
+     *
+     * This used to live inside resize(), behind two conditions: a non-zero
+     * panel size, and a framedHeight that is only set once a model has
+     * finished loading and its spine bone has been found. If either was
+     * missing the whole block was skipped in silence - the camera stayed at
+     * the origin it was constructed at, and every later attempt to move it
+     * did nothing at all. Turning the view, from the buttons or from A and D,
+     * goes through here; both would appear dead, which is exactly what they
+     * were reported doing.
+     *
+     * Nothing here can now do nothing. Without a measured framing it falls
+     * back to one that suits a human-sized model, which is wrong by a little
+     * rather than absent entirely - and the moment the real numbers arrive
+     * the next call uses them. */
+    const place = () => {
       const handles = sceneRef.current;
-      if (handles.framedHeight) {
-        // Fill the panel at any shape, so the character never floats in empty
-        // space on a wide layout.
-        const fov = (camera.fov * Math.PI) / 180;
-        const byHeight = (handles.framedHeight / 2) / Math.tan(fov / 2);
-        const byWidth = (handles.framedHeight * 0.42 / 2) / (Math.tan(fov / 2) * camera.aspect);
-        const radius = Math.max(byHeight, byWidth) * orbitRef.current.distanceScale;
-        const { yaw, pitch } = orbitRef.current;
-        camera.position.set(
-          Math.sin(yaw) * Math.cos(pitch) * radius,
-          handles.aimHeight + Math.sin(pitch) * radius,
-          Math.cos(yaw) * Math.cos(pitch) * radius,
-        );
-        camera.lookAt(0, handles.aimHeight, 0);
-      }
+      const fov = (camera.fov * Math.PI) / 180;
+      // 12 units is a person from the waist up at this field of view; the real
+      // value replaces it as soon as the model is measured.
+      const framedHeight = handles.framedHeight || 12;
+      const aimHeight = handles.aimHeight ?? 8;
+      const byHeight = (framedHeight / 2) / Math.tan(fov / 2);
+      const byWidth = (framedHeight * 0.42 / 2) / (Math.tan(fov / 2) * (camera.aspect || 1));
+      const radius = Math.max(byHeight, byWidth) * orbitRef.current.distanceScale;
+      const { yaw, pitch } = orbitRef.current;
+      camera.position.set(
+        Math.sin(yaw) * Math.cos(pitch) * radius,
+        aimHeight + Math.sin(pitch) * radius,
+        Math.cos(yaw) * Math.cos(pitch) * radius,
+      );
+      camera.lookAt(0, aimHeight, 0);
       camera.updateProjectionMatrix();
     };
+
+    const resize = () => {
+      const { clientWidth: w, clientHeight: h } = mount;
+      // A zero-sized panel is a reason not to resize the canvas. It is not a
+      // reason to leave the camera where it was.
+      if (w && h) {
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+      }
+      place();
+    };
+    sceneRef.current.place = place;
     sceneRef.current.refit = resize;
     resize();
     const observer = new ResizeObserver(resize);
@@ -422,20 +444,29 @@ const AvatarMMD = ({
   // ── View controls ──────────────────────────────────────────────────────
   const VIEWS = { 1: 0, 2: Math.PI / 4, 3: Math.PI / 2, 4: Math.PI };
 
+  /* Both of these move the camera through place(), which cannot decline.
+     They used to call refit(), which could - and did, whenever the panel had
+     no size or the model had not been measured yet. */
   const resetView = () => {
     orbitRef.current = { yaw: 0, pitch: 0, distanceScale: 1 };
-    sceneRef.current.refit?.();
+    (sceneRef.current.place || sceneRef.current.refit)?.();
   };
 
   const setView = (index) => {
     orbitRef.current.yaw = VIEWS[index] ?? 0;
     orbitRef.current.pitch = 0;
-    sceneRef.current.refit?.();
+    (sceneRef.current.place || sceneRef.current.refit)?.();
   };
 
   useEffect(() => {
     const onKey = (event) => {
-      // Never hijack keys while the user is typing a message.
+      /* Never hijack keys while the user is typing a message.
+       *
+       * Worth knowing when these keys look broken: the voice screen has a
+       * message box, and if it holds focus - which it does as soon as it is
+       * clicked, and often from the moment the screen opens - then A, D and
+       * every other shortcut here is ignored on purpose. The buttons below
+       * the character do the same things and are not affected. */
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
@@ -457,7 +488,7 @@ const AvatarMMD = ({
       }
       if (handled) {
         event.preventDefault();
-        sceneRef.current.refit?.();
+        (sceneRef.current.place || sceneRef.current.refit)?.();
       }
     };
     window.addEventListener('keydown', onKey);
