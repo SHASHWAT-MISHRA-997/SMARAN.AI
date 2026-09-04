@@ -402,6 +402,20 @@ const DesktopPet = () => {
             setState((prev) => (prev === 'waving' ? 'idle' : 'waving'));
             setShowMessage(true);
           }}
+          /* The tooltip promised this and nothing implemented it.
+             There was no onDoubleClick at all, so the sentence under the
+             companion described a feature that did not exist. */
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            const ids = Object.keys(PET_FORMS);
+            const next = ids[(ids.indexOf(pet) + 1) % ids.length];
+            setPet(next);
+            // Remembered, the same way the picker remembers it - otherwise the
+            // companion would change and then change back on the next start.
+            localStorage.setItem('sm_pet_type', next);
+            setState('jumping');
+            setShowMessage(true);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             setShowPicker((v) => !v);

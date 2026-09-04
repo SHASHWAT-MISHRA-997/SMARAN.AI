@@ -184,21 +184,48 @@ def _run(on_message: Optional[Callable[[str], None]] = None) -> None:
             _state["error"] = "Could not start pip: %s" % exc
         return
 
+    # Every line is kept here, briefly, whatever it looks like.
+    #
+    # The panel only ever showed lines starting with Collecting, Downloading,
+    # Installing, Successfully or ERROR - and pip does not announce most
+    # failures that way. A resolver conflict, a missing wheel for this Python,
+    # a proxy refusal: all of those arrive as lowercase "error:", as "note:",
+    # or inside a box drawn with "x" and "|__". Every one of them was filtered
+    # out, and the failure then read "pip exited with code 2. The last lines
+    # above say why" above nothing at all.
+    tail: list[str] = []
+
     for line in process.stdout or []:
         text = line.rstrip()
-        # pip is verbose. Only the lines that mark progress are kept, so the
-        # panel shows movement without becoming a log dump.
+        if not text:
+            continue
+        tail.append(text)
+        if len(tail) > 60:
+            del tail[0]
+        # The panel still shows only progress, so it does not become a log
+        # dump while things are going well.
         if text.startswith(("Collecting", "Downloading", "Installing", "Successfully", "ERROR")):
             note(text[:180])
 
     process.wait()
 
     if process.returncode != 0:
+        # The lines that actually explain it, preferred over the ones that
+        # merely came last.
+        blamed = [t for t in tail if any(
+            mark in t.lower() for mark in
+            ("error", "could not find", "no matching distribution",
+             "conflict", "not supported", "failed", "denied", "unable to")
+        )]
+        reason = chr(10).join((blamed or tail)[-6:])[:900]
+        for line in (blamed or tail)[-6:]:
+            note(line[:180])
         with _lock:
             _state["status"] = "failed"
             _state["error"] = (
-                "pip exited with code %s. The last lines above say why."
-                % process.returncode
+                "pip exited with code %s.%s"
+                % (process.returncode, (chr(10) * 2 + reason) if reason else
+                   " It printed nothing that explains why.")
             )
         return
 
