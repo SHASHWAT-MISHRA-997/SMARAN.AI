@@ -59,9 +59,13 @@ set -euo pipefail
 # Named, not discovered. An earlier version of this took "the newest Python in
 # the image" and got 3.15.0rc2 free-threaded - a release candidate with a
 # different ABI that no dependency has wheels for.
-dnf install -y -q python3.12 python3.12-devel gcc make >/dev/null
+# python3.12-pip is a separate package here. Without it the interpreter
+# installs fine and then answers "No module named pip", which reads like a
+# broken image rather than a missing package.
+dnf install -y -q python3.12 python3.12-pip python3.12-devel gcc make >/dev/null
 PY=/usr/bin/python3.12
 test -x "$PY" || { echo "[freeze] python3.12 did not install" >&2; exit 1; }
+"$PY" -m pip --version >/dev/null 2>&1 || "$PY" -m ensurepip --upgrade
 echo "[freeze] using $("$PY" -V) at $PY"
 
 "$PY" -m pip install --upgrade pip -q
