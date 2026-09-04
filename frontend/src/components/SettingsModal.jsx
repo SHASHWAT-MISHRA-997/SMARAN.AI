@@ -1304,7 +1304,14 @@ const SettingsModal = ({
                     <div className="w-12 h-12 rounded-2xl bg-red-600/15 border border-red-500/40 text-red-500 flex items-center justify-center shrink-0">
                       <Sparkles className="w-6 h-6 animate-pulse" />
                     </div>
-                    <div>
+                    {/* min-w-0, so this block can be squeezed.
+                        A flex item defaults to min-width:auto, which means it will not
+                        shrink below its own min-content - and the badge inside is
+                        whitespace-nowrap, so "UPDATE V2.10.15 AVAILABLE" counts as one
+                        unbreakable box. Without this the block can refuse to give way
+                        and push the buttons past the card edge, which is the shape of
+                        what was reported. */}
+                    <div className="min-w-0">
                       {/* flex-wrap and a badge that will not break.
                           "UPDATE V2.10.12 AVAILABLE" was wrapping onto two
                           lines inside its pill, which grew the pill until it
