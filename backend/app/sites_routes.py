@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app import site_builder
 
 
 router = APIRouter(prefix="/api/sites", tags=["sites"])
@@ -109,140 +110,11 @@ main{{max-width:1100px;margin:auto;padding:clamp(70px,13vw,150px) 24px}} .eyebro
 </style></head><body>{banner}<nav><div class="brand">{title}<span class="dot">.</span></div></nav><main><p class="eyebrow">A new digital experience</p><h1>{title}</h1><p class="lead">{summary}</p><a class="cta" href="#explore">Explore the site</a><section class="grid" id="explore"><article><span>01</span><h2>Clear purpose</h2><p>The experience is structured around your brief, with a focused story and responsive layout.</p></article><article><span>02</span><h2>Built for every screen</h2><p>Typography, spacing and content adapt cleanly from desktop monitors to mobile devices.</p></article><article><span>03</span><h2>Ready to refine</h2><p>Return to SMARAN.AI Sites and describe the next change to create a new local version.</p></article></section></main><footer>{title}</footer></body></html>"""
 
 
-BUILD_INSTRUCTIONS = (
-    "You are building a complete, standalone website from a brief.\n"
-    "Return ONE HTML document and nothing else - no explanation, no markdown "
-    "fence. It must begin with <!doctype html>.\n"
-    "Put all CSS in a <style> tag and any JavaScript in a <script> tag, so the "
-    "file opens on its own with no build step and no network requests. Do not "
-    "link to external stylesheets, fonts or images.\n"
-    "Build what the brief actually asks for: its sections, its wording, its "
-    "subject. Choose a palette and a layout that suit that subject rather than "
-    "a default one. Make it responsive down to 360px wide.\n"
-    "Use real, specific copy about the subject. Do not write placeholder text "
-    "such as 'Lorem ipsum' or 'Feature one'.\n"
-    "The <title> and the main heading must be the site name you are given. "
-    "Never put your own model name anywhere in the page."
-)
-
-
-def _force_title(document: str, name: str) -> str:
-    """Make the title the site's name.
-
-    Small models get this wrong in a particular way: qwen2.5-coder:3b titled a
-    tea shop "Qwen2.5 Coder:3b" and used the same string as the h1, while
-    writing the menu and the address correctly. The name is something we know
-    for certain, so it is set rather than hoped for. Only the title element
-    and a heading that repeats it are touched; the rest is the model's.
-    """
-    safe = html.escape(name.strip())
-    existing = re.search(r"<title[^>]*>(.*?)</title>", document, re.DOTALL | re.IGNORECASE)
-    if not existing:
-        return document
-    wrong = existing.group(1).strip()
-    if wrong.casefold() == name.strip().casefold():
-        return document
-    document = document[:existing.start(1)] + safe + document[existing.end(1):]
-    # If the h1 was the same wrong string, it came from the same mistake.
-    if wrong:
-        document = re.sub(
-            r"(<h1[^>]*>)\s*" + re.escape(wrong) + r"\s*(</h1>)",
-            r"\g<1>" + safe.replace("\\", "\\\\") + r"\g<2>",
-            document, count=1, flags=re.IGNORECASE)
-    return document
-
-
-def _extract_html(text: str) -> str | None:
-    """The document out of a model reply, or None if there is not one.
-
-    Models wrap HTML in fences even when told not to, so the fence is stripped
-    rather than treated as failure. Anything that does not actually contain a
-    document is rejected outright - returning half a reply as a website would
-    be worse than saying nothing was generated.
-    """
-    if not text:
-        return None
-    fence = re.search(r"```(?:html)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
-    if fence:
-        text = fence.group(1)
-    start = re.search(r"<!doctype html|<html\b", text, re.IGNORECASE)
-    if not start:
-        return None
-    document = text[start.start():]
-    end = document.lower().rfind("</html>")
-    if end == -1:
-        return None
-    document = document[:end + 7].strip()
-    # A document this short is a stub, not a site.
-    return document if len(document) > 400 else None
-
-
-def _generate_with_model(name: str, prompt: str, previous: str | None = None) -> tuple[str | None, str]:
-    """Ask the local model for the site. Returns (html, how_it_was_made)."""
-    import httpx
-
-    base = settings.OLLAMA_URL.rstrip("/")
-    try:
-        tags = httpx.get(f"{base}/api/tags", timeout=3.0)
-        if tags.status_code != 200:
-            return None, "no local model server responded"
-        # Embedding models are installed alongside chat models and cannot
-        # generate text at all - asking nomic-embed-text for a web page gets
-        # an error, not a page. Taking models[0] blindly picked exactly that
-        # on this machine.
-        installed = []
-        for entry in (tags.json().get("models") or []):
-            name = entry.get("name")
-            if not name:
-                continue
-            family = ((entry.get("details") or {}).get("family") or "").lower()
-            if "embed" in name.lower() or "bert" in family:
-                continue
-            installed.append(name)
-    except Exception as exc:
-        return None, f"local model server unreachable ({str(exc)[:60]})"
-
-    if not installed:
-        return None, ("the local model server is running but has no model that "
-                      "can write text installed")
-
-    brief = f"Site name: {name}\n\nBrief:\n{prompt}"
-    if previous:
-        brief += (
-            "\n\nThis is a revision. Here is the current document; keep what "
-            "still applies and change what the brief above asks for.\n\n"
-            + previous[:40_000]
-        )
-
-    model = installed[0]
-    try:
-        # Generous timeout: a whole page is a long completion, and a cold
-        # model has to load first.
-        response = httpx.post(
-            f"{base}/api/chat",
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": BUILD_INSTRUCTIONS},
-                    {"role": "user", "content": brief},
-                ],
-                "stream": False,
-                "think": False,
-                "options": {"temperature": 0.6, "num_predict": 8192},
-            },
-            timeout=httpx.Timeout(600.0, connect=5.0),
-        )
-        if response.status_code != 200:
-            return None, f"the model returned HTTP {response.status_code}"
-        content = (response.json().get("message") or {}).get("content") or ""
-    except Exception as exc:
-        return None, f"the model call failed ({str(exc)[:80]})"
-
-    document = _extract_html(content)
-    if not document:
-        return None, f"{model} replied, but not with a complete HTML document"
-    return _force_title(document, name), f"generated by {model}"
-
+# How a site is actually built now lives in app.site_builder: which model to
+# ask, how to ask it, and what to do when the answer stops half way. What
+# was here asked the local Ollama server and nothing else, which on an
+# installation with no local chat model meant the placeholder below every
+# single time, no matter how good the brief was.
 
 def _write_version(site: dict, prompt: str) -> None:
     directory = _site_dir(site["id"])
@@ -264,7 +136,7 @@ def _write_version(site: dict, prompt: str) -> None:
             except OSError:
                 previous = None
 
-    content, how = _generate_with_model(site["name"], prompt, previous)
+    content, how = site_builder.build(site["name"], prompt, previous)
     if content is None:
         # The template still exists, but only as a placeholder, and it now
         # says on the page itself that it is one. Handing back a stock layout

@@ -686,6 +686,24 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
             />
           </div>
 
+          {/* Which model built this, and what could not be used.
+            *
+            * The record has carried this all along and the screen never
+            * showed it, so a page that came out as the stock placeholder
+            * looked like the feature simply being poor. It is usually a
+            * key that has expired or a free tier that has run out, and
+            * that is a thing somebody can go and fix. */}
+          {site.generated_by && (
+            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+              <div className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
+                How this was built
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-400 break-words">
+                {site.generated_by}
+              </p>
+            </div>
+          )}
+
           <div className="pt-4">
             <button
               onClick={refine}
