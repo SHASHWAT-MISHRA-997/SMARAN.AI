@@ -338,10 +338,11 @@ export async function streamReply({ provider, model, key, messages, signal, onTo
 /** Whatever the provider said went wrong, rather than a bare status code. */
 async function readError(res, who) {
   let detail = '';
+  let parsed = null;
   try {
     const body = await res.text();
     try {
-      const parsed = JSON.parse(body);
+      parsed = JSON.parse(body);
       detail = parsed?.error?.message || parsed?.detail || body.slice(0, 200);
     } catch {
       detail = body.slice(0, 200);
@@ -352,7 +353,40 @@ async function readError(res, who) {
     return `${who} refused the key. Check it in Settings.`;
   }
   if (res.status === 429) {
-    return `${who} is rate-limiting this key. Wait a moment, or pick another provider.`;
+    /* What was actually exhausted, not just that something was.
+     *
+     * This said "is rate-limiting this key. Wait a moment" for every 429,
+     * which on a free tier is usually wrong advice: the limit that ran out
+     * is often per day, and waiting a moment does nothing. Google says
+     * which quota it was and how long to wait, in the error body, and all
+     * of it was being thrown away.
+     *
+     * Nothing here claims to know a provider's limits - it repeats what
+     * the provider said. */
+    const details = parsed?.error?.details || [];
+    const violation = details
+      .flatMap((d) => d?.violations || [])
+      .find((v) => v?.quotaId || v?.quotaMetric);
+    const retry = details.find((d) => d?.retryDelay)?.retryDelay;
+    const quota = String(violation?.quotaId || '');
+
+    const perDay = /PerDay/i.test(quota);
+    const freeTier = /free/i.test(quota);
+
+    const parts = [`${who} would not answer: a usage limit has been reached.`];
+    if (freeTier && perDay) {
+      parts.push('It is a daily free-tier limit for this model, so waiting a'
+        + ' moment will not help - choose a different model, or a different'
+        + ' provider, until it resets.');
+    } else if (perDay) {
+      parts.push('It is a daily limit, so it will not clear by waiting.');
+    } else if (retry) {
+      parts.push(`It says to try again in ${retry}.`);
+    } else {
+      parts.push('Wait a moment, or pick another model or provider.');
+    }
+    if (quota) parts.push(`(${quota})`);
+    return parts.join(' ');
   }
   return `${who} answered ${res.status}. ${detail}`;
 }

@@ -133,6 +133,18 @@ const buildNoise = (context) => {
 export const AMBIENCE_PROFILES = Object.keys(PROFILES);
 export const ambienceLabel = (name) => (PROFILES[name] || PROFILES.myra).label;
 
+/* How loud the room tone sits under everything else.
+ *
+ * Reported as too loud. The three character presets carry their own
+ * gains - 0.22, 0.23, 0.2 - and they are balanced against each other,
+ * so changing them one at a time would unbalance them. This scales all
+ * three together and keeps that balance.
+ *
+ * 0.5 is half the amplitude, which is about six decibels down: clearly
+ * quieter, still present. Ambience that cannot be heard at all is a
+ * setting nobody would turn on. */
+const LEVEL = 0.5;
+
 export class Ambience {
   constructor() {
     this.context = null;
@@ -168,7 +180,7 @@ export class Ambience {
     this._armResume(context);
 
     const master = context.createGain();
-    this.baseGain = profile.gain;
+    this.baseGain = profile.gain * LEVEL;
     master.gain.value = 0;
     master.connect(context.destination);
     this.master = master;

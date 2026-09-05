@@ -768,6 +768,17 @@ export const HackerVoiceAssistant = ({
   const [recognizerStatus, setRecognizerStatus] = useState('idle');
   const [recorderStatus, setRecorderStatus] = useState('idle');
   const [vadStatus, setVadStatus] = useState('idle');
+
+  // How the room is measured before anything is called speech. About a second
+  // at 60 frames a second - long enough for a median to mean something, short
+  // enough that nobody notices the microphone thinking.
+  const CALIBRATION_FRAMES = 60;
+  // How far above the room tone a sound has to be before it counts as someone
+  // talking, and the lowest that bar is ever allowed to fall.
+  const SPEECH_MARGIN = 8;
+  const SPEECH_FLOOR = 14;
+  const noiseFloorRef = useRef(null);
+  const calibrationRef = useRef([]);
   const [uploadStatus, setUploadStatus] = useState('idle');
   const [voiceIssue, setVoiceIssue] = useState('');
 
@@ -1512,6 +1523,10 @@ export const HackerVoiceAssistant = ({
           voiceStateRef.current = 'vad-ready';
 
           const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          // A new microphone session is a new room: measure it again rather
+          // than trusting a baseline from somewhere the person no longer is.
+          noiseFloorRef.current = null;
+          calibrationRef.current = [];
           const updateVolume = () => {
             if (!isMounted) return;
             analyser.getByteFrequencyData(dataArray);
@@ -1523,8 +1538,41 @@ export const HackerVoiceAssistant = ({
             // browsers may expose SpeechRecognition while its hosted service is
             // unavailable; in that case this path still sends recorded audio to
             // the bundled local faster-whisper endpoint.
-            if (['listening', 'capturing', 'vad-ready'].includes(voiceStateRef.current) && !isMutedRef.current) {
-              if (avg >= 14) {
+            // Speech is louder than THIS room, not louder than 14.
+            //
+            // This used to be `avg >= 14` against the raw average - a fixed
+            // number, with no idea what the room sounds like. Any microphone
+            // whose resting hum sits above 14 reads as speech the instant it
+            // opens, which is why 'Speech detected' appeared before anyone had
+            // said anything and then stayed. autoGainControl above makes it
+            // likelier, not less: in a quiet room the browser turns the gain up
+            // until the room tone itself is loud.
+            //
+            // So the first moments after the microphone opens are spent
+            // listening rather than judging, and the room's own level becomes
+            // the baseline everything is measured against. The median is used
+            // rather than the mean so one cough during calibration cannot set
+            // the bar for the rest of the session. This is the ordinary
+            // energy-based approach: a floor estimated from the signal itself,
+            // and a margin above it.
+            //
+            // The bar is never lowered below the old 14. In a quiet room this
+            // behaves exactly as before; it only rises where the old number was
+            // being cleared by nothing but noise.
+            const floor = noiseFloorRef.current;
+            if (floor === null) {
+              const collected = calibrationRef.current;
+              collected.push(avg);
+              if (collected.length >= CALIBRATION_FRAMES) {
+                const sorted = [...collected].sort((a, b) => a - b);
+                noiseFloorRef.current = sorted[Math.floor(sorted.length / 2)];
+              }
+              // Nothing is called speech while the room is still being measured.
+              soundStartTimeRef.current = 0;
+            } else if (['listening', 'capturing', 'vad-ready'].includes(voiceStateRef.current) && !isMutedRef.current) {
+              const speakAt = Math.max(SPEECH_FLOOR, floor + SPEECH_MARGIN);
+              const quietAt = Math.max(SPEECH_FLOOR / 2, floor + SPEECH_MARGIN / 2);
+              if (avg >= speakAt) {
                 if (!soundStartTimeRef.current) soundStartTimeRef.current = Date.now();
                 if (Date.now() - soundStartTimeRef.current >= 250) {
                   if (!hasSpokenRef.current) {
@@ -1537,8 +1585,13 @@ export const HackerVoiceAssistant = ({
                   hasSpokenRef.current = true;
                   lastSpeechTimeRef.current = Date.now();
                 }
-              } else if (avg < 7) {
+              } else if (avg < quietAt) {
                 soundStartTimeRef.current = 0;
+                // A room does not stay as loud as it was when it was measured -
+                // a fan stops, a window shuts. Following it slowly, and only
+                // while nothing is being said, keeps the baseline honest without
+                // letting a long sentence drag it upward.
+                noiseFloorRef.current = floor * 0.99 + avg * 0.01;
               }
             }
             requestAnimationFrame(updateVolume);
