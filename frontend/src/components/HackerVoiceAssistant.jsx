@@ -976,6 +976,9 @@ export const HackerVoiceAssistant = ({
   // =========================================================================
   /** The phone's own recogniser, when one is listening. */
   const nativeStopRef = useRef(null);
+  // How many native sessions in a row ended instantly having heard
+  // nothing. Reset by the first word heard.
+  const nativeEndRunRef = useRef(0);
 
   const stopRecognition = useCallback(() => {
     if (nativeStopRef.current) {
@@ -1122,10 +1125,14 @@ export const HackerVoiceAssistant = ({
           setRecognizerIssue('This phone has no speech recogniser available.');
           return;
         }
+        const startedAt = Date.now();
+        let heardAnything = false;
         try {
           nativeStopRef.current = await nativeSpeech.listen({
             language: getRecognitionLang(selectedLanguage),
             onText: (heard) => {
+              heardAnything = true;
+              nativeEndRunRef.current = 0;
               setTranscript(heard);
               transcriptRef.current = heard;
               hasSpokenRef.current = true;
@@ -1133,6 +1140,57 @@ export const HackerVoiceAssistant = ({
                 setVoiceState('listening');
                 voiceStateRef.current = 'listening';
               }
+            },
+            /* Android stops listening on its own, and nothing was told.
+             *
+             * Android's recogniser ends a session after a pause - that is
+             * its normal behaviour, not a fault. The plugin reports it,
+             * and dictation acts on it; this passed no onEnd at all, so
+             * the session died and the screen went on saying 'Listening'.
+             * Nothing more was ever heard. Pausing mid-sentence was
+             * enough to do it, which is why Speak on the phone looked
+             * like it simply did not work.
+             *
+             * The Web Speech path below has restarted itself on 'end'
+             * since the beginning. This is the same thing, for the
+             * recogniser the phone actually uses. */
+            onEnd: () => {
+              nativeStopRef.current = null;
+              // A session that ends at once, having heard nothing, is a
+              // recogniser that cannot run - usually Google's speech
+              // service disabled or a missing language pack. Restarting
+              // it forever would hold the microphone and drain the
+              // battery to no purpose, which is the loop the Web Speech
+              // path already had to learn its way out of.
+              if (!heardAnything && Date.now() - startedAt < 1200) {
+                nativeEndRunRef.current += 1;
+              } else {
+                nativeEndRunRef.current = 0;
+              }
+              if (nativeEndRunRef.current >= 3) {
+                setRecognizerStatus('unavailable');
+                setRecognizerIssue('This phone stops listening the moment it starts. '
+                  + 'On most Android phones that is Google’s speech service '
+                  + 'being disabled, or the language pack for this language '
+                  + 'not being installed.');
+                return;
+              }
+              const canListen = isOpen && !isMutedRef.current
+                && voiceStateRef.current !== 'thinking'
+                && voiceStateRef.current !== 'speaking';
+              if (!canListen) {
+                // Say what is true. Claiming 'active' while nothing is
+                // listening is how this hid for so long.
+                setRecognizerStatus('idle');
+                return;
+              }
+              setTimeout(() => {
+                if (isOpen && !isMutedRef.current
+                    && voiceStateRef.current !== 'thinking'
+                    && voiceStateRef.current !== 'speaking') {
+                  startRecognition();
+                }
+              }, 300);
             },
           });
           setRecognizerStatus('active');
