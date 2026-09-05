@@ -20,13 +20,25 @@ CTranslate2 loads its CUDA libraries at run time rather than linking them, so
 the card is reachable only if cuBLAS and cuDNN are present. They are a few
 hundred megabytes and this app does not ship them.
 
-WHY PATH IS NOT ENOUGH
+WHY BOTH PATH AND add_dll_directory
 
 Since Python 3.8, Windows no longer searches PATH for the dependencies of an
-extension module. A directory has to be registered with os.add_dll_directory,
-and it has to be registered *before* ctranslate2 is imported - after that the
-loader has already looked and failed. That is why installing the libraries and
-restarting the app is not optional.
+extension module, so a directory has to be registered with os.add_dll_directory.
+This module did only that, and it was not enough: with all three directories
+registered, before any import, CTranslate2 still answered
+
+    RuntimeError: Library cublas64_12.dll is not found or cannot be loaded
+
+with the file sitting in one of them. add_dll_directory only affects loads that
+ask for user directories. CTranslate2 does not link cuBLAS - it loads it at run
+time by name, an ordinary load, and an ordinary load searches PATH. Adding the
+same directories to PATH as well turned that error into a working transcription
+on the first try.
+
+Both, then: add_dll_directory for anything resolved at load time, PATH for the
+ones CTranslate2 asks for itself. And before ctranslate2 is imported either way -
+after that the loader has already looked and failed, which is why installing the
+libraries and restarting the app is not optional.
 
 HOW THIS DECIDES
 
@@ -56,8 +68,15 @@ def cuda_root() -> str:
 #: because ctranslate2 4.5 and newer want 9 rather than 8.
 CUDA_PACKAGES = ("nvidia-cublas-cu12", "nvidia-cudnn-cu12")
 
-#: Roughly what will be downloaded, so the interface can say so before starting.
-APPROX_DOWNLOAD_MB = 700
+#: Roughly what will be downloaded, so the interface can say so before
+#: starting. Measured rather than guessed: cuDNN is a 732 MB wheel, nvrtc
+#: another 76 MB, and cuBLAS the rest.
+APPROX_DOWNLOAD_MB = 820
+
+#: And what it costs on disk, which is not the same number and is the one
+#: somebody with a full drive needs. The wheels unpack to roughly two and a
+#: half times their download size.
+APPROX_DISK_MB = 2000
 
 _registered = False
 _verdict: Optional[Tuple[bool, str]] = None
@@ -79,6 +98,7 @@ def register_libraries() -> bool:
         return True
 
     added = False
+    folders = []
     for base in (cuda_root(), os.path.join(sys.prefix, "Lib", "site-packages")):
         nvidia = os.path.join(base, "nvidia")
         if not os.path.isdir(nvidia):
@@ -86,11 +106,23 @@ def register_libraries() -> bool:
         for library in os.listdir(nvidia):
             folder = os.path.join(nvidia, library, "bin")
             if os.path.isdir(folder):
+                folders.append(folder)
                 try:
                     os.add_dll_directory(folder)
                     added = True
                 except OSError as exc:  # noqa: PERF203 - one bad folder is not fatal
                     logger.info("Could not register %s: %s", folder, exc)
+
+    # PATH as well. See the note at the top: this is the half that
+    # CTranslate2 actually reads, and without it the card stayed
+    # unreachable with every directory correctly registered.
+    if folders:
+        existing = os.environ.get("PATH", "")
+        missing = [f for f in folders if f not in existing.split(os.pathsep)]
+        if missing:
+            os.environ["PATH"] = os.pathsep.join(missing + [existing])
+        added = True
+
     _registered = True
     return added
 
@@ -162,8 +194,9 @@ def usable(force: bool = False) -> Tuple[bool, str]:
         if "cublas" in message.lower() or "cudnn" in message.lower():
             _verdict = (False,
                         "The graphics card is here but its CUDA libraries are not, "
-                        "so speech runs on the processor. About %d MB installs them."
-                        % APPROX_DOWNLOAD_MB)
+                        "so speech runs on the processor. Installing them downloads "
+                        "about %d MB and uses about %.1f GB on disk."
+                        % (APPROX_DOWNLOAD_MB, APPROX_DISK_MB / 1000))
         else:
             _verdict = (False, "The graphics card could not be used: %s" % message[:200])
         return _verdict
@@ -211,6 +244,7 @@ def status() -> dict:
             "in_use": bool(yes),
             "detail": why,
             "approx_mb": APPROX_DOWNLOAD_MB,
+            "approx_disk_mb": APPROX_DISK_MB,
         }
 
 
@@ -228,7 +262,8 @@ def _install() -> None:
     target = cuda_root()
     os.makedirs(target, exist_ok=True)
     _note("Installing into %s" % target)
-    _note("About %d MB will be downloaded." % APPROX_DOWNLOAD_MB)
+    _note("About %d MB will be downloaded, using about %.1f GB on disk."
+          % (APPROX_DOWNLOAD_MB, APPROX_DISK_MB / 1000))
 
     command = [sys.executable, "-m", "pip", "install", "--target", target,
                "--upgrade", *CUDA_PACKAGES]
