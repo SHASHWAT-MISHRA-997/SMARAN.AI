@@ -103,10 +103,24 @@ def _get_whisper_model(model_name: str):
         except Exception:
             threads = 4
 
+        # The card if it can really be driven, the processor otherwise.
+        #
+        # device was hardcoded to "cpu", which was right while nothing knew
+        # how to tell a card that is present from one that can be used.
+        # gpu_speech answers that by trying, and falls back on its own, so
+        # this cannot end up asking for a card that will raise.
+        try:
+            from app import gpu_speech
+
+            device, compute = gpu_speech.device_and_compute()
+        except Exception:  # noqa: BLE001 - never stop speech from loading
+            device, compute = "cpu", "int8"
+        device = os.getenv("UPLOAD_WHISPER_DEVICE", device)
+
         model = WhisperModel(
             model_name,
-            device=os.getenv("UPLOAD_WHISPER_DEVICE", "cpu"),
-            compute_type="int8",
+            device=device,
+            compute_type=compute if device == "cuda" else "int8",
             download_root=download_root,
             cpu_threads=int(os.getenv("UPLOAD_WHISPER_THREADS", threads)),
         )

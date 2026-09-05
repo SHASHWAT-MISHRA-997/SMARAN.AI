@@ -3391,6 +3391,31 @@ def _generate_standalone_conversational_response(user_query: str, target_lang: s
         f"SMARAN.AI is fully active and ready to assist. You can ask me to write production code, control desktop applications, generate web apps, explain complex algorithms, or optimize multi-LLM workflows. How would you like to proceed?"
     )
 
+@app.get("/api/speech/gpu")
+async def speech_gpu_status():
+    """Whether speech is running on the graphics card, and why not if it is not."""
+    from app import gpu_speech
+
+    return gpu_speech.status()
+
+
+@app.post("/api/speech/gpu/install")
+async def speech_gpu_install():
+    """Fetch the CUDA libraries so the card can be used. Does not block.
+
+    Nothing is downloaded until this is asked for. The libraries are about
+    700 MB and most people never need them - speech works on the processor,
+    just more slowly - so this is a choice rather than something that
+    happens on first run.
+    """
+    from app import gpu_speech
+
+    current = gpu_speech.status()
+    if current["in_use"]:
+        return {"started": False, "detail": "The graphics card is already in use."}
+    return gpu_speech.start_install()
+
+
 @app.post("/api/voice/transcribe")
 async def transcribe_audio_endpoint(
     file: UploadFile = File(...),
