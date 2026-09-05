@@ -38,6 +38,30 @@
 
     <!-- Permissions -->
 
+
+    <!-- Android 11 hides other apps from this one unless it says what it
+         needs to see, and the speech recogniser is another app.
+
+         Without this, SpeechRecognizer.isRecognitionAvailable() returns
+         false on every device running Android 11 or newer - not because the
+         recogniser is missing, but because this app is not allowed to look
+         for it. The failure is silent: no exception, no log from the app,
+         just a flat "no". That is what "Voice input unavailable" has been
+         on the phone, on a device with Google's speech service installed
+         and working everywhere else.
+
+         QUERY_ALL_PACKAGES would also fix it and is the wrong answer: Play
+         treats it as a dangerous permission and this only needs to see two
+         services. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Reaching the paired desktop over the local network, and noticing when
          that network changes. -->

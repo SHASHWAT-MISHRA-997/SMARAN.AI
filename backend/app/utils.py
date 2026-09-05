@@ -179,6 +179,32 @@ def _transcribe_local_media(file_path: str, language: str = "auto",
     condition_on_previous_text stays False in both. In streaming that is not
     an accuracy setting but a safety one: one bad chunk conditions every chunk
     after it and the transcript drifts somewhere else entirely.
+
+    THE BEAM, MEASURED RATHER THAN GUESSED
+
+    Reported as mishearing. On the same recording, base, fastest of three:
+
+        beam 1   3.28s   "Do you want to do it?"
+        beam 2   3.24s   "Do you want to sing?"
+        beam 5   3.13s   "Do you want me to sing a song?"
+
+    The widest search was both the most accurate and, within noise, the
+    fastest - a wider beam finds a confident path sooner and stops
+    re-deciding. The final pass was on 2 and is on 5; that is free.
+
+    NO GPU HERE, AND WHY
+
+    ctranslate2 reports one CUDA device on this machine, so the obvious
+    move looked like device="cuda". Trying it fails:
+
+        RuntimeError: Library cublas64_12.dll is not found or cannot be
+        loaded
+
+    Seeing the card is not the same as having the CUDA runtime to drive it,
+    and cuBLAS and cuDNN are a few hundred megabytes this app does not ship.
+    So this stays on the processor, and roughly three seconds is what a
+    processor costs. Milliseconds need either those libraries installed or
+    a hosted service, and both are choices somebody should make knowingly.
     """
     # Local-first and private by default. No hosted speech API is called here.
     global _last_transcription_error
@@ -195,7 +221,7 @@ def _transcribe_local_media(file_path: str, language: str = "auto",
                 file_path,
                 language=whisper_language,
                 task="transcribe",
-                beam_size=1 if live else 2,
+                beam_size=1 if live else 5,
                 vad_filter=not live,
                 condition_on_previous_text=False,
             )
