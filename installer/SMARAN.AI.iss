@@ -11,7 +11,7 @@
 ; ============================================================================
 
 #define AppName        "SMARAN.AI"
-#define AppVersion     "2.10.24"
+#define AppVersion     "2.10.25"
 #define AppPublisher   "SMARAN AI"
 #define AppExeName     "SMARAN.AI.exe"
 #define SourceDir      "..\dist\SMARAN.AI"
