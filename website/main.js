@@ -960,3 +960,49 @@
     }
   });
 })();
+
+/* The download sizes, taken from the release rather than from memory.
+ *
+ * These were typed into the page by hand and then left alone. The Windows
+ * installer was advertised at 266 MB long after it had become 202 - the app
+ * had got smaller and the page had no way to notice. Every release moves
+ * them, and every release is a chance to forget.
+ *
+ * The numbers in the markup stay, and are correct as written: they are what
+ * shows if this fetch is blocked, fails, or is simply slow, which is better
+ * than a row of blanks. This only corrects them.
+ *
+ * Two conventions, deliberately. Windows Explorer divides by 1024 and calls
+ * the result MB; a browser and Android divide by 1000. Quoting one everywhere
+ * made the other wrong, and both were reported. So each file is quoted the way
+ * the person downloading it will see it counted.
+ */
+(function () {
+  var marked = document.querySelectorAll('[data-size]');
+  if (!marked.length || !window.fetch) return;
+
+  fetch('https://api.github.com/repos/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest',
+        { headers: { Accept: 'application/vnd.github+json' } })
+    .then(function (response) {
+      if (!response.ok) throw new Error(response.status);
+      return response.json();
+    })
+    .then(function (release) {
+      var sizes = {};
+      (release.assets || []).forEach(function (asset) {
+        sizes[asset.name] = asset.size;
+      });
+      Array.prototype.forEach.call(marked, function (node) {
+        var bytes = sizes[node.getAttribute('data-size')];
+        if (!bytes) return;
+        var divisor = node.getAttribute('data-unit') === 'mb' ? 1000000 : 1048576;
+        var value = bytes / divisor;
+        node.textContent = (value >= 100 ? Math.round(value)
+                                         : Math.round(value * 10) / 10) + ' MB';
+      });
+    })
+    .catch(function () {
+      /* Left as written in the markup. A wrong-by-a-little number beats a
+         gap where a size should be. */
+    });
+})();
