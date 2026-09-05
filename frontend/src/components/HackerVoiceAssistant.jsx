@@ -1384,6 +1384,16 @@ export const HackerVoiceAssistant = ({
       }
 
       if (!finalQuery || finalQuery.length < 2) {
+        // Say so. This reset the state and went back to listening
+        // without a word, which is indistinguishable from the app
+        // having ignored you - and it is the likeliest outcome when the
+        // recogniser is running against a language it does not have.
+        const nothingHeard = selectedLanguage === 'hi'
+          ? 'मैंने कुछ सुना नहीं। थोड़ा पास आकर दोबारा कहिए।'
+          : 'I did not catch that. Say it again, a little closer to the microphone.';
+        setVoiceIssue(nothingHeard);
+        setChatHistory((prev) => [...prev, { role: 'assistant', text: nothingHeard }]);
+        if (autoSpeakEnabled && audioEnabled) speakText?.(nothingHeard, selectedLanguage);
         hasSpokenRef.current = false;
         if (voiceStateRef.current !== 'error') {
           const vadReady = Boolean(analyserRef.current && audioContextRef.current?.state !== 'closed');
@@ -1398,6 +1408,13 @@ export const HackerVoiceAssistant = ({
       const normalizedQuery = finalQuery.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
       const now = Date.now();
       if (lastSentQueryRef.current.text === normalizedQuery && now - lastSentQueryRef.current.at < 12000) {
+        // Shown, not spoken. Repeating a sentence usually means the
+        // first one was not heard, and answering that with a spoken
+        // complaint every time would be worse than the silence - but
+        // the silence itself read as the app being broken.
+        setVoiceIssue(selectedLanguage === 'hi'
+          ? 'यही बात अभी-अभी पूछी गई थी, इसलिए दोबारा नहीं भेजी।'
+          : 'That was the same as the last question, so it was not sent again.');
         hasSpokenRef.current = false;
         finalTranscriptRef.current = '';
         startFreshRecorder();
@@ -1432,7 +1449,8 @@ export const HackerVoiceAssistant = ({
     } finally {
       autoSendInFlightRef.current = false;
     }
-  }, [finalizeRecordedAudio, onSendQuery, startFreshRecorder, startRecognition, stopRecognition, transcribeBackendAudio]);
+  }, [audioEnabled, autoSpeakEnabled, finalizeRecordedAudio, onSendQuery, selectedLanguage,
+      speakText, startFreshRecorder, startRecognition, stopRecognition, transcribeBackendAudio]);
 
   // VAD / Silence watchdog timer: 850ms
   useEffect(() => {

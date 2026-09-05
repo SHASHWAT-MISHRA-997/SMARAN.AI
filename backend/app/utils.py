@@ -225,7 +225,26 @@ def _transcribe_local_media(file_path: str, language: str = "auto",
     _last_transcription_error = None
     try:
         wanted = _whisper_model_name_for(language)
-        if live:
+        if live and wanted == _WHISPER_ENGLISH_MODEL:
+            # tiny.en only where English is certain.
+            #
+            # This was `if live:` - the live model regardless of what
+            # was being spoken - and tiny.en is English-only. Asking it
+            # for Hindi does not fail; faster-whisper says
+            #
+            #     The current model is English-only but the language
+            #     parameter is set to 'hi'; using 'en' instead.
+            #
+            # in a log nobody reads, and decodes the Hindi as English.
+            # So the reading shown while somebody dictates in Hindi,
+            # Marathi or Tamil was English nonsense, every time, and
+            # looked like the recogniser simply being poor.
+            #
+            # Anything not certainly English keeps the model the
+            # finished recording would use. On the measurements
+            # recorded above that costs about eight tenths of a second
+            # against tiny.en - and buys text in the right script
+            # instead of text in the wrong language.
             wanted = _WHISPER_LIVE_MODEL
         model = _get_whisper_model(wanted)
         selected_language = (language or "auto").lower().split("-")[0]

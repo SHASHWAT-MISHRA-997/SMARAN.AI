@@ -3315,7 +3315,24 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const handleSend = async (e, directPrompt = null, isVoicePrompt = false) => {
     if (e && e.preventDefault) e.preventDefault();
     const userPrompt = (directPrompt || input || '').trim();
-    if (!userPrompt || streaming) return;
+    /* A spoken turn must never end in silence.
+     *
+     * Everything that fills the voice bubble and speaks the reply lives
+     * in this function's finally block, so returning here skipped all of
+     * it: no answer, no error, no sound. Somebody who spoke while the
+     * previous answer was still streaming got nothing back at all and no
+     * way to tell whether the app had heard them.
+     *
+     * Typing has the composer to show it was not sent. Speaking has
+     * nothing, so it is said out loud. */
+    if (!userPrompt || streaming) {
+      if (userPrompt && streaming && (isVoicePrompt || isVoiceModeOpenRef.current)) {
+        emitVoiceReply(selectedLanguage === 'hi'
+          ? 'मैं अभी पिछला जवाब दे रहा हूँ। एक पल रुकिए और फिर कहिए।'
+          : 'I am still answering the last one. Give me a moment, then say it again.');
+      }
+      return;
+    }
     window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'running', message: 'Working on it…' } }));
 
     // Spoken turns are answered conversationally, without web/document grounding.
