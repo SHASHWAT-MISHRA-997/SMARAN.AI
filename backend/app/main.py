@@ -4898,6 +4898,10 @@ async def _synthesize_neural_speech(text: str, lang: str, speed: float, gender: 
     # edge-tts expects a relative rate such as "-10%" / "+15%".
     rate = f"{int(round((speed - 1.0) * 100)):+d}%"
 
+    # Why the last attempt produced nothing, so the caller can say something
+    # true instead of blaming a local engine that was never the problem.
+    _neural_failure = {"reason": ""}
+
     def _render() -> Optional[bytes]:
         # Run synthesis in its own process. In-process, edge-tts's websocket
         # client conflicts with libraries the API server already has loaded and
@@ -4936,6 +4940,7 @@ async def _synthesize_neural_speech(text: str, lang: str, speed: float, gender: 
             if result.returncode != 0:
                 stderr_text = result.stderr.decode("utf-8", errors="replace").strip()
                 logger.warning(f"Neural TTS process failed: {stderr_text[-600:]}")
+                _neural_failure["reason"] = stderr_text[-200:] or "the voice service did not answer"
                 return None
             if not os.path.isfile(out_path):
                 return None
@@ -4950,11 +4955,33 @@ async def _synthesize_neural_speech(text: str, lang: str, speed: float, gender: 
                 except OSError:
                     pass
 
-    try:
-        return await asyncio.to_thread(_render)
-    except Exception as exc:  # noqa: BLE001 - any failure falls back to eSpeak
-        logger.warning(f"Neural TTS unavailable, falling back to local engine: {exc}")
-        return None
+    # Twice, because there is nothing below this for most languages.
+    #
+    # edge-tts opens a websocket to Microsoft. A dropped connection or a
+    # moment of no network returns no audio, and for every language except
+    # English that is the end of it: Kokoro speaks English only, and
+    # eSpeak is on almost no Windows machine. A second attempt costs a
+    # fraction of a second and is the difference between a voice and
+    # silence.
+    #
+    # No claim is made here that the first attempt commonly fails. It was
+    # thought to, from a test that turned out to be sending mangled text
+    # through a Windows shell rather than exercising anything real.
+    for attempt in (1, 2):
+        try:
+            audio = await asyncio.to_thread(_render)
+        except Exception as exc:  # noqa: BLE001 - any failure falls through
+            logger.warning("Neural TTS attempt %d failed: %s", attempt, exc)
+            _neural_failure["reason"] = str(exc)[:200]
+            audio = None
+        if audio:
+            return audio
+        if attempt == 1:
+            await asyncio.sleep(0.4)
+
+    logger.warning("Neural TTS gave up after two attempts: %s",
+                   _neural_failure["reason"] or "no audio returned")
+    return None
 
 
 @app.post("/api/tts/local")
@@ -5019,7 +5046,21 @@ async def local_espeak_tts(req: SherpaOnnxRequest, current_user: User = Depends(
 
     executable = shutil.which("espeak-ng")
     if not executable:
-        raise HTTPException(status_code=503, detail="Local speech engine is not installed")
+        # Say which engine failed, not "a local engine is not installed".
+        #
+        # For every language except English the neural voice is the only
+        # one there is: Kokoro speaks English only, and eSpeak is on
+        # almost no Windows machine. So this message was shown for a
+        # network hiccup, and sent people looking for something to
+        # install when nothing was missing.
+        if requested_lang.split("-")[0] != "en":
+            raise HTTPException(
+                status_code=503,
+                detail=("The neural voice could not be reached, and it is the "
+                        "only one that speaks %s. It needs a connection; "
+                        "English also has an offline voice." % requested_lang))
+        raise HTTPException(status_code=503,
+                            detail="No speech engine on this machine could speak.")
 
     supported = {"en", "hi", "gu", "pa", "mr", "ta", "te", "ml", "kn", "bn"}
     lang = requested_lang.split("-")[0]
