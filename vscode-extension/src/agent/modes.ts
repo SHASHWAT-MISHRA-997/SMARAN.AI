@@ -69,6 +69,49 @@ export const REACHES: Choice1<ReachId>[] = [
     },
 ];
 
+/* One question with four answers, instead of two with seven.
+ *
+ * Reach and approval are genuinely separate dials, and the menu showed
+ * them that way: two headings, seven options, a sentence under each. It
+ * was accurate and it was a form to fill in. Codex asks one question and
+ * offers three lines; Claude Code cycles through three modes. Nobody
+ * makes you compose your own.
+ *
+ * The dials are still there underneath - a preset is just a pair - so
+ * anything set before still works and nothing is lost. What goes is being
+ * asked to build the combination yourself.
+ *
+ * Four rather than three, because Plan is a real thing this does and the
+ * documentation names it. Every one of them is one line.
+ */
+export interface Preset {
+    id: string;
+    label: string;
+    description: string;
+    policy: Policy;
+}
+
+export const PRESETS: Preset[] = [
+    { id: 'plan', label: 'Plan only',
+      description: 'Reads and explains. Changes nothing.',
+      policy: { reach: 'read', approval: 'never' } },
+    { id: 'ask', label: 'Ask me first',
+      description: 'Asks before every change and command.',
+      policy: { reach: 'workspace', approval: 'always' } },
+    { id: 'own', label: 'Work on its own',
+      description: 'Stops at what is hard to undo.',
+      policy: { reach: 'workspace', approval: 'risky' } },
+    { id: 'full', label: 'Full access',
+      description: 'Never asks. Reads and writes anywhere.',
+      policy: { reach: 'full', approval: 'never' } },
+];
+
+/** Which preset a policy is, or none when somebody has an older pairing. */
+export function presetFor(policy: Policy): Preset | undefined {
+    return PRESETS.find((p) => p.policy.reach === policy.reach
+        && p.policy.approval === policy.approval);
+}
+
 export const APPROVALS: Choice1<ApprovalId>[] = [
     { id: 'always', label: 'Every time', description: 'Every change and command.' },
     { id: 'commands', label: 'Before commands', description: 'Edits freely, asks to run.' },

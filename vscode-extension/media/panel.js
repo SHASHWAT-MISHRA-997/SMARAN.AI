@@ -63,6 +63,7 @@
     const modeMenu = $('modeMenu');
 
     let reaches = [];
+    let presets = [];
     let approvals = [];
     let policy = { reach: 'workspace', approval: 'always' };
 
@@ -156,7 +157,31 @@
         scroll();
     }
 
+    /* Nothing whose whole content is markup ever reaches the screen.
+
+       The parser already drops wrapper tags before showing what a model
+       said, and <tool_calls> still appeared - so it is arriving by some
+       path that check does not sit on. Rather than guess which, this
+       refuses it here, at the one place everything passes through. A
+       bare tag is never something a person needs to read: either it was
+       a call, in which case it ran and is shown as an action, or it was
+       malformed, in which case the note underneath already says so.
+
+       Only when it is the entire content. A sentence containing a tag is
+       a sentence, and is left alone. */
+    const ONLY_TAGS = (text) => {
+        const body = String(text == null ? '' : text).trim();
+        if (!body) return false;
+        return body.split('\n').every((line) =>
+            !line.trim() || /^<\/?[a-z_][a-z0-9_-]*(\s[^>]*)?\/?>$/i.test(line.trim()));
+    };
+
     function addEntry(entry) {
+        if ((entry.kind === 'message' || entry.kind === 'note' || !entry.kind)
+            && ONLY_TAGS(entry.body || entry.title)) {
+            return;
+        }
+
         // Whatever arrives next is the answer to the wait, so the wait goes.
         if (thinkingRow && entry.kind !== 'thinking') {
             thinkingRow.remove();
@@ -400,38 +425,36 @@
     function drawModeMenu() {
         modeMenu.replaceChildren();
 
-        const group = (title, options, current, note, send) => {
-            modeMenu.appendChild(el('div', 'menu-title', title));
-            if (note) modeMenu.appendChild(el('div', 'menu-note caution', note));
-            options.forEach((option) => {
-                const row = el('button', 'menu-item' + (option.id === current ? ' on' : ''));
-                const line = el('div', 'menu-line');
-                line.appendChild(el('strong', null, option.label));
-                if (option.id === current) line.appendChild(el('span', 'tick', '✓'));
-                row.appendChild(line);
-                row.appendChild(el('div', 'menu-note', option.description));
-                row.addEventListener('click', () => {
-                    modeMenu.hidden = true;
-                    send(option.id);
-                });
-                modeMenu.appendChild(row);
+        /* One question, four one-line answers.
+
+           This was two lists under two headings - seven options, a sentence
+           under each, and a warning paragraph on top - which asked somebody
+           to compose their own combination. Codex asks one question and
+           gives three lines. The pair of dials still exists underneath; a
+           preset just sets both. */
+        modeMenu.appendChild(el('div', 'menu-title', 'How much should it do on its own?'));
+
+        presets.forEach((preset) => {
+            const chosen = preset.policy.reach === policy.reach
+                && preset.policy.approval === policy.approval;
+            const row = el('button', 'menu-item' + (chosen ? ' on' : ''));
+            const line = el('div', 'menu-line');
+            line.appendChild(el('strong', null, preset.label));
+            if (chosen) line.appendChild(el('span', 'tick', '✓'));
+            row.appendChild(line);
+            row.appendChild(el('div', 'menu-note', preset.description));
+            row.addEventListener('click', () => {
+                modeMenu.hidden = true;
+                vscode.postMessage({ type: 'setPolicy', policy: preset.policy });
             });
-        };
+            modeMenu.appendChild(row);
+        });
 
-        group('What it may touch', reaches, policy.reach,
-            // Cut to the one thing this is warning about. Three sentences at
-            // the top of a menu is a paragraph nobody reads twice, and the
-            // part that matters is that reach does not contain a shell.
-            'A command can reach outside the folder whatever this is set to.',
-            (id) => vscode.postMessage({ type: 'setReach', reach: id }));
-
-        // Nothing to approve when it cannot change anything.
-        if (policy.reach !== 'read') {
-            group('When it asks', approvals, policy.approval, null,
-                (id) => vscode.postMessage({ type: 'setApproval', approval: id }));
-        }
+        /* The one thing the old paragraph was really about, kept because it
+           is the only part a person cannot work out from the labels. */
+        modeMenu.appendChild(el('div', 'menu-note caution',
+            'A command can reach outside the folder whatever this is set to.'));
     }
-
     $('modeChip').addEventListener('click', () => {
         drawModeMenu();
         modeMenu.hidden = !modeMenu.hidden;
@@ -974,6 +997,7 @@
                     ? `${message.provider || 'Local'} · ${message.model}`
                     : 'Pick where the model runs, and which one';
                 reaches = message.reaches || [];
+                presets = message.presets || presets;
                 approvals = message.approvals || [];
                 policy = message.policy || policy;
                 /* The chip has room for one of the two. Reach is the one that

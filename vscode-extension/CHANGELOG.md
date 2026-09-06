@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.19.0
+
+**One question instead of a form.** The mode menu was two headings, seven
+options with a sentence under each, and a three-sentence warning - it asked
+you to compose your own combination of two dials. It is now one question and
+four one-line answers: Plan only, Ask me first, Work on its own, Full access.
+The dials are still there underneath, so anything set before still works; what
+went is having to build the pairing yourself.
+
+**Bare markup can no longer reach the screen.** `<tool_calls>` was still
+appearing even after the parser was taught to drop it, so it was arriving by a
+path that check does not sit on. Rather than guess which, the panel now
+refuses anything whose entire content is a tag, at the single point every
+entry passes through. A sentence that mentions a tag is still a sentence.
 ## 2.18.0
 
 **`<tool_calls>` no longer appears in the transcript.** Several models wrap

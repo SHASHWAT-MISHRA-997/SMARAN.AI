@@ -24,8 +24,7 @@ import * as vscode from 'vscode';
 
 import { AgentEvent, run, ToolCall } from './agent/loop';
 import {
-    APPROVALS, ApprovalId, describePolicy, FROM_MODE, ModeId, Policy, REACHES, ReachId,
-} from './agent/modes';
+    APPROVALS, ApprovalId, describePolicy, FROM_MODE, ModeId, Policy, REACHES, ReachId, PRESETS } from './agent/modes';
 import { Message } from './agent/models';
 import {
     deleteOllamaModel, firstVisionModel, listModels, ModelOption, PROVIDERS,
@@ -133,6 +132,20 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 this.pendingApproval?.(false);
                 this.pendingApproval = undefined;
                 break;
+
+            /* Both dials in one message. A preset sets a pair, and setting
+               them one after another would announce a half-changed state to
+               the panel in between. */
+            case 'setPolicy': {
+                const next = (message.policy || {}) as Partial<Policy>;
+                const settings = vscode.workspace.getConfiguration('smaran');
+                await settings.update('reach', String(next.reach),
+                    vscode.ConfigurationTarget.Global);
+                await settings.update('approval', String(next.approval),
+                    vscode.ConfigurationTarget.Global);
+                await this.announce();
+                break;
+            }
 
             case 'setReach':
                 await vscode.workspace.getConfiguration('smaran')
@@ -397,6 +410,7 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             model: choice.model,
             problem: choice.problem,
             reaches: REACHES,
+            presets: PRESETS,
             approvals: APPROVALS,
             policy: this.policy(),
             policyLabel: describePolicy(this.policy()),
@@ -466,6 +480,7 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             provider,
             model: (config.get<string>('model') || '').trim(),
             reaches: REACHES,
+            presets: PRESETS,
             approvals: APPROVALS,
             policy: this.policy(),
             ollamaUrl: ollamaUrl(),
