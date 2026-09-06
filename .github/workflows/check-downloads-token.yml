@@ -1,0 +1,108 @@
+# Does DOWNLOADS_REPO_TOKEN actually have write access?
+#
+# Three releases in a row got as far as the last step and stopped there with
+#
+#     HTTP 403: Resource not accessible by personal access token
+#
+# after forty minutes of building, and each time the fix and the next answer
+# were another forty minutes apart. This asks the same question in twenty
+# seconds.
+#
+# WHY IT DOES NOT USE `gh release create`
+#
+# Because that is what hid the problem. `gh release create` does a GET first
+# to see whether the tag already exists, and stops if it does - so against an
+# existing tag it answers "a release with the same tag name already exists"
+# without ever attempting the write. A read-only token produces exactly that,
+# and it reads like success. This posts directly, so the only thing that can
+# answer is the write itself.
+#
+# WHY IT IS SAFE TO RUN
+#
+# The release it creates is a draft. GitHub does not create a git tag for a
+# draft, so nothing appears in the tag list, nothing is published, and nobody
+# is notified. It is deleted immediately afterwards, and the deletion runs
+# even if a later step fails.
+#
+# Run it from the Actions tab: "Check the downloads token" -> Run workflow.
+name: Check the downloads token
+
+on:
+  workflow_dispatch:
+
+# Nothing here touches this repository, so the automatic token gets nothing.
+permissions: {}
+
+jobs:
+  check:
+    name: Can the token write to the downloads repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      GH_TOKEN: ${{ secrets.DOWNLOADS_REPO_TOKEN }}
+      REPO: SHASHWAT-MISHRA-997/SMARAN.AI-downloads
+
+    steps:
+      - name: Is the secret set at all
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::DOWNLOADS_REPO_TOKEN is not set on this repository."
+            echo "Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "The secret is set."
+
+      - name: Can it read
+        run: |
+          if out=$(gh api "repos/${REPO}" --jq '.full_name + " (" + .visibility + ")"' 2>&1); then
+            echo "Reads: $out"
+          else
+            echo "::error::The token cannot even read ${REPO}."
+            echo "$out"
+            echo
+            echo "Usually the token does not list this repository under"
+            echo "Repository access, or it has expired."
+            exit 1
+          fi
+
+      # The real question. Everything above can pass on a token that cannot
+      # write a thing.
+      - name: Can it write
+        id: write
+        run: |
+          tag="token-check-$(date +%s)"
+          if out=$(gh api -X POST "repos/${REPO}/releases" \
+                     -f tag_name="$tag" \
+                     -f name="token permission check" \
+                     -F draft=true 2>&1); then
+            id=$(printf '%s' "$out" | jq -r '.id')
+            echo "id=$id" >> "$GITHUB_OUTPUT"
+            echo "Writes: created draft release $id."
+          else
+            echo "::error::The token can read ${REPO} but cannot write to it."
+            echo "$out"
+            echo
+            echo "On a fine-grained token that means one of:"
+            echo "  - Repository access is 'Public repositories', which is"
+            echo "    read-only by definition and offers no Contents setting;"
+            echo "  - Contents is present but left at Read-only;"
+            echo "  - ${REPO} is not among the selected repositories."
+            echo "Fix: Only select repositories -> ${REPO},"
+            echo "     then Repository permissions -> Contents -> Read and write."
+            exit 1
+          fi
+
+      # always(), so a draft is never left behind because something later failed.
+      - name: Remove the draft again
+        if: always() && steps.write.outputs.id != ''
+        run: |
+          if gh api -X DELETE "repos/${REPO}/releases/${{ steps.write.outputs.id }}"; then
+            echo "Removed the draft release."
+          else
+            echo "::warning::Could not remove draft release ${{ steps.write.outputs.id }}."
+            echo "It is a draft, so nothing is published, but delete it by hand."
+          fi
+
+      - name: Say so plainly
+        run: echo "DOWNLOADS_REPO_TOKEN can read and write ${REPO}. A release will publish itself."
