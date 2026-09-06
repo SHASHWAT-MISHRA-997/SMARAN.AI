@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.14.0
+
+**The agent can open a browser and read what the page says.** It could build
+a web page and never once find out whether it worked: it wrote the code, said
+it was done, and you opened the page and found it broken. What was missing was
+not cleverness, it was eyes.
+
+Three tools: `open_browser` opens a real Chrome or Edge window you can watch,
+`browser_check` reports what the page says about itself, and `browser_reload`
+does it again after a fix. What comes back is uncaught errors with the file and
+line, console errors and warnings, requests that failed with their status, and
+the text the page actually rendered.
+
+Proven on a page built to be broken in three ways at once. It reported the
+ReferenceError and where it was thrown, both console lines, and the 404 for a
+missing image; after the fixes, the reload said there was nothing left.
+
+It uses the Chrome DevTools Protocol, which is how Puppeteer and Playwright
+work, so nothing is downloaded - the browser is already on the machine. It
+opens its own empty profile rather than attaching to yours: your tabs, cookies
+and logins are not in reach of a model.
+
+It reads and does not click. Reading is what closes the loop between making a
+change and knowing whether it worked, and reading cannot break anything.
 ## 2.6.0
 
 **Install and remove Ollama models without leaving the panel.** Type a name,

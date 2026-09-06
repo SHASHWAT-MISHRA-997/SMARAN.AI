@@ -45,6 +45,14 @@ the person asked for the work, not a description of it.
 failed, the output will say so - fix it and try again.
 - Stop when it is actually done, and say what you changed.
 
+If the work is something a person would look at - a page, a site, an app \
+with a screen - do not stop at writing the code. Start it, open it with \
+open_browser, and read it back with browser_check. That tells you about \
+errors thrown, console messages and requests that failed, which is how you \
+learn whether it works rather than assuming. Fix what it reports and use \
+browser_reload to see whether the fix took. Saying a page is finished \
+without ever having looked at it is the thing to avoid.
+
 To use a tool, emit exactly this and nothing after it in that message:
 
 <tool_call name="read_file">

@@ -12,6 +12,7 @@
  * looks perfectly fine as text and is not fine at all once resolved.
  */
 
+import * as browser from './browser';
 import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -122,6 +123,31 @@ export const TOOLS: Record<string, { args: string[]; description: string; change
     search: { args: ['query'], description: 'Find which files contain a piece of text.', changes: false },
     run_command: { args: ['command'], description: 'Run a shell command in the project and read its output.', changes: true },
     git: { args: ['subcommand'], description: 'Run a git command, for example: status, add -A, commit -m "...", push.', changes: true },
+    /* Eyes.
+     *
+     * Without these the agent could build a page and never learn whether
+     * it works: it wrote the code, said it was done, and the person
+     * opened it themselves and found it broken. The loop that the agents
+     * this one is compared to actually run is open it, look, fix, look
+     * again - and there was nothing here to look with.
+     *
+     * Reading only. Clicking and typing are a larger surface and can be
+     * added once reading has earned its place. */
+    open_browser: {
+        args: ['url'],
+        description: 'Open a page in a real browser window and watch it. Use this after starting a dev server, and whenever the task is about something a person would look at. Example url: localhost:3000',
+        changes: false,
+    },
+    browser_check: {
+        args: [],
+        description: 'Report what the open page says: uncaught errors, console errors and warnings, requests that failed, and the text it rendered. This is how you find out whether your change worked.',
+        changes: false,
+    },
+    browser_reload: {
+        args: [],
+        description: 'Reload the open page and report it again. Use this after editing a file, to see whether the problem is gone.',
+        changes: false,
+    },
     /* The step list, published by the model and kept on screen.
      *
      * A long run was a scrolling column of tool calls: every step visible, the
@@ -320,6 +346,9 @@ export async function execute(
             case 'search': return search(root, args);
             case 'run_command': return await runCommand(root, args);
             case 'git': return await runCommand(root, { command: `git ${args.subcommand ?? ''}` });
+            case 'open_browser': return await browser.open(String(args.url ?? ''));
+            case 'browser_check': return await browser.check();
+            case 'browser_reload': return await browser.reload();
             case 'todo': {
                 /* The list is shown by the panel, from the event the loop
                    emits. What goes back to the model is the list as it was
