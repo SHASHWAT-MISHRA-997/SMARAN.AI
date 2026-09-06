@@ -144,6 +144,16 @@ export const TOOLS: Record<string, { args: string[]; description: string; change
         description: 'Report what the open page says: uncaught errors, console errors and warnings, requests that failed, and the text it rendered. This is how you find out whether your change worked.',
         changes: false,
     },
+    browser_click: {
+        args: ['text'],
+        description: 'Click something by the words on it - the label a person would read, for example "Save" or "Sign in". Not a CSS selector. If more than one thing matches it clicks nothing and tells you what it saw.',
+        changes: true,
+    },
+    browser_type: {
+        args: ['into', 'text', 'enter'],
+        description: 'Type into a field, found by its label or placeholder. Replaces whatever is already in it. Set enter to yes to press Enter afterwards.',
+        changes: true,
+    },
     browser_reload: {
         args: [],
         description: 'Reload the open page and report it again. Use this after editing a file, to see whether the problem is gone.',
@@ -424,6 +434,10 @@ export async function execute(
             case 'git': return await runCommand(root, { command: `git ${args.subcommand ?? ''}` });
             case 'open_browser': return await browser.open(String(args.url ?? ''));
             case 'browser_check': return await browser.check();
+            case 'browser_click': return await browser.click(String(args.text ?? ''));
+            case 'browser_type': return await browser.type(
+                String(args.into ?? ''), String(args.text ?? ''),
+                /^(y|yes|true|1)$/i.test(String(args.enter ?? '')));
             case 'browser_reload': return await browser.reload();
             case 'todo': {
                 /* The list is shown by the panel, from the event the loop

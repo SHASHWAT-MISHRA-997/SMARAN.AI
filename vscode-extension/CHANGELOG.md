@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.16.0
+
+**It can press things and fill them in.** Reading a page tells you it loaded;
+half of what a page does only happens after somebody presses something. The
+agent can now click and type, so it can submit the form, open the menu, and
+read back what the page did about it.
+
+Things are found by the words a person would read on them - `browser_click`
+with "Save", not a CSS selector a model is guessing at. When nothing matches
+it says so and lists what is actually on the page; when several match it
+presses none of them and names them. An exact label wins over a partial one,
+so "Sign in" does not become ambiguous just because "Sign in again" exists.
+
+`browser_type` selects what is already in the field before typing, so it
+replaces rather than appends, and can press Enter afterwards.
+
+The click is a real mouse event at the element's position rather than
+`element.click()`, so hover, focus and anything listening for a genuine press
+behave as they would for a person.
+
+Exercised against a real form: pressing Sign in with the field empty produced
+"Name is required", typing a name and pressing it produced "Welcome,
+Shashwat", and asking for a button that does not exist refused and listed the
+ones that do.
 ## 2.15.0
 
 **You can see what it changed.** An edit used to be reported as

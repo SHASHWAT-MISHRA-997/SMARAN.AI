@@ -26,12 +26,20 @@
  * in reach of a model, and there is no reason for that. This window starts
  * empty and is thrown away.
  *
- * WHAT IT DELIBERATELY DOES NOT DO
+ * CLICKING AND TYPING
  *
- * It does not click things or fill forms. Reading is what closes the loop
- * between a change and knowing whether it worked, and reading cannot break
- * anything. Driving the page is a larger surface and a larger risk, and it can
- * be added when reading has proven itself.
+ * This module first said it would not do either, on the grounds that reading
+ * closes the loop and cannot break anything. That was true and it was not
+ * enough: half of what a page does only happens after somebody presses
+ * something, and an agent that cannot press anything can never see a form
+ * reject its input, a menu fail to open, or a route it just added actually
+ * load. So it clicks and types now, and that earlier caution is written here
+ * rather than quietly deleted, because it names the real risk.
+ *
+ * The risk is handled by aim rather than by refusal. Elements are found by
+ * the words a person would read on them, so "click Save" fails loudly when
+ * there is no Save rather than pressing whatever happens to be nearby; when
+ * several things match, it says which and presses none of them.
  */
 
 import { spawn, ChildProcess } from 'child_process';
@@ -339,6 +347,111 @@ export async function check(): Promise<string> {
     }
 
     return lines.join('\n');
+}
+
+/* Finding a thing by the words on it.
+ *
+ * Not by CSS selector. A model writing ".btn-primary > span:nth-child(2)" is
+ * guessing at markup it cannot see, and the guess is wrong often enough that
+ * the failure becomes the task. A person says "click Save", and the words on
+ * the button are the one part of a page a model can actually know about,
+ * because it just read them out of browser_check.
+ *
+ * Runs in the page, and returns a box rather than a handle: the click itself
+ * is dispatched as a real mouse event at those coordinates, so hover, focus
+ * and anything listening for a genuine press all behave as they would for a
+ * person. element.click() skips all of that and is the reason scripted clicks
+ * so often "work" while the page does not respond. */
+const FIND = `(() => {
+    const wanted = %TEXT%;
+    // Two backslashes: this lives in a template literal, where a single one
+    // collapses and the expression becomes /s+/g - which replaced the letter
+    // s. "Shashwat" was reported back as "sha hwat", which is how this was
+    // found.
+    const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    const target = norm(wanted);
+    const nodes = Array.from(document.querySelectorAll(
+        'button, a, input, select, textarea, [role=button], [role=link], [role=tab], label'));
+    const described = (el) => norm(
+        el.getAttribute('aria-label') || el.value || el.placeholder ||
+        el.getAttribute('title') || el.innerText || el.textContent);
+    let hits = nodes.filter((el) => described(el) === target);
+    if (!hits.length) hits = nodes.filter((el) => described(el).includes(target));
+    const visible = hits.filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+    });
+    if (!visible.length) {
+        return { ok: false, reason: 'nothing on the page reads like that',
+                 seen: nodes.map(described).filter(Boolean).slice(0, 25) };
+    }
+    if (visible.length > 1) {
+        return { ok: false, reason: 'more than one thing matches',
+                 seen: visible.map(described).slice(0, 10) };
+    }
+    const el = visible[0];
+    el.scrollIntoView({ block: 'center', inline: 'center' });
+    const r = el.getBoundingClientRect();
+    return { ok: true, x: r.left + r.width / 2, y: r.top + r.height / 2,
+             what: described(el), tag: el.tagName.toLowerCase() };
+})()`;
+
+async function locate(text: string): Promise<any> {
+    if (!socket) throw new BrowserError('No page is open. Use open_browser first.');
+    const result = await send('Runtime.evaluate', {
+        expression: FIND.replace('%TEXT%', JSON.stringify(text)),
+        returnByValue: true,
+    });
+    const found = result?.result?.value;
+    if (!found) throw new BrowserError('The page could not be searched.');
+    if (!found.ok) {
+        const seen = (found.seen ?? []).filter(Boolean);
+        throw new BrowserError(
+            `Could not click "${text}": ${found.reason}.`
+            + (seen.length ? ` What is on the page: ${seen.join(", ")}` : ''));
+    }
+    return found;
+}
+
+/** Press something, by the words on it. */
+export async function click(text: string): Promise<string> {
+    const found = await locate(text);
+    for (const type of ['mousePressed', 'mouseReleased']) {
+        await send('Input.dispatchMouseEvent', {
+            type, x: found.x, y: found.y, button: 'left', clickCount: 1,
+        });
+    }
+    // A click often navigates or opens something; give the page a moment so
+    // browser_check straight afterwards describes the result and not the
+    // half-second before it.
+    await new Promise((r) => setTimeout(r, 900));
+    return `Clicked the ${found.tag} that reads "${found.what}". `
+        + 'Use browser_check to see what happened.';
+}
+
+/** Put text into a field, found the same way. */
+export async function type(into: string, text: string, enter = false): Promise<string> {
+    const found = await locate(into);
+    for (const type of ['mousePressed', 'mouseReleased']) {
+        await send('Input.dispatchMouseEvent', {
+            type, x: found.x, y: found.y, button: 'left', clickCount: 3,
+        });
+    }
+    // Three clicks select whatever is in there, so this replaces rather than
+    // appends - typing into a field that already has a value is otherwise a
+    // silent way to send nonsense.
+    await send('Input.insertText', { text });
+    if (enter) {
+        for (const type of ['keyDown', 'keyUp']) {
+            await send('Input.dispatchKeyEvent', {
+                type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+            });
+        }
+        await new Promise((r) => setTimeout(r, 900));
+    }
+    return `Typed into the ${found.tag} that reads "${found.what}"`
+        + (enter ? ', then pressed Enter. ' : '. ')
+        + 'Use browser_check to see what happened.';
 }
 
 /** Reload and report, which is the whole loop after a fix. */

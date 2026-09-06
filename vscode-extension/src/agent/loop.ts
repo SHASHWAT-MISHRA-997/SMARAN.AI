@@ -50,7 +50,10 @@ with a screen - do not stop at writing the code. Start it, open it with \
 open_browser, and read it back with browser_check. That tells you about \
 errors thrown, console messages and requests that failed, which is how you \
 learn whether it works rather than assuming. Fix what it reports and use \
-browser_reload to see whether the fix took. Saying a page is finished \
+browser_reload to see whether the fix took. Half of what a page does only \
+happens after something is pressed, so use browser_click and browser_type \
+to try it the way somebody would - fill the form, submit it, open the menu \
+- and read it back. Saying a page is finished \
 without ever having looked at it is the thing to avoid.
 
 To use a tool, emit exactly this and nothing after it in that message:
