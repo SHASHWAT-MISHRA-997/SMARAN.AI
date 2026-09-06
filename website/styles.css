@@ -720,9 +720,22 @@ main, .nav, .foot { position: relative; z-index: 3; }
 
 /* Three cards in two columns left the third alone with a hole beside it.
    Three columns at the width they fit, so the row simply completes. */
+/* Four downloads, so four columns where there is room for them.
+
+   This stopped at three, which left the command line alone on a second row with
+   three empty cells beside it: the widest screens showed the emptiest page.
+
+   The section widens past 1400px as well. Four cards inside the usual 1180 would
+   be 268px each, narrower than the text in them wants. */
 .dl-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
 @media (min-width: 720px)  { .dl-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (min-width: 1120px) { .dl-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 1400px) {
+  .dl-grid { grid-template-columns: repeat(4, 1fr); gap: 18px; }
+  #download .wrap { max-width: 1480px; }
+  /* A little tighter, because four columns are narrower than three. */
+  .dl-card { padding: 26px 22px; }
+}
 
 .dl-card {
   position: relative; overflow: hidden;
@@ -2500,11 +2513,18 @@ html.light .theme-toggle .moon { display: none; }
 .ext-grid[hidden],
 .ext-open[hidden] { display: none; }
 
-/* The download cards had the same ragged-gap problem as the extension ones:
-   Android is shorter than Windows, so the row left a hole beneath it, and
-   the third card sat alone. Equal heights within a row, and the content
-   pinned so the note stays at the bottom of whatever height it is given. */
-.dl-grid { align-items: stretch; }
+/* Each card its own height.
+
+   This was align-items: stretch, to keep the bottoms of a row level, and with
+   three cards that was a fair trade. With four it is not. Windows carries two
+   warning panels and stands 1100px tall; the command line carries a sentence.
+   Stretching made every card 1100px, so the short ones were mostly empty -
+   a bigger hole than the ragged bottom edge it was avoiding.
+
+   The flex column and the note pinned to the bottom stay. They cost nothing
+   when a card is its own height, and still do the right thing at the narrower
+   widths where two cards share a row. */
+.dl-grid { align-items: start; }
 .dl-card { display: flex; flex-direction: column; }
 .dl-card .dl-note { margin-top: auto; }
 

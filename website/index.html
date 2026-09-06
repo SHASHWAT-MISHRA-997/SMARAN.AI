@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=f4928a5585" />
+<link rel="stylesheet" href="styles.css?v=86e51f9ed0" />
 </head>
 
 <body>
@@ -699,15 +699,23 @@
             <p class="dl-meta">Any distribution &middot; 64-bit &middot; <span data-size="SMARAN.AI-x86_64.AppImage" data-unit="mib">299 MB</span></p>
           </div>
         </div>
+        <!-- download= carries the real name because it cannot change it: this is
+             cross-origin, and GitHub sends Content-Disposition with
+             filename=SMARAN.AI-x86_64.AppImage, which wins either way. So the file
+             lands under that name and the chmod below has to match it. The same
+             mistake was found and fixed on the APK above and left standing here.
+
+             This comment sits outside the tag. Put inside one, a browser reads it
+             as attributes and the button rendered its own URL as its label. -->
         <a class="btn btn-primary block no-lift" id="dlAppImage"
-           download="SMARAN.AI.AppImage"
+           download="SMARAN.AI-x86_64.AppImage"
            href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI-x86_64.AppImage">
           Download AppImage
         </a>
         <p class="dl-note">
           One file. Make it executable and run it &mdash; no package manager,
           no install:<br>
-          <code>chmod +x SMARAN.AI.AppImage &amp;&amp; ./SMARAN.AI.AppImage</code>
+          <code>chmod +x SMARAN.AI-x86_64.AppImage &amp;&amp; ./SMARAN.AI-x86_64.AppImage</code>
         </p>
         <ul class="dl-list">
           <li>Works on <b>any</b> distribution &mdash; Ubuntu, Debian, Fedora,
@@ -786,6 +794,7 @@
     <div class="tabs reveal" role="tablist" aria-label="Installation platform">
       <button class="tab is-on" role="tab" aria-selected="true"  aria-controls="tp-win" id="tb-win">Windows</button>
       <button class="tab"       role="tab" aria-selected="false" aria-controls="tp-and" id="tb-and">Android</button>
+      <button class="tab"       role="tab" aria-selected="false" aria-controls="tp-lin" id="tb-lin">Linux</button>
       <button class="tab"       role="tab" aria-selected="false" aria-controls="tp-cli" id="tb-cli">CLI</button>
     </div>
 
@@ -793,7 +802,7 @@
       <ol class="install-steps">
         <li>
           <h3>Download the installer</h3>
-          <p>A single <code>.exe</code>, about 266&nbsp;MB. It contains everything the app needs to start.</p>
+          <p>A single <code>.exe</code>, about <span data-size="SMARAN.AI-Setup.exe" data-unit="mib">202&nbsp;MB</span>. It contains everything the app needs to start.</p>
           <a class="btn btn-ghost" href="#download">Go to downloads</a>
         </li>
         <li>
@@ -827,7 +836,7 @@
       <ol class="install-steps">
         <li>
           <h3>Download the APK</h3>
-          <p>About 32&nbsp;MB, for Android 7.0 and newer.</p>
+          <p>About <span data-size="SMARAN-AI.apk" data-unit="mb">33.9&nbsp;MB</span>, for Android 7.0 and newer.</p>
           <a class="btn btn-ghost" href="#download">Go to downloads</a>
         </li>
         <li>
@@ -847,6 +856,45 @@
       </ol>
     </div>
 
+    <!-- Linux was downloadable from the page above and had no instructions
+         here at all: four downloads, three sets of steps. -->
+    <div class="tabpanel" role="tabpanel" id="tp-lin" aria-labelledby="tb-lin" hidden>
+      <ol class="install-steps">
+        <li>
+          <h3>Download the AppImage</h3>
+          <p>About <span data-size="SMARAN.AI-x86_64.AppImage" data-unit="mib">299&nbsp;MB</span>, for any 64-bit distribution. Nothing is installed and
+             nothing is left behind &mdash; delete the file and it is gone.</p>
+          <a class="btn btn-ghost" href="#download">Go to downloads</a>
+        </li>
+        <li>
+          <h3>Make it executable, then run it</h3>
+          <p>A downloaded file has no permission to run until you give it one. That is Linux doing its job.</p>
+          <pre class="code"><code>chmod +x SMARAN.AI-x86_64.AppImage
+./SMARAN.AI-x86_64.AppImage</code></pre>
+        </li>
+        <li>
+          <h3>Or use your package manager</h3>
+          <p>The same build, if you would rather it appeared in your package list:</p>
+          <pre class="code"><code>sudo apt install ./smaran-ai_amd64.deb     <span class="c"># Debian, Ubuntu, Mint</span>
+sudo dnf install ./smaran-ai.x86_64.rpm    <span class="c"># Fedora, RHEL, Rocky, Alma</span></code></pre>
+          <p>There is a <code>.tar.gz</code> too, to unpack anywhere and start with <code>./run.sh</code>.</p>
+        </li>
+        <li>
+          <h3>What is different from Windows</h3>
+          <p>The interface opens in a browser window with no address bar and no tabs, rather than in a native
+             window. Windows has a webview built into the system; the Linux equivalent ships in two
+             incompatible versions across distributions and cannot be bundled to work on all of them.
+             Chromium, Chrome, Brave, Edge or Vivaldi each give that clean window; with none of them
+             installed it opens in your default browser.</p>
+        </li>
+        <li>
+          <h3>How old a distribution can be</h3>
+          <p>It is built against glibc 2.28, so it runs on Debian 10, Ubuntu 18.10, RHEL and Rocky and Alma 8,
+             Fedora 29, openSUSE 15.1 &mdash; and everything released since.</p>
+        </li>
+      </ol>
+    </div>
+
     <div class="tabpanel" role="tabpanel" id="tp-cli" aria-labelledby="tb-cli" hidden>
       <p class="cli-intro">
         A terminal client for the app already running on your machine. It is not a second copy: the model routing, the
@@ -860,7 +908,10 @@
         <li>
           <h3>Get <code>smaran.exe</code></h3>
           <p>One file, about 10&nbsp;MB. Download directly or run in PowerShell:</p>
-          <pre class="code"><code>curl.exe -L -o smaran.exe https://smaran-ai.netlify.app/smaran.exe</code></pre>
+          <!-- From the release, not from this site. The site never carried a copy of
+     smaran.exe - the URL this used to give answered 404, so the command saved
+     an error page under that name and the next thing anyone typed failed. -->
+          <pre class="code"><code>curl.exe -L -o smaran.exe https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran.exe</code></pre>
           <p>Put it somewhere on your <code>PATH</code> and the <code>smaran</code> command works.</p>
           <a class="btn btn-ghost" href="#download">Go to downloads</a>
         </li>
@@ -1221,6 +1272,6 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
   </div>
 </footer>
 
-<script src="main.js?v=7019d4ff2c"></script>
+<script src="main.js?v=d5da9ce6cc"></script>
 </body>
 </html>
