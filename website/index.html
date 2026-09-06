@@ -595,10 +595,15 @@
             <!-- Each size is the number that platform will show you, and the two
                  platforms disagree. Windows Explorer divides by 1024 and calls
                  the result MB; a browser and Android divide by 1000. The same
-                 installer is 266 there and 278.8 here. Quoting one convention
+                 installer reads 202 there and 211.4 here. Quoting one convention
                  everywhere made the other one wrong, which was reported twice -
                  once from a phone, once from Explorer. So: Windows files as
-                 Explorer counts them, the APK as the phone's download counts it. -->
+                 Explorer counts them, the APK as the phone's download counts it.
+
+                 The figures above are an example and will age. The numbers on the
+                 page do not: main.js replaces them from the release on load, and
+                 data-unit picks the convention. This comment once said 266 and
+                 278.8, from a build three releases old. -->
             <p class="dl-meta">10 &amp; 11 · 64-bit · <span data-size="SMARAN.AI-Setup.exe" data-unit="mib">202 MB</span></p>
           </div>
         </div>
