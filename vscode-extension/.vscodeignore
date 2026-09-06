@@ -2,6 +2,14 @@
 src/**
 out/**/*.map
 node_modules/**
+# Except ws, which the browser tools need at run time.
+#
+# The extension had no dependencies at all, so excluding node_modules whole
+# was free. Adding one and leaving this line alone would have shipped a build
+# where the first use of open_browser died on "Cannot find module 'ws'" -
+# found by checking what the package actually contains rather than by a user
+# finding it. ws is 195 KB and has no dependencies of its own.
+!node_modules/ws/**
 tsconfig.json
 .gitignore
 test/**
