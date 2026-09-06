@@ -13,6 +13,24 @@
 
     const $ = (id) => document.getElementById(id);
     const log = $('log');
+
+    /* The welcome goes as soon as there is anything real to show, and its
+       examples put their own text in the box rather than sending it - the
+       person can change it first, which is usually what they want. */
+    function dismissWelcome() {
+        const welcome = document.getElementById('welcome');
+        if (welcome) welcome.remove();
+    }
+
+    document.addEventListener('click', (event) => {
+        const button = event.target.closest && event.target.closest('.try');
+        if (!button) return;
+        const box = $('task');
+        if (!box) return;
+        box.value = button.textContent.trim();
+        box.focus();
+        box.setSelectionRange(box.value.length, box.value.length);
+    });
     const history = $('history');
     const setup = $('setup');
     const composer = $('composer');
@@ -107,6 +125,7 @@
         if (stepsRow && stepsRow.isConnected) {
             stepsRow.replaceWith(fresh);
         } else {
+            dismissWelcome();
             log.appendChild(fresh);
         }
         stepsRow = fresh;
@@ -205,6 +224,7 @@
         const said = statusFor(entry);
         if (said) setStatus(said);
 
+        dismissWelcome();
         log.appendChild(item);
         if (entry.kind === 'thinking') {
             thinkingRow = item;

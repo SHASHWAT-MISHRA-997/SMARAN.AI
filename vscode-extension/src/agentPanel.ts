@@ -952,7 +952,35 @@ ${words.slice(0, ATTACH_LIMIT)}`,
     <span id="statusTime" class="status-time"></span>
   </div>
 
-  <main id="log" class="screen"></main>
+  <!-- What fills the panel before anything has been said.
+
+       This was an empty rectangle, and the report was that the panel is
+       boring and that people could not tell what it does. Both are the
+       same complaint: nothing on screen said what this is for. A blank
+       page asks somebody to guess the shape of a tool they have not used.
+
+       So: what it can do, in four lines, and four tasks that fill the box
+       when clicked. Examples that can be run beat a paragraph explaining
+       that examples exist. It is removed the moment anything real is
+       added to the log. -->
+  <main id="log" class="screen">
+    <div id="welcome" class="welcome">
+      <p class="welcome-lead">A coding agent, working in this folder.</p>
+      <ul class="welcome-can">
+        <li>Reads the project and finds its way around it</li>
+        <li>Writes and edits files, and runs commands</li>
+        <li>Opens what it built in a browser and reads the errors back</li>
+        <li>Says what it plans to do first, and keeps a step list as it goes</li>
+      </ul>
+      <p class="welcome-try">Try one:</p>
+      <div class="welcome-examples">
+        <button class="try" type="button">Explain what this project does and how it is laid out</button>
+        <button class="try" type="button">Find the bug causing the most recent failure and fix it</button>
+        <button class="try" type="button">Add a README with real setup and run instructions</button>
+        <button class="try" type="button">Start the dev server, open it in a browser and fix what it reports</button>
+      </div>
+    </div>
+  </main>
   <section id="history" class="screen" hidden></section>
   <section id="setup" class="screen" hidden></section>
 
