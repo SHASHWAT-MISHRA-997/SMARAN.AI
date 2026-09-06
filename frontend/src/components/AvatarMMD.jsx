@@ -151,6 +151,24 @@ const AvatarMMD = ({
   const [viewLocked, setViewLocked] = useState(true);
   // Off by default: the head turning to follow the cursor was distracting
   // rather than lifelike. The button stays, so it can be turned back on.
+  /* Whether she holds the way she is facing.
+   *
+   * VIEW LOCKED stops the camera being dragged and does nothing about her
+   * own movement, so pressing FRONT put the camera in front of somebody who
+   * then kept turning away from it. Reported as "I want front" and "she
+   * rotates while answering", which is the same sentence twice.
+   *
+   * What turns her is noise-driven yaw that scales with how animated she
+   * is: about five degrees of head wander and a couple of degrees of hip
+   * yaw, both at their strongest while speaking - which is exactly when
+   * somebody is watching her face.
+   *
+   * Held by default. Breathing, blinking, gesture and expression are
+   * untouched; only the turning stops, so she is still alive and still
+   * facing you. */
+  const [holdFacing, setHoldFacing] = useState(true);
+  const holdFacingRef = useRef(true);
+
   const [eyesTracking, setEyesTracking] = useState(false);
   const eyesTrackingRef = useRef(false);
   const stateRef = useRef({ isSpeaking, isListening, isThinking });
@@ -160,6 +178,7 @@ const AvatarMMD = ({
   }, [isSpeaking, isListening, isThinking]);
 
   useEffect(() => { eyesTrackingRef.current = eyesTracking; }, [eyesTracking]);
+  useEffect(() => { holdFacingRef.current = holdFacing; }, [holdFacing]);
 
   // ── Scene ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -686,8 +705,11 @@ const AvatarMMD = ({
         if (bones.hips) {
           bones.hips.rotation.z = swayPhase * MOTION.swayHipRoll * energy
             + postureRoll * MOTION.postureHipRoll;
-          bones.hips.rotation.y = fractalNoise(time * 0.11) * MOTION.swayHipYaw * energy
-            + postureYaw * MOTION.postureHipRoll;
+          // Held: the weight still shifts and the chest still counters it,
+          // but she does not turn away from whoever is watching.
+          bones.hips.rotation.y = holdFacingRef.current ? 0
+            : fractalNoise(time * 0.11) * MOTION.swayHipYaw * energy
+              + postureYaw * MOTION.postureHipRoll;
         }
 
         if (bones.chest) {
@@ -724,7 +746,9 @@ const AvatarMMD = ({
             bones.head.rotation.y = microYaw * 0.4 + x * 0.35;
             bones.head.rotation.x = microPitch * 0.4 + y * 0.20 - breathSigned * 0.004;
           } else {
-            bones.head.rotation.y = microYaw;
+            // The nod stays; the turn goes. Pitch is what reads as
+            // listening and emphasis, and it never takes her face away.
+            bones.head.rotation.y = holdFacingRef.current ? 0 : microYaw;
             bones.head.rotation.x = microPitch - breathSigned * 0.004;
           }
           bones.head.rotation.z = headRoll;
@@ -850,6 +874,19 @@ const AvatarMMD = ({
               }`}
             >
               EYES TRACKING
+            </button>
+            {/* The one that answers "I want front and I want her to stay
+                there". VIEW LOCKED next to it means the camera; this means
+                her, and the two were being confused for each other. */}
+            <button
+              type="button"
+              onClick={() => setHoldFacing((v) => !v)}
+              className={`px-2 py-1 rounded border transition-colors cursor-pointer ${
+                holdFacing ? 'border-emerald-400/60 text-emerald-300 bg-emerald-500/10' : 'border-white/15 text-white/50 hover:text-white'
+              }`}
+              title={holdFacing ? 'She holds the way she is facing' : 'She turns a little as she talks'}
+            >
+              {holdFacing ? 'FACING HELD' : 'FACING FREE'}
             </button>
           </div>
           <div className="flex gap-1">
