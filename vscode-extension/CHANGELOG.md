@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.17.0
+
+**It can hand a question to a second agent.** The reason is the context
+window, not cleverness. "Find where the login redirect is decided" means
+reading twenty files to quote three lines - and done in the main conversation,
+all twenty stay in it: every later step re-reads them, the actual task drifts,
+and on a small model the window fills and the task falls out of it. What looks
+like a model getting worse as a run goes on is usually it being asked to hold
+a filing cabinet.
+
+`delegate` runs a second agent in a conversation nobody keeps, with the same
+tools and the same permissions, and hands back the answer with a note of which
+files it looked at - not their contents, which would undo the point.
+
+A delegate cannot delegate. The first attempt at that limit did not work:
+"only the outermost run registers a handler" left the handler registered while
+the sub-agent ran, so a sub-agent asked to delegate nested five levels deep
+and was still going when its step budget stopped it. The handler is now
+removed for the duration of a delegated run and put back afterwards, so the
+nesting is one level and the main run can still delegate more than once.
 ## 2.16.0
 
 **It can press things and fill them in.** Reading a page tells you it loaded;

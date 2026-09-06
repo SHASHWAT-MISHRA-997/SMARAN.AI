@@ -12,6 +12,7 @@
  * looks perfectly fine as text and is not fine at all once resolved.
  */
 
+import { delegate } from './delegate';
 import { unified } from './diff';
 import * as browser from './browser';
 import { exec } from 'child_process';
@@ -142,6 +143,13 @@ export const TOOLS: Record<string, { args: string[]; description: string; change
     browser_check: {
         args: [],
         description: 'Report what the open page says: uncaught errors, console errors and warnings, requests that failed, and the text it rendered. This is how you find out whether your change worked.',
+        changes: false,
+    },
+    /* A second agent for the reading-heavy parts. See delegate.ts: the
+     * reason is the context window, not cleverness. */
+    delegate: {
+        args: ['task'],
+        description: 'Hand one self-contained question to a second agent that starts fresh, does its own reading, and replies with the answer. Use it when finding something out would mean reading many files - "which file decides the login redirect, and what does it check" - so those files do not fill this conversation. It knows nothing about what you are doing, so say everything it needs. It cannot delegate again.',
         changes: false,
     },
     browser_click: {
@@ -433,6 +441,7 @@ export async function execute(
             case 'run_command': return await runCommand(root, args);
             case 'git': return await runCommand(root, { command: `git ${args.subcommand ?? ''}` });
             case 'open_browser': return await browser.open(String(args.url ?? ''));
+            case 'delegate': return await delegate(String(args.task ?? ''));
             case 'browser_check': return await browser.check();
             case 'browser_click': return await browser.click(String(args.text ?? ''));
             case 'browser_type': return await browser.type(

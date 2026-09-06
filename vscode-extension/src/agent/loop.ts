@@ -19,6 +19,7 @@
  * and quietly fail for the rest.
  */
 
+import { canDelegate, setDelegator, summarise, DELEGATE_STEPS, DELEGATE_SYSTEM } from './delegate';
 import { decide, Policy } from './modes';
 import { Choice, complete, Message } from './models';
 import { McpRegistry } from './mcpRegistry';
@@ -275,6 +276,10 @@ export async function* run(
        nowhere else: repeating them on every step would resend the same
        megabytes for every tool call. */
     images?: { data: string; mime: string }[],
+    /* Set only by a delegated run. It gets fewer steps and is told what it
+       is, because a sub-agent that ends by asking a follow-up question has
+       asked it of a conversation that is already gone. */
+    asDelegate = false,
 ): AsyncGenerator<AgentEvent> {
     const preamble = policy.reach === 'read'
         // Told, as well as enforced. Refusing a write the model did not know
@@ -310,6 +315,9 @@ ${extra}`
         {
             role: 'system',
             content: SYSTEM.replace('%TOOLS%', toolList) + preamble + identify(choice)
+                + (asDelegate ? `
+
+${DELEGATE_SYSTEM}` : '')
                 + (house.text ? `\n\n${house.text}` : ''),
         },
         ...history,
@@ -327,7 +335,60 @@ ${extra}`
 
     yield { type: 'workspace', root };
 
-    for (let step = 1; step <= MAX_STEPS; step += 1) {
+    /* A second agent, for the parts whose reading is long and whose answer
+       is short. Registered here rather than imported by the tools, because
+       the loop already imports the tools and the other direction would be a
+       cycle.
+
+       Only the outermost run registers one. A delegate finds no handler,
+       is told so, and does the work itself - which is the depth limit, and
+       it is enforced here rather than trusted to a sentence in a prompt. */
+    const outermost = !canDelegate();
+    if (outermost) {
+        /* Named, so it can put itself back.
+
+           It removes the handler for the duration of the delegated run and
+           restores it afterwards. Removing it is the depth limit; restoring it
+           is what lets the main run delegate a second time. */
+        const delegator = async (subTask: string): Promise<string> => {
+            /* The depth limit was meant to be "only the outermost run registers
+               a handler", and it did not hold: the handler stays registered
+               while the sub-agent runs, so a sub-agent calling delegate found
+               it and spawned another. Measured before this line existed - a
+               sub-agent told to delegate again nested five levels deep and was
+               still going when the step budget stopped it, which is exactly the
+               runaway described in delegate.ts.
+
+               With no handler registered, delegate answers "there is no second
+               agent here, do it yourself", which is what a sub-agent should
+               hear. */
+            setDelegator(null);
+            const collected: AgentEvent[] = [];
+            try {
+                for await (const event of run(
+                    subTask, root, [], choice, stopped,
+                    // The same reach: a delegate that could write where its
+                    // caller could not would be a way around the mode.
+                    { ...policy },
+                    approve, mcp,
+                    undefined,   // no images: a delegate starts with words only
+                    true,        // and knows it is one
+                )) {
+                    collected.push(event);
+                    if (collected.length > 400) { break; }
+                }
+            } finally {
+                setDelegator(delegator);
+            }
+            return summarise(collected, subTask);
+        };
+        setDelegator(delegator);
+    }
+
+    try {
+
+    const limit = asDelegate ? DELEGATE_STEPS : MAX_STEPS;
+    for (let step = 1; step <= limit; step += 1) {
         if (stopped()) {
             return;
         }
@@ -426,8 +487,17 @@ ${extra}`
 
     yield {
         type: 'error',
-        message: `Stopped after ${MAX_STEPS} steps without finishing. The work so far has been done; ask again to carry on.`,
+        message: `Stopped after ${limit} steps without finishing. The work so far has been done; ask again to carry on.`,
     };
+
+    } finally {
+        /* However this ended - finished, stopped, thrown, or abandoned
+           part-way because the caller stopped consuming the generator - the
+           handler goes. Left registered, the next run would find one already
+           there, believe itself to be a delegate, and quietly lose the
+           ability to delegate for the rest of the session. */
+        if (outermost) { setDelegator(null); }
+    }
 }
 
 /** Whether a tool changes anything, for callers that treat those differently. */
