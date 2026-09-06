@@ -35,6 +35,14 @@ const STATE = {
   // start it, usually because a tool it drives is not installed. Calling that
   // ready reads as working.
   setup_required: { label: 'Needs setup', tone: 'text-amber-400', dot: 'bg-amber-400' },
+  // Saved, correct, and simply not started yet. An MCP server starts on
+  // first use by design, so nothing is being asked of anybody here.
+  // This state had no entry and fell through to setup_required, so five
+  // servers that were configured perfectly reported "Needs setup", and
+  // the footer counted them as "5 need setup" - beside a line on each row
+  // saying "Saved. It connects when first used." The screen contradicted
+  // itself, and the alarming half was the wrong one.
+  not_connected:  { label: 'Ready',    tone: 'text-zinc-400',    dot: 'bg-zinc-500' },
   error:          { label: 'Failed',   tone: 'text-rose-400',    dot: 'bg-rose-400' },
   disabled:       { label: 'Off',      tone: 'text-zinc-500',    dot: 'bg-zinc-600' },
 };
@@ -296,6 +304,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
       // handshake; everything else says what it really is.
       const MCP_STATE = {
         connected: 'active',
+        not_connected: 'not_connected',
         off: 'disabled',
         disabled: 'disabled',
         error: 'error',
@@ -306,7 +315,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
         description: c.description || c.target,
         author: (c.server && c.server.name) ? `${c.server.name} ${c.server.version || ''}`.trim() : 'MCP server',
         type: 'mcp',
-        runtime_status: MCP_STATE[c.state] || 'setup_required',
+        runtime_status: MCP_STATE[c.state] || 'not_connected',
         status_detail: c.detail || 'Saved but not started yet. Probe it to connect.',
         capabilities: (c.tools || []).map((t) => (typeof t === 'string' ? t : t.name)),
         is_custom: true,
@@ -613,8 +622,13 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
             {(() => {
               const waiting = visible.filter((r) => r.runtime_status === 'setup_required').length;
               const broken = visible.filter((r) => r.runtime_status === 'error').length;
+              const ready = visible.filter((r) => r.runtime_status === 'not_connected').length;
               if (broken) return <span className="font-semibold text-rose-400">● {broken} failed</span>;
               if (waiting) return <span className="font-semibold text-amber-400">● {waiting} need setup</span>;
+              // Ready is not running, and must not be reported as it. Saying
+              // "all running" beside "0 of 5 running" is the same
+              // contradiction this row's badge used to make, the other way up.
+              if (ready) return <span className="font-semibold text-zinc-400">● {ready} ready</span>;
               return <span className="font-semibold text-emerald-400">● all running</span>;
             })()}
           </footer>
