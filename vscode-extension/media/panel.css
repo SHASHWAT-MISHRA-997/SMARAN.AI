@@ -701,6 +701,36 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
 .tool .title { color: var(--magenta); text-shadow: none; }
 .tool pre { color: var(--ink-dim); font-size: 11.5px; }
 
+/* A diff, coloured the way every diff is coloured.
+ *
+ * The agent reports its edits as a unified diff now, and as plain text it
+ * is a wall in which a single leading + or - carries the whole meaning.
+ * Colour is what makes it scannable, and the editor already has the two
+ * colours for it - the ones its own gutter and its own diff view use - so
+ * a diff here matches a diff anywhere else in the window.
+ *
+ * The line is tinted rather than the text recoloured. Recolouring makes
+ * added code green and removed code red, which fights whatever syntax
+ * colouring the eye is used to; a tinted row says the same thing and
+ * leaves the code alone. */
+.tool pre .d-add {
+    display: block;
+    background: var(--vscode-diffEditor-insertedLineBackground,
+        color-mix(in srgb, var(--lime) 14%, transparent));
+    color: var(--ink);
+}
+
+.tool pre .d-del {
+    display: block;
+    background: var(--vscode-diffEditor-removedLineBackground,
+        color-mix(in srgb, var(--red) 14%, transparent));
+    color: var(--ink);
+}
+
+/* The "… 12 unchanged lines" markers, and the "+3 -1" heading. */
+.tool pre .d-skip { display: block; color: var(--ink-far); font-style: italic; }
+.tool pre .d-head { display: block; color: var(--ink); font-weight: 600; }
+
 .done {
     border-left-color: var(--lime);
     background: linear-gradient(135deg, color-mix(in srgb, var(--lime) 10%, transparent), var(--panel));

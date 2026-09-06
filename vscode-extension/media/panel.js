@@ -14,6 +14,30 @@
     const $ = (id) => document.getElementById(id);
     const log = $('log');
 
+    /* A diff, rendered line by line so the added and removed rows can be
+       tinted. Anything that is not a diff falls through and is shown as it
+       always was - the test is deliberately narrow, because a command's
+       output full of lines beginning with a minus is not a diff and must not
+       be painted red. */
+    const DIFF_HEAD = /^\S.*: \+\d+ -\d+$/;
+
+    function renderDiffBody(text) {
+        const lines = String(text).split('\n');
+        if (!DIFF_HEAD.test(lines[0] || '')) {
+            return el('pre', null, text);
+        }
+        const pre = el('pre', null, '');
+        lines.forEach((line, index) => {
+            let cls = null;
+            if (index === 0) cls = 'd-head';
+            else if (line.startsWith('+ ')) cls = 'd-add';
+            else if (line.startsWith('- ')) cls = 'd-del';
+            else if (line.trimStart().startsWith('…')) cls = 'd-skip';
+            pre.appendChild(el('span', cls, line + '\n'));
+        });
+        return pre;
+    }
+
     /* The welcome goes as soon as there is anything real to show, and its
        examples put their own text in the box rather than sending it - the
        person can change it first, which is usually what they want. */
@@ -196,7 +220,7 @@
                 fold.appendChild(pre);
                 item.appendChild(fold);
             } else if (entry.kind === 'tool') {
-                item.appendChild(el('pre', null, entry.body));
+                item.appendChild(renderDiffBody(entry.body));
             } else {
                 renderBody(item, entry.body);
             }

@@ -71,6 +71,26 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('smaran.startAgent', open),
 
+        /* Put the last change back.
+         *
+         * The agent shows a diff of what it changed, which answers "what did
+         * it do". This answers the next question, which is "put that back" -
+         * and without it the only answer was the version control a project
+         * may not have, or reading the diff and typing the old lines in again.
+         *
+         * It refuses when the file has moved on since the agent wrote it,
+         * because restoring an older version over somebody’s own edit is a
+         * worse outcome than the change staying. */
+        vscode.commands.registerCommand('smaran.undoLastChange', async () => {
+            const folder = vscode.workspace.workspaceFolders?.[0];
+            if (!folder) {
+                vscode.window.showWarningMessage('No folder is open, so there is nothing to undo.');
+                return;
+            }
+            const tools = await import('./agent/tools');
+            vscode.window.showInformationMessage(tools.undoLast(folder.uri.fsPath));
+        }),
+
         /* Two questions, asked one after the other, because they are two
            questions. What it may touch is the one that can lose work, so it
            is asked first and on its own. */

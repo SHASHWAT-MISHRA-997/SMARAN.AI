@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.15.0
+
+**You can see what it changed.** An edit used to be reported as
+`Wrote src/panel.ts (412 lines).` - which says a file was touched and nothing
+about what happened to it. A one-character fix and a rewrite read identically,
+and the only way to tell them apart was to open the file and compare it
+against a version you no longer had.
+
+Every write and every edit now comes back as a diff: the changed lines with a
+few either side, `+3 -1` at the top, and the untouched middle collapsed to
+`… 40 unchanged lines`. Added and removed rows are tinted in the editor's own
+diff colours, so it matches a diff anywhere else in the window.
+
+**And you can put it back.** Every change is kept with what was there before,
+so *SMARAN.AI Codex: Undo the last file change* restores it - or deletes the
+file, if the agent was the one that created it. It refuses when the file has
+changed since the agent wrote it, because restoring an older version over your
+own edit is worse than the change staying.
+
+The diff is computed here rather than pulled in: the common start and end are
+cut away first, so a one-line change in a long file stays cheap, and a rewrite
+too large to line up honestly is summarised instead of freezing the panel.
 ## 2.14.0
 
 **The agent can open a browser and read what the page says.** It could build

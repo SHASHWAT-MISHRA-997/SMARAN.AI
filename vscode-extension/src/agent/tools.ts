@@ -12,6 +12,7 @@
  * looks perfectly fine as text and is not fine at all once resolved.
  */
 
+import { unified } from './diff';
 import * as browser from './browser';
 import { exec } from 'child_process';
 import * as fs from 'fs';
@@ -245,12 +246,84 @@ function readFile(root: string, args: Record<string, string>): string {
     return clip(numbered);
 }
 
+/* Every change, with what was there before it.
+ *
+ * Two reasons, and the second is the one that matters. A diff needs the old
+ * text to compare against, and an agent that edits a file has destroyed the
+ * only copy of it unless something kept one. Without this, "put that back"
+ * had no answer except the version control the project may not have.
+ *
+ * Bounded, because a long run rewriting a large file would otherwise hold
+ * every version of it in memory at once. The oldest is dropped first, which
+ * is also the one least likely to be wanted.
+ */
+interface Recorded {
+    path: string;
+    before: string;
+    after: string;
+    existed: boolean;
+    at: number;
+}
+
+const MAX_REMEMBERED = 40;
+const history: Recorded[] = [];
+
+function record(entry: Recorded): void {
+    history.push(entry);
+    if (history.length > MAX_REMEMBERED) history.shift();
+}
+
+/** The changes made so far, newest last. */
+export function changes(): ReadonlyArray<Recorded> {
+    return history;
+}
+
+/**
+ * Put the most recent change back, and say what was undone.
+ *
+ * It refuses when the file has moved on since - somebody may have edited it
+ * by hand, and silently throwing that away to restore an older version is
+ * worse than the change being undone.
+ */
+export function undoLast(root: string): string {
+    const last = history.pop();
+    if (!last) { return "Nothing has been changed yet, so there is nothing to undo."; }
+
+    const target = resolveInside(root, last.path);
+    const now = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : null;
+    if (now !== null && now !== last.after) {
+        history.push(last);
+        return last.path + " has changed since the agent wrote it, so it was left "
+            + "alone rather than overwriting whatever that was.";
+    }
+
+    if (!last.existed) {
+        try { fs.unlinkSync(target); } catch { /* already gone */ }
+        return "Removed " + last.path + ", which the agent had created.";
+    }
+    fs.writeFileSync(target, last.before, "utf8");
+    return "Put " + last.path + " back as it was.";
+}
+
 function writeFile(root: string, args: Record<string, string>): string {
     const target = resolveInside(root, args.path);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     const content = args.content ?? '';
+    const existed = fs.existsSync(target);
+    const before = existed ? fs.readFileSync(target, 'utf8') : '';
     fs.writeFileSync(target, content, 'utf8');
-    return `Wrote ${args.path} (${content.split('\n').length} lines).`;
+    record({ path: args.path, before, after: content, existed, at: Date.now() });
+
+    if (!existed) {
+        // A trailing newline is not a line. Counting the split parts called a
+        // one-line file two lines, every time.
+        const lines = content.split(String.fromCharCode(10));
+        if (lines.length && lines[lines.length - 1] === '') { lines.pop(); }
+        const count = lines.length;
+        return "Created " + args.path + " (" + count + (count === 1 ? " line)." : " lines).");
+    }
+    const shown = unified(before, content, args.path);
+    return shown || (args.path + " was written with exactly what was already in it.");
 }
 
 function editFile(root: string, args: Record<string, string>): string {
@@ -269,8 +342,11 @@ function editFile(root: string, args: Record<string, string>): string {
     if (occurrences > 1) {
         return `That text appears ${occurrences} times in ${args.path}, so it is not clear which one you mean. Include more surrounding lines to make it unique.`;
     }
-    fs.writeFileSync(target, current.replace(find, args.replace ?? ''), 'utf8');
-    return `Wrote ${args.path}.`;
+    const updated = current.replace(find, args.replace ?? '');
+    fs.writeFileSync(target, updated, 'utf8');
+    record({ path: args.path, before: current, after: updated, existed: true, at: Date.now() });
+    const shown = unified(current, updated, args.path);
+    return shown || (args.path + " is unchanged - the replacement matches what was there.");
 }
 
 function search(root: string, args: Record<string, string>): string {
