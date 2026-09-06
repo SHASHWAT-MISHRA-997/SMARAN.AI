@@ -243,6 +243,12 @@ const SettingsModal = ({
         setUpdateInfo(data);
         setUpdateCheckedAt(new Date().toLocaleTimeString());
 
+        /* The backend answered, and it may be telling us the check did
+           not happen. That case landed here - a 200 carrying
+           checked: false - and nothing read it, so the screen showed a
+           stale card and no reason at all. */
+        setUpdateError(data.checked === false ? (data.reason || "") : "");
+
         // Windows Update's behaviour, and what was asked for: finding an
         // update starts fetching it. There is no Download button to press,
         // because being told an update exists and then having to go and get
@@ -260,11 +266,16 @@ const SettingsModal = ({
       } else {
         setUpdateError(`The update server answered ${res.status}.`);
       }
-    } catch {
+    } catch (error) {
       // This used to claim version 2.8.6 and "no update available" whenever
       // the check failed - a version number invented by the interface and an
       // answer nobody had. A check that did not happen says so.
-      setUpdateError("Could not reach the update server. You may be offline.");
+      //
+      // And it says what happened. "You may be offline" was asserted for
+      // every failure, including a release list the app was not allowed to
+      // see and a rate limit - where being offline was the one thing that
+      // was not wrong, and it sent people to check their connection.
+      setUpdateError(`Could not reach this machine's own backend: ${error?.message || "no answer"}.`);
     } finally {
       setCheckingUpdate(false);
     }

@@ -71,7 +71,19 @@ def _is_newer(candidate: str, current: str) -> bool:
     return a > b
 
 
+#: Why the last attempt failed, in words somebody can act on. Every failure
+#: used to become "Could not reach the update server. You may be offline",
+#: and the actual exception went to logger.debug, which is off. A private
+#: repository answering 404, an exhausted rate limit answering 403, a DNS
+#: failure and a genuine lack of internet all looked identical - and the
+#: one thing the message asserted, being offline, was usually the one thing
+#: that was not wrong.
+_last_failure: Optional[str] = None
+
+
 def _fetch_latest() -> Optional[dict]:
+    global _last_failure
+    _last_failure = None
     request = urllib.request.Request(
         RELEASES_API,
         headers={
@@ -83,10 +95,26 @@ def _fetch_latest() -> Optional[dict]:
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
             return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # An answer, not a silence. Saying "you may be offline" here is
+        # simply false, and sends people to check their connection.
+        if exc.code == 404:
+            _last_failure = ("The release list is not public, so the app cannot "
+                             "see it (404).")
+        elif exc.code in (403, 429):
+            _last_failure = ("GitHub is rate-limiting this network (%d). It allows "
+                             "60 checks an hour from one address; try again "
+                             "later." % exc.code)
+        else:
+            _last_failure = "The release list answered %d." % exc.code
+        logger.info("Update check: %s", _last_failure)
+        return None
     except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
-        # Being offline is the normal case for a local-first app, so this is
-        # not an error worth showing anyone.
-        logger.debug("Update check did not complete: %s", exc)
+        # Being offline is the normal case for a local-first app. Even so,
+        # the reason is kept: a certificate failure and an unplugged cable
+        # are not the same thing to whoever has to fix it.
+        _last_failure = "Could not reach GitHub: %s" % str(exc)[:160]
+        logger.info("Update check: %s", _last_failure)
         return None
 
 
@@ -103,7 +131,7 @@ def check(force: bool = False) -> dict:
             "latest_version": None,
             "update_available": False,
             "checked": False,
-            "reason": "Could not reach the update server.",
+            "reason": _last_failure or "Could not reach the update server.",
         }
         # Not cached: a failed check should be retried, not remembered.
         return payload
