@@ -1685,10 +1685,37 @@ export const HackerVoiceAssistant = ({
         setMicStatus(denied ? 'denied' : 'error');
         setRecorderStatus('idle');
         setVadStatus('idle');
+
+        /* On a phone, this failure does not mean voice input is gone.
+         *
+         * startRecognition() is the last line of the try above, so
+         * anything that threw before it - getUserMedia, the recorder,
+         * the audio context - meant it never ran. On Android that is the
+         * one path that would have worked: the phone's own recogniser
+         * captures its own audio and never touches getUserMedia. The
+         * screen then said "Voice input unavailable", which was true only
+         * because the app had stopped trying.
+         *
+         * What is actually lost here is the level meter and the silence
+         * detection, both of which come from the audio graph. Listening
+         * does not depend on them. */
+        if (isNativeApp() && !denied) {
+          setVoiceIssue(`The audio meter could not start (${error?.name || 'error'}: `
+            + `${error?.message || 'no detail'}), so this phone's own recogniser is `
+            + 'being used instead.');
+          startRecognition();
+          return;
+        }
+
         setRecognizerStatus('idle');
+        // The name as well as the message. "Microphone initialization
+        // failed" on its own is the same sentence for a missing device, a
+        // busy device and a WebView that refused, and a screenshot of it
+        // tells nobody which.
         setVoiceIssue(denied
           ? 'Microphone permission was denied. Allow microphone access to use voice input.'
-          : `Microphone initialization failed: ${error?.message || 'no input device available'}`);
+          : `Microphone initialization failed - ${error?.name || 'Error'}: `
+            + `${error?.message || 'no input device available'}`);
         setVoiceState('error');
         voiceStateRef.current = 'error';
       }

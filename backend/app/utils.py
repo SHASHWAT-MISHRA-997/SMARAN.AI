@@ -67,6 +67,32 @@ _whisper_models: dict = {}
 def _whisper_model_name_for(language: str) -> str:
     normalized = (language or "auto").lower().split("-")[0]
     if normalized in {"en", ""}:
+        # English gets the better model too, where it is free.
+        #
+        # Measured here, beam 5, best of three:
+        #
+        #                 2s audio    15s audio
+        #   base  cpu       0.719s      1.117s
+        #   small cpu       2.364s      2.421s
+        #   base  card      0.143s      0.778s
+        #   small card      0.336s      0.361s
+        #
+        # On the card small costs nothing - at fifteen seconds it is
+        # faster than base, a wider search settling sooner. On the
+        # processor it costs over a second, which is why base stays
+        # there. Mishearing was the complaint, and small is the answer
+        # to it wherever the machine can afford one.
+        #
+        # (An earlier note in this file recorded small at 2.52s against
+        # base at 2.49s. That is not what these runs show. Both are
+        # written down rather than one quietly replacing the other.)
+        try:
+            from app import gpu_speech
+
+            if gpu_speech.device_and_compute()[0] == "cuda":
+                return _WHISPER_MULTILINGUAL_MODEL
+        except Exception:  # noqa: BLE001 - no card, no change
+            pass
         return _WHISPER_ENGLISH_MODEL
     # "auto" may well be a non-English utterance, so use the accurate model.
     return _WHISPER_MULTILINGUAL_MODEL
