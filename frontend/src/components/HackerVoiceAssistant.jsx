@@ -666,6 +666,15 @@ export const HackerVoiceAssistant = ({
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [isMuted, setIsMuted] = useState(false);
+
+  /* How long the call has been running.
+   *
+   * "You cannot tell when the call started or ended" was the report, and a
+   * colour and a word were the only signals: red means end, green means
+   * start, and neither says whether anything is happening right now. Every
+   * phone answers this the same way, with a clock that is running or is not
+   * there at all. */
+  const [callSeconds, setCallSeconds] = useState(0);
   const [chatHistory, setChatHistory] = useState([]);
   const [textInput, setTextInput] = useState('');
   const [micVolume, setMicVolume] = useState(0);
@@ -1797,6 +1806,15 @@ export const HackerVoiceAssistant = ({
   );
   useEffect(() => { localStorage.setItem('sm_voice_engine', voiceEngine); }, [voiceEngine]);
 
+  useEffect(() => {
+    if (!liveActive) { setCallSeconds(0); return undefined; }
+    setCallSeconds(0);
+    const started = Date.now();
+    const timer = setInterval(
+      () => setCallSeconds(Math.floor((Date.now() - started) / 1000)), 500);
+    return () => clearInterval(timer);
+  }, [liveActive]);
+
   const stopLiveSession = useCallback(async () => {
     const session = liveSessionRef.current;
     liveSessionRef.current = null;
@@ -2469,10 +2487,20 @@ export const HackerVoiceAssistant = ({
           {/* The one control that is not a toggle: answer or hang up. */}
           <button
             type="button"
-            onClick={() => {
-              if (isMobileVoiceDevice()) toggleMute();
-              else if (liveActive) stopLiveSession();
-              else startLiveSession();
+            onClick={async () => {
+              if (isMobileVoiceDevice()) { toggleMute(); return; }
+              if (!liveActive) { startLiveSession(); return; }
+              /* Hanging up leaves the call, the way hanging up does.
+               *
+               * This ended the live session and stayed on this screen, so
+               * pressing the red phone appeared to do nothing: the call was
+               * over and the call screen was still there, and getting back
+               * to the conversation meant finding the X in the corner. The
+               * button is a handset, it rotates like one, and it says "End
+               * the conversation" - every part of it promises to put you
+               * back where you were. Reported as "call end nahi hota". */
+              await stopLiveSession();
+              onClose?.();
             }}
             className={`group relative -mb-1 flex h-16 w-16 items-center justify-center rounded-full
               transition-all duration-300 active:scale-95 sm:h-[72px] sm:w-[72px] ${
@@ -2496,8 +2524,14 @@ export const HackerVoiceAssistant = ({
               do not say whether they describe the state or the action, so
               there was no way to tell "the call is running" from "press to
               start". The word does. */}
-          <span className="pointer-events-none absolute translate-y-[3.1rem] text-[10px] font-bold uppercase tracking-wider text-white/70">
-            {isMobileVoiceDevice() ? (isMuted ? 'Resume' : 'Pause') : (liveActive ? 'End' : 'Start')}
+          <span className="pointer-events-none absolute translate-y-[3.1rem] whitespace-nowrap text-[10px] font-bold uppercase tracking-wider text-white/70">
+            {isMobileVoiceDevice()
+              ? (isMuted ? 'Resume' : 'Pause')
+              : liveActive
+                /* The clock, not the word. A number that is changing is the
+                   one thing that cannot be mistaken for a label. */
+                ? `End · ${String(Math.floor(callSeconds / 60)).padStart(2, '0')}:${String(callSeconds % 60).padStart(2, '0')}`
+                : 'Start'}
           </span>
 
           {/* Pinned above everything at 420x560 there is room for the
