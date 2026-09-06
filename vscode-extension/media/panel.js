@@ -450,10 +450,6 @@
             modeMenu.appendChild(row);
         });
 
-        /* The one thing the old paragraph was really about, kept because it
-           is the only part a person cannot work out from the labels. */
-        modeMenu.appendChild(el('div', 'menu-note caution',
-            'A command can reach outside the folder whatever this is set to.'));
     }
     $('modeChip').addEventListener('click', () => {
         drawModeMenu();

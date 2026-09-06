@@ -82,7 +82,28 @@ to or correct.
 
 Keep it under ten lines.`;
 
-const TOOL_CALL = /<tool_call\s+name=["']([a-z_]+)["']\s*>([\s\S]*?)<\/tool_call>/i;
+/* Read what models actually send, not only what they were asked for.
+ *
+ * The prompt asks for <tool_call name="x">...</tool_call>. nemotron-3-super
+ * sends
+ *
+ *     <toolcall name="read_file">
+ *     <path>src/main.py</path>
+ *     </tool>
+ *
+ * - no underscore in the opening tag, and a closing tag that matches
+ * nothing. This pattern required both to be exact, so every call failed,
+ * the loop said "that tool call did not arrive in a form it could run" and
+ * asked again, and the model sent the same thing again. The agent did
+ * nothing at all, for the entire run, while looking busy.
+ *
+ * Being strict here buys nothing. There is no other thing a message shaped
+ * like that could be, and refusing it does not make the model write the
+ * other spelling - it only makes the tool useless with that model. So the
+ * underscore is optional, and the close may be </tool_call>, </toolcall>,
+ * </tool>, or absent because the reply ran out.
+ */
+const TOOL_CALL = /<tool[_-]?call\s+name=["']([a-z_]+)["']\s*>([\s\S]*?)(?:<\/tool[_-]?call>|<\/tool>|$)/i;
 const ARGUMENT = /<([a-z_]+)>([\s\S]*?)<\/\1>/gi;
 
 /**
@@ -126,14 +147,17 @@ export interface ToolCall {
  */
 export function looksTruncated(text: string): boolean {
     const body = text || '';
-    if (/<tool_call\s+name=/i.test(body) && !/<\/tool_call>/i.test(body)) return true;
+    // The same spellings the parser accepts. Left strict here, a call the
+    // parser can read was still called truncated and asked for again.
+    if (/<tool[_-]?call\s+name=/i.test(body)
+        && !/<\/(?:tool[_-]?call|tool)>/i.test(body)) return true;
     return /<invoke\s+name=/i.test(body) && !/<\/invoke>/i.test(body);
 }
 
 /** Where a tool call starts, in either spelling, or -1. */
 function callStarts(text: string): number {
     const starts = [
-        (text || '').search(/<tool_call\s+name=/i),
+        (text || '').search(/<tool[_-]?call\s+name=/i),
         (text || '').search(/<(?:[a-z0-9_]*function_call|function_calls|tool_use)>/i),
         (text || '').search(/<invoke\s+name=/i),
     ].filter((at) => at >= 0);
@@ -429,7 +453,22 @@ ${DELEGATE_SYSTEM}` : '')
             return;
         }
 
-        const call = parseToolCall(reply);
+        let call = parseToolCall(reply);
+
+        /* A call that was cut off may be read, but must not be run if it
+           writes.
+
+           The parser now accepts a call whose closing tag never arrived,
+           because a model that stops one tag short should not cost the whole
+           run. For read_file that is harmless - the path is already there.
+           For write_file it is not: the content is exactly the part that got
+           cut off, and running it would put half a file on disk and report
+           success. So a truncated call that changes something is treated as
+           no call at all, and asked for again. */
+        if (call && looksTruncated(reply) && changesThings(call.name)) {
+            call = undefined;
+        }
+
         if (!call) {
             /* Cut off mid-call. Ask for it again rather than printing the
                half-written tag and stopping - the person did not ask for XML,

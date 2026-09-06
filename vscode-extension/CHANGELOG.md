@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.20.0
+
+**It works with models that spell the tag differently.** nemotron-3-super
+sends `<toolcall name="read_file">` with no underscore, closed with `</tool>`.
+The parser required both to be exact, so every call was rejected, the panel
+said "that tool call did not arrive in a form it could run" and asked again,
+and the model sent the same thing back. The agent did nothing at all for the
+whole run while looking busy.
+
+Being strict there bought nothing: there is no other thing a message shaped
+like that could be, and refusing it does not make the model change - it only
+makes the extension useless with that model. The underscore is optional now, a
+hyphen works, and the close may be `</tool_call>`, `</toolcall>`, `</tool>` or
+missing because the reply ran out.
+
+A call that was cut off is still run when it only reads. When it writes it is
+not: the content is exactly the part that went missing, and running it would
+put half a file on disk and report success.
+
+**The caution under the mode menu is gone.** It sat beneath four plain choices
+and made them read as a caveat rather than an answer.
 ## 2.19.0
 
 **One question instead of a form.** The mode menu was two headings, seven
