@@ -55,25 +55,25 @@ export const REACHES: Choice1<ReachId>[] = [
     {
         id: 'read',
         label: 'Read only',
-        description: 'Looks at the code and changes nothing. No files written, no commands run.',
+        description: 'Changes nothing.',
     },
     {
         id: 'workspace',
         label: 'This project',
-        description: 'Writes only inside the open folder. Commands start here, but a command can go anywhere.',
+        description: 'Writes inside this folder.',
     },
     {
         id: 'full',
         label: 'Anywhere',
-        description: 'May read and write outside the open folder too.',
+        description: 'Writes anywhere.',
     },
 ];
 
 export const APPROVALS: Choice1<ApprovalId>[] = [
-    { id: 'always', label: 'Every time', description: 'Asks before every change and every command.' },
-    { id: 'commands', label: 'Before commands', description: 'Edits files on its own. Asks before running anything.' },
-    { id: 'risky', label: 'When it looks risky', description: 'Works on its own and stops at what is hard to undo.' },
-    { id: 'never', label: 'Never', description: 'Never asks. Whatever it may touch, it touches.' },
+    { id: 'always', label: 'Every time', description: 'Every change and command.' },
+    { id: 'commands', label: 'Before commands', description: 'Edits freely, asks to run.' },
+    { id: 'risky', label: 'When it looks risky', description: 'Stops at what is hard to undo.' },
+    { id: 'never', label: 'Never', description: 'Never asks.' },
 ];
 
 /**

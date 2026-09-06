@@ -840,7 +840,7 @@ ${words.slice(0, ATTACH_LIMIT)}`,
             case 'thinking':
                 // Something on screen for the part of a run that is just
                 // waiting. On a slow free model this is most of it.
-                return { kind: 'thinking', title: `Step ${event.step} · thinking…` };
+                return { kind: 'thinking', title: 'Thinking…' };
 
             case 'note':
                 return { kind: 'note', title: event.text };
@@ -862,10 +862,25 @@ ${words.slice(0, ATTACH_LIMIT)}`,
                         ? `${key}: ${text.split('\n').length} lines`
                         : `${key}: ${text.length > 300 ? `${text.slice(0, 300)}…` : text}`;
                 });
+                /* The name and what it was given, on one line.
+
+                   This was a heading like "Step 1 - LIST_FILES" with
+                   "path: ." underneath, inside a bordered card: four lines
+                   of panel for one word of information. A run of twenty
+                   steps was twenty cards down the sidebar, and the report
+                   was that it is unreadable and looks like nothing else
+                   that does this job. Nothing else does - an action is a
+                   line.
+
+                   The step number goes as well. It counts requests to the
+                   model, which nobody is following; the list the agent
+                   publishes with the todo tool is the progress that means
+                   something. */
+                const shown = args.join(', ');
                 return {
                     kind: 'tool',
-                    title: `Step ${event.step} · ${event.name}`,
-                    body: args.join('\n'),
+                    title: event.name,
+                    body: shown.length > 140 ? `${shown.slice(0, 140)}…` : shown,
                 };
             }
 

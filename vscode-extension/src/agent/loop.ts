@@ -141,9 +141,31 @@ function callStarts(text: string): number {
 }
 
 /** Whatever the model said before it started calling a tool. */
+/* Markup is not something the model said.
+ *
+ * Several models wrap their call in a container - <tool_calls>, or
+ * <function_calls> - and put the call this parser understands inside it.
+ * The parser finds the inner call and everything before it is treated as
+ * prose, so the opening tag was printed to the person as though the model
+ * had said it. On screen it read
+ *
+ *     <tool_calls>
+ *
+ * in the middle of the transcript, which is not an answer and not English,
+ * and is the kind of thing that makes a tool look broken even while it is
+ * working perfectly - the call itself ran.
+ *
+ * A line that is nothing but a tag is dropped. A line with a tag and words
+ * in it is kept whole: the model may well be talking about markup.
+ */
 export function proseBefore(text: string): string {
     const start = callStarts(text);
-    return (start >= 0 ? text.slice(0, start) : text || '').trim();
+    const said = (start >= 0 ? text.slice(0, start) : text || '');
+    return said
+        .split('\n')
+        .filter((line) => !/^\s*<\/?[a-z_][a-z0-9_-]*\s*\/?>\s*$/i.test(line))
+        .join('\n')
+        .trim();
 }
 
 /** Argument values: code must survive exactly, a path must not keep a newline. */

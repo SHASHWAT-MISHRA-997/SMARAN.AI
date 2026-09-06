@@ -699,6 +699,45 @@ button.tiny.link:hover { text-shadow: var(--glow-cyan); box-shadow: none; }
 
 .tool { border-left-color: var(--magenta); }
 .tool .title { color: var(--magenta); text-shadow: none; }
+/* An action is a line, not a card.
+ *
+ * Every entry was a bordered, blurred, rounded panel. For a reply that is
+ * right - it is a thing somebody reads. For "it listed the files" it is
+ * four lines of furniture around one word, and a run of twenty steps was
+ * twenty of them stacked down the sidebar. Reported as unreadable, and as
+ * looking like nothing else that does this job. Nothing else does: an
+ * action is a line, and the eye skips the ones it does not need.
+ */
+.item.tool {
+    margin-bottom: 2px;
+    padding: 2px 0 2px 10px;
+    border: none;
+    border-left: 2px solid var(--edge);
+    border-radius: 0;
+    background: none;
+    backdrop-filter: none;
+}
+
+.item.tool .title {
+    /* Its own name, the way it is written in the code and in the docs.
+       LIST_FILES at .14em letter-spacing is the same word shouted. */
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--vscode-editor-font-family);
+    color: var(--ink-dim);
+    margin: 0;
+}
+
+.item.tool pre {
+    display: inline;
+    margin-left: 8px;
+    font-size: 11px;
+    color: var(--ink-far);
+    white-space: pre-wrap;
+}
+
 .tool pre { color: var(--ink-dim); font-size: 11.5px; }
 
 /* A diff, coloured the way every diff is coloured.

@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.18.0
+
+**`<tool_calls>` no longer appears in the transcript.** Several models wrap
+their call in a container and put the real call inside it. The parser found
+the inner one, and everything before it was treated as something the model had
+said - so the opening tag was printed at you, in the middle of a run that was
+working perfectly. A line that is nothing but a tag is dropped now; a sentence
+that mentions one is kept.
+
+**An action is a line.** Every step was a bordered, blurred card headed
+"Step 1 - LIST_FILES" with its arguments underneath: four lines of panel for
+one word, and a run of twenty steps was twenty of them stacked down the
+sidebar. Now it is the tool's own name and what it was given, on one line, in
+the editor's code font. The step number is gone - it counted requests to the
+model, which nobody was following.
+
+**The mode menu says a third as much.** Seven options each carried a full
+sentence, under two headings, under a three-sentence warning. Seventy-three
+words of explanation for a control you touch rarely, now twenty-six, and the
+warning is the one line it was actually about: a command can reach outside the
+folder whatever the setting is.
 ## 2.17.0
 
 **It can hand a question to a second agent.** The reason is the context

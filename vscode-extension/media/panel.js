@@ -419,9 +419,10 @@
         };
 
         group('What it may touch', reaches, policy.reach,
-            'File paths are checked here and refused outside the allowed area. '
-            + 'A shell command is not contained by anything - it starts in the '
-            + 'project and can go elsewhere.',
+            // Cut to the one thing this is warning about. Three sentences at
+            // the top of a menu is a paragraph nobody reads twice, and the
+            // part that matters is that reach does not contain a shell.
+            'A command can reach outside the folder whatever this is set to.',
             (id) => vscode.postMessage({ type: 'setReach', reach: id }));
 
         // Nothing to approve when it cannot change anything.
