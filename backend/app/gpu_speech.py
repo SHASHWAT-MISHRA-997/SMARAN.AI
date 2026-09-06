@@ -79,6 +79,11 @@ APPROX_DOWNLOAD_MB = 820
 APPROX_DISK_MB = 2000
 
 _registered = False
+#: Whether an NVIDIA card was seen at all - which is not the same question
+#: as whether it can be used, and needs its own answer. Without it the
+#: interface offered an 820 MB download to machines with no NVIDIA card,
+#: where it could not have helped.
+_has_card: Optional[bool] = None
 _verdict: Optional[Tuple[bool, str]] = None
 
 
@@ -152,12 +157,15 @@ def usable(force: bool = False) -> Tuple[bool, str]:
         _verdict = (False, "The speech engine could not be loaded: %s" % exc)
         return _verdict
 
+    global _has_card
     try:
-        if ctranslate2.get_cuda_device_count() < 1:
+        _has_card = ctranslate2.get_cuda_device_count() >= 1
+        if not _has_card:
             _verdict = (False, "No NVIDIA graphics card was found, so speech runs "
                                "on the processor.")
             return _verdict
     except Exception as exc:  # noqa: BLE001
+        _has_card = False
         _verdict = (False, "The graphics card could not be checked: %s" % exc)
         return _verdict
 
@@ -241,6 +249,10 @@ def status() -> dict:
             "lines": list(_state["lines"])[-12:],
             "error": _state["error"],
             "installed": installed(),
+            # Said separately, because "there is a card" and "the card can
+            # be driven" are different questions and only the first one
+            # decides whether offering the download makes any sense.
+            "has_card": bool(_has_card),
             "in_use": bool(yes),
             "detail": why,
             "approx_mb": APPROX_DOWNLOAD_MB,

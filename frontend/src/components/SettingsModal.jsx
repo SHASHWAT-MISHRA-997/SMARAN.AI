@@ -101,6 +101,33 @@ const SettingsModal = ({
   const [lockNote, setLockNote] = useState("");
   const [lockBusy, setLockBusy] = useState(false);
 
+  /* Speech on the graphics card.
+     The endpoints - GET /api/speech/gpu and POST /api/speech/gpu/install -
+     have existed since the card support was written, and nothing in the
+     interface ever called them. There was no button anywhere, so the only
+     way to turn the card on was to run pip by hand. A feature nobody can
+     reach is not a feature. */
+  const [gpu, setGpu] = useState(null);
+  const [gpuBusy, setGpuBusy] = useState(false);
+
+  const refreshGpu = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/speech/gpu`, { credentials: "include" });
+      if (res.ok) setGpu(await res.json());
+    } catch (_) { /* no backend here; the section stays hidden */ }
+  };
+
+  const installGpu = async () => {
+    setGpuBusy(true);
+    try {
+      await fetch(`${API_BASE}/api/speech/gpu/install`, {
+        method: "POST", credentials: "include",
+      });
+      await refreshGpu();
+    } catch (_) { /* the status below will say what happened */ }
+    setGpuBusy(false);
+  };
+
   const refreshLock = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/lock/status`, { credentials: "include" });
@@ -108,7 +135,15 @@ const SettingsModal = ({
     } catch (_) { /* no backend here; the section stays hidden */ }
   };
 
-  useEffect(() => { if (isOpen && !noBackend()) refreshLock(); }, [isOpen]);
+  useEffect(() => { if (isOpen && !noBackend()) { refreshLock(); refreshGpu(); } }, [isOpen]);
+
+  /* While pip is running, keep asking. A download of this size with no
+     sign of movement is indistinguishable from one that has died. */
+  useEffect(() => {
+    if (!isOpen || gpu?.status !== "installing") return undefined;
+    const timer = setInterval(refreshGpu, 2000);
+    return () => clearInterval(timer);
+  }, [isOpen, gpu?.status]);
 
   const callLock = async (path, body, done) => {
     setLockBusy(true);
@@ -798,6 +833,79 @@ const SettingsModal = ({
                       this machine exactly as before, and anyone who can read its storage
                       can read them whether or not a PIN is set.
                     </p>
+                  </div>
+                )}
+                {/* SPEECH ON THE GRAPHICS CARD.
+                    Built, endpoints mounted, and unreachable: nothing in the
+                    interface called them, so the only way to switch the card
+                    on was to run pip by hand.
+
+                    The libraries are not shipped with the app deliberately -
+                    they are larger than everything else in it put together -
+                    so this is a choice, made here, with both numbers said
+                    before anything is downloaded. */}
+                {!noBackend() && gpu && (
+                  <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Cpu className={`w-5 h-5 ${gpu.in_use ? "text-emerald-500" : "text-zinc-500"}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-black text-zinc-900 dark:text-white">Speech on the graphics card</p>
+                        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{gpu.detail}</p>
+                      </div>
+
+                      {/* Offered only when it would change something. A machine
+                          with no NVIDIA card, or one already using it, gets the
+                          sentence above and no button to press. */}
+                      {gpu.has_card && !gpu.in_use && !gpu.installed && gpu.status !== "installing" && (
+                        <button
+                          onClick={installGpu}
+                          disabled={gpuBusy}
+                          className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-black text-white hover:bg-indigo-500 disabled:opacity-40 transition"
+                        >
+                          {gpuBusy ? "Starting…" : `Install (${gpu.approx_mb} MB)`}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Both numbers, before anything starts. The download and
+                        what it leaves on the disk are not the same figure, and
+                        the second is the one somebody with a full drive needs. */}
+                    {gpu.has_card && !gpu.in_use && !gpu.installed && gpu.status !== "installing" && (
+                      <p className="mt-2.5 text-[11px] leading-relaxed text-zinc-500">
+                        Downloads about {gpu.approx_mb} MB and uses about
+                        {" "}{(gpu.approx_disk_mb / 1000).toFixed(1)} GB on disk. Speech works
+                        without it, on the processor, just more slowly.
+                      </p>
+                    )}
+
+                    {gpu.status === "installing" && (
+                      <div className="mt-3">
+                        <p className="text-[11px] font-bold text-indigo-500 dark:text-indigo-400">
+                          Downloading. This takes a few minutes; you can close Settings.
+                        </p>
+                        {/* pip's own words. A progress bar here would be invented:
+                            pip reports lines, not a percentage. */}
+                        {gpu.lines?.length > 0 && (
+                          <pre className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap rounded-xl bg-zinc-100 dark:bg-zinc-950 p-2.5 text-[10px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+                            {gpu.lines.join("\n")}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+
+                    {gpu.status === "done" && !gpu.in_use && (
+                      <p className="mt-2.5 text-[11px] leading-relaxed text-emerald-600 dark:text-emerald-400">
+                        Installed. Restart SMARAN.AI to use the card &mdash; Windows decides
+                        where to look for these libraries when the program starts, so a
+                        running one cannot pick them up.
+                      </p>
+                    )}
+
+                    {gpu.status === "failed" && (
+                      <p className="mt-2.5 whitespace-pre-wrap text-[11px] leading-relaxed text-rose-500">
+                        {gpu.error || "The install did not finish."}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

@@ -3404,9 +3404,10 @@ async def speech_gpu_install():
     """Fetch the CUDA libraries so the card can be used. Does not block.
 
     Nothing is downloaded until this is asked for. The libraries are about
-    700 MB and most people never need them - speech works on the processor,
-    just more slowly - so this is a choice rather than something that
-    happens on first run.
+    820 MB, and about 2 GB once unpacked, which is larger than the rest of
+    the app put together. Most people never need them - speech works on the
+    processor, just more slowly - so this is a choice, offered in Settings,
+    rather than something that happens on first run.
     """
     from app import gpu_speech
 
