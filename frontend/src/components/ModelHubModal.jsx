@@ -74,6 +74,25 @@ const CLOUD_PROVIDERS = [
 
 
 /**
+ * Bytes as the download itself would describe them.
+ *
+ * Decimal units, matching what pip prints and what the packages advertise, so
+ * the panel and the log underneath it never disagree about the same file.
+ */
+const formatBytes = (bytes) => {
+  const value = Number(bytes) || 0;
+  if (value < 1000) return `${value} B`;
+  const units = ['kB', 'MB', 'GB'];
+  let scaled = value / 1000;
+  let unit = 0;
+  while (scaled >= 1000 && unit < units.length - 1) {
+    scaled /= 1000;
+    unit += 1;
+  }
+  return `${scaled.toFixed(scaled < 10 ? 1 : 0)} ${units[unit]}`;
+};
+
+/**
  * Getting the packages that video generation needs.
  *
  * Separate from the model catalogue because it is not a model: it is PyTorch
@@ -97,10 +116,13 @@ const VideoPackages = () => {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // While it runs, the backend collects progress lines; poll for them.
+  // While it runs, the backend counts bytes; poll for them. Every three
+  // seconds was fine for a list of log lines and is not fine for a percentage:
+  // a bar that moves in three-second steps reads as a bar that is stuck, which
+  // is the thing this is here to stop.
   useEffect(() => {
     if (state?.status !== 'running') return undefined;
-    const timer = setInterval(refresh, 3000);
+    const timer = setInterval(refresh, 1000);
     return () => clearInterval(timer);
   }, [state?.status, refresh]);
 
@@ -158,6 +180,59 @@ const VideoPackages = () => {
 
       {state.error && (
         <p className="mt-3 text-xs text-rose-400 font-mono leading-relaxed">{state.error}</p>
+      )}
+
+      {/* Two bars, because they are two different kinds of number and running
+          them together would misrepresent both. The file bar is pip's own byte
+          count and is exact. The overall bar is that count measured against a
+          size seen once on one machine, so it says estimate on it - a cached
+          wheel downloads no bytes at all and would otherwise look like a
+          download that had stalled. */}
+      {running && (
+        <div className="mt-3 space-y-2.5">
+          <div>
+            <div className="flex items-baseline justify-between gap-3 text-[11px] font-mono">
+              <span className="truncate text-zinc-300">
+                {state.current_name || 'Resolving packages…'}
+              </span>
+              <span className="shrink-0 text-zinc-400">
+                {state.current_total
+                  ? `${formatBytes(state.current_bytes)} / ${formatBytes(state.current_total)}`
+                  : '—'}
+              </span>
+            </div>
+            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-black/50">
+              <div
+                className="h-full rounded-full bg-amber-500 transition-all duration-300"
+                style={{ width: `${state.current_percent ?? 0}%` }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-baseline justify-between gap-3 text-[11px] font-mono">
+              <span className="text-zinc-500">Overall (estimate)</span>
+              <span className="shrink-0 text-zinc-400">
+                {formatBytes(state.downloaded_bytes)} of about {state.approx_download_gb} GB
+                {' · '}{state.approx_percent}%
+              </span>
+            </div>
+            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-black/50">
+              <div
+                className="h-full rounded-full bg-amber-600/70 transition-all duration-300"
+                style={{ width: `${state.approx_percent ?? 0}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Done, but the copy this process has open is the old one. */}
+      {state.restart_required && (
+        <p className="mt-3 text-xs leading-relaxed text-amber-300/90">
+          The packages are installed. Windows keeps the running copy locked, so
+          restart SMARAN.AI to start using them.
+        </p>
       )}
 
       {running && (state.messages || []).length > 0 && (
