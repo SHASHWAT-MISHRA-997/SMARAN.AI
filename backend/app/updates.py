@@ -21,6 +21,8 @@ import logging
 import os
 import re
 import shutil
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -476,13 +478,90 @@ def start_download(url: str, version: Optional[str] = None) -> dict:
     return download_status()
 
 
-def install(path: str) -> dict:
+def _powershell() -> str:
+    """Windows' own PowerShell, by full path where there is one.
+
+    A bare "powershell" is resolved through PATH, and this process inherits
+    whatever PATH the shortcut that started it had. The absolute path is the
+    same on every supported build; the name is kept only as a last resort.
+    """
+    candidate = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                             "System32", "WindowsPowerShell", "v1.0",
+                             "powershell.exe")
+    return candidate if os.path.isfile(candidate) else "powershell"
+
+
+def _start_once_this_process_is_gone(installer: str) -> bool:
+    """Arrange for the installer to open after this app has fully exited.
+
+    The installer names the app's single-instance mutex as its AppMutex, so it
+    checks for a running copy the moment it starts - within milliseconds, and
+    long before this process has finished closing its window and settling the
+    database. Opening it from here therefore guaranteed the "Setup has
+    detected that SMARAN.AI is currently running" prompt on every update: the
+    app was, in fact, still running, and the person updating had to close it
+    and click OK to carry on.
+
+    Nothing inside this process can start a program after this process has
+    ended, so the wait happens in a small windowless PowerShell that outlives
+    it: wait for this PID, then open the installer. By then the mutex is gone
+    with the process that held it, and Setup goes straight to its first page.
+
+    The PID and the path travel in the environment rather than in the command
+    line, so no quoting rule has to hold for a path this module did not
+    choose. Returns whether the waiter was started.
+    """
+    if sys.platform != "win32":
+        return False
+
+    # -Timeout is the backstop: if this process somehow never exits, the
+    # installer still opens and shows the prompt it used to show, which is a
+    # worse update rather than no update at all.
+    script = (
+        "Wait-Process -Id $env:SMARAN_UPDATE_PID -Timeout 90 "
+        "-ErrorAction SilentlyContinue; "
+        "Start-Process -FilePath $env:SMARAN_UPDATE_INSTALLER"
+    )
+    environment = dict(os.environ)
+    environment["SMARAN_UPDATE_PID"] = str(os.getpid())
+    environment["SMARAN_UPDATE_INSTALLER"] = installer
+
+    # CREATE_NO_WINDOW, and deliberately not DETACHED_PROCESS. Detaching is the
+    # obvious flag for a process meant to outlive its parent and is what this
+    # module reached for first - but PowerShell is a console application, and
+    # with no console at all its host exits immediately, returning 0 without
+    # running a line of the script. Measured: the waiter was gone inside a
+    # second, every time, and the installer never opened. CREATE_NO_WINDOW
+    # gives it a console that is simply never shown, and a Windows child
+    # survives its parent regardless.
+    flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
+             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    try:
+        subprocess.Popen(
+            [_powershell(), "-NoProfile", "-NonInteractive",
+             "-WindowStyle", "Hidden", "-Command", script],
+            env=environment, creationflags=flags, close_fds=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        logger.warning("Could not arrange the deferred installer start: %s", exc)
+        return False
+    return True
+
+
+def install(path: str, after_this_closes: bool = False) -> dict:
     """Hand the downloaded installer to Windows and let it take over.
 
     This does not install anything itself and does not pass a silent flag: the
     installer's own window opens, with its own choices, exactly as it would if
-    the file were double-clicked. The app is then closed by the caller,
-    because the installer replaces the files it is running from.
+    the file were double-clicked.
+
+    after_this_closes says the caller is about to shut this app down, which is
+    what the desktop window does - and in that case the installer is opened
+    once this process has actually gone rather than immediately, so Setup
+    never finds the copy it is replacing still running. Without a window to
+    close - a browser, or a script - there is nothing to wait for and the
+    installer opens now, as it always did.
     """
     if not path or not os.path.isfile(path):
         return {"started": False,
@@ -500,12 +579,17 @@ def install(path: str) -> dict:
         return {"started": False,
                 "error": "That is not an installer."}
 
+    if after_this_closes and _start_once_this_process_is_gone(resolved):
+        return {"started": True, "path": path, "deferred": True,
+                "detail": "SMARAN.AI is closing, and the installer opens as "
+                          "soon as it has."}
+
     try:
         os.startfile(path)  # noqa: S606 - Windows' own "open this file"
     except (OSError, AttributeError) as exc:
         return {"started": False,
                 "error": "Windows would not open the installer: %s" % str(exc)[:160]}
 
-    return {"started": True, "path": path,
+    return {"started": True, "path": path, "deferred": False,
             "detail": "The installer is opening. Close SMARAN.AI to let it "
                       "replace the running version."}

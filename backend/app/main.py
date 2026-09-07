@@ -495,26 +495,40 @@ def install_update(req: UpdateInstallRequest):
     closes a moment after handing over - the same restart-to-finish step
     Windows Update ends on. The delay is there so this reply reaches the page
     before the process serving it goes away.
+
+    Whether there is a window to close is settled *before* the installer is
+    handed over, because it decides how it is handed over: with a window, the
+    installer waits for this process to end rather than starting beside it and
+    finding the app it is replacing still running.
     """
     from app import updates
-
-    result = updates.install(req.path)
-    if not result.get("started"):
-        raise HTTPException(status_code=400,
-                            detail=result.get("error", "The installer did not open."))
 
     try:
         from app import host_window
 
-        result["closing"] = host_window.close_app(delay_seconds=2.0)
+        closing = host_window.available()
     except Exception:
-        result["closing"] = False
+        host_window = None
+        closing = False
+
+    result = updates.install(req.path, after_this_closes=closing)
+    if not result.get("started"):
+        raise HTTPException(status_code=400,
+                            detail=result.get("error", "The installer did not open."))
+
+    result["closing"] = bool(closing and host_window.close_app(delay_seconds=2.0))
 
     if not result["closing"]:
         # Running in a browser rather than the desktop window: there is no
         # window to close, and saying it closed one would be untrue.
         result["detail"] = ("The installer is opening. Close SMARAN.AI "
                             "yourself so it can replace the running version.")
+    elif not result.get("deferred"):
+        # Closing, but the installer is already open beside us: the wait could
+        # not be arranged, so Setup will find this copy running and say so.
+        # Better to describe that than to promise it will not happen.
+        result["detail"] = ("SMARAN.AI is closing. If Setup asks you to close "
+                            "it first, click OK once the window has gone.")
     return result
 
 
