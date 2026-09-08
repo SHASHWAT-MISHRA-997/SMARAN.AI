@@ -417,3 +417,104 @@ configured on this isolated profile — so their "needs setup" presentation is
 still unverified. Connector behaviour under a revoked or wrong credential, and
 localhost SSRF / path traversal / argument injection for custom MCP entries,
 were also not tested.
+
+### Custom MCP: what a user-supplied server is allowed to do
+
+A custom MCP entry is a string the user provides, and `connect()` turns it into
+one of two things: an `http(s)` target becomes a request this app makes, and
+anything else becomes a program it runs. Both were examined.
+
+**No shell is involved.** `StdioSession.start()` uses `shlex.split` followed by
+`asyncio.create_subprocess_exec`. Shell punctuation therefore cannot start a
+second command: in `npx server; calc.exe` the program launched is `npx` and
+`; calc.exe` is argv. Asserted for `;`, `&&`, `|`, `$( )`, backticks and `&`,
+plus a source guard that fails if `create_subprocess_shell` or `shell=True`
+ever appears in that file.
+
+**Names are keys, not paths.** `_store_path()` writes one
+`mcp_servers.json` inside `DATA_DIR`; the server name is a dictionary key.
+Adding a server called `../../evil` was verified to leave the data directory
+containing only that one file, and to create nothing beside it.
+
+**Saving is not connecting**, and the endpoint says so in its own response.
+A disabled server is refused before anything runs, and an unknown name is
+refused by name.
+
+New tests: `backend/tests/test_mcp_security.py`, 17 cases.
+
+**One thing to be clear about rather than reassuring.** The MCP routes carry no
+authentication dependency, unlike most of the API. That matters less than it
+first appears: the server binds to loopback, and CORS is restricted by regex to
+local origins plus one named Chrome extension — not `*` — so a JSON `POST` from
+a hostile page is refused at preflight, and a DNS-rebinding origin does not
+match the pattern either. What remains is that **any local process running as
+the user can add and probe a server**, which is arbitrary command execution by
+a process that could already run commands. It is not privilege escalation, and
+it is not remotely reachable. It is still an inconsistency with the rest of the
+API, and worth an auth dependency; that change was not made here because it
+touches how the desktop UI talks to its own backend and deserves its own pass.
+
+### Offline startup — and a false alarm of my own
+
+Tested by pointing the process at a dead proxy rather than disabling the
+machine's networking, so the owner's connectivity was never touched.
+
+**First attempt reported that the app fails to start offline.** It did not.
+`_wait_until_ready()` checks health with `urllib.request.urlopen`, which honours
+`HTTP_PROXY`, and I had additionally set `NO_PROXY=""` — so the app's own
+loopback health check was routed through the dead proxy and could never
+succeed. The 180-second timeout that followed was my test breaking, not the
+product.
+
+Re-run with `NO_PROXY=127.0.0.1,localhost,::1`, so external calls still fail
+while loopback is exempt:
+
+| Check | Result |
+| --- | --- |
+| `runtime.json` | written, port 3003 |
+| `/api/test/ping` | `{"status":"ok","app":"SMARAN.AI","version":"2.10.34"}` |
+| Frontend | HTTP 200 |
+
+**The app starts with no outbound network.** The log shows it doing so
+gracefully: plugins loaded, bundled offline voice resources ready from
+`_internal/nltk_data`, and both speech models' warm-up *skipped* with the real
+reason (`ConnectError: [WinError 10061]`) rather than failing the start. The
+warm-up runs on daemon threads and does not block serving, which is why a
+missing network delays nothing.
+
+Worth recording: the failure message in the first attempt carried the port, the
+health URL, the wait, the pid, the log path and the data folder — the
+diagnostics added earlier in this work, doing their job on a real failure.
+
+### External references
+
+| Reference | Outcome |
+| --- | --- |
+| `genspark.ai` and `genspark.ai/skills` | **HTTP 403** — not readable. No capability list obtained, and none is guessed here. |
+| `agentrouter.org` | Reachable but the page carries only a title; the content is client-rendered. **No features, licence or pricing could be read.** |
+| `github.com/experientiallabs/experiential` | Read successfully. **Apache-2.0.** |
+
+Only the third could actually be assessed, so it is the only one mapped.
+
+**experiential** describes itself as an open source gateway and router for
+agent workflows: one OpenAI-compatible API over hosted, BYOK and local models;
+control over which users and agents may use which models and how much they may
+spend; OpenTelemetry traces used to build a router optimised for quality, speed
+and cost. Installable with `pip install experiential`, with a managed service
+alongside it.
+
+Against what SMARAN has today:
+
+| Capability | SMARAN |
+| --- | --- |
+| One interface over hosted and local models | **Implemented** — `agent/models.py` covers OpenAI-compatible, Gemini, Anthropic and Ollama |
+| Capability-based routing between models | **Implemented** — `orchestrator/routing.py`, ordered per role |
+| Health, backoff, rate-limit handling, fallback with a stated reason | **Implemented**, unit tested |
+| Never selecting a paid provider on the user's behalf | **Implemented** — stricter than the reference, which is about budgets rather than consent |
+| Per-user and per-agent spend limits | **Not implemented** |
+| An OpenAI-compatible gateway endpoint others can point at | **Not implemented** — routing is internal |
+| OpenTelemetry traces, and routers learned from them | **Not implemented** |
+
+The licence permits building the missing pieces or self-hosting the project.
+Nothing here claims parity: three of seven are absent, and the two sites that
+could not be read may describe capabilities not represented above at all.
