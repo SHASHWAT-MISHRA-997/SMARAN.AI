@@ -2116,33 +2116,63 @@ html.sm-voice-open .sm-pet { display: none; }
 }
 html.sm-phone-device .mmd-key-hint { display: none; }
 
-/* The bottom of the call screen has three things competing for one corner:
-   the character's view controls, the message box across the middle, and the
-   status pill. On a phone they overlapped - the box sat through VIEW LOCKED
-   and FACING HELD, and the pill covered SIDE and BACK.
-   Raising the box was tried first and is the wrong shape of fix: it means
-   guessing the controls' height in advance, and the guess was 88px against a
-   stack that measures about 110. The controls move out of the crowd instead,
-   to the top of the stage, which is empty background above her head. Nothing
-   then has to know how tall anything else is. */
-html.sm-phone-device .mmd-hud {
-  bottom: auto;
-  top: .5rem;
+/* No view controls on a phone, in either orientation.
+   VIEW LOCKED, EYES TRACKING, FACING HELD, the FRONT/¾/SIDE/BACK row and the
+   keyboard hint are a desktop control panel. They were first moved around the
+   stage to stop them colliding with the caption and the message box, which
+   only ever traded one collision for another; on a screen this size there is
+   no room for them at all, and they are not what anyone opens a call to use.
+   Removed, not merely made transparent, so they take no space and catch no
+   taps.
+   This does not release the camera or the character: viewLocked and
+   holdFacing both default to true in AvatarMMD, so with no way to toggle them
+   she stays locked and front-facing, which is the point. */
+html.sm-phone-device .mmd-hud { display: none; }
+
+/* The call screen's foreground is a column: the figure, then what she said,
+   then the controls. Each gets its own room, so the words are never drawn
+   over her face and nothing has to guess how tall anything else is. */
+.voice-stage { height: 100%; }
+
+/* The caption may take at most half the stage, so a long answer scrolls
+   inside its own box rather than squeezing the character out of existence. */
+.voice-caption { max-height: 50%; }
+
+.voice-footer {
+  /* Clear of the gesture bar and the notch cutouts. */
+  padding-bottom: max(.5rem, env(safe-area-inset-bottom, 0px));
 }
 
-/* The caption is centred and full width, so moving the controls to the top
-   put them behind it. It starts below them instead. 18% of a phone stage is
-   about 80px, and the two rows of controls are taller than that. */
-html.sm-phone-device .voice-caption {
-  top: 7.5rem;
-}
+/* Sideways there is about 360px of height in total, so stacking the figure
+   above the words leaves neither of them usable. They sit side by side
+   instead, which is the one arrangement a short wide screen has room for. */
+html.sm-phone-device.sm-phone-landscape .voice-main { flex-direction: row; }
 html.sm-phone-device.sm-phone-landscape .voice-caption {
-  top: 5.5rem;
+  max-height: 100%;
+  max-width: 55%;
+  align-items: center;
+  padding-left: 0;
 }
-/* Sideways there is very little height, and the caption may not eat it all. */
-html.sm-phone-device.sm-phone-landscape .voice-caption-scroll {
-  max-height: 30vh;
+html.sm-phone-device.sm-phone-landscape .voice-figure { flex: 1 1 45%; }
+
+/* Sideways the header and the call bar keep their full-size padding, and the
+   same status sentence is printed in three places - the header, the pill over
+   the stage, and again above the call buttons. On a 360px-tall screen that
+   left the character about 30px of height: a sliver with a face somewhere in
+   it. The duplicates go, the padding tightens, and the room goes back to her. */
+html.sm-phone-device.sm-phone-landscape .voice-header {
+  padding-top: .3rem;
+  padding-bottom: .3rem;
 }
+html.sm-phone-device.sm-phone-landscape .voice-callbar {
+  padding-top: .3rem;
+  padding-bottom: .3rem;
+}
+/* Said once, above the buttons, where the eye already is. */
+html.sm-phone-device.sm-phone-landscape .voice-callbar-status { display: none; }
+/* Typing sideways means the keyboard covers everything anyway, and the same
+   box is one rotation away. The call is what this screen is for. */
+html.sm-phone-device.sm-phone-landscape .voice-footer { display: none; }
 
 /* A subtitle that can be scrolled should not show a scrollbar over the
    character; it follows on its own and can still be dragged. */

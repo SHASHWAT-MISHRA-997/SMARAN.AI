@@ -1548,9 +1548,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   // Enhanced Real-Time Voice & Speak Mode
   const getRecognitionLang = (langCode) => {
     const map = {
-      // Android uses the handset's installed regional pack. This phone is
-      // en-GB; forcing en-US made Soda fail with language-pack error 13.
-      en: 'en-GB',
+      // Use Indian English; the native service supports Hindi/English switching.
+      en: 'en-IN',
       hi: 'hi-IN',
       gu: 'gu-IN',
       pa: 'pa-IN',
@@ -2000,7 +1999,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       if (audioBlob.size < 500) return '';
       const formData = new FormData();
       formData.append('file', audioBlob, 'voice_query.webm');
-      formData.append('language', selectedLanguage || 'auto');
+      // Reply language does not identify the language spoken into the mic.
+      formData.append('language', 'auto');
       formData.append('request_id', window.crypto?.randomUUID?.() || `${Date.now()}`);
       if (live) formData.append('live', '1');
       const res = await fetch(`${API_BASE}/api/voice/transcribe`, {

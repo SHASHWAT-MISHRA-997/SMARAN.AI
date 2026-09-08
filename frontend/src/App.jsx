@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import WorkspacePanel from './components/WorkspacePanel';
 import DirectorPanel from './components/DirectorPanel';
@@ -82,6 +82,8 @@ const App = () => {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
+  const sessionRetryRef = useRef(null);
+  const sessionsMountedRef = useRef(true);
   const [activeCollections, setActiveCollections] = useState([]);
   const [selectedModel, setSelectedModel] = useState(
     () => localStorage.getItem('sm_selected_model') || 'auto',
@@ -202,7 +204,7 @@ const App = () => {
       const stored = localChat.loadSessions();
       if (stored.length) {
         setSessions(stored);
-        if (!activeSessionId) setActiveSessionId(stored[0].id);
+        setActiveSessionId(current => current || stored[0].id);
         return;
       }
       const first = {
@@ -219,6 +221,7 @@ const App = () => {
       const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions`);
       if (res.ok) {
         const data = await res.json();
+        if (!sessionsMountedRef.current) return;
         const sessionList = Array.isArray(data) ? data : [];
         setSessions(sessionList);
         if (sessionList.length > 0) {
@@ -230,10 +233,14 @@ const App = () => {
                makes everything you wrote look lost, which is exactly how it
                was reported. */
             const withContent = sessionList.find((item) => (item.message_count || 0) > 0);
-            setActiveSessionId((withContent || sessionList[0]).id);
+            setActiveSessionId(current => current || (withContent || sessionList[0]).id);
           }
           return;
         }
+        // An empty database is a successful first launch, not a connection
+        // failure. Sending creates the first session; polling here forever
+        // wasted requests and retained a stale selected-session closure.
+        return;
       }
     } catch (err) {
       console.error(err);
@@ -247,8 +254,9 @@ const App = () => {
      * fifteen of them in one day. The app can sit with no session at all;
      * sending a message creates one, which is the moment it is actually
      * needed. */
-    if (!activeSessionId) {
-      setTimeout(() => { void fetchSessions(); }, 2000);
+    if (!activeSessionId && sessionsMountedRef.current) {
+      clearTimeout(sessionRetryRef.current);
+      sessionRetryRef.current = setTimeout(() => { void fetchSessions(); }, 2000);
     }
   }
 
@@ -281,7 +289,12 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    sessionsMountedRef.current = true;
     fetchSessions();
+    return () => {
+      sessionsMountedRef.current = false;
+      clearTimeout(sessionRetryRef.current);
+    };
   }, []);
 
   /* Counted once per start, and only from the packaged phone app - the

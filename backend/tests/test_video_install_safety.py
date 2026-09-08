@@ -35,6 +35,32 @@ def test_loaded_packages_are_never_replaced(installer):
     assert staging.exists()
 
 
+def test_foreign_wheel_cannot_shadow_bundled_packages(installer, monkeypatch):
+    from packaging.tags import Tag
+    import packaging.tags
+    live = Path(installer.packages_dir())
+    metadata = live / "tokenizers-1.0.dist-info" / "WHEEL"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("Wheel-Version: 1.0\nTag: cp312-abi3-win_amd64\n")
+    monkeypatch.setattr(packaging.tags, "sys_tags", lambda: iter([
+        Tag("cp312", "abi3", "manylinux_2_17_x86_64")]))
+    original_path = list(installer.sys.path)
+    assert not installer.ensure_on_path()
+    assert installer.sys.path == original_path
+    assert "incompatible" in installer._activation_error
+    assert metadata.exists()
+
+
+def test_compatible_and_pure_python_wheels_are_accepted(installer):
+    from packaging.tags import sys_tags
+    live = Path(installer.packages_dir())
+    for name, tag in (("native", str(next(sys_tags()))), ("pure", "py3-none-any")):
+        metadata = live / f"{name}-1.0.dist-info" / "WHEEL"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_text(f"Wheel-Version: 1.0\nTag: {tag}\n")
+    assert installer._compatibility_error(str(live)) is None
+
+
 def test_failed_promotion_restores_working_copy(installer, monkeypatch):
     live, staging = prepare(installer)
     rename = installer.os.rename

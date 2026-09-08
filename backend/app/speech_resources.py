@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from typing import Optional
 
 logger = logging.getLogger("speech.resources")
@@ -67,6 +68,11 @@ def _copy_existing(package: str, probe: str, target: str) -> bool:
         return True
 
     roots = []
+    # Frozen releases ship these corpora. Use them before looking for an
+    # unrelated installation or attempting a network download.
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        roots.append(os.path.join(bundle, "nltk_data"))
     for candidate in (os.getenv("APPDATA"), os.path.expanduser("~")):
         if candidate:
             roots.append(os.path.join(candidate, "nltk_data"))
@@ -127,7 +133,7 @@ def ensure(download: bool = True) -> bool:
 
         try:
             found = str(nltk.data.find(probe))
-            if found.startswith(os.path.abspath(target)):
+            if os.path.commonpath((os.path.abspath(found), os.path.abspath(target))) == os.path.abspath(target):
                 continue
             # Found, but somewhere else - and somewhere else is exactly what
             # fails on the machines where this breaks.

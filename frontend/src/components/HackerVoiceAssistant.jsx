@@ -32,7 +32,7 @@ import { isDesktopApp } from './RightPanel';
 import AvatarVideo, { AVATAR_CHARACTERS } from './AvatarVideo';
 import AvatarMMD, { MMD_CHARACTERS } from './AvatarMMD';
 import CyberStage from './CyberStage';
-import { classifyTranscriptionFailure, pollFinalTranscript, voiceOutcomeKind } from '../utils/voiceStatus';
+import { classifyTranscriptionFailure, pollFinalTranscript, silenceWindowMs, voiceOutcomeKind } from '../utils/voiceStatus';
 
 /* Prebuilt Gemini Live voices, grouped so a user can simply pick male or
    female. The service decides the exact timbre; these are its own voices. */
@@ -536,10 +536,8 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
 
   const getRecognitionLang = (langCode) => {
     const map = {
-      // The app's English option is marked with the UK flag. Android's
-      // recognizer on the shipped phone has en-GB installed while en-US does
-      // not, so do not force the WebView's often-US locale.
-      en: 'en-GB',
+      // Match Dictate's Indian-English locale and native bilingual recognition.
+      en: 'en-IN',
       hi: 'hi-IN',
       gu: 'gu-IN',
       pa: 'pa-IN',
@@ -998,7 +996,8 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
       const formData = new FormData();
       const extension = audioBlob.type.includes('mp4') ? 'm4a' : audioBlob.type.includes('ogg') ? 'ogg' : 'webm';
       formData.append('file', audioBlob, `voice_query.${extension}`);
-      formData.append('language', selectedLanguage || 'auto');
+      // Detect speech independently of the desired reply language.
+      formData.append('language', 'auto');
       formData.append('request_id', window.crypto?.randomUUID?.() || `${Date.now()}`);
       const res = await fetch(`${API_BASE}/api/voice/transcribe`, {
         method: 'POST',
@@ -1209,13 +1208,17 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
       speakText, startFreshRecorder, startRecognition, stopRecognition, transcribeBackendAudio,
       waitForFinalTranscript]);
 
-  // VAD / Silence watchdog timer: 850ms
+  // Silence watchdog. The window is not fixed: it starts at 850 ms for a short
+  // reply and stretches toward two seconds once enough has been said that this
+  // is plainly dictation, whose sentences have longer gaps between them. The
+  // rule lives in silenceWindowMs, where it is unit tested.
   useEffect(() => {
     if (!isOpen) return;
     const interval = setInterval(() => {
       if (['listening', 'capturing', 'vad-ready'].includes(voiceStateRef.current) && hasSpokenRef.current && !isMutedRef.current) {
         const elapsed = Date.now() - lastSpeechTimeRef.current;
-        if (elapsed > 850) {
+        const spoken = (transcriptRef.current || interimTranscriptRef.current || '').length;
+        if (elapsed > silenceWindowMs({ spokenChars: spoken })) {
           triggerAutoSend();
         }
       }
@@ -1985,7 +1988,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
       />
 
       {/* Top Cyberpunk JARVIS HUD Header */}
-      <div className="relative z-10 flex items-center justify-between px-3 sm:px-8 py-2.5 sm:py-3.5 border-b border-emerald-500/20 bg-zinc-950/80 backdrop-blur-xl">
+      <div className="voice-header relative z-10 flex items-center justify-between px-3 sm:px-8 py-2.5 sm:py-3.5 border-b border-emerald-500/20 bg-zinc-950/80 backdrop-blur-xl">
         {/* The title used to sit on the same line as a "Real-Time
             Conversation" badge, both at full size, beside three pickers and
             two buttons. Below about 1200px there was not room: the name broke
@@ -2101,8 +2104,21 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
             steps back rather than competing with it at full brightness. */}
         <CyberStage voiceState={voiceState} micVolume={micVolume} dim={showAvatar ? 1 : 0.45} />
 
+        {/* Everything in front of the room is laid out in flow rather than
+            stacked on one rectangle.
+
+            The character used to fill `absolute inset-0` while the caption sat
+            absolutely at 18% and the message box at a fixed offset from the
+            bottom, so the words she was saying were drawn across her face and
+            the only remedy was to guess a pixel offset - which then broke at a
+            different height or orientation. These are separate boxes now: the
+            figure gets the room that is left after the words and the controls
+            have taken theirs, so they cannot overlap at any size. */}
+        <div className="voice-stage absolute inset-0 flex flex-col">
+        <div className="voice-main flex-1 min-h-0 flex flex-col">
+
         {/* The character */}
-        <div className="absolute inset-0">
+        <div className="voice-figure relative flex-1 min-h-0">
           {!showAvatar ? (
             <div className="w-full h-full flex items-center justify-center">
               <EnergyCore
@@ -2134,15 +2150,19 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
           )}
         </div>
 
-        {/* What the assistant just said, large enough to read across the room.
-            Bounded and scrolled, not just placed: an unbounded block ran off
-            the bottom of the stage and a long answer was readable only as far
-            as it happened to fit, with no way to reach the rest. It keeps the
-            newest line in view as she speaks, and can be scrolled back. */}
-        <div className="voice-caption absolute inset-x-0 top-[18%] px-6 sm:px-12 flex justify-center pointer-events-none">
+        {/* What the assistant just said, in a box of its own beneath her.
+            Always in the DOM, because a live region that is created when the
+            first words arrive announces nothing; with no words it has no
+            content and so takes no height, and the figure above gets the
+            space back. */}
+        <div
+          className={`voice-caption shrink-0 px-6 sm:px-12 flex justify-center ${
+            latestSpokenLine ? 'py-2' : ''
+          }`}
+        >
           <div
             ref={captionRef}
-            className="voice-caption-scroll pointer-events-auto max-w-3xl max-h-[34vh] overflow-y-auto overscroll-contain"
+            className="voice-caption-scroll max-w-3xl max-h-full overflow-y-auto overscroll-contain"
           >
             <p
               aria-live="polite"
@@ -2153,8 +2173,14 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
           </div>
         </div>
 
+        </div>{/* /voice-main */}
+
+        {/* Status and the message box, below both. Safe-area aware, so the
+            gesture bar does not sit on the send button. */}
+        <div className="voice-footer shrink-0 flex flex-col items-center gap-2 px-4 pb-2">
+
         {/* Live status, kept small and out of the way. */}
-        <div className="absolute left-1/2 -translate-x-1/2 bottom-3 flex items-center gap-2 px-3 py-1 rounded-full bg-black/60 border border-emerald-500/25 backdrop-blur-md text-[10px] font-mono font-bold pointer-events-none">
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-black/60 border border-emerald-500/25 backdrop-blur-md text-[10px] font-mono font-bold pointer-events-none">
           <span className={`${statusToneClasses[currentVoiceStatus.tone]} flex items-center gap-1.5`}>
             {currentVoiceStatus.icon === 'loading' ? (
               <RefreshCw className="w-3 h-3 animate-spin" />
@@ -2170,7 +2196,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
         {/* Message box, centred under the character. Hidden while pinned:
             at 300 wide it covered her completely, and typing is what the full
             window is for - the small one is for talking. */}
-        <div className="pip-hide absolute inset-x-0 bottom-14 sm:bottom-16 px-4 flex justify-center">
+        <div className="pip-hide w-full flex justify-center">
           <form onSubmit={handleManualTextSubmit} className="w-full max-w-2xl flex items-center gap-2">
             <input
               type="text"
@@ -2189,6 +2215,9 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
             </button>
           </form>
         </div>
+
+        </div>{/* /voice-footer */}
+        </div>{/* /voice-stage */}
       </div>
 
 
@@ -2198,10 +2227,10 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
           action in the middle that starts or ends the conversation, and the
           rest as small round toggles around it. The previous row of seven
           identical pills gave no sense of which control mattered. */}
-      <div className="relative z-10 border-t border-white/8 bg-zinc-950/95 px-4 pb-4 pt-3 backdrop-blur-xl sm:px-8">
+      <div className="voice-callbar relative z-10 border-t border-white/8 bg-zinc-950/95 px-4 pb-4 pt-3 backdrop-blur-xl sm:px-8">
 
         {/* One line of status, centred above the controls. */}
-        <div className="mb-3 flex justify-center">
+        <div className="voice-callbar-status mb-3 flex justify-center">
           <span className={`flex items-center gap-2 text-[11px] font-medium ${statusToneClasses[currentVoiceStatus.tone]}`}>
             {currentVoiceStatus.icon === 'loading' ? (
               <RefreshCw className="h-3 w-3 animate-spin" />

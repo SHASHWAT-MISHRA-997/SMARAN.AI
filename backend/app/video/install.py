@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import importlib
+from pathlib import Path
 import os
 import re
 import shutil
@@ -106,6 +107,7 @@ _cancelled = threading.Event()
 SPEED_WINDOW_SECONDS = 20.0
 _activation_lock = threading.RLock()
 _activated_directory: Optional[str] = None
+_activation_error: Optional[str] = None
 _dll_handles: list = []
 
 _PROGRESS = re.compile(r"^Progress (\d+) of (\d+)\s*$")
@@ -194,6 +196,26 @@ def ensure_on_path() -> bool:
         return _ensure_on_path()
 
 
+def _compatibility_error(directory: str) -> Optional[str]:
+    """Reject foreign wheels before they can shadow bundled speech packages."""
+    from packaging.tags import parse_tag, sys_tags
+
+    supported = set(sys_tags())
+    for metadata in sorted(Path(directory).glob("*.dist-info/WHEEL")):
+        try:
+            tags = set()
+            for line in metadata.read_text(encoding="utf-8").splitlines():
+                if line.startswith("Tag: "):
+                    tags.update(parse_tag(line[5:].strip()))
+        except (OSError, ValueError) as exc:
+            return f"Cannot validate video package {metadata.parent.name}: {exc}"
+        if tags and tags.isdisjoint(supported):
+            return (f"Video package {metadata.parent.name} is incompatible with this "
+                    "operating system or Python version. Reinstall video packages "
+                    "for this runtime; the existing files have been preserved.")
+    return None
+
+
 def _ensure_on_path() -> bool:
     """Put the fetched packages where imports can find them.
 
@@ -203,7 +225,7 @@ def _ensure_on_path() -> bool:
     # First, and before sys.path is touched: nothing has been imported from
     # the live directory yet, so this is the one point where it can be
     # replaced without fighting a DLL that Windows has already loaded.
-    global _activated_directory
+    global _activated_directory, _activation_error
     directory = packages_dir()
     if _activated_directory == os.path.abspath(directory):
         return os.path.isdir(directory)
@@ -211,6 +233,12 @@ def _ensure_on_path() -> bool:
 
     directory = packages_dir()
     if not os.path.isdir(directory):
+        _activation_error = None
+        return False
+
+    _activation_error = _compatibility_error(directory)
+    if _activation_error:
+        logger.warning("%s", _activation_error)
         return False
 
     if directory not in sys.path:
@@ -344,7 +372,7 @@ def _package_error() -> Optional[str]:
 
 def status() -> dict:
     installed = ensure_on_path()
-    package_error = _package_error()
+    package_error = _activation_error or _package_error()
     interpreter = _python_that_can_install()
     with _lock:
         approx_total = int(APPROX_DOWNLOAD_GB * 1000 ** 3)
@@ -358,7 +386,7 @@ def status() -> dict:
         return {
             "status": _state["status"],
             "messages": list(_state["messages"])[-40:],
-            "error": _state["error"],
+            "error": _state["error"] or _activation_error,
             "installed": package_error is None,
             "directory": packages_dir() if installed else None,
             "approx_download_gb": APPROX_DOWNLOAD_GB,

@@ -133,7 +133,14 @@ Description: SMARAN.AI - a local-first AI assistant
  it falls back to the default browser.
 EOF
 
-dpkg-deb --build --root-owner-group "$TREE" "$OUT/${APP_ID}_${VERSION}_amd64.deb" >/dev/null
+# DrvFS mounts without Unix metadata report 0777 even after chmod. Normalize
+# archive permissions inside fakeroot where available; never weaken dpkg's
+# control-directory validation or ship world-writable application files.
+if command -v fakeroot >/dev/null 2>&1; then
+    fakeroot bash "$ROOT/packaging/linux/build_deb.sh" "$TREE" "$OUT/${APP_ID}_${VERSION}_amd64.deb"
+else
+    bash "$ROOT/packaging/linux/build_deb.sh" "$TREE" "$OUT/${APP_ID}_${VERSION}_amd64.deb"
+fi
 echo "[linux] built $(basename "$OUT/${APP_ID}_${VERSION}_amd64.deb")"
 
 # ── the portable archive, for everything that is not Debian ───────────────

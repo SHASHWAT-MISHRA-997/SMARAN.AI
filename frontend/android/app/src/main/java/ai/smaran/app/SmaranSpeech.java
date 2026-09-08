@@ -97,11 +97,11 @@ public class SmaranSpeech extends Plugin {
             release();
             final int session = generation;
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(getContext())) {
-                    recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(getContext());
-                } else {
-                    recognizer = SpeechRecognizer.createSpeechRecognizer(getContext());
-                }
+                // An available on-device engine does not imply that the user's
+                // spoken language is installed. Forcing it selected an English
+                // offline model even for Hindi/Hinglish. Use the configured
+                // system speech service, which can resolve the requested locale.
+                recognizer = SpeechRecognizer.createSpeechRecognizer(getContext());
 
                 recognizer.setRecognitionListener(new RecognitionListener() {
                     private void state(String status) {
@@ -114,7 +114,9 @@ public class SmaranSpeech extends Plugin {
                         if (session != generation) return;
                         ArrayList<String> matches = bundle == null ? null
                             : bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                        Log.i(TAG, "Speech results (final=" + isFinal + "): " + matches);
+                        // Transcripts may contain credentials or personal content.
+                        // Keep lifecycle diagnostics without writing speech to logcat.
+                        Log.i(TAG, "Speech results received (final=" + isFinal + ")");
                         notifyListeners("recognitionResults", new JSObject()
                             .put("matches", matches == null ? new JSArray() : new JSArray(matches))
                             .put("isFinal", isFinal));
@@ -158,8 +160,15 @@ public class SmaranSpeech extends Plugin {
 
                 String lang = call.getString("language", Locale.getDefault().toLanguageTag());
                 intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lang);
-                intent.putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", new String[]{"en-US", "en-IN", "hi-IN"});
+                // LANGUAGE_PREFERENCE is a response field, and the former
+                // EXTRA_ADDITIONAL_LANGUAGES string was not a recognition API.
+                if (Build.VERSION.SDK_INT >= 34) {
+                    // Do not restrict detection to the reply language or a
+                    // two-language allowlist: a user may switch languages.
+                    intent.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true);
+                    intent.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH,
+                        RecognizerIntent.LANGUAGE_SWITCH_BALANCED);
+                }
 
                 recognizer.startListening(intent);
                 Log.i(TAG, "recognizer.startListening called with language: " + lang);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  classifyTranscriptionFailure, pollFinalTranscript, voiceOutcomeKind,
+  classifyTranscriptionFailure, pollFinalTranscript, silenceWindowMs, voiceOutcomeKind,
 } from '../src/utils/voiceStatus.js';
 
 // The reported failure, written down as a test.
@@ -123,4 +123,41 @@ test('a resumed sentence outranks an expired deadline', () => {
   assert.equal(pollFinalTranscript({
     finalText: '', lastSpeechAt: 2000, quietSince: 1000, expired: true,
   }), 'resumed');
+});
+
+// ---- how long silence must last before a turn is over ---------------------
+//
+// The reported fault: dictating a long passage, sentences were cut at the
+// natural pauses. One fixed 850 ms window has to serve both a two-word reply
+// and a dictated paragraph, and it cannot.
+
+test('a short reply still ends quickly', () => {
+  assert.equal(silenceWindowMs({ spokenChars: 0 }), 850);
+  assert.equal(silenceWindowMs({ spokenChars: 12 }), 850);
+  assert.equal(silenceWindowMs({ spokenChars: 40 }), 850);
+});
+
+test('a dictated passage is given room to breathe between sentences', () => {
+  assert.equal(silenceWindowMs({ spokenChars: 220 }), 2200);
+  assert.equal(silenceWindowMs({ spokenChars: 1000 }), 2200);
+});
+
+test('the window grows rather than jumping', () => {
+  const mid = silenceWindowMs({ spokenChars: 130 });
+  assert.ok(mid > 850 && mid < 2200, `expected a value between, got ${mid}`);
+  // Monotonic: more said never means less patience.
+  let previous = 0;
+  for (const chars of [0, 40, 80, 120, 160, 200, 240, 400]) {
+    const value = silenceWindowMs({ spokenChars: chars });
+    assert.ok(value >= previous, `patience dropped at ${chars} chars`);
+    previous = value;
+  }
+});
+
+test('it is bounded at both ends whatever it is handed', () => {
+  assert.equal(silenceWindowMs({ spokenChars: -50 }), 850);
+  assert.equal(silenceWindowMs({ spokenChars: NaN }), 850);
+  assert.equal(silenceWindowMs({}), 850);
+  assert.equal(silenceWindowMs(), 850);
+  assert.ok(silenceWindowMs({ spokenChars: 1e9 }) <= 2200);
 });

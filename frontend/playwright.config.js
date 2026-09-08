@@ -26,7 +26,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'node ./node_modules/vite/bin/vite.js --port 5173 --host 127.0.0.1',
+    command: process.env.SMARAN_TEST_PREVIEW === '1'
+      ? 'node ./node_modules/vite/bin/vite.js preview --port 5173 --host 127.0.0.1'
+      : 'node ./node_modules/vite/bin/vite.js --port 5173 --host 127.0.0.1',
     env: {
       VITE_API_TARGET: process.env.VITE_API_TARGET || 'http://127.0.0.1:3003',
     },

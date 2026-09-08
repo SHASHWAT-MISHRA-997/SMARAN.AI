@@ -921,7 +921,7 @@ const AvatarMMD = ({
       />
       {/* View controls */}
       {status === 'ready' && (
-        <div className="mmd-hud absolute bottom-2 right-2 flex flex-col items-end gap-1 font-mono text-[9px] select-none">
+        <div className="mmd-hud absolute z-10 bottom-2 right-2 flex flex-col items-end gap-1 rounded-lg border border-white/15 bg-slate-950/95 p-2 shadow-lg font-mono text-[11px] select-none">
           <div className="flex gap-1">
             <button
               type="button"
@@ -961,7 +961,7 @@ const AvatarMMD = ({
                 key={label}
                 type="button"
                 onClick={() => setView(index)}
-                className="px-2 py-1 rounded border border-white/12 text-white/45 hover:text-white hover:border-white/30 transition-colors cursor-pointer"
+                className="min-h-8 px-2 py-1 rounded border border-white/30 text-white/90 hover:text-white hover:border-white/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 transition-colors cursor-pointer"
               >
                 {label}
               </button>

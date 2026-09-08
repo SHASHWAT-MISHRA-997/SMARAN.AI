@@ -42,6 +42,34 @@ export function voiceOutcomeKind({
 }
 
 /**
+ * How long silence must last before a turn is treated as finished.
+ *
+ * A single number cannot serve both things people do here. Answering a
+ * question is a short burst and a short gap: waiting two seconds after "yes"
+ * feels broken. Dictating a paragraph is long, and the gaps between its
+ * sentences are longer than the gap that ends a reply - so the same 850 ms
+ * that keeps a conversation responsive cuts a dictated sentence in half. That
+ * is the reported "it cuts my sentences".
+ *
+ * So the window grows with how much has already been said, which is the one
+ * signal available before the sentence is over. It is not a blanket increase:
+ * a short utterance still ends after `base`.
+ *
+ * @param {{spokenChars?: number, base?: number, max?: number}} input
+ * @returns {number} milliseconds of silence that end the turn
+ */
+export function silenceWindowMs({ spokenChars = 0, base = 850, max = 2200 } = {}) {
+  const chars = Math.max(0, Number(spokenChars) || 0);
+  // Below this it is a reply; above it, a dictation. Between them it eases.
+  const SHORT = 40;
+  const LONG = 220;
+  if (chars <= SHORT) return base;
+  if (chars >= LONG) return max;
+  const progress = (chars - SHORT) / (LONG - SHORT);
+  return Math.round(base + (max - base) * progress);
+}
+
+/**
  * What to do at one tick of the wait for a recogniser's final result.
  *
  * The silence watchdog fires 850 ms after the audio stops, but a recogniser

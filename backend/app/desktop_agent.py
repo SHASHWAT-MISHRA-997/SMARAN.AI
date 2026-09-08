@@ -1869,6 +1869,16 @@ INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
     (re.compile(r"(?:open|kholo|launch|start)\s+(?:file\s*explorer|explorer|my\s*computer)", re.I), "open_application", {"name": "file explorer"}),
     (re.compile(r"(?:open|kholo|launch|start)\s+settings", re.I), "open_application", {"name": "settings"}),
 
+    # The same applications, said the way Hindi and Hinglish put it: the verb
+    # last. Every pattern above needs the verb first, so "Chrome kholo" - which
+    # is how the owner actually speaks - matched nothing and fell through to
+    # ordinary conversation, while "open Chrome" worked.
+    (re.compile(r"\b(?:vs\s*code|vscode|visual\s+studio\s+code)\s+(?:kholo|khol\s+do|chalu\s+karo|start\s+karo|open\s+karo)\b", re.I), "open_application", {"name": "vscode"}),
+    (re.compile(r"\b(chrome|brave|edge|firefox|notepad|calculator|calc|paint|terminal|cmd|powershell)\s+(?:kholo|khol\s+do|chalu\s+karo|start\s+karo|open\s+karo)\b", re.I), "open_application", {"name": "$1"}),
+    (re.compile(r"\b(?:task\s*manager)\s+(?:kholo|khol\s+do|chalu\s+karo|open\s+karo)\b", re.I), "open_application", {"name": "task manager"}),
+    (re.compile(r"\b(?:file\s*explorer|explorer|my\s*computer)\s+(?:kholo|khol\s+do|open\s+karo)\b", re.I), "open_application", {"name": "file explorer"}),
+    (re.compile(r"\bsettings\s+(?:kholo|khol\s+do|open\s+karo)\b", re.I), "open_application", {"name": "settings"}),
+
     # Folders
     (re.compile(r"(?:open|kholo|show|dikhao)\s+(?:my\s+)?(?:desktop|downloads?|documents?|pictures?|videos?|music)\s*(?:folder)?", re.I), "open_folder", {"path": "$0"}),
     (re.compile(r"(?:open|kholo)\s+folder\s+(.+)", re.I), "open_folder", {"path": "$1"}),
@@ -1981,11 +1991,23 @@ def detect_desktop_intent(text: str) -> Optional[Dict[str, Any]]:
 
     # These are conversation, not instructions to control the desktop. In
     # particular, "do not mute" previously fired the system mute key.
+    #
+    # The check below is anchored at the start, which catches "do not open
+    # chrome" and misses "I do not want you to open chrome" - the refusal is
+    # in the middle, and that opened Chrome. is_being_discussed looks at the
+    # whole line, and is shared with the browser intents so both refuse the
+    # same sentences.
     disabling_startup = INTENT_PATTERNS[0][0].fullmatch(text)
-    if not disabling_startup and re.match(
-        r"^(?:please\s+)?(?:don['’]?t|do\s+not|never|why|how|explain|what\s+does)\b", text, re.I
-    ):
-        return None
+    if not disabling_startup:
+        from app.web_intents import is_being_discussed
+
+        if is_being_discussed(text):
+            return None
+        if re.match(
+            r"^(?:please\s+)?(?:don['’]?t|do\s+not|never|why|how|explain|what\s+does)\b",
+            text, re.I,
+        ):
+            return None
 
     for pattern, action_id, param_template in INTENT_PATTERNS:
         match = pattern.search(text)

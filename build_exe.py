@@ -292,6 +292,8 @@ def build(onefile: bool = False, output_root: str = ROOT, incremental: bool = Fa
         cmd += ["--add-binary", f"{source}{sep}{destination}"]
 
     for module in HIDDEN_IMPORTS:
+        if sys.platform.startswith("linux") and module.startswith("webview"):
+            continue
         cmd += ["--hidden-import", module]
     for package in COLLECT_ALL:
         if sys.platform.startswith("linux") and package == "tiktoken_ext":
@@ -306,6 +308,12 @@ def build(onefile: bool = False, output_root: str = ROOT, incremental: bool = Fa
         cmd += ["--collect-all", package]
     for package in EXCLUDES:
         cmd += ["--exclude-module", package]
+    if sys.platform.startswith("linux"):
+        # desktop_app._open_window intentionally uses an installed browser on
+        # Linux. Collecting pywebview anyway drags in GTK/Qt and thousands of
+        # system icons, despite none of them being reachable at runtime.
+        for package in ("webview", "gi", "PyQt5", "PyQt6", "PySide2", "PySide6"):
+            cmd += ["--exclude-module", package]
 
     cmd.append(ENTRY)
 
