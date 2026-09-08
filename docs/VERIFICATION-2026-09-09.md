@@ -323,3 +323,97 @@ and no other distribution was tested.
 **What was not done.** A real `dpkg -i` install as root, an uninstall
 (`dpkg -r`) leaving-nothing-behind check, and any test on a distribution other
 than the build host. `rpmbuild` is unavailable, so no `.rpm` exists.
+
+### Windows installer rebuilt — and blocked from installing by Smart App Control
+
+    ISCC /DSourceDir=<fresh dist> /O<out> installer/SMARAN.AI.iss
+
+| Artifact | Size | SHA-256 |
+| --- | --- | --- |
+| `SMARAN.AI-Setup.exe` | 280,316,613 | `b0ba0f0b1c127bb9675840d6bae6b05c5a2bb1382ef0ded7c59e3fb17200b92c` |
+
+Compiled successfully in 181 s from 3,218 files, taking its payload from
+`.cache/audit/windows-build/dist/SMARAN.AI` — the dist rebuilt in this pass,
+whose executable is `49aa57a9…` and which was independently confirmed to start
+(`passed: true`, health `2.10.34`, frontend served, ready in 18.88 s).
+
+**It could not be installed on this machine.** Running it returns:
+
+    'SMARAN.AI-Setup.exe' was blocked by your organization's Device Guard policy.
+
+The machine's state, read but not changed:
+
+    CodeIntegrityPolicyEnforcementStatus:            2  (enforced)
+    UsermodeCodeIntegrityPolicyEnforcementStatus:    2  (enforced)
+    SmartAppControl VerifiedAndReputablePolicyState: 1  (on, enforcing)
+
+Smart App Control is enforcing, and it refuses unsigned binaries that have no
+reputation. There is no "run anyway" for it — which is exactly what the
+download page's remaining amber warning says. **Nothing was disabled or
+excluded to get around this**, because that would be changing the owner's
+security configuration to make a test pass, and it would also invalidate the
+test: the point is whether a user's machine accepts this installer, and this
+one does not.
+
+An earlier installer in the previous pass did install on this machine, so the
+policy verdict is not fixed for all builds; Smart App Control evaluates each
+new unsigned file.
+
+**What this leaves unverified for the installer specifically:** installation,
+the installed-file-versus-built-file byte comparison, first start from the
+installed location, upgrade over an existing install, and uninstall. Those were
+all exercised in the previous pass against the previous installer, and none of
+them has been repeated against this one. The remedy is code signing, or the
+owner permitting this specific binary on their machine.
+
+### Plugin, skill, connector and MCP inventory — every one executed
+
+Previously six built-in probes had been run. This is all thirteen, each with a
+real operation carried out against the packaged backend, not a status read.
+
+`GET /api/plugins` reports **13 plugins, all `runtime_status: active`**.
+
+| Plugin | Capabilities | Operation executed | Result |
+| --- | --- | --- | --- |
+| code-risk-scan | 4 | `strix_scan_code` | real |
+| github-reader | 2 | `github_get_repo_info` | real — live GitHub API, returned the repository |
+| google-agents-cli | **14** | `agents_cli_info --help` | real — CLI help returned |
+| headroom | 2 | `headroom_compress` | real |
+| hyperframes | 3 | `hyperframes_status` | real |
+| long-term-memory | 3 | `claudemem_recall` | real — searched 0, matched 0, honest empty result |
+| meeting-notes-import | 2 | `meetily_scan` | real |
+| paperclip | 69 | `paperclip_doctor` | real — CLI output, including an upstream update notice |
+| provider-latency | 3 | `omniroute_get_metrics` | real |
+| task-observer | 2 | `observer_review_session` | real |
+| text-reverse | 5 | `reverse_string` | real — `SMARAN` → `NARAMS` |
+| ui-ux-review | 3 | `ui_ux_audit_checklist` | real |
+| web-page-reader | 2 | `firecrawl_scrape_url` | real — see below |
+
+The `google-agents-cli` count of 14 is the earlier discovery fix holding up
+through HTTP: the list comes from the CLI's own `--help`, and the invented
+`grade` tool is absent.
+
+**The one that needed checking.** `web-page-reader` reported success, and a
+connector reporting success is exactly the shape a fabricated result takes. It
+is real: scraping `https://example.com` returned `title: "Example Domain"`,
+142 characters of the actual page text, and the genuine outbound link to
+`iana.org/domains/example`. An initial reading of this as empty was a mistake
+in the probe — it looked at `content` when the field is `markdown_content`.
+
+**Request shapes differ by kind**, which is worth recording because getting it
+wrong returns `422` and looks like a broken plugin: tools take
+`{tool_name, arguments}`, skills `{skill_name, context}`, connectors
+`{operation, parameters}`.
+
+**MCP and custom items.** `GET /api/mcp/servers` returns an empty list with the
+note *"A saved server is not a connected one. Use
+/api/mcp/servers/{name}/probe to actually start it and read its tools."* — the
+correct truthful state rather than a saved configuration presented as a live
+connection. `GET /api/plugins/custom/all` returns `[]`. On this isolated data
+directory there is nothing claiming to be Active that is not.
+
+**Not covered:** credentialed integrations were not exercised, because none is
+configured on this isolated profile — so their "needs setup" presentation is
+still unverified. Connector behaviour under a revoked or wrong credential, and
+localhost SSRF / path traversal / argument injection for custom MCP entries,
+were also not tested.
