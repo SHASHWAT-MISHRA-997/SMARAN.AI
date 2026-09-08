@@ -789,6 +789,22 @@ main, .nav, .foot { position: relative; z-index: 3; }
 }
 .dl-note b { color: #fde68a; }
 
+/* Amber above is for the two things that can actually stop an install: the
+   unsigned Windows binary, and the Linux window being a browser window. It
+   used to carry the instructions too - how to chmod an AppImage, where the
+   .deb lives, what the CLI is - so seven amber panels shouted equally and the
+   one that mattered read as decoration. Instructions are information, and
+   look like it. */
+.dl-info {
+  margin: 18px 0 0; padding: 13px 15px;
+  border: 1px solid rgba(255, 255, 255, .10); border-radius: 12px;
+  background: rgba(255, 255, 255, .03);
+  font-size: .81rem; line-height: 1.6; color: var(--dim);
+}
+.dl-info b { color: #e5e7eb; }
+.dl-info code { color: #e5e7eb; }
+.dl-card .dl-info { margin-top: auto; }
+
 .dl-foot { margin: 34px 0 0; text-align: center; color: var(--dim); font-size: .9rem; }
 .dl-foot a { color: #fca5a5; border-bottom: 1px solid rgba(252,165,165,.35); }
 .dl-foot a:hover { color: #fff; border-bottom-color: #fff; }

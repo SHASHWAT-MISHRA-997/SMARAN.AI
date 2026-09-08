@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, BookOpen, User, X, Upload, Plus, Database, LayoutDashboard, Globe, FolderPlus, FolderOpen, Brain, Languages, UserCheck, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Activity, Shield, Mic, MicOff, Volume2, VolumeX, Radio, Headphones, PhoneOff, Play, Square, Smartphone, Laptop, Battery, Ear, GitBranch, PictureInPicture2,} from 'lucide-react';
+import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Box } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
-import { micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
+import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
+import { useBackClose } from '../utils/backStack';
+import { parseCodeFence } from '../utils/codeFence';
 
 /* How often dictation reads back what has been said so far.
  *
@@ -15,13 +17,14 @@ const LIVE_DICTATION_MS = 1200;
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
 import * as nativeSpeech from '../utils/nativeSpeech';
+import { speakableText } from '../utils/speakableText';
 
 /* True in the packaged phone app with no computer linked: there is no backend
    at the app's own origin, so anything under /api comes back as the app's own
    HTML page. Module scope, because the message rows are their own components
    and need to know too. */
 const noBackend = () => isNativeApp() && !loadLink()?.url;
-import { downloadProjectZip, downloadSingleFile } from '../utils/zip';
+import { downloadProjectZip } from '../utils/zip';
 import ArtifactRenderer from './ArtifactRenderer';
 import ModelCompareModal from './ModelCompareModal';
 import HackerVoiceAssistant from './HackerVoiceAssistant';
@@ -32,7 +35,7 @@ import { detectClientDevice, isDesktopApp } from './RightPanel';
 import { Maya3DCanvas } from './CodePreviewVisualizer';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
-const positive = (value) => finite(value) && value > 0;
+
 const safeToFixed = (value, digits = 0) => {
   if (!finite(value)) return null;
   try { return value.toFixed(digits); } catch { return null; }
@@ -65,7 +68,7 @@ const parseChartSpec = (value) => {
     try {
       const parsed = JSON.parse(str);
       return isChartSpec(parsed) ? parsed : null;
-    } catch (_) {
+    } catch  {
       return null;
     }
   };
@@ -78,13 +81,13 @@ const parseChartSpec = (value) => {
   try {
     // 1. Escape lone backslashes
     let repaired = cleanVal.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
-    
+
     // 2. Clear out array ellipses: remove trailing ellipses like ", ..." or ",..."
     repaired = repaired.replace(/,\s*\.\.\.\s*(?=\])/g, '');
     repaired = repaired.replace(/(?<=\[)\s*\.\.\.\s*,\s*/g, '');
     // Also remove mid-array ellipses like ", ..., " or ",...,"
     repaired = repaired.replace(/,\s*\.\.\.\s*,\s*/g, ',');
-    
+
     res = tryParse(repaired);
     if (res) return res;
 
@@ -92,7 +95,7 @@ const parseChartSpec = (value) => {
     repaired = cleanVal.replace(/(?<!")\.\.\.(?!")/g, 'null');
     repaired = repaired.replace(/,\s*,\s*/g, ','); // merge double commas if any
     return tryParse(repaired);
-  } catch (_) {
+  } catch  {
     return null;
   }
 };
@@ -103,17 +106,7 @@ const parseChartSpec = (value) => {
 //  Think / Reasoning Block 
 // Renders the AI's chain-of-thought in a collapsible glassmorphism panel.
 const cleanPlainText = (value) => {
-  let text = String(value || '');
-  const score = (input) => (input.match(/[]/g) || []).length;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const repaired = decodeURIComponent(escape(text));
-      if (score(repaired) >= score(text)) break;
-      text = repaired;
-    } catch (_) {
-      break;
-    }
-  }
+  const text = String(value || '');
   return text.replace(/\*\*/g, '').replace(/__/g, '');
 };
 
@@ -178,7 +171,7 @@ const MarkdownText = ({ text }) => {
     : null;
 
   const parts = cleanedText.split(/```/);
-  
+
   const thinkElements = thinkMatches.map((t, i) => (
     <ThinkBlock key={`think-${i}`} content={t} />
   ));
@@ -190,11 +183,9 @@ const MarkdownText = ({ text }) => {
   const markdownParts = parts.map((part, index) => {
 
     if (index % 2 === 1) {
-      const lines = part.trim().split('\n');
-      const firstLine = lines[0].trim();
-      
-      const firstLineLower = firstLine.toLowerCase();
-      const rawBlockContent = lines.slice(1).join('\n').trim();
+      const { language, code, isSource } = parseCodeFence(part);
+      const firstLineLower = language.toLowerCase();
+      const rawBlockContent = code;
 
       if (firstLineLower === 'chart') {
         const chartData = parseChartSpec(rawBlockContent);
@@ -207,17 +198,16 @@ const MarkdownText = ({ text }) => {
       const possibleJsonString = (firstLineLower === 'json' || firstLineLower === 'chart')
         ? rawBlockContent
         : part.trim();
-        
+
       const autoChartData = parseChartSpec(possibleJsonString);
       if (autoChartData) {
         return <ArtifactRenderer key={index} data={autoChartData} />;
       }
 
-      const isLang = /^[a-zA-Z0-9_\-]+$/.test(firstLine);
-      const language = isLang ? firstLine : '';
-      const code = isLang ? lines.slice(1).join('\n') : part;
-      
-      return <CodeBlock key={index} code={code.trim()} language={language} />;
+      if (!isSource) {
+        return <div key={index} className="my-3 whitespace-pre-wrap break-words text-sm leading-relaxed" data-testid="plain-fenced-text">{code}</div>;
+      }
+      return <CodeBlock key={index} code={code} language={language} />;
     }
 
     const blockLines = part.split('\n');
@@ -287,9 +277,9 @@ const MarkdownText = ({ text }) => {
       if (trimmed.startsWith('|')) {
         flushList(lineIdx);
         const cols = trimmed.split('|').filter((_, i, arr) => i > 0 && i < arr.length - 1);
-        
+
         // Skip table separator alignment lines (e.g., | :--- | :--- |)
-        if (cols.every(c => /^[:\s\-]+$/.test(c.trim()))) {
+        if (cols.every(c => /^[:\s-]+$/.test(c.trim()))) {
           return;
         }
 
@@ -354,7 +344,7 @@ const MarkdownText = ({ text }) => {
 // Clean LaTeX math syntax into extremely readable presentation text
 const cleanMathFormula = (mathStr) => {
   let cleaned = mathStr;
-  
+
   // Strip out LaTeX block and inline math delimiters
   if (cleaned.startsWith('$$') && cleaned.endsWith('$$')) cleaned = cleaned.slice(2, -2);
   else if (cleaned.startsWith('$') && cleaned.endsWith('$')) cleaned = cleaned.slice(1, -1);
@@ -378,7 +368,7 @@ const cleanMathFormula = (mathStr) => {
   cleaned = cleaned.replace(/\\sum/g, '');
   cleaned = cleaned.replace(/\\prod/g, '');
   cleaned = cleaned.replace(/\\int/g, '');
-  
+
   // Greek Symbols & SI Units
   cleaned = cleaned.replace(/\\Delta/g, '');
   cleaned = cleaned.replace(/\\mu/g, '');
@@ -399,14 +389,14 @@ const cleanMathFormula = (mathStr) => {
   cleaned = cleaned.replace(/\\degree/g, '');
   cleaned = cleaned.replace(/\\circ/g, '');
   cleaned = cleaned.replace(/\^\s*/g, '');
-  
+
   // Fractions: \frac{num}{den} -> (num / den). Repeating handles common nested fractions.
   for (let i = 0; i < 4; i += 1) {
     const next = cleaned.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1 / $2)');
     if (next === cleaned) break;
     cleaned = next;
   }
-  
+
   // Superscripts & Subscripts
   const superscript = { '0': '', '1': '', '2': '', '3': '', '4': '', '5': '', '6': '', '7': '', '8': '', '9': '', '+': '', '-': '', '=': '', '(': '', ')': '', n: '', i: '' };
   const toSuperscript = (value) => [...value].map(char => superscript[char] || char).join('');
@@ -415,24 +405,24 @@ const cleanMathFormula = (mathStr) => {
   cleaned = cleaned.replace(/\^3/g, '');
   cleaned = cleaned.replace(/\^x/g, '');
   cleaned = cleaned.replace(/\^n/g, '');
-  
+
   // Clean backslashes, escape underscores, spaces
   cleaned = cleaned.replace(/\\([ _&%#${}])/g, '$1'); 
   cleaned = cleaned.replace(/\\/g, ''); 
   cleaned = cleaned.replace(/\*/g, '  ');
-  
+
   return cleaned.trim();
 };
 
 const parseInlineFormatting = (text) => {
   if (!text) return '';
-  
+
   // Split regex to capture block math ($$ or \[), inline math ($ or \(), bold (**), and inline code (`)
-  const parts = text.split(/(\$\$[^\$]+\$\$|\$[^\$]+\$|\\\(.*?\\\)|\\\[.*?\\\]|\*\*.*?\*\*|`.*?`)/g);
-  
+  const parts = text.split(/(\$\$[^$]+\$\$|\$[^$]+\$|\\\(.*?\\\)|\\\[.*?\\\]|\*\*.*?\*\*|`.*?`)/g);
+
   return parts.map((part, i) => {
     if (!part) return null;
-    
+
     // Block Math
     if ((part.startsWith('$$') && part.endsWith('$$')) || (part.startsWith('\\[') && part.endsWith('\\]'))) {
       const cleaned = cleanMathFormula(part);
@@ -442,7 +432,7 @@ const parseInlineFormatting = (text) => {
         </div>
       );
     }
-    
+
     // Inline Math
     if ((part.startsWith('$') && part.endsWith('$')) || (part.startsWith('\\(') && part.endsWith('\\)'))) {
       const cleaned = cleanMathFormula(part);
@@ -452,17 +442,17 @@ const parseInlineFormatting = (text) => {
         </span>
       );
     }
-    
+
     // Bold
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={i} className="font-black text-zinc-950 dark:text-white">{part.slice(2, -2)}</strong>;
     }
-    
+
     // Inline Code
     if (part.startsWith('`') && part.endsWith('`')) {
       return <code key={i} className="px-1.5 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-950 border border-zinc-350 dark:border-zinc-850 text-indigo-750 dark:text-indigo-400 font-bold font-mono text-[11px]">{part.slice(1, -1)}</code>;
     }
-    
+
     return cleanPlainText(part);
   });
 };
@@ -472,35 +462,14 @@ const CodeBlock = ({ code, language }) => {
   const langLower = (language || '').toLowerCase();
   const isMayaOr3D = /maya\.cmds|cmds\.poly|bpy\.|three\.js|three\/|webgl|create_jarvis_ring|polyTorus|polySphere|polyCube|polyCylinder/i.test(code);
   const isHtmlOrWeb = !isMayaOr3D && (langLower === 'html' || langLower === 'htm' || langLower === 'svg' || langLower === 'xml' || /<!doctype html|<html|<body|<div|<script/i.test(code));
-  const isPythonOrExecutable = !isMayaOr3D && !isHtmlOrWeb && (langLower === 'python' || langLower === 'py' || langLower === 'js' || langLower === 'javascript' || /print\(|console\.log\(/i.test(code));
 
   const [viewMode, setViewMode] = useState(isMayaOr3D ? '3d' : (isHtmlOrWeb ? 'preview' : 'code'));
   const [iframeKey, setIframeKey] = useState(0);
-  const [consoleOutput, setConsoleOutput] = useState('');
-  const [isRunning, setIsRunning] = useState(false);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleRunCode = () => {
-    setIsRunning(true);
-    setViewMode('output');
-    setTimeout(() => {
-      const prints = [];
-      const printMatches = code.matchAll(/print\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/gi);
-      for (const m of printMatches) {
-        prints.push(m[1]);
-      }
-      if (prints.length > 0) {
-        setConsoleOutput(prints.join('\n') + '\n\n[Process completed successfully with exit code 0]');
-      } else {
-        setConsoleOutput(`[SMARAN.AI Quantum Runtime]\n> Executing script in sandbox...\n> Execution OK (0.04s)\n\n[Process completed with exit code 0]`);
-      }
-      setIsRunning(false);
-    }, 350);
   };
 
   const handleDownloadZip = () => {
@@ -518,10 +487,7 @@ const CodeBlock = ({ code, language }) => {
     }
   };
 
-  const handleDownloadFile = () => {
-    const ext = isHtmlOrWeb ? 'html' : langLower === 'python' || langLower === 'py' || isMayaOr3D ? 'py' : langLower === 'javascript' || langLower === 'js' ? 'js' : langLower === 'json' ? 'json' : langLower === 'css' ? 'css' : (langLower || 'txt');
-    downloadSingleFile(`smaran_app.${ext}`, code);
-  };
+
 
   const handleOpenNewTab = () => {
     const blob = new Blob([code], { type: 'text/html;charset=utf-8' });
@@ -562,18 +528,6 @@ const CodeBlock = ({ code, language }) => {
               >
                 <Eye className="w-3 h-3" />
                 <span>Live Preview</span>
-              </button>
-            )}
-
-            {isPythonOrExecutable && (
-              <button
-                onClick={handleRunCode}
-                className={`px-2.5 py-1 rounded-md text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                  viewMode === 'output' ? 'bg-emerald-600 text-white shadow-xs' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Play className="w-3 h-3 text-emerald-400" />
-                <span>{isRunning ? 'Running...' : 'Run Output'}</span>
               </button>
             )}
 
@@ -654,22 +608,9 @@ const CodeBlock = ({ code, language }) => {
             key={iframeKey}
             srcDoc={code}
             title="SMARAN Live Interactive Artifact Preview"
-            sandbox="allow-scripts allow-modals allow-forms allow-same-origin allow-popups"
+            sandbox="allow-scripts allow-modals allow-forms allow-popups"
             className="w-full h-[420px] border-0 bg-white"
           />
-        </div>
-      ) : viewMode === 'output' ? (
-        <div className="p-4 bg-black/90 font-mono text-[11px] text-emerald-400 leading-relaxed text-left whitespace-pre-wrap min-h-[140px] max-h-[350px] overflow-y-auto border-t border-zinc-850">
-          <div className="flex items-center gap-2 pb-2 mb-2 border-b border-zinc-800 text-zinc-400 text-[10px]">
-            <Terminal className="w-3 h-3 text-emerald-400" />
-            <span>Interactive Terminal Sandbox Output</span>
-          </div>
-          {consoleOutput || (
-            <div className="flex items-center gap-2 text-zinc-400">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              <span>Executing script in sandbox...</span>
-            </div>
-          )}
         </div>
       ) : (
         <pre className="p-4 overflow-x-auto font-mono text-[11px] text-zinc-300 leading-relaxed text-left whitespace-pre max-h-[500px]">
@@ -816,7 +757,7 @@ const MediaPreviewCard = ({ text }) => {
   }
 
   // Detect all Web URLs (excluding YouTube)
-  const allUrls = text.match(/https?:\/\/[^\s<>\]\[\)\(]+/gi) || [];
+  const allUrls = text.match(/https?:\/\/[^\s<>\][)(]+/gi) || [];
   const webUrls = allUrls.filter(u => !u.includes('youtube.com') && !u.includes('youtu.be'));
   const cleanWebUrls = webUrls.map(u => u.replace(/[.,;:!?)]+$/, '')).filter((v, i, a) => a.indexOf(v) === i);
 
@@ -859,13 +800,13 @@ const MediaPreviewCard = ({ text }) => {
               <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <img
-                    src={`https://www.google.com/s2/favicons?domain=${(() => { try { return new URL(url).hostname; } catch(_) { return 'website'; } })()}&sz=64`}
+                    src={`https://www.google.com/s2/favicons?domain=${(() => { try { return new URL(url).hostname; } catch { return 'website'; } })()}&sz=64`}
                     alt="Website Favicon"
                     className="w-4 h-4 rounded shrink-0 bg-white p-0.5"
                     onError={(e) => { e.target.style.display = 'none'; }}
                   />
                   <span className="text-xs font-black text-indigo-400 truncate tracking-wide">
-                    {(() => { try { return new URL(url).hostname; } catch(_) { return url; } })()}
+                    {(() => { try { return new URL(url).hostname; } catch { return url; } })()}
                   </span>
                 </div>
                 <a
@@ -949,7 +890,7 @@ const extractBackendMeasurements = (payload = {}) => {
 };
 
 // Per-message row with Gemini-style copy / re-use / delete actions 
-const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete, isSpeakingAudio, stopSpeaking, speakText, onConfirmDesktopAction, onCancelDesktopAction, audioEnabled, autoSpeakEnabled }) => {
+const MessageRow = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopSpeaking, speakText, onConfirmDesktopAction, onCancelDesktopAction, audioEnabled, selectedLanguage }) => {
   const [copied, setCopied] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [editText, setEditText] = React.useState(msg.content);
@@ -1007,7 +948,7 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete, isSpeakingAudi
               {/* If we have a vision file reference, render it! */}
               {(() => {
                 let imageUrl = msg.imagePreview; // Local blob URL during active session
-                
+
                 // If loaded from history database, parse msg.references
                 if (!imageUrl && msg.references && Array.isArray(msg.references)) {
                   const visionRef = msg.references.find(r => r.type === 'vision');
@@ -1023,7 +964,7 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete, isSpeakingAudi
                         imageUrl = `${API_BASE}${visionRef.url}`;
                       }
                     }
-                  } catch (_) {}
+                  } catch  {}
                 }
 
                 if (imageUrl) {
@@ -1042,7 +983,7 @@ const MessageRow = ({ msg, onReuse, onRefClick, onEdit, onDelete, isSpeakingAudi
                 }
                 return null;
               })()}
-              
+
               {isEditing ? (
                 <div className="w-full min-w-0 max-w-full flex flex-col gap-2 mt-1">
                   <textarea
@@ -1281,9 +1222,20 @@ const voiceGender = (name = '') => {
   return '';
 };
 
-const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenDeveloper, onOpenWorkspace, onEnsureSession, performancePosition }) => {
+const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenWorkspace, onEnsureSession, performancePosition }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  useEffect(() => {
+    const applySkill = () => {
+      const instructions = localStorage.getItem('sm_pending_skill_prompt');
+      if (!instructions) return;
+      localStorage.removeItem('sm_pending_skill_prompt');
+      setInput((current) => [current, instructions].filter(Boolean).join('\n\n'));
+    };
+    applySkill();
+    window.addEventListener('smaran:use-skill', applySkill);
+    return () => window.removeEventListener('smaran:use-skill', applySkill);
+  }, []);
   const inputValueRef = useRef('');
   useEffect(() => { inputValueRef.current = input; }, [input]);
   const [telemetry, setTelemetry] = useState(null);
@@ -1305,6 +1257,34 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   useEffect(() => { localStorage.setItem('sm_web_search', String(isWebSearchEnabled)); }, [isWebSearchEnabled]);
   // RAG Mode Toggle  Combination (RAG On / Direct AI Mode)
   const [isRagEnabled, setIsRagEnabled] = useState(true);
+
+  // The two grounding modes are exclusive, and the backend already treats them
+  // that way: /api/chat sets rag_enabled to False whenever web_search is on,
+  // so the live web wins. The buttons did not know that, so both could read ON
+  // at once - the screen said the uploaded files were being used while the
+  // request had already dropped them, and the answer came from the web with
+  // nothing on screen to explain why the documents had been ignored.
+  //
+  // Turning one on now turns the other off, so what the buttons say is what
+  // the request does.
+  const enableRag = (on) => {
+    setIsRagEnabled(on);
+    if (on) setIsWebSearchEnabled(false);
+  };
+  const enableWebSearch = (on) => {
+    setIsWebSearchEnabled(on);
+    if (on) setIsRagEnabled(false);
+  };
+
+  // Web search is remembered between runs, and RAG starts on, so a phone that
+  // had web search left on opened with both buttons lit before either was
+  // touched. Settled once on load, the same way and in the same direction the
+  // backend settles it.
+  useEffect(() => {
+    if (isWebSearchEnabled) setIsRagEnabled(false);
+    // Only on mount: after this the two handlers above keep them apart.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Model readiness  polling until model is downloaded
   const [modelStatus, setModelStatus] = useState({ ready: true, downloading: false, status_msg: '', display_name: '' });
   const [isModelNoticeExpanded, setIsModelNoticeExpanded] = useState(false);
@@ -1320,7 +1300,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         if (!response.ok) return;
         const data = await response.json();
         if (!cancelled) setWorkspaceStatus(data);
-      } catch (_) {
+      } catch  {
         // Project context is optional; chat remains available without it.
       }
     };
@@ -1329,7 +1309,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     const timer = window.setInterval(refreshWorkspace, 5000);
     return () => { cancelled = true; window.removeEventListener('focus', refreshWorkspace); window.clearInterval(timer); };
   }, []);
-  const [translatedResponse, setTranslatedResponse] = useState(null);
+
   const [isTranslating, setIsTranslating] = useState(false);
   const translateTimerRef = useRef(null);
   // Model Comparison Matrix Modal
@@ -1370,7 +1350,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [wakeWordEnabled, setWakeWordEnabled] = useState(
     () => localStorage.getItem('sm_wake_enabled') !== 'false',
   );
-  const [wakePhrase, setWakePhrase] = useState(
+  const [wakePhrase] = useState(
     () => localStorage.getItem('sm_wake_phrase') || WAKE_PHRASE_DEFAULT,
   );
   const wakeListenerRef = useRef(null);
@@ -1432,6 +1412,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [sheetError, setSheetError] = useState('');
   const [sheetFreeOnly, setSheetFreeOnly] = useState(true);
 
+  // The phone model picker is a ChatArea-owned overlay, so the app-level
+  // back-stack cannot see it.  Register it here as well; otherwise Android's
+  // Back button leaves the picker (and sometimes the app) instead of closing
+  // the picker the user is looking at.
+
   const refreshDeviceChoice = () => setDeviceChoice({
     provider: standalone.getProvider(),
     model: standalone.getModel(),
@@ -1475,16 +1460,16 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     document.documentElement.classList.toggle('sm-menu-open', covering);
     return () => document.documentElement.classList.remove('sm-menu-open');
   }, [mobileToolsOpen, modelSheetOpen]);
-  const [voiceState, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'thinking' | 'speaking'
-  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [, setVoiceState] = useState('idle'); // 'idle' | 'listening' | 'thinking' | 'speaking'
+  const [, setVoiceTranscript] = useState('');
   const [voiceAiResponse, setVoiceAiResponse] = useState('');
   const [isSpeakingAudio, setIsSpeakingAudio] = useState(false);
-  const [micVolume, setMicVolume] = useState(0);
+
   const recognitionRef = useRef(null);
   const sidebarDictationRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const micStreamRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
+
+
+
   const audioChunksRef = useRef([]);
   // Why the last transcription came back empty, so the failure can be named
   // rather than blamed on the microphone.
@@ -1554,8 +1539,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
   // Refs to avoid stale closures in RAF loops and recognition callbacks
   const isVoiceModeOpenRef = useRef(false);
-  const isDictatingRef = useRef(false);
-  const dictationStoppedManuallyRef = useRef(false);
+
+
   const voicesLoadedRef = useRef(false);
   // Pending destructive desktop command awaiting a spoken yes/no confirmation
   const pendingVoiceCommandRef = useRef(null);
@@ -1563,7 +1548,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   // Enhanced Real-Time Voice & Speak Mode
   const getRecognitionLang = (langCode) => {
     const map = {
-      en: 'en-US',
+      // Android uses the handset's installed regional pack. This phone is
+      // en-GB; forcing en-US made Soda fail with language-pack error 13.
+      en: 'en-GB',
       hi: 'hi-IN',
       gu: 'gu-IN',
       pa: 'pa-IN',
@@ -1577,19 +1564,59 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     return map[langCode] || 'en-US';
   };
 
+  // The character on screen decides this. It was read in three places with
+  // two different fallbacks - one said male, two said female - so the same
+  // character could be described one way and voiced another. Female is the
+  // fallback because the default character is a woman; the Energy Core sets
+  // male explicitly when it is chosen.
+  const assistantGender = () =>
+    (localStorage.getItem('sm_voice_gender') || 'female').toLowerCase();
+
   const ttsChunksRef = useRef([]);
   const generatedAudioRef = useRef(null);
   const generatedAudioUrlRef = useRef('');
 
   const speakNativeText = (text, langCode = selectedLanguage) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      console.warn('Speech synthesis is not supported in this browser.');
-      return;
-    }
-
     // Check if audio is globally enabled
     if (!audioEnabled) {
       console.log('Audio is disabled globally');
+      return;
+    }
+
+    const clean = speakableText(text);
+
+    if (!clean) return;
+
+    if (isNativeApp()) {
+      setIsSpeakingAudio(true);
+      if (isVoiceModeOpenRef.current) setVoiceState('speaking');
+      nativeSpeech.speak({
+        text: clean,
+        language: langCode === 'en' ? 'en-IN' : getRecognitionLang(langCode),
+        gender: assistantGender(),
+        rate: 0.95,
+        pitch: 1.0,
+        onStart: () => {
+          setIsSpeakingAudio(true);
+          if (isVoiceModeOpenRef.current) setVoiceState('speaking');
+        },
+        onEnd: () => {
+          setIsSpeakingAudio(false);
+          if (isVoiceModeOpenRef.current) setVoiceState('idle');
+        },
+        onError: () => {
+          setIsSpeakingAudio(false);
+          if (isVoiceModeOpenRef.current) setVoiceState('idle');
+        },
+      }).catch((err) => {
+        console.warn('Native speech error:', err);
+        setIsSpeakingAudio(false);
+      });
+      return;
+    }
+
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      console.warn('Speech synthesis is not supported in this browser.');
       return;
     }
 
@@ -1601,15 +1628,6 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       ttsChunksRef.current = [];
       setIsSpeakingAudio(false);
 
-      const clean = text
-        .replace(/```[\s\S]*?```/g, '')
-        .replace(/`([^`]+)`/g, '$1')
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-        .replace(/[*#_~>•]/g, '')
-        .replace(/\n+/g, '. ')
-        .trim();
-
-      if (!clean) return;
 
       // Clean sentence chunks (max ~140 chars each for flawless continuous speech flow)
       const rawSentences = clean.match(/[^.!?।\n,;]+[.!?।\n,;]*/g) || [clean];
@@ -1630,7 +1648,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       if (sentences.length === 0) return;
 
       ttsChunksRef.current = [...sentences];
-      const targetLang = getRecognitionLang(langCode) || 'en-US';
+      const targetLang = langCode === 'en' ? 'en-IN' : (getRecognitionLang(langCode) || 'en-IN');
 
       window._activeSpeechUtterances = window._activeSpeechUtterances || [];
       window._activeSpeechUtterances = [];
@@ -1670,13 +1688,15 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           // Match the character's gender. Without this the first voice the
           // system happened to return was used, so a female character was
           // frequently given a man's voice.
-          const wanted = (localStorage.getItem('sm_voice_gender') || 'female').toLowerCase();
+          const wanted = assistantGender();
           const sameGender = candidates.filter((v) => voiceGender(v.name) === wanted);
           const pool = sameGender.length ? sameGender : candidates;
 
           // Within the right gender, prefer the higher-quality neural voices.
-          const natural = pool.find((v) => /natural|neural|online|google/i.test(v.name));
-          const matching = natural || pool[0];
+          const exactLocale = pool.filter((v) => v.lang.toLowerCase() === targetLang.toLowerCase());
+          const preferred = exactLocale.length ? exactLocale : pool;
+          const natural = preferred.find((v) => /natural|neural|online|google/i.test(v.name));
+          const matching = natural || preferred[0];
           if (matching) utterance.voice = matching;
         }
 
@@ -1810,21 +1830,13 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       noteForLog(`speak skipped: audioEnabled=${audioEnabled} textLength=${(text || '').trim().length}`);
       return;
     }
-    const clean = text
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      .replace(/[*#_~>•]/g, '')
-      .replace(/\n+/g, '. ')
-      .trim();
+    const clean = speakableText(text);
     if (!clean) return;
 
     stopSpeaking();
 
-    /* No backend to synthesize with. The browser's own voice is built into
-       the Android WebView, so reading a reply aloud does not need a computer
-       at all - it was only ever asking the backend first because the backend
-       has better voices, not because this one is missing. */
+    /* On native mobile app or when no backend is paired, use native speech synthesis.
+       Android WebView lacks browser TTS, so nativeSpeech bridges directly to Android TextToSpeech. */
     if (noBackend()) {
       speakNativeText(clean, langCode);
       return;
@@ -1848,7 +1860,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           text: clean,
           language: langCode,
           speed: 0.95,
-          gender: localStorage.getItem('sm_voice_gender') || 'female',
+          gender: assistantGender(),
         }),
       });
       if (!response.ok) throw new Error(`Local TTS returned ${response.status}`);
@@ -1857,6 +1869,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       const url = URL.createObjectURL(blob);
       generatedAudioUrlRef.current = url;
       const audio = new Audio(url);
+      audio.volume = 1.0;
+      audio.muted = false;
       generatedAudioRef.current = audio;
       audio.onplay = () => {
         setIsSpeakingAudio(true);
@@ -1875,9 +1889,17 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         if (generatedAudioRef.current === audio) generatedAudioRef.current = null;
         reportSpeechFailure('the audio element rejected the file', clean, langCode);
       };
-      await audio.play();
-      noteForLog(`play() resolved: ${blob.size} bytes, duration=${audio.duration}, `
-        + `muted=${audio.muted}, volume=${audio.volume}, paused=${audio.paused}`);
+      try {
+        await audio.play();
+        noteForLog(`play() resolved: ${blob.size} bytes, duration=${audio.duration}, `
+          + `muted=${audio.muted}, volume=${audio.volume}, paused=${audio.paused}`);
+      } catch (playErr) {
+        if (playErr?.name === 'AbortError') {
+          // Play was intentionally superseded or paused
+          return;
+        }
+        reportSpeechFailure(`audio.play() error: ${playErr?.message || playErr}`, clean, langCode);
+      }
     } catch (error) {
       reportSpeechFailure(`${error?.name || 'Error'}: ${error?.message || error}`,
                           clean, langCode);
@@ -1908,8 +1930,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const reportSpeechFailure = (reason, text, langCode) => {
     noteForLog(`playback failed: ${reason}`);
     setIsSpeakingAudio(false);
-    const voices = window.speechSynthesis?.getVoices?.() || [];
-    if (voices.length > 0) {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       speakNativeText(text, langCode);
       return;
     }
@@ -1920,12 +1941,15 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
   const stopSpeaking = () => {
+    if (isNativeApp()) {
+      nativeSpeech.stopSpeaking().catch(() => {});
+    }
     ttsChunksRef.current = [];
     if (generatedAudioRef.current) {
       try {
         generatedAudioRef.current.pause();
         generatedAudioRef.current.currentTime = 0;
-      } catch (_) {}
+      } catch  {}
       generatedAudioRef.current = null;
     }
     if (generatedAudioUrlRef.current) {
@@ -2034,11 +2058,18 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     // Reading a reply aloud needs no backend - the WebView has a voice. What
     // it cannot do without one is hear you, so a session that can only speak
     // says as much rather than sitting there waiting for words.
-    if (voiceNeedsHost() && !standalone.isReady()) { sayVoiceUnavailable(); return; }
+    // A standalone phone can still hear and speak through Android's native
+    // services.  The host/model check belongs to sending an answer, not to
+    // opening the microphone UI.  Keeping it here made Voice Assistant show
+    // “voice input unavailable” before native speech was even attempted.
+    if (voiceNeedsHost() && !standalone.isReady() && !isNativeApp()) {
+      sayVoiceUnavailable();
+      return;
+    }
 
     // Ensure any leftover dictation recognition is cleanly stopped
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (_) {}
+      try { recognitionRef.current.stop(); } catch  {}
     }
     stopSpeaking();
     setIsVoiceModeOpen(true);
@@ -2060,6 +2091,16 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     setVoiceAiResponse('');
   };
 
+  // The Android shell asks the page before finishing the Activity. Register
+  // the voice surface as a topmost layer so Back closes it predictably.
+  // One history entry survives tools -> Speak transitions. Separate hooks let
+  // the closing tools sheet pop the newly opened voice screen immediately.
+  useBackClose([
+    { open: isVoiceModeOpen, close: closeVoiceMode },
+    { open: mobileToolsOpen, close: () => setMobileToolsOpen(false) },
+    { open: modelSheetOpen, close: () => setModelSheetOpen(false) },
+  ]);
+
   // Sidebar Voice is continuous dictation into the composer. Speak remains a
   // separate two-way voice conversation with spoken assistant responses.
   useEffect(() => {
@@ -2069,10 +2110,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         // Before the recorder, so no further live reading is started for a
         // recording that is ending.
         if (active.live) window.clearInterval(active.live);
-        try { active.recorder.stop(); } catch (_) {}
+        try { active.recorder.stop(); } catch  {}
         active.stream?.getTracks?.().forEach((track) => track.stop());
       } else {
-        try { active?.stop?.(); } catch (_) {}
+        try { active?.stop?.(); } catch  {}
       }
       sidebarDictationRef.current = null;
       setIsDictating(false);
@@ -2162,17 +2203,37 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
        and the screen said "Unexpected token '<'". */
     const startNativeDictation = async () => {
       const startingText = inputValueRef.current.trim();
+      let heardSpeech = false;
+      const session = { kind: 'native', stop: () => {} };
+      sidebarDictationRef.current = session;
+      setIsDictating(true);
       try {
         const stopListening = await nativeSpeech.listen({
           language: getRecognitionLang(selectedLanguage),
-          onText: (heard) => setInput([startingText, heard].filter(Boolean).join(' ').trim()),
-          onEnd: () => stop(),
+          continuous: true,
+          onText: (heard) => {
+            if (heard) heardSpeech = true;
+            setInput([startingText, heard].filter(Boolean).join(' ').trim());
+          },
+          onEnd: ({ reason, message } = {}) => {
+            if (sidebarDictationRef.current === session) stop();
+            if (message || (!heardSpeech && reason === 'no-speech')) {
+              window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
+                detail: { message: message || 'No speech was recognized. Tap Dictate and try speaking again.' },
+              }));
+            }
+          },
         });
-        sidebarDictationRef.current = { kind: 'native', stop: stopListening };
+        if (stopListening.ended || sidebarDictationRef.current !== session) {
+          await stopListening.cancel();
+          return;
+        }
+        session.stop = stopListening;
+        session.cancel = stopListening.cancel;
         setIsDictating(true);
-        composerRef.current?.focus?.();
         window.dispatchEvent(new CustomEvent('smaran:dictation-state', { detail: { active: true } }));
       } catch (error) {
+        if (sidebarDictationRef.current === session) stop();
         window.dispatchEvent(new CustomEvent('smaran:dictation-error', {
           detail: { message: error?.message || 'The phone could not start listening.' },
         }));
@@ -2264,10 +2325,14 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         setIsDictating(true);
         composerRef.current?.focus?.();
         window.dispatchEvent(new CustomEvent('smaran:dictation-state', { detail: { active: true } }));
-      } catch (_) { stop(); }
+      } catch  { stop(); }
     };
     window.addEventListener('smaran:toggle-dictation', toggle);
-    return () => { window.removeEventListener('smaran:toggle-dictation', toggle); stop(); };
+    return () => {
+      window.removeEventListener('smaran:toggle-dictation', toggle);
+      sidebarDictationRef.current?.cancel?.();
+      stop();
+    };
   }, [selectedLanguage]);
 
   // The pet sits above the composer, and the composer changes height - it
@@ -2339,7 +2404,16 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     localStorage.setItem('sm_wake_enabled', String(wakeWordEnabled));
     localStorage.setItem('sm_wake_phrase', wakePhrase);
 
-    const shouldListen = wakeWordEnabled && !isVoiceModeOpen;
+    // The wake listener owns a microphone stream. Pause it while the user is
+    // explicitly dictating too; leaving both recognisers live made Android
+    // arbitrate between two audio sessions and was reported as unavailable
+    // input even though the native recogniser had permission.
+    // Android's WebView exposes the browser SpeechRecognition constructor,
+    // but its background wake session can false-trigger on UI audio and open
+    // a voice layer above an unrelated modal. Explicit Speak/Dictate already
+    // use the native recognizer, so keep the background browser listener off
+    // on the phone and reserve the microphone for the action the user chose.
+    const shouldListen = wakeWordEnabled && !isNativeApp() && !isVoiceModeOpen && !isDictating;
     if (!shouldListen) {
       wakeListenerRef.current?.stop();
       wakeListenerRef.current = null;
@@ -2368,7 +2442,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       wakeListenerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wakeWordEnabled, wakePhrase, isVoiceModeOpen]);
+  }, [wakeWordEnabled, wakePhrase, isVoiceModeOpen, isDictating]);
 
   useEffect(() => {
     // detectClientDevice is async (it awaits the Battery API). Storing the
@@ -2391,7 +2465,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           const data = await res.json();
           setTelemetry(data);
         }
-      } catch (_) {}
+      } catch  {}
     };
     fetchTelemetry();
     const interval = setInterval(fetchTelemetry, 2500);
@@ -2419,6 +2493,20 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     autoSizeComposer(event.target);
   };
 
+  // The height set above is in pixels, measured at the width the box had when
+  // it was last typed into. Turning the phone sideways changes that width and
+  // nothing re-measured it, so text that fitted in portrait was cut off in
+  // landscape - the placeholder alone wrapped and lost its second line.
+  useEffect(() => {
+    const remeasure = () => autoSizeComposer(composerRef.current);
+    window.addEventListener('resize', remeasure);
+    window.addEventListener('orientationchange', remeasure);
+    return () => {
+      window.removeEventListener('resize', remeasure);
+      window.removeEventListener('orientationchange', remeasure);
+    };
+  }, []);
+
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -2442,8 +2530,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     const model = modelParts.join(':');
     let apiKeys = {};
     let cachedModels = {};
-    try { apiKeys = JSON.parse(localStorage.getItem('sm_cloud_api_keys') || '{}'); } catch (_) {}
-    try { cachedModels = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}'); } catch (_) {}
+    try { apiKeys = JSON.parse(localStorage.getItem('sm_cloud_api_keys') || '{}'); } catch  {}
+    try { cachedModels = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}'); } catch  {}
     const isEligible = (providerId, modelId) => (
       providerId !== 'openrouter' || modelId === 'openrouter/free' || modelId.endsWith(':free')
     );
@@ -2538,7 +2626,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           const data = await res.json();
           if (!cancelled) setModelStatus(data);
         }
-      } catch (_) {}
+      } catch  {}
       finally {
         if (!cancelled) timer = window.setTimeout(checkStatus, document.hidden ? 30000 : 10000);
       }
@@ -2620,7 +2708,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     try {
       const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
       let targetIds = collectionIds && collectionIds.length > 0 ? collectionIds : activeCollections;
-      
+
       // If active collections is empty, fetch all user collections from backend
       if (!targetIds || targetIds.length === 0) {
         const colRes = await fetch(`${API_BASE}/api/collections`, {
@@ -2655,7 +2743,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           allDocs.push(...asList(docs));
         }
       }
-      
+
       const uniqueDocs = Array.from(
         new Map(allDocs.map((doc) => [doc.id, doc])).values()
       ).sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
@@ -2695,7 +2783,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       } else {
         setSelectedFilePreview({ id: doc.id, name: doc.name, content_preview: "Document content parsed and indexed into vector database." });
       }
-    } catch (e) {
+    } catch  {
       setSelectedFilePreview({ id: doc.id, name: doc.name, content_preview: "Document content indexed." });
     }
   };
@@ -2711,9 +2799,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
   // Direct upload inside the chat window
-  const handleDirectUploadClick = () => {
-    fileInputRef.current?.click();
-  };
+
 
   const handleDirectFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -2727,7 +2813,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       const getColRes = await fetch(`${API_BASE}/api/collections`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      
+
       let targetCollectionId = null;
       if (getColRes.ok) {
         const cols = await parseJsonResponse(getColRes);
@@ -2782,17 +2868,17 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
       setIsRagEnabled(true);
       setIsWebSearchEnabled(false);
-      
+
       const nextActiveCollections = activeCollections.includes(targetCollectionId)
         ? activeCollections
         : [...activeCollections, targetCollectionId];
       if (nextActiveCollections !== activeCollections) {
         setActiveCollections(nextActiveCollections);
       }
-      
+
       // Refresh visible session-file chips after every successful upload
       await fetchUploadedFiles(nextActiveCollections);
-      
+
       setDirectUploadMessage(`Successfully parsed and indexed ${files.length} document(s)!`);
       setTimeout(() => {
         setDirectUploadMessage(null);
@@ -2812,7 +2898,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
     setDirectUploading(true);
     let uploadedCount = 0;
-    
+
     // Ignore build artifacts, virtual environments, and system VCS directories
     const IGNORED_DIR_PATTERNS = [
       '/node_modules/', '/.git/', '/.venv/', '/venv/', '/__pycache__/', 
@@ -2827,7 +2913,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       if (!file || file.size === 0) return false;
       const relPath = '/' + (file.webkitRelativePath || file.name).replace(/\\/g, '/');
       if (IGNORED_DIR_PATTERNS.some(pat => relPath.includes(pat))) return false;
-      
+
       const ext = '.' + file.name.split('.').pop().toLowerCase();
       if (FORBIDDEN_EXTS.includes(ext)) return false;
       return true;
@@ -2884,7 +2970,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       const file = validFiles[i];
       const relativePath = file.webkitRelativePath || file.name;
       setDirectUploadMessage(`Ingesting folder files: ${i + 1} of ${validFiles.length} ("${relativePath}")...`);
-      
+
       const formData = new FormData();
       formData.append('file', file, relativePath);
       if (activeSessionId) {
@@ -2933,7 +3019,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         },
         body: JSON.stringify({ content: newText.trim() })
       });
-      
+
       if (!resp.ok) {
         throw new Error('Failed to update message content.');
       }
@@ -2942,11 +3028,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       const messagesResp = await fetch(`${API_BASE}/api/chat/sessions/${activeSessionId}/messages`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      
+
       if (messagesResp.ok) {
         const updatedMsgs = await messagesResp.json();
         setMessages(updatedMsgs);
-        
+
         // 3. Trigger chat stream using the edited user text, and clearing current input field
         setStreaming(true);
         streamingRef.current = true;
@@ -2982,6 +3068,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               turbo: turboMode,
               web_search: isWebSearchEnabled,
               rag_enabled: isRagEnabled,
+              assistant_gender: assistantGender(),
               ...getCloudRoutingPayload(),
             }),
           });
@@ -3038,7 +3125,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                   if (tokenStr) {
                     accumulatedResponse += tokenStr;
                     incomingQueueRef.current.push(tokenStr);
-                    
+
                     if (!typewriterTimerRef.current) {
                       const processQueue = () => {
                         if (incomingQueueRef.current.length > 0) {
@@ -3077,7 +3164,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                     setTelemetry((previous) => ({ ...previous, ...backendMeasurements.telemetryPatch }));
                     window.dispatchEvent(new CustomEvent('smaran-inference-update', { detail: backendMeasurements.telemetryPatch }));
                   }
-                } catch (_) {}
+                } catch  {}
               }
             }
           }
@@ -3197,7 +3284,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
   /** Answer with no backend, streaming into the bubble already on screen. */
-  const answerOnDevice = async ({ prompt, sessionId, assistantId, userMessage, spoken }) => {
+  const answerOnDevice = async ({ prompt, sessionId, assistantId, spoken }) => {
     const provider = standalone.getProvider();
     const key = standalone.loadKeys()[provider];
     let model = standalone.getModel();
@@ -3354,7 +3441,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       clearTimeout(translateTimerRef.current);
     }
     setIsTranslating(false);
-    
+
     setInput('');
     // Collapse the composer back to a single row once the message is sent.
     if (composerRef.current) composerRef.current.style.height = 'auto';
@@ -3368,7 +3455,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       content: userPrompt,
       created_at: new Date().toISOString(),
     };
-    
+
     const assistantMessage = {
       id: Date.now() + 1,
       role: 'assistant',
@@ -3532,7 +3619,19 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           model: selectedModel,
           turbo: turboMode,
           web_search: isVoiceTurn ? false : isWebSearchEnabled,
-          rag_enabled: !isVoiceTurn && isRagEnabled && activeCollections.length > 0,
+          // Whether RAG is on is what the toggle says, and nothing else.
+          //
+          // This used to also require `activeCollections.length > 0`, so with
+          // RAG switched on and no collection picked in the sidebar the request
+          // went out as rag_enabled:false - and the backend, told grounding was
+          // off, answered from general knowledge while the button still read
+          // RAG ON. There was no way to tell from the screen that the uploaded
+          // files had not been consulted.
+          //
+          // An empty `collections` is not "no grounding", it is "no filter":
+          // the backend already falls back to every document in the session.
+          rag_enabled: !isVoiceTurn && isRagEnabled,
+          assistant_gender: assistantGender(),
           // Spoken turns get short, proactive replies written to be heard.
           voice_mode: isVoiceTurn,
           target_language: selectedLanguage === 'en' ? undefined : selectedLanguage,
@@ -3797,7 +3896,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           });
           const data = await res.json();
           emitVoiceReply(data?.message || 'Done.');
-        } catch (_) {
+        } catch  {
           emitVoiceReply(selectedLanguage === 'en' ? 'That action could not be completed.' : 'Action could not be completed.');
         }
         return true;
@@ -3829,7 +3928,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       }
       emitVoiceReply(data.message || 'Done.');
       return true;
-    } catch (_) {
+    } catch  {
       // Bridge unreachable (e.g. host agent unavailable) — fall back to chat.
       return false;
     }
@@ -3927,7 +4026,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               Hidden when the panel itself has been set to Hidden in Settings:
               the button used to stay, and pressing it did nothing at all,
               because the panel is gated on that setting further up. */}
-          {onTogglePanel && performancePosition !== 'hidden' && (
+          {onTogglePanel && performancePosition !== 'hidden' && !isPhone() && (
             <button
               data-testid="performance-toggle"
               onClick={onTogglePanel}
@@ -3964,8 +4063,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         </div>
       </div>
 
-      {/* Single Row Real-Time Hardware & Speed Telemetry Ribbon (Hidden on mobile per user request) */}
-      <div className="hidden sm:flex w-full px-3 sm:px-6 py-1.5 bg-white/80 dark:bg-zinc-950/60 backdrop-blur-md border-b border-zinc-200/70 dark:border-zinc-800/60 flex-wrap items-center gap-x-1.5 gap-y-1 sm:gap-x-2.5 font-mono text-[10px] sm:text-[11px] select-none shrink-0 z-10 transition-all duration-300">
+      {/* Single Row Real-Time Hardware & Speed Telemetry Ribbon. Keep the
+          complete performance strip off phones, including landscape where
+          Android reports a desktop-sized CSS viewport. */}
+      {!isPhone() && <div className="hidden sm:flex w-full px-3 sm:px-6 py-1.5 bg-white/80 dark:bg-zinc-950/60 backdrop-blur-md border-b border-zinc-200/70 dark:border-zinc-800/60 flex-wrap items-center gap-x-1.5 gap-y-1 sm:gap-x-2.5 font-mono text-[10px] sm:text-[11px] select-none shrink-0 z-10 transition-all duration-300">
         <div className="contents">
           {/* Real Client Active Device (Mobile / Tablet / Laptop) */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-700 dark:text-indigo-300 font-bold" title={`Browser-reported client hint: ${reportedDevice} (${reportedOs}). Browser hints can be unavailable or spoofed.`}>
@@ -4020,7 +4121,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             </span>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Model Downloading Banner  shown when AI model is still being pulled */}
       {!modelStatus.ready && (
@@ -4065,6 +4166,20 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       {modelSheetOpen && (
         <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm"
              onClick={() => setModelSheetOpen(false)}>
+          {/* Keep an escape hatch above the sheet and below the system status
+              area.  On Android the WebView draws edge-to-edge, and a long
+              model list could otherwise leave the header/close button behind
+              the status bar. */}
+          <button
+            type="button"
+            aria-label="Close model picker"
+            onClick={() => setModelSheetOpen(false)}
+            className="sm:hidden fixed right-3 z-[140] inline-flex items-center gap-1.5 rounded-xl border border-white/20 bg-zinc-950/90 px-3 py-2 text-xs font-black text-white shadow-xl backdrop-blur"
+            style={{ top: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)' }}
+          >
+            <X className="h-4 w-4" />
+            <span>Close</span>
+          </button>
           <div className="w-full sm:max-w-lg max-h-[80vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 overflow-hidden"
                onClick={(e) => e.stopPropagation()}>
 
@@ -4190,11 +4305,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
            a scrollbar across the screen just above the composer - reported as
            a slider nobody could explain. Decoration should never be able to
            add a scrollbar. */
-        className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-6 md:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6 relative z-10"
+        className="chat-scroll flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-6 md:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6 relative z-10"
       >
         {messages.length === 0 ? (
           <div className="min-h-full flex flex-col items-center justify-start sm:justify-center text-center max-w-2xl mx-auto w-full space-y-4 sm:space-y-6 px-2 py-6 sm:py-8 select-none animate-in fade-in slide-in-from-bottom-4 duration-500">
-            
+
             {/* Animated 3D hero: tumbling glass logo, orbiting rings,
                 energy arcs, and a wordmark that assembles itself. */}
             <HeroLogo3D />
@@ -4217,6 +4332,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                   onCancelDesktopAction={handleCancelDesktopAction}
                   audioEnabled={audioEnabled}
                   autoSpeakEnabled={autoSpeakEnabled}
+                  selectedLanguage={selectedLanguage}
                 />
               ))}
           </>
@@ -4290,7 +4406,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
       {/* Input Box Console — Responsive: Clean 2-tier toolbar on Mobile (<640px) | Single unified capsule on Desktop (≥640px) */}
       <div className="px-2 sm:px-5 pb-3 sm:pb-5 pt-1 bg-transparent shrink-0 relative z-10 w-full max-w-full">
-        <div className="mx-auto mb-2 hidden max-w-4xl items-center gap-1.5 sm:flex">
+        <div className="composer-workspace-context mx-auto mb-2 hidden max-w-4xl items-center gap-1.5 sm:flex">
           <span className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 px-2.5 text-[11px] font-semibold text-zinc-300">
           <Laptop className="h-3.5 w-3.5 text-indigo-400" /> Local
           </span>
@@ -4415,7 +4531,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             {isTranslating && (
               <span className="absolute right-10 sm:right-2 top-2 text-[10px] text-indigo-500 font-bold animate-pulse">Translating...</span>
             )}
-            
+
             {/* Mobile Send Button */}
             {/* Dictation. It types what you say into the box beside it, which
                 is where it belongs - the only way to start it was a row in the
@@ -4490,7 +4606,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
                   <button
                     type="button"
-                    onClick={() => { setIsRagEnabled(!isRagEnabled); setMobileToolsOpen(false); }}
+                    onClick={() => { enableRag(!isRagEnabled); setMobileToolsOpen(false); }}
                     disabled={!activeSessionId || directUploading}
                     className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-bold text-zinc-900 dark:text-zinc-100 active:bg-zinc-100 dark:active:bg-zinc-800 disabled:opacity-40"
                   >
@@ -4503,7 +4619,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
                   <button
                     type="button"
-                    onClick={() => { setIsWebSearchEnabled(!isWebSearchEnabled); setMobileToolsOpen(false); }}
+                    onClick={() => { enableWebSearch(!isWebSearchEnabled); setMobileToolsOpen(false); }}
                     disabled={!activeSessionId || directUploading}
                     className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-bold text-zinc-900 dark:text-zinc-100 active:bg-zinc-100 dark:active:bg-zinc-800 disabled:opacity-40"
                   >
@@ -4518,6 +4634,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                     <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
                     <span className="flex-1 text-sm font-bold text-zinc-900 dark:text-zinc-100">Reply in</span>
                     <select
+                      aria-label="Reply language"
                       value={selectedLanguage}
                       onChange={(e) => setSelectedLanguage(e.target.value)}
                       className="text-sm font-bold text-zinc-900 dark:text-zinc-100 bg-transparent outline-none"
@@ -4537,7 +4654,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             {/* RAG Toggle */}
             <button
               type="button"
-              onClick={() => setIsRagEnabled(!isRagEnabled)}
+              onClick={() => enableRag(!isRagEnabled)}
               disabled={!activeSessionId || directUploading}
               className={`h-8 px-2.5 rounded-xl transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1 text-xs font-bold ${
                 isRagEnabled
@@ -4553,7 +4670,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             {/* Web Toggle */}
             <button
               type="button"
-              onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+              onClick={() => enableWebSearch(!isWebSearchEnabled)}
               disabled={!activeSessionId || directUploading}
               className={`h-8 px-2.5 rounded-xl transition-all cursor-pointer disabled:opacity-35 shrink-0 flex items-center gap-1 text-xs font-bold ${
                 isWebSearchEnabled
@@ -4599,6 +4716,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             <div className="h-8 flex items-center gap-1 bg-zinc-200 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl px-2.5 shrink-0 shadow-xs" title="Response Language">
               <Globe className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
               <select
+                aria-label="Reply language"
                 value={selectedLanguage}
                 onChange={(e) => setSelectedLanguage(e.target.value)}
                 className="text-xs font-black text-zinc-900 dark:text-zinc-50 bg-transparent outline-none cursor-pointer pr-1"
@@ -4688,7 +4806,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="p-6 overflow-y-auto space-y-3 font-semibold text-xs flex-1">
               <div className="flex items-center justify-between text-[10px] text-zinc-400 font-bold uppercase tracking-wider">
                 <span>Extracted Text Content</span>
@@ -4748,7 +4866,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         isWebSearchEnabled={isWebSearchEnabled}
         setIsWebSearchEnabled={setIsWebSearchEnabled}
         onClearChat={handleClearCurrentChat}
-        wakeWordSupported={WakeWordListener.isSupported()}
+        wakeWordSupported={!isNativeApp() && WakeWordListener.isSupported()}
         wakeWordEnabled={wakeWordEnabled}
         wakePhrase={wakePhrase}
         onToggleWakeWord={() => setWakeWordEnabled((value) => !value)}

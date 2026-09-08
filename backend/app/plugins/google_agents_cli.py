@@ -6,19 +6,33 @@ A plugin that integrates google/agents-cli as a tool.
 
 from app.plugin_system import ToolPlugin, PluginMetadata, PluginConfig, PluginType
 import logging
+import asyncio
 import os
+import re
 import subprocess
 import sys
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("google_agents_cli_plugin")
 
 class GoogleAgentsCLIPlugin(ToolPlugin):
     """Plugin for google/agents-cli"""
     
+    # A command line in `--help`: indentation, the name, then the description
+    # separated by at least two spaces.
+    _COMMAND_RE = re.compile(r"^(\s+)([A-Za-z][\w-]*)(?:\s{2,}(.*))?$")
+    # agents-cli keeps retired commands listed so it can explain where they
+    # went. Offering them as tools would advertise something that only ever
+    # returns an error.
+    _RETIRED_RE = re.compile(r"^(removed|deprecated|no longer)\b", re.I)
+
     def __init__(self, config: PluginConfig, metadata: PluginMetadata):
         super().__init__(config, metadata)
         self.agents_cli_path = None
+        # get_tools() is called while serving requests, and asking the CLI
+        # what it can do costs a subprocess launch each time. Discovered once,
+        # after the path is known.
+        self._commands: Optional[List[Dict[str, str]]] = None
         # This used to run in a background thread while initialize() read the
         # result, which is a race it usually lost: the plugin reported the CLI
         # missing on a machine that had it. Looking for a file is fast enough
@@ -97,45 +111,110 @@ class GoogleAgentsCLIPlugin(ToolPlugin):
         self.agents_cli_path = None
         return True
     
+    @classmethod
+    def _parse_commands(cls, help_text: str) -> List[Dict[str, str]]:
+        """The commands agents-cli says it has, read out of its own --help.
+
+        This used to be a hand-written list, which drifted: it advertised a
+        `grade` command that the CLI answers with "No such command 'grade'"
+        (grading moved under `eval`). A list that has to be edited by hand
+        whenever the upstream project changes will be wrong again, so the
+        names now come from the CLI itself.
+        """
+        commands: List[Dict[str, str]] = []
+        in_section = False
+        base_indent = None
+
+        for raw in (help_text or "").splitlines():
+            line = raw.rstrip()
+            if not line:
+                continue
+            if not line[:1].isspace():
+                # Section headers sit at the left margin, so any of them ends
+                # the command list - including "Options:" printed after it.
+                in_section = line.strip().lower().rstrip(":") == "commands"
+                base_indent = None
+                continue
+            if not in_section:
+                continue
+
+            indent = len(line) - len(line.lstrip())
+            if base_indent is None:
+                base_indent = indent
+            if indent > base_indent and commands:
+                # A description wrapped onto the next line.
+                commands[-1]["description"] = (
+                    commands[-1]["description"] + " " + line.strip()
+                ).strip()
+                continue
+
+            match = cls._COMMAND_RE.match(line)
+            if not match:
+                continue
+            commands.append({
+                "name": match.group(2),
+                "description": (match.group(3) or "").strip(),
+            })
+
+        return [c for c in commands if not cls._RETIRED_RE.match(c["description"])]
+
+    def _discover_commands(self) -> List[Dict[str, str]]:
+        """Ask the CLI what it can do, once, and remember the answer."""
+        if self._commands is not None:
+            return self._commands
+        if not self.agents_cli_path:
+            return []
+
+        try:
+            result = subprocess.run(
+                [self.agents_cli_path, "--help"],
+                capture_output=True, text=True,
+                # agents-cli prints box-drawing characters, and the Windows
+                # console default encoding cannot represent them.
+                encoding='utf-8', errors='replace', timeout=30)
+        except Exception as exc:
+            # Left uncached: a timeout here is worth retrying later, and the
+            # generic tool below still works in the meantime.
+            logger.warning("Could not ask agents-cli for its commands: %s", exc)
+            return []
+
+        if result.returncode != 0:
+            logger.warning("agents-cli --help exited %s; using the generic tool",
+                           result.returncode)
+            return []
+
+        self._commands = self._parse_commands(result.stdout or "")
+        if not self._commands:
+            logger.warning("No commands found in agents-cli --help output.")
+        return self._commands
+
     def get_tools(self) -> List[Dict]:
         """Return the tools provided by this plugin."""
         if not self.agents_cli_path:
             return []
-        
-        # Get available commands from agents-cli help
-        try:
-            result = subprocess.run(["agents-cli", "--help"], 
-                                  capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                # Parse help to extract commands (simplified)
-                # In a real implementation, we'd parse this more carefully
-                commands = [
-                    "setup", "update", "login", "create", "playground", 
-                    "run", "lint", "install", "data-ingestion", "eval", 
-                    "grade", "scaffold", "deploy", "publish", "infra", "info"
-                ]
-                
-                tools = []
-                for cmd in commands:
-                    tools.append({
-                        "name": f"agents_cli_{cmd}",
-                        "description": f"Run agents-cli {cmd} command",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "args": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": f"Arguments to pass to agents-cli {cmd}"
-                                }
-                            }
+
+        tools = []
+        for command in self._discover_commands():
+            tools.append({
+                "name": f"agents_cli_{command['name'].replace('-', '_')}",
+                "description": command["description"] or f"Run agents-cli {command['name']}",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": f"Arguments to pass to agents-cli {command['name']}"
                         }
-                    })
-                return tools
-        except Exception as e:
-            logger.error(f"Failed to get agents-cli commands: {e}")
-        
-        # Fallback to generic tool
+                    }
+                }
+            })
+        if tools:
+            return tools
+
+        # Discovery failed. Rather than guess at a command list, offer the one
+        # tool that is true regardless: pass a command through and report what
+        # the CLI says about it.
         return [
             {
                 "name": "agents_cli_run",
@@ -163,24 +242,46 @@ class GoogleAgentsCLIPlugin(ToolPlugin):
         if not self.agents_cli_path:
             raise RuntimeError("Agents CLI not available")
         
-        # Handle specific command tools (e.g., agents_cli_setup)
-        if tool_name.startswith("agents_cli_"):
-            command = tool_name[len("agents_cli_"):]
-            args = arguments.get("args", [])
-        elif tool_name == "agents_cli_run":
-            command = arguments.get("command")
-            args = arguments.get("args", [])
-            if not command:
-                raise ValueError("command is required for agents_cli_run tool")
+        args = arguments.get("args", []) or []
+        # Tool names replace the dashes that command names may contain, so map
+        # back through what was discovered rather than guessing the spelling.
+        by_tool_suffix = {
+            c["name"].replace("-", "_"): c["name"] for c in self._discover_commands()
+        }
+
+        if tool_name == "agents_cli_run" and arguments.get("command"):
+            # The generic pass-through, offered when discovery came up empty.
+            command = arguments["command"]
+        elif tool_name.startswith("agents_cli_"):
+            suffix = tool_name[len("agents_cli_"):]
+            if not suffix:
+                raise ValueError(f"Unknown tool: {tool_name}")
+            # `agents_cli_run` with no command used to fall through to here and
+            # silently become `agents-cli run`, which runs an agent.
+            if suffix == "run" and "command" in arguments and not arguments["command"]:
+                raise ValueError("command is required for the agents_cli_run tool")
+            command = by_tool_suffix.get(suffix, suffix)
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
-        
+
+        # The command becomes argv[1] of a real process. It is not run through
+        # a shell, but an unchecked value can still smuggle in an option
+        # (`--config=...`) or a path, so only plain command names are accepted.
+        if not re.fullmatch(r"[A-Za-z][\w-]*", command or ""):
+            raise ValueError(
+                f"'{command}' is not a valid agents-cli command name."
+            )
+        if not all(isinstance(a, str) for a in args):
+            raise ValueError("args must be a list of strings.")
+
         # Build the full command
         full_command = [self.agents_cli_path, command] + args
         
         try:
-            result = subprocess.run(full_command, 
-                                  capture_output=True, text=True, timeout=60)
+            result = await asyncio.to_thread(subprocess.run, full_command,
+                                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
+            if result.returncode:
+                raise RuntimeError((result.stderr or result.stdout or 'CLI failed')[-1500:])
             return {
                 "stdout": result.stdout,
                 "stderr": result.stderr,

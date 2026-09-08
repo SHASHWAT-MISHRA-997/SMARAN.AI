@@ -135,7 +135,7 @@ export const FROM_MODE: Record<ModeId, Policy> = {
 };
 
 /** Tools that change something. Everything else runs unasked, always. */
-export const MUTATING = new Set(['write_file', 'edit_file', 'run_command', 'git']);
+export const MUTATING = new Set(['write_file', 'edit_file', 'run_command', 'git', 'browser_click', 'browser_type']);
 
 /** Tools that run a shell. These are the ones reach cannot actually contain. */
 export const SHELL = new Set(['run_command', 'git']);

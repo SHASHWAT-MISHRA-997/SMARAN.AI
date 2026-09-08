@@ -165,7 +165,11 @@ def _find_free_port(preferred: int = 3003) -> int:
     """Return `preferred` when free, else an arbitrary free port."""
     for port in (preferred, 0):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # On Windows SO_REUSEADDR permits overlapping wildcard/loopback
+            # listeners. A localhost proxy could own 3003 while this probe
+            # "succeeded", sending our health checks to that other service.
+            if sys.platform == 'win32':
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
             try:
                 probe.bind(("0.0.0.0", port))
                 return probe.getsockname()[1]
@@ -396,7 +400,20 @@ def _media_log(message: str) -> None:
         pass
 
 
-def _grant_webview2_media_permissions() -> None:
+def _same_media_origin(requested: str, trusted: str) -> bool:
+    from urllib.parse import urlsplit
+
+    try:
+        a, b = urlsplit(requested), urlsplit(trusted)
+        def origin(url):
+            return (url.scheme.lower(), url.hostname,
+                    url.port if url.port is not None else (443 if url.scheme.lower() == "https" else 80))
+        return bool(a.hostname and b.hostname and origin(a) == origin(b))
+    except (TypeError, ValueError):
+        return False
+
+
+def _grant_webview2_media_permissions(trusted_url: str) -> None:
     """Let the app window use the microphone, camera and audio playback.
 
     pywebview's WebView2 backend never handles ``PermissionRequested``, and a
@@ -405,9 +422,10 @@ def _grant_webview2_media_permissions() -> None:
     were set, and why the background ambience stayed silent: autoplay is gated
     the same way.
 
-    Only the app's own pages can ask, since the workspace is served from
-    ``127.0.0.1``, so granting these outright matches what launching the app
-    already implies. Every other permission keeps its default.
+    Only requests from the exact local app origin receive these grants.
+    A remote page reached through navigation or an iframe must not inherit
+    the app's microphone or camera access. Other permission kinds keep their
+    default.
     """
     try:
         import webview.platforms.edgechromium as edge
@@ -478,6 +496,10 @@ def _grant_webview2_media_permissions() -> None:
                         else str(kind) in wanted_names
                     )
                     if granted:
+                        if not _same_media_origin(str(event.Uri), trusted_url):
+                            event.State = 2  # CoreWebView2PermissionState.Deny
+                            _media_log(f"request {kind} -> deny (foreign origin)")
+                            return
                         if "allow" in enums:
                             event.State = enums["allow"]
                         else:
@@ -499,10 +521,14 @@ def _grant_webview2_media_permissions() -> None:
 
 def _open_window(url: str) -> bool:
     """Open a real app window. Returns True if it blocked until closed."""
+    if sys.platform.startswith("linux"):
+        # Linux packages intentionally use an installed browser. Importing
+        # pywebview first emits missing GTK/Qt errors on a healthy installation.
+        return _open_browser_window(url)
     try:
         import webview  # pywebview: native window, no browser chrome
 
-        _grant_webview2_media_permissions()
+        _grant_webview2_media_permissions(url)
         window = webview.create_window(APP_NAME, url, width=1440, height=900,
                                        min_size=(260, 340), confirm_close=False)
         # Hand the window to the backend, which runs in this same process, so
@@ -526,7 +552,11 @@ def _open_window(url: str) -> bool:
     except Exception:
         pass
 
-    # Fall back to a chrome-less browser app window.
+    return _open_browser_window(url)
+
+
+def _open_browser_window(url: str) -> bool:
+    """Use an installed browser when a native webview is not part of the build."""
     import shutil
     import subprocess
 
@@ -659,10 +689,29 @@ def main() -> int:
         return 1
 
     if not _wait_until_ready(port, server=server):
+        # Everything needed to work out what happened, in the message itself.
+        # This previously read "The local engine did not become ready in time,
+        # so the window was not opened." and stopped there - which says that
+        # something failed and nothing about where to look. The port it waited
+        # on, the process it is, the log it wrote and how long it waited are
+        # all known here, and each of them is the first thing anyone would ask.
         detail = f"\n\n{server.error}" if server.error else ""
+        # _user_data_dir() is the same helper runtime.json is written through,
+        # so this names the folder the app is really using rather than a guess.
+        try:
+            data_dir = _user_data_dir()
+        except Exception:                                   # noqa: BLE001
+            data_dir = "(data folder unknown)"
         _report_fatal(
             "The local engine did not become ready in time, so the window was "
-            f"not opened.{detail}"
+            f"not opened.{detail}\n\n"
+            f"Waited {STARTUP_TIMEOUT_SECONDS:.0f}s for "
+            f"http://127.0.0.1:{port}{HEALTH_PATH}\n"
+            f"Process: {APP_NAME} (pid {os.getpid()})\n"
+            f"Log: {os.path.join(data_dir, 'smaran.log')}\n"
+            f"Data folder: {data_dir}\n\n"
+            "If another copy is already running, close it and try again; the "
+            "log names the reason the engine stopped."
         )
         server.stop()
         return 1

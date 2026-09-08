@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smaran-cli"
-version = "2.10.24"
+dynamic = ["version"]
 description = "Command line for SMARAN.AI, the local-first AI assistant"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,3 +26,6 @@ smaran = "smaran_cli.main:main"
 
 [tool.setuptools.packages.find]
 include = ["smaran_cli*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "smaran_cli.__version__" }

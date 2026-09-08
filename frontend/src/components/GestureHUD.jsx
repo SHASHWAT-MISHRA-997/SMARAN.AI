@@ -50,7 +50,7 @@ const GestureHUD = ({ isOpen, onClose, onAction }) => {
   const [desktopControl, setDesktopControl] = useState(
     () => localStorage.getItem('sm_gesture_desktop') === 'true',
   );
-  const [desktopNote, setDesktopNote] = useState('');
+  const [, setDesktopNote] = useState('');
   useEffect(() => {
     localStorage.setItem('sm_gesture_desktop', String(desktopControl));
   }, [desktopControl]);
@@ -82,7 +82,7 @@ const GestureHUD = ({ isOpen, onClose, onAction }) => {
           return;
         }
         setDesktopNote(data?.action || '');
-      } catch (_) {
+      } catch  {
         setDesktopNote('The desktop could not be reached.');
       }
     })();

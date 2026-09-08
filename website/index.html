@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=86e51f9ed0" />
+<link rel="stylesheet" href="styles.css?v=9e817e7f22" />
 </head>
 
 <body>
@@ -105,7 +105,7 @@
     <div class="hero-copy">
       <span class="pill reveal">
         <span class="pill-dot"></span>
-        Windows &amp; Android · Free
+        Windows, Linux &amp; Android · Free
       </span>
 
       <!-- The mascot: an ember with a face, drifting over the hero. Drawn
@@ -212,7 +212,7 @@
   <div class="wrap">
     <header class="head reveal">
       <span class="eyebrow">What it does</span>
-      <h2>Everything in one window,<br /><span class="grad">nothing phoning home.</span></h2>
+      <h2>Everything in one window,<br /><span class="grad">local models on your machine.</span></h2>
       <p>Assistants usually mean a browser tab and a monthly bill. This one is a program on your computer that happens to be very good at talking.</p>
     </header>
 
@@ -259,7 +259,7 @@
         <div class="card-glow"></div>
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2 3 7v6c0 5 3.8 8.4 9 9 5.2-.6 9-4 9-9V7Z"/><path d="m9 12 2 2 4-4"/></svg></div>
         <h3>Locked like a phone</h3>
-        <p>A PIN on startup, with the attempt limits and lockouts you would expect. Your history is not one click away for whoever walks past.</p>
+          <p>Enable a startup PIN in Settings, with attempt limits and lockouts to protect access to your history.</p>
       </article>
 
       <article class="card tilt reveal">
@@ -577,7 +577,7 @@
       </div>
       <div class="live-stat">
         <b id="liveVisitors">&mdash;</b>
-        <span>visitors</span>
+        <span>visits</span>
       </div>
       <div class="live-stat">
         <b id="liveViewing"><span class="live-dot"></span>&mdash;</b>
@@ -633,18 +633,14 @@
             <b>&ldquo;An Application Control policy has blocked this file&rdquo;</b>
             — this is Smart App Control, which is on by default on newer
             Windows 11 machines. There is no &ldquo;run anyway&rdquo; for it.
-            The only way past is to turn Smart App Control off in
-            <b>Windows Security &rarr; App &amp; browser control</b>, and that
-            cannot be switched back on afterwards without reinstalling Windows.
-            That is a real decision, so it is worth knowing before you make it.
+            Use a signed release accepted by your device policy, or ask your
+            device administrator about approved installation options.
           </li>
         </ul>
-        <p class="dl-note">
-          A signing certificate removes both warnings. This project is applying
-          for a free one through the SignPath Foundation, which signs open
-          source software at no cost. Until that is in place, the honest
-          position is the one above.
-        </p>
+        <!-- A second amber panel stood here saying the download is unsigned
+             and that reputation and device policy still apply. The panel above
+             already says both, in the same card, with the dialogs named. One
+             warning read twice is read once. -->
       </article>
 
       <article class="dl-card reveal" data-delay="1">
@@ -688,7 +684,7 @@
           <li>Chats stay on the device, and read aloud</li>
           <li>Pair a PC for documents, local models and control</li>
         </ul>
-        <p class="dl-note">
+        <p class="dl-info">
           Android will ask you to allow installing from your browser. When download finishes, swipe down your notification shade or open your phone's <b>Downloads</b> app to tap and install.
         </p>
       </article>
@@ -701,7 +697,7 @@
           <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M12 2c-2 0-3.2 1.6-3.2 3.6 0 1.3.2 2 .2 2.8 0 .9-.8 1.7-1.6 3-.8 1.2-1.7 2.6-2.2 4-.3.9-.3 1.8.1 2.4.4.6 1.1.9 1.9.9.5 0 .8.3 1.2.7.5.5 1.2 1 2.6 1h2c1.4 0 2.1-.5 2.6-1 .4-.4.7-.7 1.2-.7.8 0 1.5-.3 1.9-.9.4-.6.4-1.5.1-2.4-.5-1.4-1.4-2.8-2.2-4-.8-1.3-1.6-2.1-1.6-3 0-.8.2-1.5.2-2.8C15.2 3.6 14 2 12 2Zm-1.6 3.1c.4 0 .7.4.7 1 0 .5-.3.9-.7.9-.4 0-.7-.4-.7-1 0-.5.3-.9.7-.9Zm3.2 0c.4 0 .7.4.7 1 0 .5-.3.9-.7.9-.4 0-.7-.4-.7-1 0-.5.3-.9.7-.9ZM12 8.2c.8 0 1.7.4 2.2.9.3.3.2.6-.2.8l-1.7.8c-.2.1-.4.1-.6 0l-1.7-.8c-.4-.2-.5-.5-.2-.8.5-.5 1.4-.9 2.2-.9Z"/></svg>
           <div>
             <h3>Linux</h3>
-            <p class="dl-meta">Any distribution &middot; 64-bit &middot; <span data-size="SMARAN.AI-x86_64.AppImage" data-unit="mib">299 MB</span></p>
+            <p class="dl-meta">Linux x86-64 &middot; glibc 2.28+ &middot; <span data-size="SMARAN.AI-x86_64.AppImage" data-unit="mib">299 MB</span></p>
           </div>
         </div>
         <!-- download= carries the real name because it cannot change it: this is
@@ -717,20 +713,20 @@
            href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI-x86_64.AppImage">
           Download AppImage
         </a>
-        <p class="dl-note">
+        <p class="dl-info">
           One file. Make it executable and run it &mdash; no package manager,
           no install:<br>
           <code>chmod +x SMARAN.AI-x86_64.AppImage &amp;&amp; ./SMARAN.AI-x86_64.AppImage</code>
         </p>
         <ul class="dl-list">
-          <li>Works on <b>any</b> distribution &mdash; Ubuntu, Debian, Fedora,
-            Arch, openSUSE, Mint, Manjaro, RHEL, Rocky, Alma, Pop!_OS</li>
+          <li>For compatible x86-64 glibc distributions, including Ubuntu, Debian,
+            Fedora and RHEL. ARM and musl-based distributions need a separate build.</li>
           <li>Built against glibc 2.28, so it also runs on releases as old as
             Debian 10, Ubuntu 18.10 and RHEL 8</li>
-          <li>Nothing is installed and nothing is left behind &mdash; delete the
-            file and it is gone</li>
+          <li>No package installation is required. Chats, models and settings
+            are stored separately and remain when you delete the AppImage.</li>
         </ul>
-        <p class="dl-note">
+        <p class="dl-info">
           Prefer your package manager? Same app, same build:
           <a href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran-ai_amd64.deb">.deb</a>
           for Debian and Ubuntu,
@@ -771,13 +767,17 @@
            href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran.exe">
           Download smaran.exe
         </a>
+        <a class="btn btn-primary block no-lift" id="dlCliLinux"
+           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran-linux-x86_64">
+          Download Linux CLI
+        </a>
         <ul class="dl-list">
           <li><code>smaran ask</code>, <code>chat</code>, <code>models</code>, <code>status</code></li>
           <li>Talks to the desktop app, so the app must be running</li>
-          <li>No login: it reaches your machine only, over loopback</li>
+          <li>Local discovery uses loopback and your device account</li>
           <li>One file. Put it on your PATH and it works</li>
         </ul>
-        <p class="dl-note">
+        <p class="dl-info">
           It is a client, not a second copy of SMARAN.AI. Model routing, your
           provider keys and the history stay in the app, so the two can never
           disagree about which model answered.
@@ -867,8 +867,8 @@
       <ol class="install-steps">
         <li>
           <h3>Download the AppImage</h3>
-          <p>About <span data-size="SMARAN.AI-x86_64.AppImage" data-unit="mib">299&nbsp;MB</span>, for any 64-bit distribution. Nothing is installed and
-             nothing is left behind &mdash; delete the file and it is gone.</p>
+            <p>About <span data-size="SMARAN.AI-x86_64.AppImage" data-unit="mib">299&nbsp;MB</span>, for Linux x86-64 with glibc 2.28 or newer. No package installation is needed.
+              Chats, downloaded models and settings remain in the app data directory.</p>
           <a class="btn btn-ghost" href="#download">Go to downloads</a>
         </li>
         <li>
@@ -929,8 +929,8 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
         </li>
         <li>
           <h3>No login</h3>
-          <p>Requests go to the loopback interface, which the app treats as you. That is also why it cannot reach
-             anybody else&rsquo;s machine: there is no remote mode.</p>
+          <p>By default, requests use loopback and the app treats them as your local device.
+             An explicit <code>SMARAN_URL</code> can select another backend, whose authentication still applies.</p>
         </li>
       </ol>
     </div>
@@ -947,8 +947,8 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
       <h2>Work beside <span class="grad">your code.</span></h2>
       <p class="lede">
         Ask about the file you have open, propose an edit, run a command &mdash;
-        without leaving the editor. It talks to the SMARAN.AI app on your machine
-        when that is running, and to your own provider keys when it is not.
+        without leaving the editor. Connect directly to a local model server
+        or use a cloud provider with your own key.
       </p>
       <div class="ext-actions">
         <a class="btn btn-primary lg magnetic"
@@ -975,22 +975,22 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
       </article>
 
       <article class="ext-card reveal" data-delay="1">
-        <h3>What it will not do without you</h3>
+        <h3>You choose its access</h3>
         <ul class="ide-list">
-          <li>Every file write is shown and waits for your approval</li>
-          <li>Every terminal command is shown and waits for your approval</li>
-          <li>Only files you attach, and a capped workspace listing, are sent</li>
-          <li>Attachments are limited to 200,000 characters per file</li>
+          <li>Choose read-only, workspace or full access</li>
+          <li>Approval settings control which edits and commands need confirmation</li>
+          <li>Attachments, conversation context and files read by agent tools go to your chosen model</li>
+          <li>Text attachments are capped at 60,000 characters per file</li>
         </ul>
       </article>
 
       <article class="ext-card reveal" data-delay="2">
         <h3>Where the answer comes from</h3>
         <ul class="ide-list">
-          <li>The SMARAN.AI app on this machine, when it is running</li>
+          <li>A local model server such as LM Studio</li>
           <li>Ollama, if you have a model pulled locally</li>
           <li>OpenRouter, Groq, Gemini or Anthropic, with your own key</li>
-          <li>If every route refuses, it says which one refused and why</li>
+          <li>Provider failures appear as errors so you can retry or choose another model</li>
         </ul>
       </article>
 
@@ -1016,20 +1016,16 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
           <span class="ide-choice-name">Marketplace</span>
           <span class="ide-choice-sub">Open in a browser</span>
         </a>
-        <!-- The Marketplace copy is reviewed and published separately, so it can
-             sit a version or two behind this one. This link is the file from the
-             newest release, which is never behind. -->
-        <a class="ide-choice"
-           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran-ai-codex.vsix">
-          <span class="ide-choice-name">Download the VSIX</span>
-          <span class="ide-choice-sub">Newest build, install by hand</span>
-        </a>
+        <!-- A "Download the VSIX" choice stood here, pointing at
+             releases/latest/download/smaran-ai-codex.vsix, and the comment
+             beside it said the file was "never behind". No release has ever
+             carried that asset: the link answered 404. A button that downloads
+             nothing is worse than one that is absent, so it is gone until a
+             .vsix is actually attached to a release. -->
       </div>
       <p class="ide-note">
-        The first four open your editor at the extension page, where one click
-        installs it. The VSIX is for when you want the newest build before the
-        Marketplace has it: in the editor, Extensions &rarr; &hellip; &rarr;
-        <em>Install from VSIX</em>.
+        Each of these opens your editor at the extension page, where one click
+        installs it.
       </p>
     </div>
 
@@ -1127,7 +1123,8 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
         <div class="pcol warn reveal" data-delay="1">
           <h3><span class="pmark">↗</span> Leaves only if you choose it</h3>
           <ul>
-            <li>Cloud models — only after you add a key, and only the message you send</li>
+            <li>Cloud models — after you configure a provider, the request includes your message and any conversation, document or image context needed for that request.</li>
+            <li>Android dictation uses the phone's speech recognition service, which may process microphone audio online depending on its language packs and settings.</li>
             <li>Web search — only when you switch it on</li>
             <li>
               <b>The live voice call, on the Gemini engine</b> — while a call is
@@ -1161,7 +1158,7 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
       </details>
       <details class="reveal">
         <summary>Do I need internet?</summary>
-        <p>To download the app, Ollama and a model, yes. After that typing to a local model works with the network off. Web search and cloud models obviously need a connection — Speak has two engines: the Gemini one needs a key and a connection, the Local one needs neither — it listens, thinks and speaks on your own machine, so a voice call works with the network off too. Offline speech is text-to-speech only, and English only.</p>
+        <p>Downloading the app and local models needs a connection. Once the required models are installed, local chat and supported local speech engines can work offline. Cloud models, Gemini voice and web search need internet access. On Android, dictation depends on the phone&rsquo;s speech service and installed language packs; that service may require a connection.</p>
       </details>
       <details class="reveal">
         <summary>What hardware do I need?</summary>
@@ -1277,6 +1274,6 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
   </div>
 </footer>
 
-<script src="main.js?v=d5da9ce6cc"></script>
+<script src="main.js?v=e1b693a31e"></script>
 </body>
 </html>

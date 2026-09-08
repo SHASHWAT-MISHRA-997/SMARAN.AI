@@ -2,7 +2,7 @@ import os
 import sys
 import json
 from dotenv import dotenv_values
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Dynamic root data directory resolution
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -104,8 +104,7 @@ class Settings(BaseSettings):
     # Model context window
     MAX_MODEL_LEN: int = int(os.getenv("MAX_MODEL_LEN", _hw_config.get("max_model_len", 2048)))
 
-    class Config:
-        case_sensitive = True
+    model_config = SettingsConfigDict(case_sensitive=True)
 
 
 settings = Settings()

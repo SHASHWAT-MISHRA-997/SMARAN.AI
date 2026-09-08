@@ -31,11 +31,11 @@ https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads
 Publishing a new build:
 
 ```bash
-gh release create vX.Y.Z dist-release/SMARAN.AI-Setup.exe dist-release/SMARAN.AI.apk   --repo SHASHWAT-MISHRA-997/SMARAN.AI-downloads --title "SMARAN.AI X.Y.Z"
+gh release create vX.Y.Z dist-release/SMARAN.AI-Setup.exe dist-release/SMARAN-AI.apk   --repo SHASHWAT-MISHRA-997/SMARAN.AI-downloads --title "SMARAN.AI X.Y.Z"
 ```
 
 The file names matter: the page links to `releases/latest/download/<name>`, so
-they have to stay `SMARAN.AI-Setup.exe` and `SMARAN.AI.apk`.
+they have to stay `SMARAN.AI-Setup.exe` and `SMARAN-AI.apk`.
 
 GitHub Releases is the right home for these: it accepts up to 2 GB per file
 and serves them free, which neither Netlify nor Vercel will do for a 233 MB

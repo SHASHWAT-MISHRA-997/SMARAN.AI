@@ -138,7 +138,7 @@ export class GestureController {
       });
       try {
         this.recognizer = await GestureRecognizer.createFromOptions(vision, options('GPU'));
-      } catch (gpuError) {
+      } catch  {
         // The packaged desktop window does not always expose a usable WebGL
         // context to the model runtime, and the GPU delegate then stalls
         // rather than failing loudly. CPU is slower but always available.

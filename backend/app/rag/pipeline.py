@@ -18,15 +18,14 @@ class RAGPipeline:
         
         # Initialize Qdrant Manager conditionally
         self.use_qdrant = False
-        try:
-            if os.getenv("QDRANT_ENABLED", "0") != "1":
-                raise RuntimeError("Qdrant disabled; using local Chroma")
-            from app.rag.qdrant import QdrantManager
-            self.qdrant_manager = QdrantManager()
-            self.use_qdrant = True
-            logger.info("RAGPipeline initialized with Qdrant vector engine.")
-        except Exception as e:
-            logger.warning(f"Could not load QdrantManager: {e}. Falling back to Chroma.")
+        if os.getenv("QDRANT_ENABLED", "0") == "1":
+            try:
+                from app.rag.qdrant import QdrantManager
+                self.qdrant_manager = QdrantManager()
+                self.use_qdrant = True
+                logger.info("RAGPipeline initialized with Qdrant vector engine.")
+            except Exception as e:
+                logger.warning(f"Could not load QdrantManager: {e}. Falling back to Chroma.")
 
         # Always initialize Chroma Manager as fallback/default
         try:

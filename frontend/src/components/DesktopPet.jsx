@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Sparkles, MessageCircle, X, ChevronRight } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Sparkles, X } from 'lucide-react';
 
 const STATES = {
   idle: { row: 0, frames: 6, speed: 420 },
@@ -36,7 +36,7 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
   const kind = PET_FORMS[pet]?.kind || 'cyber';
   const isTalking = activity === 'typing' || activity === 'running' || activity === 'review';
   const isJoyful = activity === 'waving' || activity === 'jumping';
-  const isThinking = activity === 'waiting';
+
 
   /* The face, decided in one place from what the app is doing.
    *
@@ -376,6 +376,7 @@ const labelFor = (state) => ({
 }[state] || 'SMARAN AI Companion');
 
 const DesktopPet = () => {
+  const frame = useRef(null);
   const [visible, setVisible] = useState(() => localStorage.getItem('sm_pet_visible') !== 'false');
   const [pet, setPet] = useState(() => {
     const saved = localStorage.getItem('sm_pet_type');
@@ -409,10 +410,40 @@ const DesktopPet = () => {
     };
   }, []);
 
-  if (!visible || !PET_FORMS[pet]) return null;
+  const shown = visible && Boolean(PET_FORMS[pet]);
+
+  // The companion floats above the composer, over the bottom of the message
+  // list, so a reply can scroll underneath it - and the copy and download
+  // buttons sit exactly there. The list reserves this much room at its foot.
+  // Published the way the composer publishes its own height, and set to zero
+  // when the companion is turned off so nothing reserves space for a
+  // character that is not on screen.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (!shown) {
+      root.style.setProperty('--sm-pet-h', '0px');
+      return undefined;
+    }
+    const measure = () => {
+      const height = frame.current?.getBoundingClientRect().height || 0;
+      root.style.setProperty('--sm-pet-h', `${Math.round(height)}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (frame.current) observer.observe(frame.current);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+      root.style.setProperty('--sm-pet-h', '0px');
+    };
+  }, [shown, size]);
+
+  if (!shown) return null;
 
   return (
     <aside
+      ref={frame}
       aria-label="Desktop AI Companion"
       className="sm-pet fixed z-30 flex flex-col items-end pointer-events-none transition-all duration-300"
     >

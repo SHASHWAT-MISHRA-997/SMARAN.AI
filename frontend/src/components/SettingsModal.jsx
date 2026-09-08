@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Lock,
-  X, Cpu, Monitor, Sparkles, SlidersHorizontal, Wifi, PawPrint,
+  X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint,
   UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop,
-  ShieldCheck, HardDrive, Database, Zap, RefreshCw, Trash2, CheckCircle2,
-  ExternalLink, Key, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe
+  RefreshCw, Trash2, CheckCircle2,
+  ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe
 } from "lucide-react";
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
@@ -20,35 +20,12 @@ import * as localChat from '../utils/localChat';
    updates displayed a version four releases old as though it were fact. */
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'unknown';
 
-const finite = (value) => typeof value === "number" && Number.isFinite(value);
-const positive = (value) => finite(value) && value > 0;
-const cleanText = (value) => {
-  if (typeof value !== "string") return "";
-  const text = value.trim();
-  return text && !/^(n\/?a|unknown|not detected|none|null)$/i.test(text) ? text : "";
-};
-const safeToFixed = (value, digits = 0) => {
-  if (!finite(value)) return null;
-  try { return value.toFixed(digits); } catch { return null; }
-};
 
-const SettingsModal = ({
-  isOpen,
-  onClose,
-  initialTab = "general",
-  onModelChange,
-  selectedModel = "auto",
-  sidebarPosition = "left",
-  onSidebarPositionChange,
-  performancePosition = "right",
-  onPerformancePositionChange,
-  onOpenConnections,
-  onOpenAccount,
-  onOpenModels,
-  onOpenAnalytics,
-  onOpenMemory,
-  onOpenDeveloper,
-}) => {
+
+
+
+
+const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange, selectedModel = "auto", sidebarPosition = "left", onSidebarPositionChange, performancePosition = "right", onPerformancePositionChange, onOpenConnections, onOpenModels, onOpenAnalytics }) => {
   const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState(initialTab || "general");
 
@@ -60,7 +37,7 @@ const SettingsModal = ({
 
   const [petVisible, setPetVisible] = useState(() => localStorage.getItem("sm_pet_visible") !== "false");
   const [petType, setPetType] = useState(() => localStorage.getItem("sm_pet_type") || "smaru");
-  const [petSize, setPetSize] = useState(() => Number(localStorage.getItem("sm_pet_size")) || 80);
+
 
   // Updates State
   const [updateInfo, setUpdateInfo] = useState(null);
@@ -114,7 +91,7 @@ const SettingsModal = ({
     try {
       const res = await fetch(`${API_BASE}/api/speech/gpu`, { credentials: "include" });
       if (res.ok) setGpu(await res.json());
-    } catch (_) { /* no backend here; the section stays hidden */ }
+    } catch  { /* no backend here; the section stays hidden */ }
   };
 
   const installGpu = async () => {
@@ -124,7 +101,7 @@ const SettingsModal = ({
         method: "POST", credentials: "include",
       });
       await refreshGpu();
-    } catch (_) { /* the status below will say what happened */ }
+    } catch  { /* the status below will say what happened */ }
     setGpuBusy(false);
   };
 
@@ -132,7 +109,7 @@ const SettingsModal = ({
     try {
       const res = await fetch(`${API_BASE}/api/lock/status`, { credentials: "include" });
       if (res.ok) setLockState(await res.json());
-    } catch (_) { /* no backend here; the section stays hidden */ }
+    } catch  { /* no backend here; the section stays hidden */ }
   };
 
   useEffect(() => { if (isOpen && !noBackend()) { refreshLock(); refreshGpu(); } }, [isOpen]);
@@ -366,15 +343,12 @@ const SettingsModal = ({
   }, [isOpen, activeTab]);
 
   // Models State
-  const [models, setModels] = useState({
-    installed_models: ["auto", "deepseek-coder:6.7b", "llama3.2:3b", "qwen2.5-coder:7b"],
-    downloaded_models: ["deepseek-coder:6.7b", "llama3.2:3b", "qwen2.5-coder:7b"],
-  });
+
 
   // Memory State
   const [memoryFacts, setMemoryFacts] = useState([]);
   const [newFact, setNewFact] = useState("");
-  const [loadingMemory, setLoadingMemory] = useState(false);
+  const [, setLoadingMemory] = useState(false);
 
   // Hardware Specs - Real detected hardware
   const [deviceSpecs, setDeviceSpecs] = useState({
@@ -436,7 +410,7 @@ const SettingsModal = ({
           // list is what an unreachable memory looks like.
           setMemoryFacts([]);
         }
-      } catch (_) {
+      } catch  {
         setMemoryFacts([]);
       } finally {
         setLoadingMemory(false);
@@ -466,7 +440,7 @@ const SettingsModal = ({
         if (cancelled) return;
         setLocalState(data);
         setLocalModels(Array.isArray(data?.models) ? data.models : []);
-      } catch (_) {
+      } catch  {
         if (!cancelled) { setLocalModels([]); setLocalState({ detail: 'The local model server could not be reached.' }); }
       }
     })();
@@ -520,7 +494,7 @@ const SettingsModal = ({
   /* Something can still ask for a tab that no longer exists here - a saved
      initialTab, or a navigation from elsewhere. Without this the panel would
      open on a phone with nothing in it at all.
-     
+
      Above the early return on purpose. Below it, this hook only ran while the
      panel was open, so the hook count changed between renders and React threw
      #310 - the whole app fell over to "Something went wrong" the moment you
@@ -578,7 +552,7 @@ const SettingsModal = ({
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-3 sm:p-5 backdrop-blur-md animate-fadeIn">
       <div className="w-full max-w-4xl h-[88vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col text-left transition-colors duration-200">
-        
+
         {/* Modal Top Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-zinc-900/60 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -592,6 +566,7 @@ const SettingsModal = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close settings"
             className="p-2 rounded-xl text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition"
           >
             <X className="w-4 h-4" />
@@ -655,7 +630,7 @@ const SettingsModal = ({
               unbroken line, a file path - widened this pane past the dialog and
               put a horizontal scrollbar across the bottom of it. */}
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-7 space-y-5 sm:space-y-6 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
-            
+
             {/* 1. GENERAL & THEME TAB */}
             {activeTab === "general" && (
               <div className="space-y-6">
@@ -748,7 +723,7 @@ const SettingsModal = ({
 
                 {/* Workspace Layout Positions */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-2">
+                  {!isMobile && <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-2">
                     <span className="block text-xs font-black text-zinc-900 dark:text-white">Sidebar Position</span>
                     <select
                       value={sidebarPosition}
@@ -758,7 +733,7 @@ const SettingsModal = ({
                       <option value="left">Left Rail (Standard)</option>
                       <option value="right">Right Rail</option>
                     </select>
-                  </div>
+                  </div>}
 
                   {!isMobile && <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-2">
                     <span className="block text-xs font-black text-zinc-900 dark:text-white">Hardware Performance Panel</span>
@@ -1602,7 +1577,7 @@ const SettingsModal = ({
                   <h4 className="text-xs font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
                     Direct Downloads & Installers
                   </h4>
-                  
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {/* Windows Card */}
                     <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex flex-col justify-between gap-3">

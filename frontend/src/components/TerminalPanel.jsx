@@ -33,7 +33,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
   const shellStyle = shellName.startsWith('pwsh') || shellName.startsWith('powershell')
     ? { prompt: 'PS>', example: 'Get-ChildItem' }
     : shellName.startsWith('cmd')
-      ? { prompt: 'C:\>', example: 'dir' }
+      ? { prompt: 'C:>', example: 'dir' }
       : shellName
         ? { prompt: '$', example: 'ls -la' }
         // Nothing known yet. A neutral mark rather than a wrong one.
@@ -52,7 +52,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
       try {
         const res = await fetch(`${API_BASE}/api/terminal/context`, { credentials: 'include' });
         if (res.ok) setContext(await res.json());
-      } catch (_) { /* the header just stays quiet */ }
+      } catch  { /* the header just stays quiet */ }
     })();
     inputRef.current?.focus();
   }, [isOpen]);
@@ -96,7 +96,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
         for (const part of parts) {
           if (!part.trim()) continue;
           let event;
-          try { event = JSON.parse(part); } catch (_) { continue; }
+          try { event = JSON.parse(part); } catch  { continue; }
           if (event.type === 'needs_approval') {
             setPending(event);
           } else if (event.type === 'output') {
@@ -136,7 +136,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
           <TerminalSquare className="h-4 w-4 shrink-0 text-emerald-400" />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-black text-white">Terminal</p>
-            <p className="truncate font-mono text-[10px] text-zinc-500">
+            <p className="truncate font-mono text-[10px] text-zinc-400">
               {context ? `${context.shell} · ${context.cwd}` : 'Asking where commands will run…'}
             </p>
           </div>
@@ -148,7 +148,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3 font-mono text-[12px] leading-relaxed">
           {lines.length === 0 && (
-            <p className="text-zinc-600">
+            <p className="text-zinc-400">
               Type a command. It runs in {context?.shell || 'your shell'}, as you, with no
               allowlist — this is your machine.
             </p>
@@ -201,6 +201,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
           <span className="shrink-0 font-mono text-sm font-bold text-emerald-400">{shellStyle.prompt}</span>
           <input
             ref={inputRef}
+            aria-label="Terminal command"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             onKeyDown={(e) => {
@@ -221,7 +222,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
             spellCheck={false}
             autoComplete="off"
             placeholder={running ? 'waiting for the command to finish…' : shellStyle.example}
-            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50"
+            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-zinc-100 outline-none placeholder:text-zinc-400 disabled:opacity-50"
           />
         </form>
       </div>

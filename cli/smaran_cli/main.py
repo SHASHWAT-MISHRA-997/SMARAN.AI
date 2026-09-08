@@ -5,9 +5,9 @@ not a second brain: the model routing, the provider keys and the conversation
 history all live in the app, so there is nothing to configure here and no way
 for the two to disagree about which model answered.
 
-Requests go to 127.0.0.1 only. The backend treats a caller on the loopback
-interface as the local user, which is why no login is asked for — and why this
-cannot reach anybody else's machine.
+Discovery uses 127.0.0.1 by default. The backend treats a loopback caller as
+the local user. SMARAN_URL can explicitly select another backend; remote
+connections remain subject to that backend's authentication.
 """
 
 from __future__ import annotations
@@ -305,7 +305,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _print_any_language() -> None:
+    """Make stdout able to carry the languages this assistant answers in.
+
+    On Windows a redirected stream takes the legacy code page, which for this
+    machine is cp1252 and cannot represent Devanagari. So the console showed a
+    Hindi answer correctly and `smaran ask ... > answer.txt` died with
+    `UnicodeEncodeError: 'charmap' codec can't encode characters`, having
+    written nothing at all.
+
+    errors='replace' rather than 'strict': a terminal that genuinely cannot
+    show a glyph should print a placeholder, not lose the whole answer.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            # Python without reconfigure, or a stream that is already closed
+            # or replaced. Nothing here is worth failing a command over.
+            pass
+
+
 def main(argv=None) -> int:
+    _print_any_language()
     parser = build_parser()
     args = parser.parse_args(argv)
 

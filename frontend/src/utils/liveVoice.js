@@ -107,7 +107,7 @@ export class LiveVoiceSession {
       // difference here is the path.
       const path = this.engine === 'local' ? '/ws/voice/local' : '/ws/voice/live';
       this.socket = new WebSocket(`${scheme}//${base.host}${path}`);
-    } catch (error) {
+    } catch  {
       this.handlers.onError?.('Could not open the real-time voice channel.');
       this._emit('error');
       return false;

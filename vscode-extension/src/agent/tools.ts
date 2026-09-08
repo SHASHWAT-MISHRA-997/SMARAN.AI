@@ -64,19 +64,23 @@ function resolveInside(root: string, relative: string): string {
         return candidate;
     }
 
-    let real = candidate;
-    let realRoot = root;
-    try {
-        realRoot = fs.realpathSync(root);
-        real = fs.existsSync(candidate)
-            ? fs.realpathSync(candidate)
-            : path.join(fs.realpathSync(path.dirname(candidate)), path.basename(candidate));
-    } catch {
-        // A parent that does not exist yet is reported by the caller as a
-        // missing directory, which is more useful than a resolution failure.
+    const realRoot = fs.realpathSync(root);
+    let ancestor = candidate;
+    const missing: string[] = [];
+    // Resolve the nearest existing ancestor. A new nested directory under an
+    // outward junction previously bypassed the check when realpath threw.
+    while (!fs.existsSync(ancestor)) {
+        if (fs.lstatSync(ancestor, { throwIfNoEntry: false })?.isSymbolicLink()) {
+            throw new ToolError(`${relative} contains a broken symbolic link.`);
+        }
+        missing.unshift(path.basename(ancestor));
+        const parent = path.dirname(ancestor);
+        if (parent === ancestor) throw new ToolError(`Cannot resolve ${relative}.`);
+        ancestor = parent;
     }
-
-    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+    const real = path.join(fs.realpathSync(ancestor), ...missing);
+    const fromRoot = path.relative(realRoot, real);
+    if (fromRoot === '..' || fromRoot.startsWith('..' + path.sep) || path.isAbsolute(fromRoot)) {
         throw new ToolError(
             `${relative} is outside the open folder. Only files under ${root} can be read or changed.`,
         );
@@ -304,67 +308,78 @@ export function changes(): ReadonlyArray<Recorded> {
  * worse than the change being undone.
  */
 export function undoLast(root: string): string {
-    const last = history.pop();
+    const last = history[history.length - 1];
     if (!last) { return "Nothing has been changed yet, so there is nothing to undo."; }
 
     const target = resolveInside(root, last.path);
     const now = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : null;
-    if (now !== null && now !== last.after) {
-        history.push(last);
+    if (now !== last.after) {
         return last.path + " has changed since the agent wrote it, so it was left "
             + "alone rather than overwriting whatever that was.";
     }
 
     if (!last.existed) {
-        try { fs.unlinkSync(target); } catch { /* already gone */ }
+        if (now !== null) fs.unlinkSync(target);
+        history.pop();
         return "Removed " + last.path + ", which the agent had created.";
     }
     fs.writeFileSync(target, last.before, "utf8");
+    history.pop();
     return "Put " + last.path + " back as it was.";
 }
 
-function writeFile(root: string, args: Record<string, string>): string {
-    const target = resolveInside(root, args.path);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    const content = args.content ?? '';
-    const existed = fs.existsSync(target);
-    const before = existed ? fs.readFileSync(target, 'utf8') : '';
-    fs.writeFileSync(target, content, 'utf8');
-    record({ path: args.path, before, after: content, existed, at: Date.now() });
-
-    if (!existed) {
-        // A trailing newline is not a line. Counting the split parts called a
-        // one-line file two lines, every time.
-        const lines = content.split(String.fromCharCode(10));
-        if (lines.length && lines[lines.length - 1] === '') { lines.pop(); }
-        const count = lines.length;
-        return "Created " + args.path + " (" + count + (count === 1 ? " line)." : " lines).");
-    }
-    const shown = unified(before, content, args.path);
-    return shown || (args.path + " was written with exactly what was already in it.");
+export interface PreparedChange {
+    target: string;
+    label: string;
+    before: string;
+    after: string;
+    existed: boolean;
+    preview: string;
 }
 
-function editFile(root: string, args: Record<string, string>): string {
+/** Read and calculate only; approval sees the same bytes that will be saved. */
+export function prepareFileChange(name: string, args: Record<string, string>, root: string): PreparedChange {
+    if (!args.path?.trim()) throw new ToolError(`${name} needs path.`);
     const target = resolveInside(root, args.path);
-    if (!fs.existsSync(target)) {
-        return `${args.path} does not exist.`;
+    const existed = fs.existsSync(target);
+    if (name === 'edit_file' && !existed) throw new ToolError(`${args.path} does not exist.`);
+    const before = existed ? fs.readFileSync(target, 'utf8') : '';
+    let after: string;
+    if (name === 'write_file') {
+        if (!('content' in args)) throw new ToolError('write_file needs content.');
+        after = args.content;
+    } else {
+        const find = args.find ?? '';
+        if (!('replace' in args)) throw new ToolError('edit_file needs replace.');
+        // Models normally send LF even when a Windows editor saved CRLF.
+        // Match newline styles without relaxing indentation or other bytes.
+        const escaped = find.split(/\r?\n/).map(line => line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\r?\\n');
+        const matches = find ? [...before.matchAll(new RegExp(escaped, 'g'))] : [];
+        const count = matches.length;
+        if (!count) throw new ToolError(`That exact text is not in ${args.path}. Do not repeat the same edit. Copy the exact indentation from this current content (no line-number prefixes):\n${clip(before)}`);
+        if (count !== 1) throw new ToolError(`That text appears ${count} times in ${args.path}. Include more surrounding lines to make it unique.`);
+        const match = matches[0];
+        const start = match.index!;
+        const eol = match[0].includes('\r\n') || (!match[0].includes('\n') && before.includes('\r\n')) ? '\r\n' : '\n';
+        const replacement = args.replace.replace(/\r?\n/g, eol);
+        after = before.slice(0, start) + replacement + before.slice(start + match[0].length);
     }
-    const current = fs.readFileSync(target, 'utf8');
-    const find = args.find ?? '';
-    // Counting with split rather than a regex: the text is code, and code is
-    // full of characters a regex would read as syntax.
-    const occurrences = find ? current.split(find).length - 1 : 0;
-    if (occurrences === 0) {
-        return `That exact text is not in ${args.path}. Read the file again and copy the lines you mean, including their indentation.`;
+    return { target, label: args.path, before, after, existed,
+        preview: unified(before, after, args.path) || `${args.path}: no content change.` };
+}
+
+export function applyFileChange(change: PreparedChange, root: string): string {
+    const target = resolveInside(root, change.label);
+    const existed = fs.existsSync(target);
+    const now = existed ? fs.readFileSync(target, 'utf8') : '';
+    if (target !== change.target || existed !== change.existed || now !== change.before) {
+        throw new ToolError(`${change.label} changed while the edit was being reviewed. Read it again and prepare a new edit.`);
     }
-    if (occurrences > 1) {
-        return `That text appears ${occurrences} times in ${args.path}, so it is not clear which one you mean. Include more surrounding lines to make it unique.`;
-    }
-    const updated = current.replace(find, args.replace ?? '');
-    fs.writeFileSync(target, updated, 'utf8');
-    record({ path: args.path, before: current, after: updated, existed: true, at: Date.now() });
-    const shown = unified(current, updated, args.path);
-    return shown || (args.path + " is unchanged - the replacement matches what was there.");
+    if (existed && now === change.after) return `${change.label} is unchanged.`;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, change.after, 'utf8');
+    record({ path: target, before: change.before, after: change.after, existed, at: Date.now() });
+    return (existed ? '' : `Created ${change.label}.\n`) + change.preview;
 }
 
 function search(root: string, args: Record<string, string>): string {
@@ -375,9 +390,9 @@ function search(root: string, args: Record<string, string>): string {
         if (shown.endsWith('/') || hits.length >= 80) {
             continue;
         }
-        const full = path.join(root, shown);
         let text: string;
         try {
+            const full = resolveInside(root, shown);
             if (fs.statSync(full).size > MAX_READ_BYTES) {
                 continue;
             }
@@ -410,8 +425,9 @@ function runCommand(root: string, args: Record<string, string>): Promise<string>
                 // The exit code is part of the result. A command that failed
                 // and a command that printed nothing have to look different,
                 // or the model cannot tell whether its test passed.
-                const code = error && typeof error.code === 'number' ? error.code : 0;
-                resolve(clip(`exit code ${code}\n${output || '(no output)'}`));
+                  const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+                  const failure = error ? `\nCommand failed: ${error.message}` : '';
+                  resolve(clip(`exit code ${code}${failure}\n${output || '(no output)'}`));
             },
         );
     });
@@ -426,7 +442,7 @@ export async function execute(
     if (!tool) {
         return `There is no tool called ${JSON.stringify(name)}. The ones that exist are: ${Object.keys(TOOLS).join(', ')}.`;
     }
-    const missing = tool.args.filter((a) => a !== 'path' && !(a in args));
+    const missing = tool.args.filter((a) => !(a === 'path' && name === 'list_files') && !(a === 'enter' && name === 'browser_type') && !(a in args));
     if (missing.length) {
         return `${name} needs ${missing.join(' and ')}.`;
     }
@@ -435,8 +451,8 @@ export async function execute(
         switch (name) {
             case 'list_files': return listFiles(root, args);
             case 'read_file': return readFile(root, args);
-            case 'write_file': return writeFile(root, args);
-            case 'edit_file': return editFile(root, args);
+            case 'write_file':
+            case 'edit_file': return applyFileChange(prepareFileChange(name, args, root), root);
             case 'search': return search(root, args);
             case 'run_command': return await runCommand(root, args);
             case 'git': return await runCommand(root, { command: `git ${args.subcommand ?? ''}` });

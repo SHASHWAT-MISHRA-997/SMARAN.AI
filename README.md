@@ -2,7 +2,7 @@
 
 <img src="frontend/public/smaran-logo.png" alt="SMARAN.AI" width="110" />
 
-# SMARAN.AI 2.10.2
+# SMARAN.AI
 
 **A local-first AI workspace.** Chat, voice, vision and your own documents,
 running on your own machine.

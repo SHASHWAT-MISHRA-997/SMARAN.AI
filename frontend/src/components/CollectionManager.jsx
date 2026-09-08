@@ -8,7 +8,7 @@ const safeToFixed = (value, digits = 0) => {
   try { return value.toFixed(digits); } catch { return "0"; }
 };
 
-const CollectionManager = ({ token }) => {
+const CollectionManager = () => {
   const [collections, setCollections] = useState([]);
   const [activeCol, setActiveCol] = useState(null);
   const [documents, setDocuments] = useState([]);
@@ -80,7 +80,7 @@ const CollectionManager = ({ token }) => {
       } else {
         setError(data.detail || 'Failed to create collection');
       }
-    } catch (err) {
+    } catch  {
       setError('Connection failure');
     }
   };
@@ -122,7 +122,7 @@ const CollectionManager = ({ token }) => {
     if (e.dataTransfer.items && activeCol) {
       const files = [];
       const queue = [];
-      
+
       for (let i = 0; i < e.dataTransfer.items.length; i++) {
         const item = e.dataTransfer.items[i];
         if (item.kind === 'file') {
@@ -132,7 +132,7 @@ const CollectionManager = ({ token }) => {
           }
         }
       }
-      
+
       await Promise.all(queue);
       await processAndUploadFiles(files);
     }
@@ -416,7 +416,7 @@ const CollectionManager = ({ token }) => {
                   <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{activeCol.name}</h3>
                   <p className="text-xs text-zinc-500 dark:text-zinc-550 mt-0.5">{activeCol.description || 'No description provided'}</p>
                 </div>
-                
+
                 <div className="flex items-center gap-2 shrink-0">
                   {/* Upload Files Button */}
                   <label className={`relative flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-xl cursor-pointer bg-gradient-to-tr from-indigo-650 to-purple-650 hover:from-indigo-600 hover:to-purple-600 text-white transition-all shadow-md shadow-indigo-500/10 hover:scale-[1.01] active:scale-[0.99] ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>

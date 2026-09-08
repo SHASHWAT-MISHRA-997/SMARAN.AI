@@ -39,6 +39,12 @@ export interface Choice {
     lmStudioUrl?: string;
 }
 
+export interface NativeTool {
+    type: 'function';
+    function: { name: string; description: string; parameters: { type: 'object'; properties: Record<string, { type: 'string' }>; required: string[] } };
+}
+export const NATIVE_CALL_PREFIX = 'SMARAN_TOOL_CALL_JSON\n';
+
 export const OPENAI_COMPATIBLE: Record<string, string> = {
     openai: 'https://api.openai.com/v1',
     groq: 'https://api.groq.com/openai/v1',
@@ -131,7 +137,25 @@ function toOpenAiMessage(message: Message): unknown {
     };
 }
 
-async function openAiStyle(base: string, choice: Choice, messages: Message[]): Promise<string> {
+async function openAiStyle(base: string, choice: Choice, messages: Message[], tools?: NativeTool[]): Promise<string> {
+    // Native calls must be returned to the provider as assistant/tool pairs,
+    // with the original call id. Plain user text is not a tool result and
+    // some models repeat the same action indefinitely when it is used.
+    let pendingCall: string | undefined;
+    const wireMessages = messages.map((message, index) => {
+        if (tools?.length && message.role === 'assistant' && message.content.startsWith(NATIVE_CALL_PREFIX)) {
+            const call = JSON.parse(message.content.slice(NATIVE_CALL_PREFIX.length));
+            pendingCall = call.id || `smaran_call_${index}`;
+            return { role: 'assistant', content: null, tool_calls: [{ id: pendingCall, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }] };
+        }
+        if (pendingCall && message.role === 'user' && message.content.startsWith('Result of ')) {
+            const id = pendingCall;
+            pendingCall = undefined;
+            return { role: 'tool', tool_call_id: id, content: message.content };
+        }
+        pendingCall = undefined;
+        return toOpenAiMessage(message);
+    });
     const { status, body } = await post(
         `${base.replace(/\/+$/, '')}/chat/completions`,
         /* max_tokens matters more than it looks.
@@ -145,33 +169,47 @@ async function openAiStyle(base: string, choice: Choice, messages: Message[]): P
          * file being written is well under it. */
         {
             model: choice.model,
-            messages: messages.map(toOpenAiMessage),
+            messages: wireMessages,
             temperature: 0.2,
             max_tokens: 4096,
+            ...(tools?.length ? { tools, parallel_tool_calls: false } : {}),
         },
         choice.apiKey ? { Authorization: `Bearer ${choice.apiKey}` } : {},
     );
+    // Some OpenRouter routes expose text-only models. Fall back only when the
+    // provider explicitly rejects function tools, never for auth/rate limits.
+    if (tools?.length && [400, 404, 422].includes(status)
+        && /(?:tool|function)[\s\S]{0,100}(?:not supported|unsupported|not available)|(?:not support|unsupported)[\s\S]{0,100}(?:tool|function)|no endpoints found[^\n]*tool/i.test(body)) {
+        return openAiStyle(base, choice, messages.map(message => message.role === 'system'
+            ? { ...message, content: message.content + '\nThis route has no native tools. Use the documented text tool_call tags for all actions.' }
+            : message));
+    }
     const data = contentOrThrow(choice.provider, status, body) as {
         choices?: {
             finish_reason?: string;
-            message?: { content?: string; reasoning_content?: string; reasoning?: string };
+            message?: { content?: string; reasoning_content?: string; reasoning?: string; tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[] };
         }[];
     };
     const choiceOut = data.choices?.[0];
     const message = choiceOut?.message;
-
-    /* Some models put the answer where the answer is not.
-     *
-     * A reasoning model can return an empty `content` and leave everything it
-     * said in `reasoning_content` (or `reasoning`, depending on the host).
-     * Reading only `content` produced an empty string, which the loop passed
-     * on as an empty message, which the panel drew as an empty box: a question
-     * asked, a box, and nothing in it.
-     */
-    const text = (message?.content
-        || message?.reasoning_content
-        || message?.reasoning
-        || '').trim();
+    if (choiceOut?.finish_reason === 'error' || choiceOut?.finish_reason === 'content_filter') {
+        throw new Error(`${choice.model} could not complete its response (${choiceOut.finish_reason}). Try another model or retry the task.`);
+    }
+    if (message?.tool_calls?.length) {
+        if (message.tool_calls.length !== 1 || choiceOut?.finish_reason === 'length') {
+            throw new Error('The provider returned multiple or incomplete tool calls. Retry with one complete action per step.');
+        }
+        const call = message.tool_calls[0].function;
+        const args = JSON.parse(call?.arguments || '{}');
+        if (!call?.name || !args || typeof args !== 'object' || Array.isArray(args)) {
+            throw new Error('The provider returned an invalid tool call.');
+        }
+        const id = message.tool_calls[0].id;
+        return NATIVE_CALL_PREFIX + JSON.stringify({ name: call.name, args, ...(id ? { id } : {}) });
+    }
+    // Reasoning can arrive before a provider fails. It is not a completed
+    // answer or an executable tool call and must not end the run as success.
+    const text = (message?.content || '').trim();
     if (text) return text;
 
     /* Still nothing. Saying so is the whole point - silence reads as the
@@ -180,6 +218,9 @@ async function openAiStyle(base: string, choice: Choice, messages: Message[]): P
         throw new Error(
             `${choice.model} used its whole budget before writing anything. `
             + 'Try a different model, or a shorter question.');
+    }
+    if (message?.reasoning_content || message?.reasoning) {
+        throw new Error(`${choice.model} returned reasoning without a final answer. Retry the task or choose another model.`);
     }
     throw new Error(
         `${choice.model} returned an empty reply. That model may not be usable `
@@ -300,7 +341,7 @@ export async function firstInstalledOllamaModel(ollamaUrl: string): Promise<stri
     });
 }
 
-export async function complete(messages: Message[], choice: Choice): Promise<string> {
+export async function complete(messages: Message[], choice: Choice, tools?: NativeTool[]): Promise<string> {
     const call = async (): Promise<string> => {
         // LM Studio speaks the OpenAI shape too; it just lives on this machine
         // and its address is a setting rather than a constant.
@@ -309,7 +350,7 @@ export async function complete(messages: Message[], choice: Choice): Promise<str
                 choice.lmStudioUrl || 'http://127.0.0.1:1234/v1', choice, messages);
         }
         if (choice.provider in OPENAI_COMPATIBLE) {
-            return openAiStyle(OPENAI_COMPATIBLE[choice.provider], choice, messages);
+            return openAiStyle(OPENAI_COMPATIBLE[choice.provider], choice, messages, choice.provider === 'openrouter' ? tools : undefined);
         }
         if (choice.provider === 'gemini') {
             return gemini(choice, messages);

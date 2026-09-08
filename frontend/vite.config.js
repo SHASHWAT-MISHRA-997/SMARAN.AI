@@ -28,11 +28,17 @@ export default defineConfig({
   build: {
     outDir: '../backend/frontend_dist',
     emptyOutDir: true,
-    // The console intentionally bundles the interactive workspace together.
-    // Avoid a misleading production build size warning.
+    // The 3D renderer and charts previously made one 1.9 MB entry chunk.
+    // Split the large dependencies so cache and downloads work independently.
     chunkSizeWarningLimit: 1000,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
+        codeSplitting: {
+          groups: [
+            { name: 'three', test: /node_modules[\\/](?:three|@pixiv)[\\/]/ },
+            { name: 'charts', test: /node_modules[\\/](?:recharts|recharts-scale|d3-[^\\/]+)[\\/]/ },
+          ],
+        },
         // Include version stamp in asset filenames to guarantee cache bust
         entryFileNames: `assets/[name]-${BUILD_VERSION}-[hash].js`,
         chunkFileNames: `assets/[name]-${BUILD_VERSION}-[hash].js`,

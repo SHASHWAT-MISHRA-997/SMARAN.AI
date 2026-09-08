@@ -4,12 +4,15 @@
 # worse than no package at all - the person has already downloaded it, already
 # trusted it, and now has an error instead of an app.
 #
-# Each format is checked the way its own tools check it, and the AppImage is
-# not just inspected but actually run.
+# This checks package contents. Run check_build.sh separately for backend
+# startup, and opt in to installation only on a disposable test machine.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT/dist/linux"
+source "$ROOT/packaging/linux/paths.sh"
+cd "$PACKAGE_DIR"
+SCRATCH="$(mktemp -d "$PWD/.package-check.XXXXXX")"
+trap 'rm -rf -- "$SCRATCH"' EXIT
 
 fail=0
 say() { printf '  %s\n' "$1"; }
@@ -22,27 +25,28 @@ echo
 echo "=== AppImage ==="
 APPIMAGE="$(ls *.AppImage 2>/dev/null | head -1 || true)"
 if [ -z "$APPIMAGE" ]; then
-    say "MISSING - this is the one that runs anywhere, so its absence is fatal"
+    say "MISSING - the portable x86-64 package is required"
     fail=1
 else
     say "file: $APPIMAGE"
-    say "executable bit: $([ -x "$APPIMAGE" ] && echo yes || { echo 'NO'; fail=1; })"
+    if [ -x "$APPIMAGE" ]; then
+        say "executable bit: yes"
+    else
+        say "executable bit: NO"
+        fail=1
+    fi
     # A container has no FUSE, so the AppImage cannot mount itself. Unpacking
     # it is the same contents by another route.
-    rm -rf squashfs-root
-    ./"$APPIMAGE" --appimage-extract >/dev/null 2>&1 || true
-    if [ -d squashfs-root ]; then
+    if (cd "$SCRATCH" && "$PACKAGE_DIR/$APPIMAGE" --appimage-extract >/dev/null 2>&1); then
         for f in AppRun smaran-ai.desktop smaran-ai.png usr/lib/smaran-ai/SMARAN.AI; do
-            [ -e "squashfs-root/$f" ] && say "contains: $f" || { say "MISSING: $f"; fail=1; }
+            [ -e "$SCRATCH/squashfs-root/$f" ] && say "contains: $f" || { say "MISSING: $f"; fail=1; }
         done
         if command -v desktop-file-validate >/dev/null 2>&1; then
-            desktop-file-validate squashfs-root/smaran-ai.desktop \
+            desktop-file-validate "$SCRATCH/squashfs-root/smaran-ai.desktop" \
                 && say "desktop entry: valid" || { say "desktop entry: INVALID"; fail=1; }
         fi
-        # The real question: does the thing AppRun points at start.
-        target="squashfs-root/usr/lib/smaran-ai/SMARAN.AI"
+        target="$SCRATCH/squashfs-root/usr/lib/smaran-ai/SMARAN.AI"
         [ -x "$target" ] && say "the app inside is executable" || { say "the app inside is NOT executable"; fail=1; }
-        rm -rf squashfs-root
     else
         say "could not unpack it"
         fail=1
@@ -59,7 +63,11 @@ if [ -z "$DEB" ]; then
 else
     say "file: $DEB"
     say "glibc it declares: $(dpkg-deb -f "$DEB" Depends)"
-    if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    if [ "${SMARAN_PACKAGE_INSTALL_TEST:-0}" = "1" ] && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        if dpkg-query -W -f='${Status}' smaran-ai 2>/dev/null | grep -q 'install ok installed'; then
+            say "Refusing to replace an existing SMARAN installation; use a clean test machine"
+            exit 1
+        fi
         sudo apt-get install -y "./$DEB" >/dev/null 2>&1 \
             && say "installs with apt: yes" || { say "installs with apt: NO"; fail=1; }
         for f in /usr/bin/smaran-ai /usr/share/applications/smaran-ai.desktop \
@@ -73,9 +81,9 @@ else
         [ -e /usr/bin/smaran-ai ] && { say "left files behind on removal"; fail=1; } \
                                   || say "removes cleanly: yes"
     else
-        say "no passwordless sudo here, so it was inspected but not installed"
-        dpkg-deb -c "$DEB" > /tmp/deb-list.txt 2>/dev/null
-        grep -q 'usr/bin/smaran-ai' /tmp/deb-list.txt \
+        say "inspected only; install tests require SMARAN_PACKAGE_INSTALL_TEST=1 and passwordless sudo"
+        dpkg-deb -c "$DEB" > "$SCRATCH/deb-list.txt" 2>/dev/null
+        grep -q 'usr/bin/smaran-ai' "$SCRATCH/deb-list.txt" \
             && say "contains the launcher" || { say "MISSING the launcher"; fail=1; }
     fi
 fi
@@ -90,8 +98,8 @@ if [ -z "$RPM" ]; then
 else
     say "file: $RPM"
     rpm -qip "$RPM" 2>/dev/null | sed -n '1,6p' | sed 's/^/    /'
-    rpm -qlp "$RPM" > /tmp/rpm-list.txt 2>/dev/null
-    grep -q '/usr/bin/smaran-ai' /tmp/rpm-list.txt \
+    rpm -qlp "$RPM" > "$SCRATCH/rpm-list.txt" 2>/dev/null
+    grep -q '/usr/bin/smaran-ai' "$SCRATCH/rpm-list.txt" \
         && say "contains the launcher" || { say "MISSING the launcher"; fail=1; }
 fi
 
@@ -111,8 +119,8 @@ else
     # pipe and dies with "tar: stdout: write error", and pipefail takes tar
     # status for the whole pipeline. The archive was fine; the check said
     # MISSING run.sh and failed the build.
-    tar -tzf "$TAR" > /tmp/tar-list.txt
-    grep -q 'run.sh' /tmp/tar-list.txt \
+    tar -tzf "$TAR" > "$SCRATCH/tar-list.txt"
+    grep -q 'run.sh' "$SCRATCH/tar-list.txt" \
         && say "contains run.sh" || { say "MISSING run.sh"; fail=1; }
 fi
 

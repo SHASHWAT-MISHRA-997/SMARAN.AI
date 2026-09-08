@@ -2,7 +2,7 @@
   "name": "smaran-ai-codex",
   "displayName": "SMARAN.AI Codex",
   "description": "A coding agent that reads your project, changes files, runs commands and reads the results \u2014 one step at a time, in view.",
-  "version": "2.20.0",
+  "version": "2.20.1",
   "publisher": "ShashwatMishra",
   "icon": "media/agent.png",
   "galleryBanner": {
@@ -335,10 +335,11 @@
     ]
   },
   "scripts": {
+    "test": "npm run compile && node --test test/*.test.js test/regressions.cjs test/browser-transport.cjs",
     "vscode:prepublish": "npm run compile",
     "compile": "node bake-analytics.js && tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "npx --yes @vscode/vsce package --no-dependencies"
+    "package": "npx --yes @vscode/vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

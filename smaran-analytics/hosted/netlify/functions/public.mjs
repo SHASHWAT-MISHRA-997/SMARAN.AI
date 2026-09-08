@@ -1,5 +1,5 @@
 import { getStore } from '@netlify/blobs';
-import { decodeWebKey } from './_shared.mjs';
+import { decodeWebKey } from '../lib/shared.mjs';
 
 /**
  * The three numbers the website shows, and the heartbeat behind one of them.

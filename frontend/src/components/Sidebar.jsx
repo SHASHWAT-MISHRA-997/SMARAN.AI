@@ -2,14 +2,14 @@ import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   MessageSquare, Plus, Trash2, X,
-  Settings, Pencil, Check, Brain, Sparkles,
-  ChevronLeft, ChevronDown, PanelLeftOpen, PanelLeftClose, Menu, Bot, Database, Boxes, UserCheck, User,
-  Activity, LayoutDashboard, QrCode, LogIn, Blocks, FolderOpen, Globe2, Volume2, ArrowDownToLine, Terminal
+  Settings, Pencil, Check, Brain,
+  ChevronDown, PanelLeftOpen, PanelLeftClose, Menu, Database,
+  LogIn, Blocks, FolderOpen, Globe2, ArrowDownToLine, Terminal, Users
 } from 'lucide-react';
 import { isNativeApp } from '../utils/hostLink';
 import ModelHubModal from './ModelHubModal';
 import { SmaranLogo } from './SmaranLogo';
-import { API_BASE, logoutUser, getCurrentUser, fetchWithAuth } from '../context/AuthContext';
+import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 
 /* Tooltip uses a React Portal so parent overflow never clips it. */
@@ -95,19 +95,17 @@ const RailBtn = ({ icon, label, onClick, active = false, danger = false, violet 
 const Sidebar = ({
   token, user, sessions, activeSessionId, setActiveSessionId,
   onCreateSession, onDeleteSession, onRenameSession, onClearHistory,
-  activeCollections, setActiveCollections,
   onNavigate, activeView, onExpandChange,
   isModelHubOpen: externalModelHubOpen,
   onOpenWorkspace,
+  onOpenDirector,
   setIsModelHubOpen: externalSetIsModelHubOpen,
-  onModelChange, position = 'left',
-  onTogglePerformance, showPerformance, onOpenAnalytics,
-  onOpenDeveloper, onOpenPairing, onOpenAuth,
+  position = 'left',
+  onOpenAuth,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showUtilityMenu, setShowUtilityMenu] = useState(false);
-  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(false);
   // The profile row had "SHASHWAT MISHRA" and the initials "SM" written into
   // it, so every install of SMARAN.AI showed one particular person's name as
   // the signed-in user. The user record was already being passed in and was
@@ -146,7 +144,7 @@ const Sidebar = ({
     let cancelled = false;
     const read = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/workspace/status`, { credentials: 'include' });
+        const res = await fetchWithAuth(`${API_BASE}/api/workspace/status`);
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setOpenProject(data?.open ? data : null);
@@ -165,14 +163,11 @@ const Sidebar = ({
 
   useEffect(() => {
     const openMemory = () => setIsMemoryOpen(true);
-    const dictationState = (event) => setVoiceOutputEnabled(Boolean(event.detail?.active));
     const dictationFailed = (event) => setDictationError(event.detail?.message || 'Voice dictation could not start.');
     window.addEventListener('smaran:open-memory', openMemory);
-    window.addEventListener('smaran:dictation-state', dictationState);
     window.addEventListener('smaran:dictation-error', dictationFailed);
     return () => {
       window.removeEventListener('smaran:open-memory', openMemory);
-      window.removeEventListener('smaran:dictation-state', dictationState);
       window.removeEventListener('smaran:dictation-error', dictationFailed);
     };
   }, []);
@@ -206,14 +201,18 @@ const Sidebar = ({
   // Plugin & Skills Hub Modal (Removed)
 
   const fetchMemoryFacts = async () => {
+    setMemoryLoading(true);
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/memory`);
       if (res.ok) {
         const data = await parseJsonResponse(res);
         setMemoryFacts(asList(data));
+      } else {
+        setMemoryToast('Could not load memory. Try again.');
       }
     } catch (err) {
       console.error(err);
+      setMemoryToast('Could not load memory. Check the connection and try again.');
     } finally {
       setMemoryLoading(false);
     }
@@ -323,6 +322,7 @@ const Sidebar = ({
           </div>
           <button
             onClick={() => setIsMemoryOpen(false)}
+            aria-label="Close memory vault"
             className="text-zinc-500 hover:text-white p-1 hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -331,6 +331,7 @@ const Sidebar = ({
 
         {/* Content list */}
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {memoryToast && <p role="status" className="text-sm text-amber-300">{memoryToast}</p>}
           {memoryLoading && memoryFacts.length === 0 ? (
             <div className="py-8 flex flex-col items-center justify-center space-y-2">
               <span className="w-6 h-6 rounded-full border-2 border-t-transparent border-violet-400 animate-spin" />
@@ -427,7 +428,7 @@ const Sidebar = ({
 
   /* Desktop sidebar: collapsed icon rail or expanded panel */
   const sidebarDesktop = (
-    <aside className={`
+    <aside className={`sidebar-desktop
       hidden md:flex flex-col shrink-0 z-40
       bg-[#f3f4f6] dark:bg-[#171717] text-zinc-900 dark:text-zinc-100 sidebar-cyber-border
       ${position === 'right' ? 'md:order-3 h-screen sticky top-0 border-l border-zinc-300/70 dark:border-zinc-800' : 'md:order-1 h-screen sticky top-0 border-r border-zinc-300/70 dark:border-zinc-800'}
@@ -516,6 +517,16 @@ const Sidebar = ({
               >
                 <FolderOpen className="h-4 w-4"/><span className="truncate">{openProject.name}</span>
               </button>
+              {/* The Director works on the open project, so it belongs with
+                  it rather than in the rail: without a folder there is
+                  nowhere for it to write. */}
+              <button
+                onClick={() => onOpenDirector?.()}
+                title="Split a project prompt across several models"
+                className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"
+              >
+                <Users className="h-4 w-4"/><span className="truncate">Director</span>
+              </button>
             </>
           )}
         </> : <>
@@ -558,7 +569,7 @@ const Sidebar = ({
                 <MessageSquare className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{s.title}</span>
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className={`flex items-center gap-1 ${isEditing || isConfirmDel ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
                 {isEditing ? (
                   <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                     <input
@@ -568,7 +579,8 @@ const Sidebar = ({
                       className="w-24 px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-xs text-zinc-900 dark:text-white outline-none"
                       autoFocus
                     />
-                    <button onClick={() => handleSave(s.id)} className="p-1 text-emerald-500 hover:text-emerald-400"><Check className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => handleSave(s.id)} className="p-1 text-emerald-500 hover:text-emerald-400 cursor-pointer" title="Save"><Check className="w-3.5 h-3.5" /></button>
+                    <button onClick={handleCancel} className="p-1 text-zinc-400 hover:text-zinc-200 cursor-pointer" title="Cancel"><X className="w-3.5 h-3.5" /></button>
                   </div>
                 ) : (
                   <>
@@ -717,7 +729,7 @@ const Sidebar = ({
     <>
       {/* pip-hide: pinned at 420 wide this narrow-window bar sat above the
           assistant and offered a menu there is no room to use. */}
-      <div className="pip-hide md:hidden flex items-center justify-between px-4 py-3 bg-white/95 dark:bg-[#1a1b1e] border-b border-zinc-200 dark:border-zinc-800 shrink-0 z-30 mobile-px-4 mobile-py-3">
+      <div className="sidebar-mobile-header pip-hide md:hidden flex items-center justify-between px-4 py-3 bg-white/95 dark:bg-[#1a1b1e] border-b border-zinc-200 dark:border-zinc-800 shrink-0 z-30 mobile-px-4 mobile-py-3">
         <div className="flex items-center gap-2">
           <Logo3DMotion size="sm" />
           <span className="font-black text-sm tracking-wide select-none flex items-center ml-1">
@@ -737,14 +749,14 @@ const Sidebar = ({
         </button>
       </div>
 
-      {mobileOpen && <div onClick={() => setMobileOpen(false)} className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-40 mobile-full-width" aria-hidden="true" />}
+      {mobileOpen && <div onClick={() => setMobileOpen(false)} className="sidebar-mobile-backdrop md:hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-40 mobile-full-width" aria-hidden="true" />}
 
       <aside
         id="smaran-mobile-navigation"
         aria-label="SMARAN.AI navigation"
         aria-hidden={!mobileOpen}
         inert={!mobileOpen}
-        className={`md:hidden fixed top-0 bottom-0 left-0 w-[268px] max-w-full bg-white dark:bg-[#1a1b1e] border-r border-zinc-200 dark:border-zinc-800 flex flex-col z-50 transition-transform duration-300 sidebar-mobile-fix sidebar-mobile-scroll ${mobileOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'}`}
+        className={`sidebar-mobile md:hidden fixed top-0 bottom-0 left-0 w-[268px] max-w-full bg-white dark:bg-[#1a1b1e] border-r border-zinc-200 dark:border-zinc-800 flex flex-col z-50 transition-transform duration-300 sidebar-mobile-fix sidebar-mobile-scroll ${mobileOpen ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'}`}
       >
         <div className="p-4 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -782,19 +794,103 @@ const Sidebar = ({
           <span className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest px-2 mb-2">Chat History</span>
           {sessions.length === 0 ? (
             <p className="text-xs text-zinc-500 dark:text-zinc-600 italic px-2 py-1 font-bold">No conversations yet.</p>
-          ) : sessions.map(s => (
-            <div key={s.id} onClick={() => handleSessionClick(s.id)}
-              className={`group w-full flex items-center justify-between rounded-full px-3 py-2 text-xs font-bold cursor-pointer transition-all border btn-lightning-hover ${activeSessionId === s.id && activeView === 'chat' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/20 shadow-[0_0_10px_rgba(99,102,241,0.2)]' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60 border-transparent hover:shadow-[0_0_8px_rgba(99,102,241,0.08)]'}`}>
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-zinc-400 dark:text-zinc-500" />
-                <span className="truncate">{s.title}</span>
+          ) : sessions.map(s => {
+            const isActive = activeSessionId === s.id && activeView === 'chat';
+            const isEditing = editingSessionId === s.id;
+
+            return (
+              <div
+                key={s.id}
+                onClick={() => !isEditing && handleSessionClick(s.id)}
+                className={`group w-full flex items-center justify-between rounded-xl px-3 py-2 text-xs font-bold cursor-pointer transition-all border ${
+                  isActive
+                    ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/20 shadow-[0_0_10px_rgba(99,102,241,0.2)]'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60 border-transparent'
+                }`}
+              >
+                {isEditing ? (
+                  <div className="flex items-center gap-1.5 w-full" onClick={e => e.stopPropagation()}>
+                    <MessageSquare className="w-3.5 h-3.5 shrink-0 text-indigo-500 dark:text-indigo-400" />
+                    <input
+                      value={editTitle}
+                      onChange={e => setEditTitle(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') handleSave(s.id);
+                        if (e.key === 'Escape') handleCancel();
+                      }}
+                      className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-indigo-500 text-xs text-zinc-900 dark:text-white outline-none focus:ring-1 focus:ring-indigo-500"
+                      autoFocus
+                      aria-label="Rename conversation"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSave(s.id)}
+                      className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-lg cursor-pointer shrink-0"
+                      title="Save title"
+                      aria-label="Save title"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancel}
+                      className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg cursor-pointer shrink-0"
+                      title="Cancel"
+                      aria-label="Cancel rename"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 min-w-0 flex-1 mr-1">
+                      <MessageSquare className="w-3.5 h-3.5 shrink-0 text-zinc-400 dark:text-zinc-500" />
+                      <span className="truncate">{s.title}</span>
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={e => handleStartEdit(e, s)}
+                        className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-xl cursor-pointer transition-colors"
+                        title="Rename conversation"
+                        aria-label={`Rename ${s.title}`}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      {confirmDeleteId === s.id ? (
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => { onDeleteSession(s.id); setConfirmDeleteId(null); }}
+                            className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg cursor-pointer"
+                          >
+                            Delete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="px-2.5 py-1 bg-zinc-300 dark:bg-zinc-700 hover:bg-zinc-400 text-zinc-700 dark:text-zinc-300 text-xs font-bold rounded-lg cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setConfirmDeleteId(s.id); }}
+                          className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-xl cursor-pointer transition-colors"
+                          title="Delete conversation"
+                          aria-label={`Delete ${s.title}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={e => handleStartEdit(e, s)} className="p-0.5 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
-                <button onClick={e => { e.stopPropagation(); onDeleteSession(s.id); }} className="p-0.5 text-zinc-500 hover:text-rose-400 hover:bg-zinc-800 rounded cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2 shrink-0 max-h-[55dvh] overflow-y-auto overscroll-contain sidebar-mobile-footer">

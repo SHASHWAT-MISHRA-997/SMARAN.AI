@@ -13,19 +13,19 @@
  * written or the test passed. Everything else here is detail; that arrow is
  * the difference.
  *
- * Tool calls are tags in ordinary text rather than a provider's function
- * calling. Every model reachable from here can produce tags - a small one in
- * Ollama, a large one behind a key. Native tool calling would work for some
- * and quietly fail for the rest.
+ * OpenRouter can return native function calls. Other providers and routes
+ * without native tools use text tags. Both pass through the same parser,
+ * workspace boundaries and approval policy before an action executes.
  */
 
 import { canDelegate, setDelegator, summarise, DELEGATE_STEPS, DELEGATE_SYSTEM } from './delegate';
 import { decide, Policy } from './modes';
-import { Choice, complete, Message } from './models';
+import { Choice, complete, Message, NativeTool, NATIVE_CALL_PREFIX } from './models';
 import { McpRegistry } from './mcpRegistry';
 import { readInstructions } from '../instructions';
 import {
     confineToFolder, describeTools, execute, parseTodo, TodoItem, TOOLS,
+    prepareFileChange, applyFileChange, PreparedChange,
 } from './tools';
 
 /** Not a guess at how much work a task needs — a stop, so a model repeating
@@ -132,6 +132,7 @@ export interface ToolCall {
     name: string;
     args: Record<string, string>;
     raw: string;
+    preview?: string;
 }
 
 /**
@@ -156,9 +157,10 @@ export function looksTruncated(text: string): boolean {
 
 /** Where a tool call starts, in either spelling, or -1. */
 function callStarts(text: string): number {
+    if ((text || '').startsWith(NATIVE_CALL_PREFIX)) return 0;
     const starts = [
         (text || '').search(/<tool[_-]?call\s+name=/i),
-        (text || '').search(/<(?:[a-z0-9_]*function_call|function_calls|tool_use)>/i),
+        (text || '').search(/<(?:[a-z0-9_]*function_call|function_calls|tool_calls|tool_use)>/i),
         (text || '').search(/<invoke\s+name=/i),
     ].filter((at) => at >= 0);
     return starts.length ? Math.min(...starts) : -1;
@@ -194,11 +196,22 @@ export function proseBefore(text: string): string {
 
 /** Argument values: code must survive exactly, a path must not keep a newline. */
 function keep(key: string, value: string): string {
-    return key === 'content' ? value : value.trim();
+    return ['content', 'find', 'replace'].includes(key) ? value : value.trim();
 }
 
 export function parseToolCall(text: string): ToolCall | undefined {
     const body = text || '';
+    if (body.startsWith(NATIVE_CALL_PREFIX)) {
+        try {
+            const value = JSON.parse(body.slice(NATIVE_CALL_PREFIX.length));
+            if (typeof value.name !== 'string' || !value.args || typeof value.args !== 'object' || Array.isArray(value.args)) return undefined;
+            const args: Record<string, string> = {};
+            for (const [key, argument] of Object.entries(value.args)) {
+                args[key] = typeof argument === 'string' ? argument : JSON.stringify(argument);
+            }
+            return { name: value.name.toLowerCase(), args, raw: body };
+        } catch { return undefined; }
+    }
     const match = TOOL_CALL.exec(body);
     if (match) {
         const args: Record<string, string> = {};
@@ -373,6 +386,15 @@ ${DELEGATE_SYSTEM}` : '')
     // What was actually done, so a claim of completion can be checked against
     // it. A small model will write one file and announce it wrote three.
     const performed: string[] = [];
+    const nativeTools: NativeTool[] = Object.entries(TOOLS).map(([name, tool]) => ({
+        type: 'function',
+        function: { name, description: tool.description, parameters: {
+            type: 'object',
+            properties: Object.fromEntries(tool.args.map(argument => [argument, { type: 'string' as const }])),
+            required: tool.args.filter(argument => !(name === 'list_files' && argument === 'path') && !(name === 'browser_type' && argument === 'enter')),
+        } },
+    }));
+    if (choice.provider === 'openrouter') messages[0].content += '\n\nUse the supplied native function tools for built-in actions. Emit one tool call per step. Text tool tags remain available for MCP tools.';
 
     /* The reach dial, applied where the paths are resolved. Set per run, so
        changing it takes effect on the next question rather than on the next
@@ -389,7 +411,7 @@ ${DELEGATE_SYSTEM}` : '')
        Only the outermost run registers one. A delegate finds no handler,
        is told so, and does the work itself - which is the depth limit, and
        it is enforced here rather than trusted to a sentence in a prompt. */
-    const outermost = !canDelegate();
+    const outermost = !asDelegate && !canDelegate();
     if (outermost) {
         /* Named, so it can put itself back.
 
@@ -443,7 +465,7 @@ ${DELEGATE_SYSTEM}` : '')
 
         let reply: string;
         try {
-            reply = await complete(messages, choice);
+            reply = await complete(messages, choice, nativeTools);
         } catch (error) {
             yield { type: 'error', message: (error as Error).message };
             return;
@@ -502,7 +524,9 @@ ${DELEGATE_SYSTEM}` : '')
             return;
         }
 
-        const spoken = reply.slice(0, reply.indexOf(call.raw)).trim();
+        // The successful-call path used to bypass proseBefore, leaking the
+        // enclosing <tool_calls> tag even though malformed calls were clean.
+        const spoken = proseBefore(reply);
         if (spoken) {
             yield { type: 'message', text: spoken };
         }
@@ -513,8 +537,22 @@ ${DELEGATE_SYSTEM}` : '')
         // to the model to respect.
         const decision = decide(policy, call.name, call.args);
         let result: string;
+        let prepared: PreparedChange | undefined;
+        let preparationError: string | undefined;
+        if (decision.act !== 'refuse' && ['write_file', 'edit_file'].includes(call.name)) {
+            try {
+                prepared = prepareFileChange(call.name, call.args, root);
+                call.preview = prepared.preview;
+                yield { type: 'note', text: `Proposed edit:\n${prepared.preview}` };
+            } catch (error) {
+                preparationError = `${call.name} failed: ${(error as Error).message}`;
+            }
+        }
 
-        if (decision.act === 'refuse') {
+        if (preparationError) {
+            result = preparationError;
+            yield { type: 'tool_result', name: call.name, result, step };
+        } else if (decision.act === 'refuse') {
             yield { type: 'refused', name: call.name, because: decision.because, step };
             result = decision.because;
         } else if (decision.act === 'ask' && !(await approve(call, decision.because))) {
@@ -526,9 +564,13 @@ ${DELEGATE_SYSTEM}` : '')
             if (stopped()) {
                 return;
             }
-            result = mcp?.has(call.name)
-                ? await mcp.call(call.name, call.args)
-                : await execute(call.name, call.args, root);
+            try {
+                result = prepared ? applyFileChange(prepared, root)
+                    : mcp?.has(call.name) ? await mcp.call(call.name, call.args)
+                    : await execute(call.name, call.args, root);
+            } catch (error) {
+                result = `${call.name} failed: ${(error as Error).message}`;
+            }
             performed.push(call.name);
             if (call.name === 'todo') {
                 // The list itself, for the panel to draw in place. The result

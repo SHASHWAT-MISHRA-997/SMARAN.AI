@@ -1301,22 +1301,12 @@ class DesktopAgent:
 
     @staticmethod
     def _action_set_volume(params: Dict[str, Any]) -> Dict[str, Any]:
-        level = int(params.get("level", 50))
-        level = max(0, min(100, level))
-
-        if sys.platform == "win32":
-            try:
-                # Use nircmd (free utility) or PowerShell
-                _run_host_cmd([
-                    "powershell", "-Command",
-                    f"$wshell = New-Object -ComObject WScript.Shell; "
-                    f"1..50 | ForEach-Object {{ $wshell.SendKeys([char]174) }}; "  # Volume down to 0
-                    f"1..{level // 2} | ForEach-Object {{ $wshell.SendKeys([char]175) }}"  # Volume up to target
-                ])
-                return {"success": True, "message": f"Volume set to {level}%."}
-            except Exception as e:
-                return {"success": False, "error": f"Volume control failed: {e}"}
-        return {"success": False, "error": "Volume control only supported on Windows."}
+        from app.windows_audio import set_volume
+        try:
+            level = set_volume(params.get("level", 50))
+            return {"success": True, "message": f"Volume set to {level}%.", "level": level}
+        except (OSError, ValueError, TypeError) as exc:
+            return {"success": False, "error": f"Volume control failed: {exc}"}
 
     @staticmethod
     def _action_get_clipboard(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1342,8 +1332,10 @@ class DesktopAgent:
         if sys.platform == "win32":
             try:
                 subprocess.run(
-                    ["powershell", "-Command", f"Set-Clipboard -Value '{text}'"],
-                    capture_output=True, text=True, timeout=5,
+                    ["powershell", "-NoProfile", "-Command",
+                     "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())"],
+                    input=text, encoding="utf-8", check=True,
+                    capture_output=True, timeout=5,
                     creationflags=WIN_NO_WINDOW,
                 )
                 return {"success": True, "message": f"Copied to clipboard: {text[:50]}..."}
@@ -1414,7 +1406,14 @@ class DesktopAgent:
 
     @staticmethod
     def _action_toggle_mute(params: Dict[str, Any]) -> Dict[str, Any]:
-        return DesktopAgent._tap_media_key(0xAD, "Toggled mute.")
+        from app.windows_audio import set_mute
+        raw = params.get("muted")
+        muted = None if raw is None else str(raw).lower() in {"true", "1", "yes"}
+        try:
+            actual = set_mute(muted)
+            return {"success": True, "message": "Muted." if actual else "Unmuted.", "muted": actual}
+        except OSError as exc:
+            return {"success": False, "error": f"Mute control failed: {exc}"}
 
     @staticmethod
     def _action_volume_up(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1839,6 +1838,8 @@ class DesktopAgent:
 # ---------------------------------------------------------------------------
 
 INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
+    # Disabling startup must precede the positive pattern it contains.
+    (re.compile(r"\b(?:don'?t|do not|mat)\s+(?:start|launch|chalao)\s+(?:smaran\s*)?(?:ai\s*)?(?:with|at|pe|par)\s+(?:windows\s+)?startup\b", re.I), "set_launch_at_startup", {"enabled": "false"}),
     # YouTube
     (re.compile(r"(?:open|play|search|chalao|kholo|dikhao)\s+(?:on\s+)?youtube\s+(.+)", re.I), "search_youtube", {"query": "$1"}),
     (re.compile(r"youtube\s+(?:pe|par|par|mein|mai)\s+(.+?)(?:\s+(?:chalao|play|search|kholo|dikhao))", re.I), "search_youtube", {"query": "$1"}),
@@ -1909,7 +1910,10 @@ INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
     (re.compile(r"\b(?:pause|resume|play)\s+(?:the\s+)?(?:music|song|video|media)\b|\b(?:gaana|gana|video)\s*(?:rok|chalao|band karo)\b|\bplay\s*pause\b", re.I), "media_play_pause", {}),
     (re.compile(r"\b(?:next|skip)\s+(?:the\s+)?(?:track|song|gaana|gana)\b|\bagla\s+(?:gaana|gana|track)\b", re.I), "media_next", {}),
     (re.compile(r"\b(?:previous|last|pichla)\s+(?:track|song|gaana|gana)\b|\bgo\s+back\s+a\s+track\b", re.I), "media_previous", {}),
-    (re.compile(r"\b(?:mute|unmute)\b|\bawaz\s*(?:band|chalu)\s*karo\b", re.I), "toggle_mute", {}),
+    (re.compile(r"^(?:please\s+)?mute(?:\s+(?:the\s+)?(?:system|speakers?|sound|audio|volume))?(?:\s+please)?[.!?]*$", re.I), "toggle_mute", {"muted": "true"}),
+    (re.compile(r"^(?:please\s+)?unmute(?:\s+(?:the\s+)?(?:system|speakers?|sound|audio|volume))?(?:\s+please)?[.!?]*$", re.I), "toggle_mute", {"muted": "false"}),
+    (re.compile(r"^(?:awaz|awaaz)\s+band\s+karo[.!?]*$", re.I), "toggle_mute", {"muted": "true"}),
+    (re.compile(r"^(?:awaz|awaaz)\s+chalu\s+karo[.!?]*$", re.I), "toggle_mute", {"muted": "false"}),
     (re.compile(r"\b(?:volume|awaz|awaaz)\s*(?:up|badhao|tez)\b|\bincrease\s+(?:the\s+)?volume\b|\bturn\s+it\s+up\b", re.I), "volume_up", {}),
     (re.compile(r"\b(?:volume|awaz|awaaz)\s*(?:down|kam)\s*(?:karo)?\b|\bdecrease\s+(?:the\s+)?volume\b|\bturn\s+it\s+down\b", re.I), "volume_down", {}),
 
@@ -1964,7 +1968,6 @@ INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
     (re.compile(r"\b(?:set|change)\s+(?:the\s+)?wallpaper\s+(?:to\s+)?(.+)$", re.I), "set_wallpaper", {"path": "$1"}),
     (re.compile(r"\b(?:toggle|switch|change)\s+(?:to\s+)?(?:dark|light)\s+mode\b|\bdark\s+mode\s+(?:on|off|karo)\b", re.I), "toggle_dark_mode", {}),
     (re.compile(r"\b(?:start|launch|open)\s+(?:smaran\s*)?(?:ai\s*)?(?:with|at)\s+(?:windows\s+)?startup\b|\bstartup\s+(?:pe|par)\s+(?:chalu|start)\s+karo\b", re.I), "set_launch_at_startup", {"enabled": "true"}),
-    (re.compile(r"\b(?:don'?t|do not|mat)\s+(?:start|launch|chalao)\s+(?:smaran\s*)?(?:ai\s*)?(?:with|at|pe|par)\s+(?:windows\s+)?startup\b", re.I), "set_launch_at_startup", {"enabled": "false"}),
 ]
 
 
@@ -1974,6 +1977,14 @@ def detect_desktop_intent(text: str) -> Optional[Dict[str, Any]]:
     """
     text = text.strip()
     if not text or len(text) < 3:
+        return None
+
+    # These are conversation, not instructions to control the desktop. In
+    # particular, "do not mute" previously fired the system mute key.
+    disabling_startup = INTENT_PATTERNS[0][0].fullmatch(text)
+    if not disabling_startup and re.match(
+        r"^(?:please\s+)?(?:don['’]?t|do\s+not|never|why|how|explain|what\s+does)\b", text, re.I
+    ):
         return None
 
     for pattern, action_id, param_template in INTENT_PATTERNS:

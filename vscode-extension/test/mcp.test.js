@@ -122,10 +122,10 @@ process.stdin.on('data', (chunk) => {
   ok('an invented tool name is answered, not crashed on');
 
   // Every mode, because this is the safety half of the feature.
-  assert.strictEqual(decide('plan', 'mcp_test_echo', {}).act, 'refuse');
-  for (const mode of ['manual', 'autoEdit', 'auto']) {
-    assert.strictEqual(decide(mode, 'mcp_test_echo', {}).act, 'ask',
-      `${mode} should still ask`);
+  assert.strictEqual(decide({ reach: 'read', approval: 'always' }, 'mcp_test_echo', {}).act, 'refuse');
+  for (const approval of ['always', 'commands', 'risky']) {
+    assert.strictEqual(decide({ reach: 'workspace', approval }, 'mcp_test_echo', {}).act, 'ask',
+      `${approval} should still ask`);
   }
   ok('MCP tools are shown and waited on in every mode, and refused in Plan');
 

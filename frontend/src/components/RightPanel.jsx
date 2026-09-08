@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Activity, CheckCircle, Cpu, HardDrive, LayoutDashboard, Shield, Thermometer, Wifi, X, Zap, Gauge, Timer, Rocket, Battery, Monitor, Sparkles, AlertTriangle, ExternalLink } from "lucide-react";
+import { Activity, Cpu, HardDrive, LayoutDashboard, Shield, Wifi, X, Zap, Gauge, Battery, Monitor, AlertTriangle, ExternalLink } from "lucide-react";
 import { API_BASE } from "../context/AuthContext";
 
 const UNAVAILABLE = "Unavailable";
@@ -181,7 +181,7 @@ export const detectClientDevice = async () => {
       }
       if (!gpu) gpu = gl.getParameter(gl.RENDERER) || "";
     }
-  } catch (_) {}
+  } catch  {}
 
   const cleanGpu = tidyGpuName(gpu);
 
@@ -206,7 +206,7 @@ export const detectClientDevice = async () => {
       networkRtt = Number.isFinite(conn.rtt) ? conn.rtt : null;
       isWifi = networkType === "wifi";
     }
-  } catch (_) {}
+  } catch  {}
 
   // ── Screen dimensions ──
   // Only the CSS pixel grid is knowable here. A physical diagonal cannot be
@@ -220,7 +220,7 @@ export const detectClientDevice = async () => {
     screenWidth = window.screen?.width || null;
     screenHeight = window.screen?.height || null;
     pixelRatio = Number.isFinite(window.devicePixelRatio) ? window.devicePixelRatio : null;
-  } catch (_) {}
+  } catch  {}
 
   // ── Battery (async) ──
   let batteryLevel = null;
@@ -231,7 +231,7 @@ export const detectClientDevice = async () => {
       batteryLevel = bat.level >= 0 ? Math.round(bat.level * 100) : null;
       batteryCharging = bat.charging;
     }
-  } catch (_) {}
+  } catch  {}
 
   // A machine that reports a battery is a laptop; a tower reports none. This is
   // the only form-factor signal available, so nothing is claimed without it.
@@ -352,7 +352,7 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(clientDevice),
       }).catch(() => {});
-    } catch (_) {}
+    } catch  {}
   }, [clientDevice]);
 
   useEffect(() => {
@@ -408,7 +408,7 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
           const payload = await res.json();
           applyTelemetry(payload);
         }
-      } catch (_) {}
+      } catch  {}
     };
 
     const connectWebSocket = () => {
@@ -449,7 +449,7 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
   }, [showPanel]);
 
   const isTelemetry = connectionState === "telemetry";
-  const isLoading = connectionState === "connecting";
+
 
   const isRealGpu = (name) => {
     if (!name || typeof name !== "string") return false;
@@ -469,7 +469,7 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
   const gpuVramUsed = finite(gpus[0]?.vram_used_gb) ? gpus[0].vram_used_gb : (finite(stats?.gpu_vram_used) ? stats.gpu_vram_used : null);
   const gpuVramTotal = positive(gpus[0]?.vram_total_gb) ? gpus[0].vram_total_gb : (positive(stats?.gpu_vram_total) ? stats.gpu_vram_total : null);
   const gpuTemperature = finite(gpus[0]?.temperature) ? gpus[0].temperature : (finite(stats?.gpu_temperature) ? stats.gpu_temperature : null);
-  const gpuCount = gpus.length;
+
   const gpuAvailable = Boolean(gpuName);
   const hasLiveGpuTelemetry = realGpuList.some((gpu) => gpu?.has_live_metrics === true || finite(gpu?.usage) || finite(gpu?.vram_used_gb));
   const telemetrySource = String(stats?.telemetry_source || "");
@@ -482,7 +482,7 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
 
   const metricCards = useMemo(() => {
     const cpuThreads = positive(stats?.cpu_threads) ? stats.cpu_threads : (clientDevice?.threads || null);
-    const cpuUsageVal = finite(stats?.cpu_usage) ? percent(stats.cpu_usage) : (clientDevice?.isMobile ? "Active" : "Optimal");
+    const cpuUsageVal = finite(stats?.cpu_usage) ? percent(stats.cpu_usage) : "Usage unavailable";
     const cpu = [
       `${isHostTelemetry ? "Host" : clientDevice?.isMobile ? "Mobile Device CPU" : "Local runtime"} • ${cpuUsageVal}`,
       cpuThreads ? `${cpuThreads} logical cores` : null,
@@ -493,8 +493,8 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
     const memory = (usedRam != null && totalRam != null)
       ? `${gigabytes(usedRam)} / ${gigabytes(totalRam)} (${percent(stats?.memory_usage || 0)})`
       : totalRam != null
-        ? `≈${gigabytes(totalRam)} Mobile Device RAM`
-        : "Device Memory Managed";
+        ? `≈${gigabytes(totalRam)} browser-reported RAM`
+        : "Memory measurement unavailable";
 
     // The percentage beside used/total is how full the disk is
     const disk = positive(stats?.disk_total_gb)
@@ -504,8 +504,8 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
     const network = (stats?.net_down_kb || stats?.net_up_kb)
       ? "Down " + rate(stats?.net_down_kb || 0) + " • Up " + rate(stats?.net_up_kb || 0)
       : clientDevice?.effectiveType
-        ? `${clientDevice.effectiveType.toUpperCase()} Mobile Network Active`
-        : "Network Connected";
+          ? `${clientDevice.effectiveType.toUpperCase()} browser connection estimate`
+          : "Network measurement unavailable";
 
     const effectiveGpuName = gpuName || cleanClientGpu || (clientDevice?.isMobile ? "Mobile WebGL 3D Engine" : "");
     const gpuSub = hasLiveGpuTelemetry
@@ -557,8 +557,8 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
             <h2 className="text-xs sm:text-sm font-black tracking-[0.12em] text-indigo-900 dark:text-indigo-300 uppercase flex items-center gap-1.5 leading-tight">
               <Shield className="w-4 h-4 text-indigo-500 shrink-0" /> <span className="break-words">DEVICE &amp; AI PERFORMANCE</span>
             </h2>
-            <p className="performance-copy min-w-0 text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5 flex items-start gap-1 leading-snug">
-              <span className="w-1.5 h-1.5 mt-1 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <p className="performance-copy min-w-0 text-[10px] text-zinc-600 dark:text-zinc-400 font-bold uppercase tracking-wider mt-0.5 flex items-start gap-1 leading-snug">
+              <span className={`w-1.5 h-1.5 mt-1 rounded-full shrink-0 ${connectionState === 'telemetry' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
               <span className="min-w-0">{statusLabel}</span>
             </p>
           </div>
@@ -893,7 +893,7 @@ const StatCard = ({ label, value }) => (
   </div>
 );
 
-const MetricDetails = ({ metric, stats, gpu, gpus }) => {
+const MetricDetails = ({ metric, stats, gpu }) => {
   if (metric === "GPU") {
     return (
       <div className="grid grid-cols-2 gap-1.5">

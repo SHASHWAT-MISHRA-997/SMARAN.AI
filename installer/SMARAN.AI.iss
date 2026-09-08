@@ -11,13 +11,22 @@
 ; ============================================================================
 
 #define AppName        "SMARAN.AI"
-#define AppVersion     "2.10.33"
+#define AppVersion     "2.10.34"
 #define AppPublisher   "SMARAN AI"
 #define AppExeName     "SMARAN.AI.exe"
-#define SourceDir      "..\dist\SMARAN.AI"
+#ifndef SourceDir
+  #define SourceDir "..\dist\SMARAN.AI"
+#endif
 
 [Setup]
+#ifdef SmaranAudit
+AppId=SMARAN.AI.IsolatedAudit
+CreateUninstallRegKey=no
+UsePreviousAppDir=no
+UsePreviousTasks=no
+#else
 AppId={{9F1C7E20-4B3D-4C55-9A67-2E1D5B8C4A11}
+#endif
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
@@ -48,7 +57,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; AppMutex names the same kernel object the app itself claims, so Inno
 ; recognises the running copy and can ask for it to be closed rather than
 ; guessing from open file handles.
+#ifndef SmaranAudit
 AppMutex=Global\SMARAN.AI.SingleInstance
+#endif
 CloseApplications=yes
 RestartApplications=no
 
@@ -63,9 +74,11 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
+#ifndef SmaranAudit
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+#endif
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName} now"; Flags: nowait postinstall skipifsilent

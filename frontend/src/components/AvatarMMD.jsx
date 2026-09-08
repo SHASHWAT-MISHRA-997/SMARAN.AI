@@ -149,6 +149,10 @@ const AvatarMMD = ({
   const orbitRef = useRef({ yaw: 0, pitch: 0, distanceScale: 1 });
   const pointerRef = useRef({ x: 0, y: 0 });
   const [viewLocked, setViewLocked] = useState(true);
+  // The keyboard handler is mounted once and would otherwise close over the
+  // value viewLocked had at mount, which is not the value it has when a key
+  // is pressed.
+  const viewLockedRef = useRef(true);
   // Off by default: the head turning to follow the cursor was distracting
   // rather than lifelike. The button stays, so it can be turned back on.
   /* Whether she holds the way she is facing.
@@ -179,6 +183,7 @@ const AvatarMMD = ({
 
   useEffect(() => { eyesTrackingRef.current = eyesTracking; }, [eyesTracking]);
   useEffect(() => { holdFacingRef.current = holdFacing; }, [holdFacing]);
+  useEffect(() => { viewLockedRef.current = viewLocked; }, [viewLocked]);
 
   // ── Scene ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -492,6 +497,20 @@ const AvatarMMD = ({
       const orbit = orbitRef.current;
       const step = 0.12;
       let handled = true;
+      /* VIEW LOCKED has to mean the same thing for the keyboard as it does
+       * for the mouse.
+       *
+       * Dragging already checked it; these keys did not, so with the view
+       * locked and the character deliberately held front-facing, a stray A or
+       * D still swung the camera round her - and the report reads as "she
+       * turned again" whichever of the two moved. Nudging is what the lock is
+       * for, so nudging is what it now stops.
+       *
+       * The deliberate commands are left alone: L unlocks, R returns to the
+       * front, 1-4 pick a named view, F toggles eye tracking. Those are asked
+       * for; a repeated A is usually not. */
+      const nudges = 'adwsqe';
+      if (viewLockedRef.current && nudges.includes(event.key.toLowerCase())) return;
       switch (event.key.toLowerCase()) {
         case 'a': orbit.yaw -= step; break;
         case 'd': orbit.yaw += step; break;
@@ -586,7 +605,16 @@ const AvatarMMD = ({
     // weight shift currently in progress.
     // Current blended expression, and the gesture currently playing.
     const expression = { smile: 0, mouthUp: 0, narrow: 0, surprise: 0, sad: 0 };
-    const gesture = { weight: 0, timer: 0, next: 1.5, shape: 0, side: 1 };
+    // The lift/open values are held here, not recomputed as targets each
+    // frame, because a gesture change used to move the arms to their new pose
+    // in a single frame. Eased toward the target instead, so a shape change
+    // is a movement rather than a cut.
+    const gesture = {
+      weight: 0, timer: 0, next: 1.5, shape: 0, side: 1,
+      liftL: 0, liftR: 0, openL: 0, openR: 0,
+      // The elbows follow these, which trail the shoulders slightly.
+      elbowL: 0, elbowR: 0,
+    };
 
     const idle = {
       energy: 0.34,
@@ -714,6 +742,9 @@ const AvatarMMD = ({
 
         if (bones.chest) {
           bones.chest.rotation.x = breathSigned * MOTION.breathChest;
+          // Recompute from the rest pose each frame. Adding this gesture to
+          // last frame's yaw accumulated a full turn during long replies.
+          bones.chest.rotation.y = 0;
           // Counter-rotate against the hips: the torso stays upright while the
           // weight moves, which is what reads as balance.
           bones.chest.rotation.z = -swayPhase * MOTION.swayChestCounter * energy
@@ -740,7 +771,7 @@ const AvatarMMD = ({
           const headRoll = -postureRoll * MOTION.postureHeadRoll
             + fractalNoise(time * 0.13 + 57) * MOTION.microHead * 1.6 * energy;
 
-          if (eyesTrackingRef.current) {
+          if (eyesTrackingRef.current && !holdFacingRef.current) {
             // Turn toward the pointer, so she appears to look at you.
             const { x, y } = pointerRef.current;
             bones.head.rotation.y = microYaw * 0.4 + x * 0.35;
@@ -775,32 +806,66 @@ const AvatarMMD = ({
         const armDrift = 0.05 + energy * 0.11;
         const armPhase = fractalNoise(time * 0.21 + 3);
         const armPhaseB = fractalNoise(time * 0.21 + 71);
-        let liftL = 0;
-        let liftR = 0;
-        let openL = 0;
-        let openR = 0;
+        let wantLiftL = 0;
+        let wantLiftR = 0;
+        let wantOpenL = 0;
+        let wantOpenR = 0;
         if (gesture.shape === 0) {          // both hands open outward
-          liftL = 0.52; liftR = 0.52; openL = 0.30; openR = 0.30;
+          wantLiftL = 0.52; wantLiftR = 0.52; wantOpenL = 0.30; wantOpenR = 0.30;
         } else if (gesture.shape === 1) {   // one hand leads
-          if (gesture.side < 0) { liftL = 0.78; openL = 0.38; liftR = 0.14; }
-          else { liftR = 0.78; openR = 0.38; liftL = 0.14; }
+          if (gesture.side < 0) { wantLiftL = 0.78; wantOpenL = 0.38; wantLiftR = 0.14; }
+          else { wantLiftR = 0.78; wantOpenR = 0.38; wantLiftL = 0.14; }
         } else {                            // small contained beats
-          liftL = 0.28; liftR = 0.28; openL = 0.12; openR = 0.12;
+          wantLiftL = 0.28; wantLiftR = 0.28; wantOpenL = 0.12; wantOpenR = 0.12;
         }
-        // The beat rides on top, so the arms punctuate loud syllables.
-        const pulse = Math.sin(time * 5.2) * 0.11 * beat;
+
+        // Reach the new pose over about a third of a second instead of in one
+        // frame. Written as an exponential rather than `delta * rate` so the
+        // speed does not change with the frame rate - on a fast phone the
+        // linear form eased faster, which is part of why this read as snapping.
+        // The two arms are given slightly different rates: limbs that start
+        // and stop together look mechanical.
+        const easeL = 1 - Math.exp(-delta * 3.4);
+        const easeR = 1 - Math.exp(-delta * 3.0);
+        gesture.liftL += (wantLiftL - gesture.liftL) * easeL;
+        gesture.liftR += (wantLiftR - gesture.liftR) * easeR;
+        gesture.openL += (wantOpenL - gesture.openL) * easeL;
+        gesture.openR += (wantOpenR - gesture.openR) * easeR;
+
+        // The beat rides on top, so the arms punctuate loud syllables. One
+        // shared sine drove both arms in exact mirror image, at a fixed rate,
+        // which is the marionette look: two hands on one string. Each arm now
+        // has its own rate and offset, so they agree without matching.
+        const pulseL = Math.sin(time * 5.2) * 0.105 * beat;
+        const pulseR = Math.sin(time * 4.3 + 1.9) * 0.095 * beat;
 
         if (bones.armL) {
-          bones.armL.rotation.z = -0.62 - (armPhase * 0.5 + 0.5) * armDrift + (liftL + pulse) * gw;
-          bones.armL.rotation.x = -openL * gw;
+          bones.armL.rotation.z = -0.62 - (armPhase * 0.5 + 0.5) * armDrift
+            + (gesture.liftL + pulseL) * gw;
+          bones.armL.rotation.x = -gesture.openL * gw;
         }
         if (bones.armR) {
-          bones.armR.rotation.z = 0.62 + (armPhaseB * 0.5 + 0.5) * armDrift - (liftR + pulse) * gw;
-          bones.armR.rotation.x = -openR * gw;
+          bones.armR.rotation.z = 0.62 + (armPhaseB * 0.5 + 0.5) * armDrift
+            - (gesture.liftR + pulseR) * gw;
+          bones.armR.rotation.x = -gesture.openR * gw;
         }
-        // Elbows bend with the lift, otherwise the arms swing as stiff poles.
-        if (bones.elbowL) bones.elbowL.rotation.z = -0.20 - Math.abs(armPhase) * armDrift * 0.8 - liftL * gw * 0.8;
-        if (bones.elbowR) bones.elbowR.rotation.z = 0.20 + Math.abs(armPhaseB) * armDrift * 0.8 + liftR * gw * 0.8;
+
+        // The forearm trails the upper arm. Elbows that bent in perfect step
+        // with the shoulder made each arm one rigid piece hinged in the
+        // middle; a real forearm arrives a moment late and settles after the
+        // shoulder has stopped. This is that lag, and nothing more.
+        const elbowLag = 1 - Math.exp(-delta * 1.9);
+        gesture.elbowL += (gesture.liftL - gesture.elbowL) * elbowLag;
+        gesture.elbowR += (gesture.liftR - gesture.elbowR) * elbowLag;
+
+        if (bones.elbowL) {
+          bones.elbowL.rotation.z = -0.20 - Math.abs(armPhase) * armDrift * 0.8
+            - gesture.elbowL * gw * 0.8;
+        }
+        if (bones.elbowR) {
+          bones.elbowR.rotation.z = 0.20 + Math.abs(armPhaseB) * armDrift * 0.8
+            + gesture.elbowR * gw * 0.8;
+        }
 
         // Arms alone are not what makes someone look like they are talking.
         // People nod into their own sentences, turn slightly on a phrase and
@@ -813,12 +878,13 @@ const AvatarMMD = ({
             + fractalNoise(time * 0.7 + 11) * 0.045 * gw;
           const turn = fractalNoise(time * 0.45 + 23) * 0.075 * gw;
           bones.head.rotation.x += nod;
-          bones.head.rotation.y += turn;
+          if (!holdFacingRef.current) bones.head.rotation.y += turn;
           bones.head.rotation.z += fractalNoise(time * 0.38 + 91) * 0.035 * gw;
         }
         if (bones.chest && gw > 0.001) {
           bones.chest.rotation.x += Math.sin(time * 3.1) * 0.022 * beat;
-          bones.chest.rotation.y += fractalNoise(time * 0.33 + 47) * 0.05 * gw;
+          bones.chest.rotation.y = holdFacingRef.current ? 0
+            : fractalNoise(time * 0.33 + 47) * 0.05 * gw;
         }
       }
 
@@ -855,7 +921,7 @@ const AvatarMMD = ({
       />
       {/* View controls */}
       {status === 'ready' && (
-        <div className="absolute bottom-2 right-2 flex flex-col items-end gap-1 font-mono text-[9px] select-none">
+        <div className="mmd-hud absolute bottom-2 right-2 flex flex-col items-end gap-1 font-mono text-[9px] select-none">
           <div className="flex gap-1">
             <button
               type="button"
@@ -901,7 +967,11 @@ const AvatarMMD = ({
               </button>
             ))}
           </div>
-          <span className="text-white/25 pr-1">
+          {/* Keyboard shortcuts, so this is only worth showing where there is
+              a keyboard. On the phone it was a line of instructions for keys
+              that do not exist, taking a row from a screen that has none to
+              spare and running under the message box. */}
+          <span className="mmd-key-hint text-white/25 pr-1">
             WASD rotate · Q/E zoom · L lock · F eyes · R reset · 1-4 views
           </span>
         </div>

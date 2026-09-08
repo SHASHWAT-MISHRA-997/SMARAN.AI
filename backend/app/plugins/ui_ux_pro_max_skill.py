@@ -4,10 +4,8 @@ UI/UX Pro Max Skill
 A skill that provides UI/UX design guidance and suggestions.
 
 
-Unlike the other plugins in this folder, nothing here was fabricated. It
-returns design principles and checklists, and where it mentions evidence it
-says what evidence would be needed to verify a principle rather than
-inventing any. That is what a skill is, and it was left as it was.
+This local skill returns design principles and checklists. It does not
+inspect a running interface, measure accessibility, or assign audit scores.
 
 The real ui-ux-pro-max is a separate MIT project by nextlevelbuilder with
 192 industry-specific reasoning rules and design-system generation. It
@@ -195,6 +193,8 @@ class UIUXProMaxSkill(SkillPlugin):
         
         if skill_name == "ui_ux_review":
             design_description = context.get("design_description")
+            if not isinstance(design_description, str) or not design_description.strip():
+                raise ValueError("A non-empty design_description is required")
             platform = context.get("platform", "web")
             focus_areas = context.get("focus_areas", ["accessibility", "usability", "visual_design", "interaction_design"])
             
@@ -202,7 +202,6 @@ class UIUXProMaxSkill(SkillPlugin):
             
             # Generate review based on principles
             feedback = []
-            scores = {}
             
             for area in focus_areas:
                 if area in self.ux_principles:
@@ -211,8 +210,6 @@ class UIUXProMaxSkill(SkillPlugin):
                     selected_principles = principles[:min(3, len(principles))]
                     feedback.extend([f"[{area.title()}] {p}" for p in selected_principles])
                     
-                    # Calculate a mock score based on principle coverage
-                    scores[area] = min(10, max(1, 8 + len(selected_principles) - 3))
             
             # Add platform-specific feedback
             if platform == "mobile":
@@ -225,27 +222,33 @@ class UIUXProMaxSkill(SkillPlugin):
                 feedback.append("[Web] Ensure responsive design breakpoints are well-defined")
                 feedback.append("[Web] Consider performance optimization for slow connections")
             
-            # Calculate overall score
-            overall_score = sum(scores.values()) / max(len(scores), 1) if scores else 7.5
-            
             return {
                 "review_id": f"ui_ux_review_{hash(design_description) % 10000}",
                 "design_description": design_description,
                 "platform": platform,
                 "focus_areas": focus_areas,
                 "feedback": feedback,
-                "scores": scores,
-                "overall_score": round(overall_score, 1),
+                "scores": {},
+                "overall_score": None,
+                "assessment_type": "guidance_only",
+                "verified": False,
+                "evidence_required": [
+                    "Inspect the rendered interface at the target viewport",
+                    "Measure contrast and test keyboard and assistive-technology access",
+                    "Exercise the user flows before reporting findings or scores"
+                ],
                 "recommendations": [
                     "Prioritize fixes for accessibility issues first",
                     "Consider conducting user testing with real users",
                     "Iterate based on feedback and analytics"
                 ],
-                "message": "UI/UX review completed successfully"
+                "message": "Design checklist generated. The interface has not been inspected or scored."
             }
         
         elif skill_name == "ui_ux_suggest_components":
             feature_description = context.get("feature_description")
+            if not isinstance(feature_description, str) or not feature_description.strip():
+                raise ValueError("A non-empty feature_description is required")
             platform = context.get("platform", "web")
             complexity = context.get("complexity", "medium")
             

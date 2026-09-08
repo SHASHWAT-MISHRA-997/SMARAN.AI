@@ -101,7 +101,7 @@ let socket: WebSocket | null = null;
 let port = 0;
 let nextId = 1;
 let currentUrl = '';
-const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
 const collected: Collected = { console: [], exceptions: [], failedRequests: [] };
 
 /** Keep a bounded amount: a page in a reload loop would otherwise fill memory. */
@@ -142,12 +142,23 @@ function send(method: string, params: Record<string, unknown> = {}): Promise<any
     if (!socket) throw new BrowserError('The browser is not open. Use open_browser first.');
     const id = nextId++;
     return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        socket!.send(JSON.stringify({ id, method, params }));
         // A command that never comes back would hang the whole agent run.
-        setTimeout(() => {
+        const timer = setTimeout(() => {
             if (pending.delete(id)) reject(new BrowserError(`${method} did not answer in 20s.`));
         }, 20000);
+        pending.set(id, { resolve, reject, timer });
+        try {
+            socket!.send(JSON.stringify({ id, method, params }), (error) => {
+                if (error && pending.delete(id)) {
+                    clearTimeout(timer);
+                    reject(new BrowserError(error.message));
+                }
+            });
+        } catch (error) {
+            pending.delete(id);
+            clearTimeout(timer);
+            reject(error);
+        }
     });
 }
 
@@ -164,6 +175,7 @@ function listen(message: any): void {
         const waiting = pending.get(message.id);
         if (!waiting) return;
         pending.delete(message.id);
+        clearTimeout(waiting.timer);
         if (message.error) waiting.reject(new BrowserError(message.error.message ?? 'protocol error'));
         else waiting.resolve(message.result);
         return;
@@ -222,7 +234,12 @@ async function attach(): Promise<void> {
     socket.on('message', (raw) => {
         try { listen(JSON.parse(String(raw))); } catch { /* not JSON we understand */ }
     });
-    socket.on('close', () => { socket = null; });
+    const attached = socket;
+    socket.on('close', () => {
+        if (socket !== attached) return;
+        socket = null;
+        rejectPending();
+    });
 
     // Events first, so nothing that happens during the very first load is missed.
     await send('Runtime.enable');
@@ -399,7 +416,7 @@ const FIND = `(() => {
 async function locate(text: string): Promise<any> {
     if (!socket) throw new BrowserError('No page is open. Use open_browser first.');
     const result = await send('Runtime.evaluate', {
-        expression: FIND.replace('%TEXT%', JSON.stringify(text)),
+        expression: FIND.replace('%TEXT%', () => JSON.stringify(text)),
         returnByValue: true,
     });
     const found = result?.result?.value;
@@ -465,10 +482,20 @@ export async function reload(): Promise<string> {
     return check();
 }
 
+function rejectPending(): void {
+    // Clearing the map alone left each awaiting promise unresolved forever:
+    // its timeout saw no entry and also declined to reject it.
+    for (const waiting of pending.values()) {
+        clearTimeout(waiting.timer);
+        waiting.reject(new BrowserError('The browser was closed before the command finished.'));
+    }
+    pending.clear();
+}
+
 export async function close(): Promise<void> {
     try { socket?.close(); } catch { /* already gone */ }
     socket = null;
-    pending.clear();
+    rejectPending();
     if (child && child.exitCode === null) {
         try { child.kill(); } catch { /* already gone */ }
     }

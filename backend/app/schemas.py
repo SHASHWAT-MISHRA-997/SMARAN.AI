@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 
@@ -15,8 +15,7 @@ class CollectionResponse(BaseModel):
     created_at: datetime
     doc_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class DocumentResponse(BaseModel):
     id: int
@@ -27,8 +26,7 @@ class DocumentResponse(BaseModel):
     session_id: Optional[str] = None
     uploaded_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Chat Schemas ---
@@ -41,6 +39,11 @@ class ChatRequest(BaseModel):
     web_search: bool = False
     rag_enabled: bool = False
     voice_mode: bool = False  # Spoken conversation: short, proactive replies
+    #: The gender of the character answering. Hindi, Gujarati, Marathi,
+    #: Punjabi and Bengali conjugate verbs by the speaker's own gender, so
+    #: without this the model guesses - and it guessed male, which put a
+    #: female character on screen saying "मैं कर सकता हूँ".
+    assistant_gender: Optional[str] = "female"
     target_language: Optional[str] = "en"  # Default English
     cloud_provider: Optional[str] = None
     cloud_model: Optional[str] = None
@@ -66,8 +69,7 @@ class ChatMessageResponse(BaseModel):
     references: Optional[List[SourceReference]] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ChatSessionResponse(BaseModel):
     id: str
@@ -78,8 +80,7 @@ class ChatSessionResponse(BaseModel):
     # were actually having rather than the newest empty shell.
     message_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ChatSessionCreate(BaseModel):
     title: str
@@ -97,8 +98,7 @@ class UserMemoryResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Translation Schemas ---

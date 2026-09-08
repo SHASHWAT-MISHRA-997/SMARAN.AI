@@ -42,9 +42,9 @@ export const playWakeChime = () => {
     osc2.stop(now + 0.35);
 
     setTimeout(() => {
-      try { ctx.close(); } catch (_) {}
+      try { ctx.close(); } catch  {}
     }, 450);
-  } catch (_) {}
+  } catch  {}
 };
 
 /** Loose & robust phrase matcher with extensive Hindi / Hinglish / English aliases */
@@ -114,7 +114,13 @@ export class WakeWordListener {
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.maxAlternatives = 3;
-      recognition.lang = 'en-US';
+      // Match the WebView/device locale. Android phones commonly have an
+      // en-GB pack while en-US is not installed; forcing en-US made the wake
+      // listener fail before the explicit Dictate/Speak controls could use
+      // the native recogniser.
+      recognition.lang = (typeof navigator !== 'undefined' && navigator.language)
+        ? navigator.language.replace('_', '-')
+        : 'en-US';
 
       recognition.onresult = (event) => {
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
@@ -159,7 +165,7 @@ export class WakeWordListener {
       };
 
       return recognition;
-    } catch (e) {
+    } catch  {
       return null;
     }
   }
@@ -168,7 +174,7 @@ export class WakeWordListener {
     if (!this.running) return;
     try {
       if (this.recognition) {
-        try { this.recognition.abort(); } catch (_) {}
+        try { this.recognition.abort(); } catch  {}
         this.recognition = null;
       }
       this.recognition = this._createRecognition();
@@ -200,7 +206,7 @@ export class WakeWordListener {
       return;
     }
     this.localRunning = true;
-    try { this.recognition?.abort(); } catch (_) {}
+    try { this.recognition?.abort(); } catch  {}
     this.recognition = null;
 
     try {
@@ -248,7 +254,7 @@ export class WakeWordListener {
           mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
             ? 'audio/webm;codecs=opus' : 'audio/webm',
         });
-      } catch (_) { resolve(); return; }
+      } catch  { resolve(); return; }
 
       const chunks = [];
       recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
@@ -267,13 +273,13 @@ export class WakeWordListener {
             playWakeChime();
             this.onWake?.(heard.trim());
           }
-        } catch (_) { /* a missed wake is not worth reporting */ }
+        } catch  { /* a missed wake is not worth reporting */ }
         resolve();
       };
 
       recorder.start();
       // Long enough for "hey smaran", short enough not to lag behind.
-      window.setTimeout(() => { try { recorder.stop(); } catch (_) { resolve(); } }, 2200);
+      window.setTimeout(() => { try { recorder.stop(); } catch  { resolve(); } }, 2200);
     });
   }
 
@@ -303,17 +309,17 @@ export class WakeWordListener {
       this.levelTimer = null;
     }
     if (this.recognition) {
-      try { this.recognition.abort(); } catch (_) {}
+      try { this.recognition.abort(); } catch  {}
       this.recognition = null;
     }
     // Release the microphone. Leaving the tracks live keeps the recording
     // indicator on and holds the device against everything else.
     if (this.stream) {
-      this.stream.getTracks().forEach((track) => { try { track.stop(); } catch (_) {} });
+      this.stream.getTracks().forEach((track) => { try { track.stop(); } catch  {} });
       this.stream = null;
     }
     if (this.audioCtx) {
-      try { this.audioCtx.close(); } catch (_) {}
+      try { this.audioCtx.close(); } catch  {}
       this.audioCtx = null;
     }
   }

@@ -788,7 +788,8 @@
       // The CLI is also a .exe, so it is matched before the generic rule.
       // Otherwise every command-line download is counted as an installer and
       // the two figures can never be told apart again.
-      if (/smaran\.exe(\?|$)/i.test(href)) return 'cli';
+      if (/(smaran\.exe|smaran-linux-x86_64)(\?|$)/i.test(href)) return 'cli';
+      if (/\.(AppImage|deb|rpm|tar\.gz)(\?|$)/i.test(href)) return 'linux';
       if (/\.exe(\?|$)/i.test(href)) return 'exe';
       if (/\.apk(\?|$)/i.test(href)) return 'apk';
       if (/\.vsix(\?|$)/i.test(href) || /marketplace\.visualstudio\.com/i.test(href)) return 'vsix';
@@ -801,7 +802,7 @@
       var href = link.getAttribute('href') || '';
       // Only real files. The in-page '#download' jump is navigation, not a
       // download, and counting it would inflate the number that matters.
-      if (!/\.(exe|apk|vsix)(\?|$)|marketplace\.visualstudio\.com/i.test(href)) return;
+      if (!/\.(exe|apk|vsix|AppImage|deb|rpm|tar\.gz)(\?|$)|smaran-linux-x86_64(\?|$)|marketplace\.visualstudio\.com/i.test(href)) return;
       sendHit('download_click', targetOf(href));
     }, true);
   }

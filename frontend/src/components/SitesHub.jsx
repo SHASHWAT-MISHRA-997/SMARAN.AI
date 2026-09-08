@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ExternalLink, Globe2, Loader2, Plus, RefreshCw, Search, Send, Trash2, X,
-  Code2, Eye, Download, Sparkles, LayoutTemplate, Layers, Laptop, Smartphone, Check
+  Globe2, Loader2, Plus, RefreshCw, Search, Send, Trash2, X,
+  Code2, Eye, Download, Sparkles, Laptop, Smartphone, Check
 } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 
@@ -68,7 +68,7 @@ const generateSiteHTML = (name, prompt, version = 1) => {
   </style>
 </head>
 <body class="glow-radial min-h-screen text-zinc-100 antialiased selection:bg-indigo-500 selection:text-white flex flex-col justify-between">
-  
+
   <!-- Navigation Header -->
   <header class="border-b border-zinc-800/80 bg-zinc-950/70 backdrop-blur-xl sticky top-0 z-50">
     <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -101,7 +101,7 @@ const generateSiteHTML = (name, prompt, version = 1) => {
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
         ${profile.eyebrow}
       </div>
-      
+
       <h1 class="text-4xl sm:text-6xl font-black tracking-tight text-white leading-tight">
         ${safeName}
       </h1>
@@ -175,7 +175,7 @@ const SitesHub = () => {
     try {
       const saved = JSON.parse(localStorage.getItem('sm_sites_registry') || '[]');
       return saved.length > 0 ? saved : DEFAULT_INITIAL_SITES;
-    } catch (_) {
+    } catch  {
       return DEFAULT_INITIAL_SITES;
     }
   });
@@ -203,7 +203,7 @@ const SitesHub = () => {
             try {
               const page = await fetch(`${API_BASE}/api/sites/${site.id}/preview`, { credentials: 'include' });
               return page.ok ? { ...site, html: await page.text() } : site;
-            } catch (_) {
+            } catch  {
               return site;
             }
           }));
@@ -211,7 +211,7 @@ const SitesHub = () => {
           localStorage.setItem('sm_sites_registry', JSON.stringify(withHtml));
         }
       }
-    } catch (_) {
+    } catch  {
       // Fallback gracefully to localStorage
     } finally {
       setLoading(false);
@@ -308,7 +308,7 @@ const SitesHub = () => {
             <Globe2 className="h-12 w-12 text-zinc-700" />
             <h2 className="mt-4 text-xl font-bold">{query ? 'No matching sites' : 'No sites created yet'}</h2>
             <p className="mt-2 max-w-md text-sm text-zinc-400">
-              Describe what you want to build or pick a pre-made template below.
+              Start a site to describe what you want or choose a starter template.
             </p>
             <button
               onClick={() => setCreating(true)}
@@ -448,7 +448,7 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
         onCreated({ ...siteObj, ...backendSite, html: backendSite.html || generatedHTML });
         return;
       }
-    } catch (_) {}
+    } catch  {}
 
     // Only when the request itself did not get through.
     onCreated({ ...siteObj, generatedLocally: true });
@@ -472,7 +472,7 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
               instant, and there is no Tailwind in the output.
             </p>
           </div>
-          <button type="button" onClick={onClose} className="p-1.5 text-zinc-400 hover:text-white">
+          <button type="button" aria-label="Close site creation" onClick={onClose} className="p-1.5 text-zinc-400 hover:text-white">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -603,7 +603,7 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
       {/* Top Bar */}
       <header className="flex items-center justify-between gap-2 border-b border-zinc-800 px-2 sm:px-4 py-3 bg-zinc-950">
         <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
-          <button onClick={onClose} className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-900 hover:text-white">
+          <button aria-label="Close site workspace" onClick={onClose} className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-900 hover:text-white">
             <X className="h-4 w-4" />
           </button>
           <div>

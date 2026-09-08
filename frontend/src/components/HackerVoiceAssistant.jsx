@@ -3,28 +3,11 @@ import {
   Mic,
   MicOff,
   PictureInPicture2,
-  Volume2,
-  VolumeX,
   X,
-  Sparkles,
   Zap,
-  Globe,
-  Radio,
-  Bot,
-  User,
   Send,
-  Square,
   RefreshCw,
   Cpu,
-  Shield,
-  Activity,
-  Maximize2,
-  Terminal,
-  Upload,
-  FolderPlus,
-  BookOpen,
-  Brain,
-  Trash2,
   UserRound,
   Monitor,
   Camera,
@@ -41,6 +24,7 @@ import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/devi
 /** No computer behind the phone: the live session these controls need. */
 const noBackend = () => isNativeApp() && !loadLink()?.url;
 import EnergyCore from './EnergyCore';
+import { resolveCoreState } from '../utils/coreStates';
 import GestureHUD from './GestureHUD';
 import CyberFX from './CyberFX';
 import { GESTURES } from '../utils/gestureControl';
@@ -48,6 +32,7 @@ import { isDesktopApp } from './RightPanel';
 import AvatarVideo, { AVATAR_CHARACTERS } from './AvatarVideo';
 import AvatarMMD, { MMD_CHARACTERS } from './AvatarMMD';
 import CyberStage from './CyberStage';
+import { classifyTranscriptionFailure, pollFinalTranscript, voiceOutcomeKind } from '../utils/voiceStatus';
 
 /* Prebuilt Gemini Live voices, grouped so a user can simply pick male or
    female. The service decides the exact timbre; these are its own voices. */
@@ -113,458 +98,9 @@ const isMobileVoiceDevice = () => typeof window !== 'undefined' && window.matchM
  * microphone level and pulses while the assistant speaks, shifting from the
  * idle neon green to cyan as it becomes active.
  */
-const AICoreSphere = ({ voiceState, micVolume }) => {
-  const canvasRef = useRef(null);
-  const voiceStateRef = useRef(voiceState);
-  const micVolumeRef = useRef(micVolume);
 
-  // Keep the animation loop reading fresh values without restarting it.
-  useEffect(() => { voiceStateRef.current = voiceState; }, [voiceState]);
-  useEffect(() => { micVolumeRef.current = micVolume; }, [micVolume]);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
-    const ctx = canvas.getContext('2d');
-    let animationId;
-    let time = 0;
-    let volume = 0;
 
-    const COUNT = 900;
-    const RADIUS = 1.3;
-    // Fibonacci sphere: even coverage without clustering at the poles.
-    const points = Array.from({ length: COUNT }, (_, i) => {
-      const phi = Math.acos(1 - (2 * (i + 0.5)) / COUNT);
-      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-      return {
-        x: RADIUS * Math.sin(phi) * Math.cos(theta),
-        y: RADIUS * Math.sin(phi) * Math.sin(theta),
-        z: RADIUS * Math.cos(phi),
-        phase: Math.random() * Math.PI * 2,
-        weight: 0.5 + Math.random() * 0.8,
-      };
-    });
-
-    const lerp = (a, b, t) => a + (b - a) * t;
-    const IDLE_RGB = [57, 255, 20];   // #39ff14
-    const ACTIVE_RGB = [0, 255, 255]; // #00ffff
-
-    const render = () => {
-      const width = canvas.width;
-      const height = canvas.height;
-      const cx = width / 2;
-      const cy = height / 2;
-      const state = voiceStateRef.current;
-      const mic = micVolumeRef.current || 0;
-      const speaking = state === 'speaking';
-      const thinking = state === 'thinking';
-      const connected = state !== 'idle' && state !== 'error' && state !== 'muted';
-
-      time += 0.016;
-      ctx.clearRect(0, 0, width, height);
-
-      // Target "volume" drives colour, scale and the surface wave.
-      let targetVolume = 0;
-      if (speaking) {
-        targetVolume = Math.abs(Math.sin(time * 9) * 0.6 + Math.sin(time * 4.3) * 0.4) * 0.6;
-      } else if (thinking) {
-        targetVolume = 0.25 + Math.abs(Math.sin(time * 3)) * 0.15;
-      } else if (connected) {
-        targetVolume = Math.min(0.5, mic / 160) + Math.abs(Math.sin(time * 1.6)) * 0.035;
-      }
-      volume = lerp(volume, targetVolume, speaking ? 0.14 : 0.09);
-
-      const blend = Math.min(volume * 2, 1);
-      const r = Math.round(lerp(IDLE_RGB[0], ACTIVE_RGB[0], blend));
-      const g = Math.round(lerp(IDLE_RGB[1], ACTIVE_RGB[1], blend));
-      const b = Math.round(lerp(IDLE_RGB[2], ACTIVE_RGB[2], blend));
-      const core = `${r}, ${g}, ${b}`;
-
-      const scale = Math.min(width, height) * (connected ? (speaking ? 0.30 : 0.26) : 0.19);
-      const rotY = time * 0.28;
-      const rotZ = time * 0.12;
-
-      const project = (p) => {
-        // Surface wave: displace along the normal while active.
-        const wave = volume > 0.002
-          ? Math.sin(time * 7 + p.phase) * volume * p.weight * 0.2
-          : 0;
-        const f = 1 + wave;
-        let x = p.x * f;
-        let y = p.y * f;
-        let z = p.z * f;
-
-        const cosY = Math.cos(rotY);
-        const sinY = Math.sin(rotY);
-        [x, z] = [x * cosY - z * sinY, x * sinY + z * cosY];
-
-        const cosZ = Math.cos(rotZ);
-        const sinZ = Math.sin(rotZ);
-        [x, y] = [x * cosZ - y * sinZ, x * sinZ + y * cosZ];
-
-        const depth = 4.2;
-        const persp = depth / (depth + z);
-        return { x: cx + x * scale * persp, y: cy + y * scale * persp, persp, z };
-      };
-
-      ctx.globalCompositeOperation = 'lighter';
-
-      // Inner glow
-      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, scale * 1.5);
-      glow.addColorStop(0, `rgba(${core}, ${0.10 + volume * 0.22})`);
-      glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, width, height);
-
-      // Orbital rings
-      const drawRing = (ringRadius, tilt, speed, alpha) => {
-        ctx.beginPath();
-        for (let i = 0; i <= 96; i++) {
-          const a = (i / 96) * Math.PI * 2;
-          const rx = Math.cos(a) * ringRadius;
-          const rz = Math.sin(a) * ringRadius;
-          const ry = rz * Math.sin(tilt);
-          const p = project({ x: rx, y: ry, z: rz * Math.cos(tilt), phase: 0, weight: 0 });
-          if (i === 0) ctx.moveTo(p.x, p.y);
-          else ctx.lineTo(p.x, p.y);
-        }
-        ctx.strokeStyle = `rgba(${core}, ${alpha})`;
-        ctx.lineWidth = 1.1;
-        ctx.stroke();
-        void speed;
-      };
-      const ringAlpha = connected ? 0.12 + volume * 0.5 : 0.05;
-      drawRing(1.5, Math.PI * 0.1, 0.16, ringAlpha);
-      drawRing(1.72, Math.PI * 0.42, -0.1, ringAlpha * 0.75);
-
-      // Particle shell — far points first so near points read as brighter.
-      const projected = points.map(project).sort((a, b) => b.z - a.z);
-      const baseAlpha = connected ? 0.65 + volume * 0.3 : 0.2;
-      for (const p of projected) {
-        const size = Math.max(0.4, 1.5 * p.persp);
-        ctx.fillStyle = `rgba(${core}, ${baseAlpha * p.persp * 0.8})`;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      ctx.globalCompositeOperation = 'source-over';
-      animationId = requestAnimationFrame(render);
-    };
-
-    render();
-    return () => cancelAnimationFrame(animationId);
-  }, []);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={420}
-      height={400}
-      className="w-full max-w-[340px] sm:max-w-[400px] h-[300px] sm:h-[360px] mx-auto select-none pointer-events-none"
-    />
-  );
-};
-
-const IronManHologramCanvas = ({ voiceState, micVolume, theme = 'jarvis' }) => {
-  const canvasRef = useRef(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    let animationId;
-    let time = 0;
-
-    // Generate holographic ambient stars/particles
-    const particles = Array.from({ length: 45 }, () => ({
-      x: (Math.random() - 0.5) * 400,
-      y: (Math.random() - 0.5) * 400,
-      z: Math.random() * 400 - 200,
-      speed: Math.random() * 0.8 + 0.4,
-      size: Math.random() * 1.8 + 0.8,
-    }));
-
-    const render = () => {
-      time += 0.025;
-      const width = canvas.width;
-      const height = canvas.height;
-      const cx = width / 2;
-      const cy = height / 2;
-
-      ctx.clearRect(0, 0, width, height);
-
-      // Color themes
-      let primaryGlow = 'rgba(56, 189, 248, '; // Cyan
-      let eyeColor = '#38bdf8';
-      let arcColor = '#0284c7';
-      let ringColor = 'rgba(99, 102, 241, ';
-
-      if (voiceState === 'speaking') {
-        primaryGlow = 'rgba(239, 68, 68, '; // Hot Iron Man Crimson & Gold
-        eyeColor = '#f59e0b';
-        arcColor = '#dc2626';
-        ringColor = 'rgba(245, 158, 11, ';
-      } else if (voiceState === 'thinking') {
-        primaryGlow = 'rgba(245, 158, 11, '; // Amber Matrix
-        eyeColor = '#fbbf24';
-        arcColor = '#d97706';
-        ringColor = 'rgba(217, 119, 6, ';
-      }
-
-      // Smooth 180-degree oscillating rotation
-      const rotY = Math.sin(time * 0.8) * 0.85; // ~100 deg sweep left-to-right
-      const rotX = Math.sin(time * 0.4) * 0.12;
-
-      // 1. Draw Starfield & Cyber Matrix Nodes
-      particles.forEach((p) => {
-        p.z -= p.speed;
-        if (p.z < -200) p.z = 200;
-        const scale = 250 / (250 + p.z);
-        const px = cx + p.x * scale;
-        const py = cy + p.y * scale;
-        const alpha = Math.max(0.1, (1 - p.z / 200) * 0.4);
-
-        ctx.fillStyle = `${primaryGlow}${alpha})`;
-        ctx.beginPath();
-        ctx.arc(px, py, p.size * scale, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      // 2. Draw Orbiting Holographic HUD Radar Rings & Arc Equalizer
-      ctx.save();
-      ctx.translate(cx, cy);
-
-      const pulseVol = Math.min(45, (micVolume || 0) * 0.6);
-      const outerRadius = 130 + pulseVol;
-
-      // Outer targeting reticle ring
-      ctx.strokeStyle = `${ringColor}0.35)`;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(0, 0, outerRadius, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Dashed HUD Ring
-      ctx.save();
-      ctx.rotate(time * 0.4);
-      ctx.strokeStyle = `${primaryGlow}0.6)`;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([12, 18, 4, 18]);
-      ctx.beginPath();
-      ctx.arc(0, 0, outerRadius - 15, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      // Equalizer Waveform Arcs around helmet
-      const bars = 36;
-      for (let i = 0; i < bars; i++) {
-        const angle = (i / bars) * Math.PI * 2 + time * 0.3;
-        const barHeight = Math.sin(time * 4 + i * 0.8) * 12 + (voiceState === 'speaking' ? 22 : pulseVol * 0.8);
-        const r1 = outerRadius + 8;
-        const r2 = r1 + Math.max(3, barHeight);
-
-        const x1 = Math.cos(angle) * r1;
-        const y1 = Math.sin(angle) * r1;
-        const x2 = Math.cos(angle) * r2;
-        const y2 = Math.sin(angle) * r2;
-
-        ctx.strokeStyle = i % 2 === 0 ? `${primaryGlow}0.8)` : `${ringColor}0.6)`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      }
-
-      ctx.restore();
-
-      // 3. 3D Iron Man Mark-LXXXV Holographic Helmet Points & Polygons
-      const project = (x, y, z) => {
-        // Rotate Y
-        const cosY = Math.cos(rotY);
-        const sinY = Math.sin(rotY);
-        const x1 = x * cosY - z * sinY;
-        const z1 = x * sinY + z * cosY;
-
-        // Rotate X
-        const cosX = Math.cos(rotX);
-        const sinX = Math.sin(rotX);
-        const y2 = y * cosX - z1 * sinX;
-        const z2 = y * sinX + z1 * cosX;
-
-        const depth = 280;
-        const fov = depth / (depth + z2 + 80);
-        return {
-          x: cx + x1 * fov * 1.35,
-          y: cy + y2 * fov * 1.35,
-          z: z2,
-          fov,
-        };
-      };
-
-      // Helmet Structural Landmarks
-      const headNodes = [
-        // Crown & Forehead
-        { id: 'crown_t', p: project(0, -95, 10) },
-        { id: 'forehead_l', p: project(-42, -75, 45) },
-        { id: 'forehead_r', p: project(42, -75, 45) },
-        { id: 'temple_l', p: project(-58, -45, 30) },
-        { id: 'temple_r', p: project(58, -45, 30) },
-
-        // Faceplate & Brow
-        { id: 'brow_mid', p: project(0, -45, 62) },
-        { id: 'brow_l', p: project(-32, -45, 58) },
-        { id: 'brow_r', p: project(32, -45, 58) },
-
-        // Visor Eyes Left
-        { id: 'eye_l_in', p: project(-10, -28, 62) },
-        { id: 'eye_l_out', p: project(-40, -32, 54) },
-        { id: 'eye_l_bot', p: project(-26, -23, 60) },
-
-        // Visor Eyes Right
-        { id: 'eye_r_in', p: project(10, -28, 62) },
-        { id: 'eye_r_out', p: project(40, -32, 54) },
-        { id: 'eye_r_bot', p: project(26, -23, 60) },
-
-        // Cheekbones & Gold Insets
-        { id: 'cheek_l', p: project(-48, -5, 45) },
-        { id: 'cheek_r', p: project(48, -5, 45) },
-        { id: 'nose_bridge', p: project(0, -18, 66) },
-        { id: 'nose_tip', p: project(0, 5, 64) },
-
-        // Jawline & Chin
-        { id: 'jaw_l', p: project(-36, 48, 40) },
-        { id: 'jaw_r', p: project(36, 48, 40) },
-        { id: 'chin_l', p: project(-18, 72, 50) },
-        { id: 'chin_r', p: project(18, 72, 50) },
-        { id: 'chin_mid', p: project(0, 75, 54) },
-
-        // Arc Reactor Core (Below Chin)
-        { id: 'arc_core', p: project(0, 115, 20) },
-      ];
-
-      // Draw Wireframe Mesh
-      const drawLine = (p1, p2, alpha = 0.55, width = 1.5, strokeStyle) => {
-        ctx.strokeStyle = strokeStyle || `${primaryGlow}${alpha})`;
-        ctx.lineWidth = width;
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      };
-
-      const getNode = (id) => headNodes.find((n) => n.id === id)?.p;
-
-      // Outer Helmet Contours
-      drawLine(getNode('crown_t'), getNode('forehead_l'), 0.5);
-      drawLine(getNode('crown_t'), getNode('forehead_r'), 0.5);
-      drawLine(getNode('forehead_l'), getNode('temple_l'), 0.6);
-      drawLine(getNode('forehead_r'), getNode('temple_r'), 0.6);
-      drawLine(getNode('temple_l'), getNode('cheek_l'), 0.6);
-      drawLine(getNode('temple_r'), getNode('cheek_r'), 0.6);
-      drawLine(getNode('cheek_l'), getNode('jaw_l'), 0.7);
-      drawLine(getNode('cheek_r'), getNode('jaw_r'), 0.7);
-      drawLine(getNode('jaw_l'), getNode('chin_l'), 0.75);
-      drawLine(getNode('jaw_r'), getNode('chin_r'), 0.75);
-      drawLine(getNode('chin_l'), getNode('chin_mid'), 0.85);
-      drawLine(getNode('chin_r'), getNode('chin_mid'), 0.85);
-
-      // Forehead & Brow Plate
-      drawLine(getNode('brow_mid'), getNode('brow_l'), 0.8);
-      drawLine(getNode('brow_mid'), getNode('brow_r'), 0.8);
-      drawLine(getNode('brow_mid'), getNode('crown_t'), 0.4);
-      drawLine(getNode('brow_l'), getNode('forehead_l'), 0.45);
-      drawLine(getNode('brow_r'), getNode('forehead_r'), 0.45);
-
-      // Nose & Faceplate Center Ridge
-      drawLine(getNode('brow_mid'), getNode('nose_bridge'), 0.85);
-      drawLine(getNode('nose_bridge'), getNode('nose_tip'), 0.85);
-      drawLine(getNode('nose_tip'), getNode('chin_mid'), 0.6);
-      drawLine(getNode('nose_tip'), getNode('cheek_l'), 0.5);
-      drawLine(getNode('nose_tip'), getNode('cheek_r'), 0.5);
-
-      // 4. Glowing Iron Man Visor Eyes (High Glow)
-      const el_in = getNode('eye_l_in');
-      const el_out = getNode('eye_l_out');
-      const el_bot = getNode('eye_l_bot');
-
-      const er_in = getNode('eye_r_in');
-      const er_out = getNode('eye_r_out');
-      const er_bot = getNode('eye_r_bot');
-
-      const renderEye = (pIn, pOut, pBot) => {
-        ctx.save();
-        ctx.shadowColor = eyeColor;
-        ctx.shadowBlur = voiceState === 'speaking' ? 24 : 16;
-        ctx.fillStyle = eyeColor;
-        ctx.beginPath();
-        ctx.moveTo(pIn.x, pIn.y);
-        ctx.lineTo(pOut.x, pOut.y);
-        ctx.lineTo(pBot.x, pBot.y);
-        ctx.closePath();
-        ctx.fill();
-
-        // Inner bright core
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.moveTo(pIn.x * 0.8 + pBot.x * 0.2, pIn.y * 0.8 + pBot.y * 0.2);
-        ctx.lineTo(pOut.x * 0.8 + pBot.x * 0.2, pOut.y * 0.8 + pBot.y * 0.2);
-        ctx.lineTo(pBot.x, pBot.y);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      };
-
-      renderEye(el_in, el_out, el_bot);
-      renderEye(er_in, er_out, er_bot);
-
-      // 5. Arc Reactor Quantum Chest Core
-      const arc = getNode('arc_core');
-      if (arc) {
-        ctx.save();
-        ctx.shadowColor = arcColor;
-        ctx.shadowBlur = 20 + pulseVol;
-
-        // Outer Arc Ring
-        ctx.strokeStyle = eyeColor;
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.arc(arc.x, arc.y, 22 + pulseVol * 0.3, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Inner Triangle Reactor
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        const rTri = 12 + pulseVol * 0.15;
-        for (let i = 0; i < 3; i++) {
-          const a = (i * 2 * Math.PI) / 3 - Math.PI / 2 + time * 0.8;
-          const tx = arc.x + Math.cos(a) * rTri;
-          const ty = arc.y + Math.sin(a) * rTri;
-          if (i === 0) ctx.moveTo(tx, ty);
-          else ctx.lineTo(tx, ty);
-        }
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
-
-      animationId = requestAnimationFrame(render);
-    };
-
-    render();
-    return () => cancelAnimationFrame(animationId);
-  }, [voiceState, micVolume, theme]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={420}
-      height={400}
-      className="w-full max-w-[340px] sm:max-w-[400px] h-[300px] sm:h-[360px] mx-auto filter drop-shadow-[0_0_25px_rgba(56,189,248,0.25)] select-none pointer-events-none"
-    />
-  );
-};
 
 /* ==========================================================================
    IRIS-style dashboard pieces
@@ -573,95 +109,20 @@ const IronManHologramCanvas = ({ voiceState, micVolume, theme = 'jarvis' }) => {
    unavailable rather than invented.
    ========================================================================== */
 
-const finiteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+
 
 /** Green through amber to red as a load approaches its limit. */
-const loadColor = (percent) => {
-  if (!finiteNumber(percent)) return '#52525b';
-  const clamped = Math.min(100, Math.max(0, percent));
-  const hue = 120 * (1 - clamped / 100);
-  return `hsl(${hue}, 85%, 55%)`;
-};
 
-const GlassPanel = ({ title, icon: Icon, children }) => (
-  <div className="rounded-2xl border border-emerald-500/15 bg-black/50 backdrop-blur-xl p-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
-    <div className="flex items-center gap-1.5 mb-2.5">
-      {Icon ? <Icon className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> : null}
-      <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-emerald-300/80">{title}</span>
-    </div>
-    {children}
-  </div>
-);
+
+
 
 /** A labelled bar whose colour tracks the load it is showing. */
-const NeonBar = ({ label, percent, readout }) => {
-  const known = finiteNumber(percent);
-  const width = known ? Math.min(100, Math.max(0, percent)) : 0;
-  const color = loadColor(percent);
-  return (
-    <div className="mb-2.5 last:mb-0">
-      <div className="flex items-baseline justify-between gap-2 mb-1">
-        <span className="font-mono text-[9px] uppercase tracking-wider text-white/45 truncate">{label}</span>
-        <span className="font-mono text-[9px] font-bold shrink-0" style={{ color: known ? color : undefined }}>
-          {readout ?? (known ? `${Math.round(width)}%` : 'Unavailable')}
-        </span>
-      </div>
-      <div className="h-1 w-full rounded-full bg-white/8 overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-500 ease-out"
-          style={{ width: `${width}%`, background: color, boxShadow: known ? `0 0 8px ${color}` : 'none' }}
-        />
-      </div>
-    </div>
-  );
-};
+
 
 /** A short boot log, so the panel has something to say before data arrives. */
-const BootSequence = ({ lines }) => (
-  <div className="space-y-0.5">
-    {lines.map((line, index) => (
-      <div
-        key={line}
-        className="font-mono text-[8px] leading-relaxed text-emerald-400/70 animate-in fade-in slide-in-from-left-1"
-        style={{ animationDelay: `${index * 90}ms`, animationFillMode: 'backwards' }}
-      >
-        <span className="text-emerald-500/50">›</span> {line}
-      </div>
-    ))}
-  </div>
-);
 
-export const HackerVoiceAssistant = ({
-  isOpen,
-  onClose,
-  onSendQuery,
-  isSpeakingAudio,
-  stopSpeaking,
-  speakText,
-  selectedLanguage = 'hi',
-  setSelectedLanguage,
-  languages = [],
-  voiceAiResponse = '',
-  activeModelDisplay = 'Auto Model',
-  telemetry,
-  API_BASE,
-  token,
-  audioEnabled,
-  autoSpeakEnabled,
-  setAudioEnabled,
-  setAutoSpeakEnabled,
-  onAttachFiles,
-  onUploadFolder,
-  isRagEnabled,
-  setIsRagEnabled,
-  isWebSearchEnabled,
-  setIsWebSearchEnabled,
-  onClearChat,
-  wakeWordSupported = false,
-  wakeWordEnabled = false,
-  wakePhrase = 'hey smaran',
-  onToggleWakeWord,
-}) => {
+
+export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingAudio, stopSpeaking, speakText, selectedLanguage = 'hi', voiceAiResponse = '', activeModelDisplay = 'Auto Model', API_BASE, token, audioEnabled, autoSpeakEnabled }) => {
   const [voiceState, setVoiceState] = useState('idle');
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -678,7 +139,7 @@ export const HackerVoiceAssistant = ({
   const [chatHistory, setChatHistory] = useState([]);
   const [textInput, setTextInput] = useState('');
   const [micVolume, setMicVolume] = useState(0);
-  const [theme, setTheme] = useState('jarvis'); // 'jarvis' | 'cyberpunk' | 'quantum'
+   // 'jarvis' | 'cyberpunk' | 'quantum'
   // Picture-in-picture shrinks and pins the real desktop window, so you can
   // use another application while this keeps listening. A panel drawn inside
   // the page would only float over the page, which helps nobody trying to
@@ -696,7 +157,7 @@ export const HackerVoiceAssistant = ({
           setPipAvailable(Boolean(data?.available));
           setPipOn(Boolean(data?.pinned));
         }
-      } catch (_) { /* leave the control hidden */ }
+      } catch  { /* leave the control hidden */ }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -737,7 +198,7 @@ export const HackerVoiceAssistant = ({
         // actually being shown at.
         document.documentElement.classList.toggle('sm-pip', next);
       }
-    } catch (_) { /* the window stays as it is */ }
+    } catch  { /* the window stays as it is */ }
   }, [pipOn]);
 
   // If the window was already pinned when this mounted - reopened while in
@@ -745,6 +206,45 @@ export const HackerVoiceAssistant = ({
   useEffect(() => {
     document.documentElement.classList.toggle('sm-pip', pipOn);
   }, [pipOn]);
+
+  // Scrolled to its newest line by the effect further down, once the line it
+  // follows has been worked out.
+  const captionRef = useRef(null);
+
+  // Whether there is a network at all. The core had no way to show this, so
+  // with the connection gone it went on drawing a healthy cyan idle core while
+  // nothing could be reached - the one indicator on this screen saying the
+  // opposite of the truth.
+  const [online, setOnline] = useState(() => (
+    typeof navigator === 'undefined' ? true : navigator.onLine !== false
+  ));
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine !== false);
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => {
+      window.removeEventListener('online', update);
+      window.removeEventListener('offline', update);
+    };
+  }, []);
+
+  // Ending the call has to end the voice too. The red handset stopped the
+  // live session and closed the screen but never stopped playback, so she went
+  // on talking to a screen that was no longer there - and so did the X, the
+  // back gesture, and every other way out. Done here, where all of them meet.
+  useEffect(() => {
+    if (!isOpen) stopSpeaking?.();
+  }, [isOpen, stopSpeaking]);
+
+  // The call screen already has a character on it. The desktop companion is
+  // fixed to the window rather than to the page, so she stayed put and floated
+  // over the call - on a phone, directly across the status line under Amarya.
+  // Two characters on one screen was never intended; the companion stands down
+  // while the call is up.
+  useEffect(() => {
+    document.documentElement.classList.toggle('sm-voice-open', isOpen);
+    return () => document.documentElement.classList.remove('sm-voice-open');
+  }, [isOpen]);
 
   /* Maximising the window is a way of saying "give me the whole thing back",
      and it was being ignored: the window grew and the page stayed in its
@@ -778,18 +278,24 @@ export const HackerVoiceAssistant = ({
   const [recorderStatus, setRecorderStatus] = useState('idle');
   const [vadStatus, setVadStatus] = useState('idle');
 
-  // How the room is measured before anything is called speech. About a second
-  // at 60 frames a second - long enough for a median to mean something, short
-  // enough that nobody notices the microphone thinking.
-  const CALIBRATION_FRAMES = 60;
+  // How the room is measured before anything is called speech.
+  const CALIBRATION_FRAMES = 30;
   // How far above the room tone a sound has to be before it counts as someone
   // talking, and the lowest that bar is ever allowed to fall.
-  const SPEECH_MARGIN = 8;
-  const SPEECH_FLOOR = 14;
+  const SPEECH_MARGIN = 4;
+  const SPEECH_FLOOR = 6;
   const noiseFloorRef = useRef(null);
   const calibrationRef = useRef([]);
   const [uploadStatus, setUploadStatus] = useState('idle');
   const [voiceIssue, setVoiceIssue] = useState('');
+  /* Set when a turn ended with no words, cleared the moment anything is heard.
+   *
+   * Hearing nothing is an ordinary outcome of listening - the room was quiet,
+   * or the words did not carry. It is not a fault, and it needs its own line
+   * in the status bar, because the alternative was falling through to the
+   * failure branch and telling somebody their microphone did not work when it
+   * had just been recording them. */
+  const [heardNothing, setHeardNothing] = useState(false);
 
   // Real-time streaming voice (Gemini Live). When active it replaces the
   // record-then-transcribe path with a continuous two-way audio stream, which
@@ -911,12 +417,27 @@ export const HackerVoiceAssistant = ({
   const audioChunksRef = useRef([]);
   const transcriptionInFlightRef = useRef(false);
   const autoSendInFlightRef = useRef(false);
+  /* Why the recorded-audio fallback last produced nothing.
+   *
+   * '' when it has not run or it worked, 'unreachable' when there was no
+   * transcription endpoint to talk to - which is the ordinary case for a phone
+   * that has never been paired with a desktop - 'empty' when it ran and heard
+   * nothing, and 'failed' when a server answered and refused.
+   *
+   * These are three different sentences to say to somebody, and they used to
+   * be one. */
+  const fallbackReasonRef = useRef('');
   const soundStartTimeRef = useRef(0);
   const lastSpeechTimeRef = useRef(Date.now());
   const hasSpokenRef = useRef(false);
   const isSpeakingRef = useRef(false);
   const voiceStateRef = useRef('idle');
   const isMutedRef = useRef(false);
+  /* Whether the call is still on screen, readable from callbacks that were
+   * created once and outlive a close - the delayed restarts and the wait for a
+   * final transcript both continue running after the screen has gone
+   * otherwise. */
+  const isOpenRef = useRef(isOpen);
   const transcriptRef = useRef('');
   const interimTranscriptRef = useRef('');
   const finalTranscriptRef = useRef('');
@@ -985,27 +506,40 @@ export const HackerVoiceAssistant = ({
   // =========================================================================
   /** The phone's own recogniser, when one is listening. */
   const nativeStopRef = useRef(null);
+  const nativeRestartTimeoutRef = useRef(null);
+  const nativeSessionCountRef = useRef(0);
   // How many native sessions in a row ended instantly having heard
   // nothing. Reset by the first word heard.
   const nativeEndRunRef = useRef(0);
 
   const stopRecognition = useCallback(() => {
+    if (nativeRestartTimeoutRef.current) {
+      clearTimeout(nativeRestartTimeoutRef.current);
+      nativeRestartTimeoutRef.current = null;
+    }
     if (nativeStopRef.current) {
       const end = nativeStopRef.current;
       nativeStopRef.current = null;
-      Promise.resolve(end()).catch(() => {});
+      if (typeof end.cancel === 'function') {
+        try { end.cancel(); } catch {}
+      } else {
+        Promise.resolve(end()).catch(() => {});
+      }
     }
     if (recognitionRef.current) {
       try {
         recognitionRef.current.abort();
-      } catch (_) {}
+      } catch  {}
       recognitionRef.current = null;
     }
   }, []);
 
   const getRecognitionLang = (langCode) => {
     const map = {
-      en: 'en-US',
+      // The app's English option is marked with the UK flag. Android's
+      // recognizer on the shipped phone has en-GB installed while en-US does
+      // not, so do not force the WebView's often-US locale.
+      en: 'en-GB',
       hi: 'hi-IN',
       gu: 'gu-IN',
       pa: 'pa-IN',
@@ -1020,6 +554,7 @@ export const HackerVoiceAssistant = ({
   };
 
   const startFreshRecorder = useCallback(() => {
+    if (isNativeApp()) return null;
     const stream = micStreamRef.current;
     if (!isOpen || isMutedRef.current || !stream) return null;
     if (!window.MediaRecorder) {
@@ -1074,7 +609,7 @@ export const HackerVoiceAssistant = ({
         recorder.addEventListener('stop', finish, { once: true });
         try {
           recorder.stop();
-        } catch (_) {
+        } catch  {
           finish();
         }
         window.setTimeout(finish, 2000);
@@ -1127,24 +662,29 @@ export const HackerVoiceAssistant = ({
      * The recorder still runs alongside it - that is where the level meter and
      * the silence detection come from, not the words. */
     if (isNativeApp()) {
-      startFreshRecorder();
+      const sessionId = ++nativeSessionCountRef.current;
       (async () => {
         if (!(await nativeSpeech.available())) {
+          if (sessionId !== nativeSessionCountRef.current) return;
           setRecognizerStatus('unavailable');
           setRecognizerIssue('This phone has no speech recogniser available.');
           return;
         }
+        if (sessionId !== nativeSessionCountRef.current || !isOpen || isMutedRef.current) return;
         const startedAt = Date.now();
         let heardAnything = false;
         try {
-          nativeStopRef.current = await nativeSpeech.listen({
+          const stopListening = await nativeSpeech.listen({
             language: getRecognitionLang(selectedLanguage),
+            continuous: true,
             onText: (heard) => {
+              if (sessionId !== nativeSessionCountRef.current) return;
               heardAnything = true;
               nativeEndRunRef.current = 0;
               setTranscript(heard);
               transcriptRef.current = heard;
               hasSpokenRef.current = true;
+              lastSpeechTimeRef.current = Date.now();
               if (voiceStateRef.current === 'idle' || voiceStateRef.current === 'vad-ready') {
                 setVoiceState('listening');
                 voiceStateRef.current = 'listening';
@@ -1163,8 +703,15 @@ export const HackerVoiceAssistant = ({
              * The Web Speech path below has restarted itself on 'end'
              * since the beginning. This is the same thing, for the
              * recogniser the phone actually uses. */
-            onEnd: () => {
+            onEnd: ({ reason, message } = {}) => {
+              if (sessionId !== nativeSessionCountRef.current) return;
               nativeStopRef.current = null;
+              if (reason === 'cancelled' || reason === 'manual') return;
+              if (message) {
+                setRecognizerStatus('unavailable');
+                setRecognizerIssue(message);
+                return;
+              }
               // A session that ends at once, having heard nothing, is a
               // recogniser that cannot run - usually Google's speech
               // service disabled or a missing language pack. Restarting
@@ -1193,7 +740,11 @@ export const HackerVoiceAssistant = ({
                 setRecognizerStatus('idle');
                 return;
               }
-              setTimeout(() => {
+              if (nativeRestartTimeoutRef.current) {
+                clearTimeout(nativeRestartTimeoutRef.current);
+              }
+              nativeRestartTimeoutRef.current = setTimeout(() => {
+                nativeRestartTimeoutRef.current = null;
                 if (isOpen && !isMutedRef.current
                     && voiceStateRef.current !== 'thinking'
                     && voiceStateRef.current !== 'speaking') {
@@ -1202,9 +753,42 @@ export const HackerVoiceAssistant = ({
               }, 300);
             },
           });
+          if (sessionId !== nativeSessionCountRef.current || !isOpen || isMutedRef.current) {
+            if (typeof stopListening?.cancel === 'function') stopListening.cancel();
+            return;
+          }
+          nativeStopRef.current = stopListening;
           setRecognizerStatus('active');
           setRecognizerIssue('');
         } catch (error) {
+          if (sessionId !== nativeSessionCountRef.current) return;
+          const message = String(error?.message || '').toLowerCase();
+          if (message.includes('no match')
+              || message.includes("didn't understand")
+              || message.includes('no speech')
+              || message.includes('client side error')) {
+            // A quiet test interval is an ordinary recognition outcome. The
+            // native wrapper normally converts it into onEnd; keep this
+            // guard for plugin versions that reject before that conversion.
+            setRecognizerStatus('idle');
+            setRecognizerIssue('No speech was heard; listening again.');
+            if (isOpen && !isMutedRef.current
+                && voiceStateRef.current !== 'thinking'
+                && voiceStateRef.current !== 'speaking') {
+              if (nativeRestartTimeoutRef.current) {
+                clearTimeout(nativeRestartTimeoutRef.current);
+              }
+              nativeRestartTimeoutRef.current = setTimeout(() => {
+                nativeRestartTimeoutRef.current = null;
+                if (isOpen && !isMutedRef.current
+                    && voiceStateRef.current !== 'thinking'
+                    && voiceStateRef.current !== 'speaking') {
+                  startRecognition();
+                }
+              }, 300);
+            }
+            return;
+          }
           setRecognizerStatus('unavailable');
           setRecognizerIssue(error?.message || 'The phone would not start listening.');
         }
@@ -1239,6 +823,7 @@ export const HackerVoiceAssistant = ({
         setRecognizerStatus('active');
         setRecognizerIssue('');
         setVoiceIssue('');
+        setHeardNothing(false);
         setVoiceState('listening');
         voiceStateRef.current = 'listening';
       };
@@ -1264,6 +849,9 @@ export const HackerVoiceAssistant = ({
 
         if (finalText || interimText) {
           setVadStatus('speech-detected');
+          // Something was heard, so the previous turn's "I did not catch that"
+          // has stopped being true and must stop being displayed.
+          setHeardNothing(false);
           hasSpokenRef.current = true;
           lastSpeechTimeRef.current = Date.now();
         }
@@ -1361,14 +949,17 @@ export const HackerVoiceAssistant = ({
   };
 
   // When AI finishes speaking -> automatically restart listening loop for perpetual conversation
+  const wasSpeakingRef = useRef(false);
   useEffect(() => {
+    const previouslySpeaking = wasSpeakingRef.current;
+    wasSpeakingRef.current = isSpeakingAudio;
     isSpeakingRef.current = isSpeakingAudio;
     if (isSpeakingAudio) {
       setVoiceState('speaking');
       voiceStateRef.current = 'speaking';
       stopRecognition();
       finalizeRecordedAudio().catch(() => {});
-    } else if (voiceStateRef.current === 'speaking' || voiceStateRef.current === 'thinking') {
+    } else if (previouslySpeaking || voiceStateRef.current === 'speaking') {
       setVoiceState('idle');
       voiceStateRef.current = 'idle';
       hasSpokenRef.current = false;
@@ -1381,13 +972,18 @@ export const HackerVoiceAssistant = ({
           startFreshRecorder();
           startRecognition();
         }
-      }, 100);
+      }, 150);
     }
   }, [isSpeakingAudio, isOpen, finalizeRecordedAudio, startFreshRecorder, startRecognition, stopRecognition]);
 
   // Backend Audio Transcription Fallback (Whisper)
   const transcribeBackendAudio = useCallback(async () => {
     if (transcriptionInFlightRef.current) return '';
+    if (isNativeApp() && noBackend()) {
+      fallbackReasonRef.current = 'unreachable';
+      setUploadStatus('unavailable');
+      return '';
+    }
     transcriptionInFlightRef.current = true;
     try {
       const audioBlob = await finalizeRecordedAudio();
@@ -1413,21 +1009,61 @@ export const HackerVoiceAssistant = ({
         const data = await res.json();
         const backendTranscript = (data?.transcript || '').trim();
         setUploadStatus(backendTranscript ? 'complete' : 'empty');
-        if (!backendTranscript) setVoiceIssue('Local transcription completed without recognized speech.');
+        fallbackReasonRef.current = backendTranscript ? '' : 'empty';
         return backendTranscript;
+      }
+      // A phone that was never paired serves the app shell and nothing else,
+      // so the transcription route is simply not there. That is a missing
+      // option, not a broken microphone.
+      const httpReason = classifyTranscriptionFailure(null, res.status);
+      if (httpReason === 'unreachable') {
+        fallbackReasonRef.current = 'unreachable';
+        setUploadStatus('unavailable');
+        return '';
       }
       throw new Error(`Local transcription returned HTTP ${res.status}`);
     } catch (error) {
       console.warn('Local voice transcription failed:', error);
-      setUploadStatus('error');
-      setVoiceIssue(`Recorded-audio transcription failed: ${error?.message || 'backend unavailable'}`);
-      setVoiceState('error');
-      voiceStateRef.current = 'error';
+      // fetch rejects rather than resolving when there is nothing listening,
+      // which is what happens on a standalone phone with no desktop paired.
+      const unreachable = classifyTranscriptionFailure(error) === 'unreachable';
+      fallbackReasonRef.current = unreachable ? 'unreachable' : 'failed';
+      setUploadStatus(unreachable ? 'unavailable' : 'error');
+      if (!unreachable) {
+        setVoiceIssue(`Recorded-audio transcription failed: ${error?.message || 'transcription service refused the request'}`);
+      }
+      return '';
     } finally {
       transcriptionInFlightRef.current = false;
     }
-    return '';
   }, [API_BASE, finalizeRecordedAudio, selectedLanguage, token]);
+
+  /* How long to wait for a final result once the audio has gone quiet.
+   *
+   * The watchdog has already waited 850 ms, so this is on top of that. It is
+   * an upper bound and is usually not reached: the recogniser commits as soon
+   * as it is sure, and this returns the moment it does. */
+  const FINAL_TRANSCRIPT_GRACE_MS = 900;
+
+  useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
+
+  const waitForFinalTranscript = useCallback(async () => {
+    const deadline = Date.now() + FINAL_TRANSCRIPT_GRACE_MS;
+    const quietSince = lastSpeechTimeRef.current;
+    for (;;) {
+      // The precedence lives in pollFinalTranscript, where it is unit tested.
+      const decision = pollFinalTranscript({
+        finalText: transcriptRef.current,
+        lastSpeechAt: lastSpeechTimeRef.current,
+        quietSince,
+        muted: isMutedRef.current,
+        open: isOpenRef.current,
+        expired: Date.now() >= deadline,
+      });
+      if (decision !== 'wait') return decision;
+      await new Promise((resolve) => { window.setTimeout(resolve, 60); });
+    }
+  }, []);
 
   // Trigger send when user stops talking (0.85s silence detected)
   const triggerAutoSend = useCallback(async () => {
@@ -1440,10 +1076,36 @@ export const HackerVoiceAssistant = ({
     autoSendInFlightRef.current = true;
 
     try {
-      let finalQuery = (transcriptRef.current || interimTranscriptRef.current || '').trim();
+      fallbackReasonRef.current = '';
+      let finalQuery = (transcriptRef.current || '').trim();
+
+      /* Give the recogniser its last word before committing the turn.
+       *
+       * The silence watchdog fires 850 ms after the audio stops. Android's
+       * recogniser commits its final result some hundreds of milliseconds
+       * after that, so at the moment this ran there was often only interim
+       * text - and taking it sent half a sentence and discarded the rest when
+       * it arrived. That is the "it cuts my sentences" report.
+       *
+       * Waiting is bounded, and the interim is still used if nothing final
+       * turns up: losing the tail of a sentence is bad, losing the whole turn
+       * is worse.
+       *
+       * If the user simply started talking again, the pause was inside a
+       * sentence rather than the end of one, and there is nothing to send. */
+      if (!finalQuery && (interimTranscriptRef.current || '').trim()) {
+        const outcome = await waitForFinalTranscript();
+        // Resumed speech is mid-sentence; a closed or muted call has nobody to
+        // answer. Neither is a turn.
+        if (outcome === 'resumed' || outcome === 'cancelled') return;
+        finalQuery = (transcriptRef.current || interimTranscriptRef.current || '').trim();
+      }
+
       if (!finalQuery) {
-        const backendText = await transcribeBackendAudio();
-        if (backendText) finalQuery = backendText.trim();
+        if (!isNativeApp()) {
+          const backendText = await transcribeBackendAudio();
+          if (backendText) finalQuery = backendText.trim();
+        }
       } else {
         // Native SpeechRecognition already supplied the text. Discard its parallel
         // recording so a later fallback cannot repeat an older utterance.
@@ -1459,16 +1121,43 @@ export const HackerVoiceAssistant = ({
           ? 'मैंने कुछ सुना नहीं। थोड़ा पास आकर दोबारा कहिए।'
           : 'I did not catch that. Say it again, a little closer to the microphone.';
         setVoiceIssue(nothingHeard);
+        setHeardNothing(true);
         setChatHistory((prev) => [...prev, { role: 'assistant', text: nothingHeard }]);
-        if (autoSpeakEnabled && audioEnabled) speakText?.(nothingHeard, selectedLanguage);
+        const willSpeak = Boolean(autoSpeakEnabled && audioEnabled && speakText);
+        if (willSpeak) {
+          setVoiceState('speaking');
+          voiceStateRef.current = 'speaking';
+          speakText(nothingHeard, selectedLanguage);
+        }
         hasSpokenRef.current = false;
-        if (voiceStateRef.current !== 'error') {
-          const vadReady = Boolean(analyserRef.current && audioContextRef.current?.state !== 'closed');
+
+        /* Go back to listening, unconditionally.
+         *
+         * This used to be guarded by `voiceStateRef.current !== 'error'`, and
+         * the fallback above set exactly that state whenever it could not
+         * reach a transcription endpoint. On a phone with no paired desktop
+         * that is every turn, so the first silence put Speak into an error it
+         * could never leave: the reset was skipped, the state stayed 'error',
+         * and every following turn skipped the reset too.
+         *
+         * Nothing above this line is a reason not to keep listening. A real
+         * fault - a denied microphone, a recogniser that will not start - is
+         * carried by micStatus and recognizerStatus, which are not touched
+         * here and still stop the call on their own.
+         */
+        const vadReady = Boolean(analyserRef.current && audioContextRef.current?.state !== 'closed');
+        if (!willSpeak) {
           setVoiceState(vadReady ? 'vad-ready' : 'idle');
           voiceStateRef.current = vadReady ? 'vad-ready' : 'idle';
-          setVadStatus(vadReady ? 'ready' : 'unavailable');
         }
+        setVadStatus(vadReady ? 'ready' : 'unavailable');
+        // An upload that failed on the way to this point has been accounted
+        // for; leaving it set would keep the failure branch lit afterwards.
+        setUploadStatus((previous) => (previous === 'error' ? 'idle' : previous));
         startFreshRecorder();
+        if (!willSpeak) {
+          startRecognition();
+        }
         return;
       }
 
@@ -1517,7 +1206,8 @@ export const HackerVoiceAssistant = ({
       autoSendInFlightRef.current = false;
     }
   }, [audioEnabled, autoSpeakEnabled, finalizeRecordedAudio, onSendQuery, selectedLanguage,
-      speakText, startFreshRecorder, startRecognition, stopRecognition, transcribeBackendAudio]);
+      speakText, startFreshRecorder, startRecognition, stopRecognition, transcribeBackendAudio,
+      waitForFinalTranscript]);
 
   // VAD / Silence watchdog timer: 850ms
   useEffect(() => {
@@ -1561,11 +1251,23 @@ export const HackerVoiceAssistant = ({
         setVadStatus('idle');
         setUploadStatus('idle');
         setVoiceIssue('');
+        setHeardNothing(false);
         setRecognizerIssue('');
         setVoiceState('permission');
         voiceStateRef.current = 'permission';
 
         if (!navigator.mediaDevices?.getUserMedia) {
+          // Capacitor can expose no WebView media device on a particular
+          // Android/WebView build even though Android's native recogniser is
+          // available and RECORD_AUDIO is granted.  Do not turn that WebView
+          // limitation into “Voice input unavailable”; start the native path
+          // directly and let it report its own service/permission result.
+          if (isNativeApp()) {
+            setMicStatus('idle');
+            setVoiceIssue('WebView microphone capture is unavailable; using Android speech input.');
+            startRecognition();
+            return;
+          }
           setMicStatus('unavailable');
           setVoiceIssue('This browser does not expose microphone capture to the application.');
           setVoiceState('error');
@@ -1574,10 +1276,10 @@ export const HackerVoiceAssistant = ({
         }
 
         if (micStreamRef.current) {
-          try { micStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
+          try { micStreamRef.current.getTracks().forEach((t) => t.stop()); } catch  {}
         }
         if (audioContextRef.current) {
-          try { audioContextRef.current.close(); } catch (_) {}
+          try { audioContextRef.current.close(); } catch  {}
         }
 
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -1659,9 +1361,10 @@ export const HackerVoiceAssistant = ({
               const quietAt = Math.max(SPEECH_FLOOR / 2, floor + SPEECH_MARGIN / 2);
               if (avg >= speakAt) {
                 if (!soundStartTimeRef.current) soundStartTimeRef.current = Date.now();
-                if (Date.now() - soundStartTimeRef.current >= 250) {
+                if (Date.now() - soundStartTimeRef.current >= 140) {
                   if (!hasSpokenRef.current) {
                     setVadStatus('speech-detected');
+                    setHeardNothing(false);
                     if (voiceStateRef.current !== 'listening') {
                       setVoiceState('capturing');
                       voiceStateRef.current = 'capturing';
@@ -1708,7 +1411,12 @@ export const HackerVoiceAssistant = ({
          * What is actually lost here is the level meter and the silence
          * detection, both of which come from the audio graph. Listening
          * does not depend on them. */
-        if (isNativeApp() && !denied) {
+        // Capacitor's WebView can reject getUserMedia even when Android has
+        // granted RECORD_AUDIO (the WebView origin is not the Android app
+        // origin).  That failure only removes the level meter/recorder; it
+        // must never stop us from asking Android's SpeechRecognizer, which
+        // owns its microphone permission separately.
+        if (isNativeApp()) {
           setVoiceIssue(`The audio meter could not start (${error?.name || 'error'}: `
             + `${error?.message || 'no detail'}), so this phone's own recogniser is `
             + 'being used instead.');
@@ -1736,13 +1444,13 @@ export const HackerVoiceAssistant = ({
       isMounted = false;
       stopRecognition();
       if (micStreamRef.current) {
-        try { micStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        try { micStreamRef.current.getTracks().forEach((t) => t.stop()); } catch  {}
       }
       if (audioContextRef.current) {
-        try { audioContextRef.current.close(); } catch (_) {}
+        try { audioContextRef.current.close(); } catch  {}
       }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        try { mediaRecorderRef.current.stop(); } catch (_) {}
+        try { mediaRecorderRef.current.stop(); } catch  {}
       }
       setRecorderStatus('stopped');
       setRecognizerStatus('stopped');
@@ -1784,7 +1492,7 @@ export const HackerVoiceAssistant = ({
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) setLiveAvailable(Boolean(data?.available) && !isMobileVoiceDevice());
-      } catch (_) {
+      } catch  {
         /* leave real-time voice switched off */
       }
     })();
@@ -1801,7 +1509,7 @@ export const HackerVoiceAssistant = ({
 
   // Which engine serves a live call. Remembered, because someone running
   // without a key wants local every time, not once.
-  const [voiceEngine, setVoiceEngine] = useState(
+  const [voiceEngine] = useState(
     () => localStorage.getItem('sm_voice_engine') || 'local',
   );
   useEffect(() => { localStorage.setItem('sm_voice_engine', voiceEngine); }, [voiceEngine]);
@@ -1841,9 +1549,9 @@ export const HackerVoiceAssistant = ({
     // The turn-based recogniser and the live stream must not hold the
     // microphone at the same time.
     stopRecognition();
-    try { await finalizeRecordedAudio(); } catch (_) { /* nothing recorded */ }
+    try { await finalizeRecordedAudio(); } catch  { /* nothing recorded */ }
     if (micStreamRef.current) {
-      try { micStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      try { micStreamRef.current.getTracks().forEach((t) => t.stop()); } catch  {}
       micStreamRef.current = null;
     }
 
@@ -2021,6 +1729,7 @@ export const HackerVoiceAssistant = ({
       isMutedRef.current = false;
       setIsMuted(false);
       setVoiceIssue('');
+      setHeardNothing(false);
       const vadReady = Boolean(analyserRef.current && audioContextRef.current?.state !== 'closed');
       setVadStatus(vadReady ? 'ready' : 'unavailable');
       setVoiceState(vadReady ? 'vad-ready' : 'idle');
@@ -2039,6 +1748,18 @@ export const HackerVoiceAssistant = ({
   };
 
   const liveVoiceStatus = (() => {
+    // Ahead of everything except the microphone conditions below it, which are
+    // local and remain true offline. Without this the line went on reporting
+    // that it was waiting for a model response that could not arrive.
+    if (!online && micStatus !== 'denied' && voiceState !== 'muted') {
+      return {
+        label: 'Offline',
+        detail: 'No network connection, so nothing can be sent or answered. '
+          + 'Reconnect and this picks up where it left off.',
+        tone: 'rose',
+        icon: 'error',
+      };
+    }
     if (isSpeakingAudio || voiceState === 'speaking') {
       return {
         label: 'Playing response audio',
@@ -2079,12 +1800,47 @@ export const HackerVoiceAssistant = ({
         icon: 'loading',
       };
     }
-    if (micStatus === 'denied' || micStatus === 'unavailable' || micStatus === 'error' || uploadStatus === 'error' || voiceState === 'error') {
+    const nativeRecognizerFailed = isNativeApp()
+      && (recognizerStatus === 'unavailable' || recognizerStatus === 'error' || recognizerStatus === 'denied');
+    /* Which failure-shaped condition is actually true, decided in one place.
+     *
+     * The ordering used to fold uploadStatus === 'error' in with a denied
+     * microphone, so a missing transcription endpoint - the ordinary state of
+     * an unpaired phone - reported "Voice input unavailable" over a working
+     * microphone. voiceOutcomeKind is unit tested for exactly that case. */
+    const outcome = voiceOutcomeKind({
+      micStatus, voiceState, uploadStatus, heardNothing, nativeRecognizerFailed,
+    });
+    if (outcome === 'mic-denied' || outcome === 'voice-unavailable') {
       return {
-        label: micStatus === 'denied' ? 'Microphone permission denied' : 'Voice input unavailable',
+        label: outcome === 'mic-denied' ? 'Microphone permission denied' : 'Voice input unavailable',
         detail: voiceIssue || recognizerIssue || 'No working voice-input path is currently reported.',
         tone: 'rose',
         icon: 'error',
+      };
+    }
+    // Heard nothing. Ordinary, recoverable, and still listening - so it says
+    // that, rather than borrowing the language of a failure.
+    if (outcome === 'no-speech') {
+      return {
+        label: 'No speech detected',
+        detail: uploadStatus === 'unavailable'
+          ? `${voiceIssue} Recorded-audio transcription is not available on this device, `
+            + 'so only the on-device recogniser is in use.'
+          : voiceIssue || 'Nothing was heard in the last turn. Still listening.',
+        tone: 'amber',
+        icon: 'listening',
+      };
+    }
+    // The fallback route is missing or refused. Worth saying, because it is a
+    // reduced capability, but the call is still running on the recogniser.
+    if (outcome === 'transcriber-unavailable') {
+      return {
+        label: 'Recorded-audio transcription unavailable',
+        detail: voiceIssue
+          || 'No transcription endpoint answered. The on-device recogniser is still active.',
+        tone: 'amber',
+        icon: 'listening',
       };
     }
     if (vadStatus === 'speech-detected' || voiceState === 'capturing') {
@@ -2139,7 +1895,8 @@ export const HackerVoiceAssistant = ({
   // between "Listening" and "Speech detected" while the user is talking.
   const [shownVoiceStatus, setShownVoiceStatus] = useState(liveVoiceStatus);
   useEffect(() => {
-    if (liveVoiceStatus.label === shownVoiceStatus.label) return undefined;
+    if (liveVoiceStatus.label === shownVoiceStatus.label
+        && liveVoiceStatus.detail === shownVoiceStatus.detail) return undefined;
     // Problems and playback are shown at once; everything else settles first.
     const immediate = liveVoiceStatus.icon === 'error' || liveVoiceStatus.icon === 'speaking';
     if (immediate) {
@@ -2152,6 +1909,27 @@ export const HackerVoiceAssistant = ({
   }, [liveVoiceStatus.label]);
 
   const currentVoiceStatus = shownVoiceStatus;
+
+  // Being offline outranks whatever the call thinks it is doing, except for
+  // the microphone conditions, which are local and still the thing to act on.
+  const coreState = resolveCoreState({ voiceState, online });
+
+  // The caption grows while she talks. Kept scrolled to its newest line, so a
+  // long answer reads like subtitles rather than stopping wherever the box
+  // ended. Left alone once the user has scrolled up to read something they
+  // missed: yanking it back to the bottom mid-sentence is worse than not
+  // following at all.
+  //
+  // Above the early return below, and watching the values the caption is
+  // built from rather than the caption itself, because that is computed after
+  // it. A hook placed after a conditional return runs on some renders and not
+  // others, which React rejects outright.
+  useEffect(() => {
+    const box = captionRef.current;
+    if (!box) return;
+    const distanceFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (distanceFromBottom < 48) box.scrollTop = box.scrollHeight;
+  }, [transcript, interimTranscript, voiceAiResponse, chatHistory]);
 
   if (!isOpen) return null;
 
@@ -2178,6 +1956,7 @@ export const HackerVoiceAssistant = ({
     ? (currentSpeakingText || voiceAiResponse || lastAssistantLine)
     : '';
 
+
   const statusToneClasses = {
     amber: 'text-amber-400',
     cyan: 'text-emerald-400',
@@ -2195,7 +1974,7 @@ export const HackerVoiceAssistant = ({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black text-zinc-100 animate-in fade-in duration-200 overflow-hidden font-sans">
-      
+
       {/* The room the character stands in: grid floor, motes, scan sweep,
           brackets and vignette. It reacts to her voice, so the space feels
           part of the conversation rather than a looping wallpaper. */}
@@ -2317,13 +2096,25 @@ export const HackerVoiceAssistant = ({
 
         {/* The room she stands in. Behind the character, the caption and the
             controls, so nothing it draws competes with them. */}
-        <CyberStage voiceState={voiceState} micVolume={micVolume} />
+        {/* With a character on stage the room is the backdrop it was built to
+            be. With no character the Energy Core is the subject, so the room
+            steps back rather than competing with it at full brightness. */}
+        <CyberStage voiceState={voiceState} micVolume={micVolume} dim={showAvatar ? 1 : 0.45} />
 
         {/* The character */}
         <div className="absolute inset-0">
           {!showAvatar ? (
             <div className="w-full h-full flex items-center justify-center">
-              <EnergyCore voiceState={voiceState} micVolume={micVolume} />
+              <EnergyCore
+                voiceState={coreState}
+                micVolume={micVolume}
+                /* The assistant's own voice, so the core reacts to what it is
+                   saying rather than to the room the user is sitting in. The
+                   avatar already listens to this same bus. */
+                speechSource={speechBus?.node || null}
+                speechContext={speechBus?.context || null}
+                toneText={latestSpokenLine}
+              />
             </div>
           ) : MMD_CHARACTERS.some((c) => c.id === avatarId) ? (
             <AvatarMMD
@@ -2343,11 +2134,23 @@ export const HackerVoiceAssistant = ({
           )}
         </div>
 
-        {/* What the assistant just said, large enough to read across the room. */}
-        <div className="absolute inset-x-0 top-[18%] px-6 sm:px-12 flex justify-center pointer-events-none">
-          <p className="max-w-3xl text-center text-lg sm:text-2xl md:text-3xl leading-relaxed font-medium text-white drop-shadow-[0_2px_18px_rgba(0,0,0,0.9)]">
-            {latestSpokenLine}
-          </p>
+        {/* What the assistant just said, large enough to read across the room.
+            Bounded and scrolled, not just placed: an unbounded block ran off
+            the bottom of the stage and a long answer was readable only as far
+            as it happened to fit, with no way to reach the rest. It keeps the
+            newest line in view as she speaks, and can be scrolled back. */}
+        <div className="voice-caption absolute inset-x-0 top-[18%] px-6 sm:px-12 flex justify-center pointer-events-none">
+          <div
+            ref={captionRef}
+            className="voice-caption-scroll pointer-events-auto max-w-3xl max-h-[34vh] overflow-y-auto overscroll-contain"
+          >
+            <p
+              aria-live="polite"
+              className="text-center text-lg sm:text-2xl md:text-3xl leading-relaxed font-medium text-white drop-shadow-[0_2px_18px_rgba(0,0,0,0.9)]"
+            >
+              {latestSpokenLine}
+            </p>
+          </div>
         </div>
 
         {/* Live status, kept small and out of the way. */}
@@ -2418,7 +2221,8 @@ export const HackerVoiceAssistant = ({
                 make http into https, and a button that will never work is
                 worse than no button. */}
             {!micIsBlockedByOrigin()
-              && (micStatus === 'denied' || micStatus === 'error' || micStatus === 'unavailable') && (
+              && (micStatus === 'denied' || micStatus === 'error' || micStatus === 'unavailable'
+                || recognizerStatus === 'unavailable' || recognizerStatus === 'error' || recognizerStatus === 'denied') && (
               <button
                 type="button"
                 onClick={() => setMicRetry((n) => n + 1)}
@@ -2429,6 +2233,12 @@ export const HackerVoiceAssistant = ({
             )}
           </span>
         </div>
+
+        {currentVoiceStatus.icon === 'error' && (
+          <p role="status" className="mb-3 mx-auto max-w-xl text-center text-xs leading-relaxed text-rose-200 break-words">
+            {currentVoiceStatus.detail}
+          </p>
+        )}
 
         <div className="flex items-end justify-center gap-3 sm:gap-5">
           <CallToggle

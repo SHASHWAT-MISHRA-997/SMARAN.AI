@@ -20,9 +20,9 @@ assert.strictEqual(parseToolCall(complete).args.path, 'a/b.py');
 assert.strictEqual(looksTruncated(complete), false);
 ok('a complete call still parses, and is not called truncated');
 
-assert.strictEqual(parseToolCall(cut), undefined);
+assert.strictEqual(parseToolCall(cut).args.path, 'a/b.py');
 assert.strictEqual(looksTruncated(cut), true);
-ok('a call with no closing tag is recognised as cut off');
+ok('a complete read argument is recovered while the missing closing tag remains flagged');
 
 assert.strictEqual(proseBefore(cut), 'Let me look at that file.');
 ok('what the model said before the call is kept');

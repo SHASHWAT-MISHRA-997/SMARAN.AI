@@ -10,9 +10,9 @@
 
 [functions]
   node_bundler = "esbuild"
-  # Ships the key file with the functions. It lives outside publish/,
-  # so it is readable by the function and not by the internet.
-  included_files = ["keys.json"]
+  # Only one-way verification hashes enter the private function bundles.
+  # Generate locally with `node prepare-key-hashes.mjs` before deploying.
+  included_files = ["key-hashes.json"]
 
 [[headers]]
   for = "/*"

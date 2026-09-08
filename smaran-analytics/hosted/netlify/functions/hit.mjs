@@ -1,5 +1,5 @@
 import { getStore } from '@netlify/blobs';
-import { WEB_EVENTS, WEB_LABELS, dayOf, encodeWebKey, json } from './_shared.mjs';
+import { WEB_EVENTS, WEB_LABELS, dayOf, encodeWebKey, json } from '../lib/shared.mjs';
 
 /**
  * Records one event from the public website.

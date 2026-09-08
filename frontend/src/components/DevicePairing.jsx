@@ -23,7 +23,7 @@ const POLL_MS = 4000;
 const jsonRequest = async (url, options = {}) => {
   const response = await fetch(`${API_BASE}${url}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...options.headers },
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.detail || `Request failed (${response.status}).`);

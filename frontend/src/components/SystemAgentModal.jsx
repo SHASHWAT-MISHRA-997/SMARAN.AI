@@ -8,7 +8,7 @@ import { API_BASE } from '../context/AuthContext';
 
 function storedJson(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
-  catch (_) { return fallback; }
+  catch  { return fallback; }
 }
 
 function errorMessage(payload, fallback) {
@@ -22,10 +22,10 @@ function errorMessage(payload, fallback) {
 async function jsonRequest(url, options = {}) {
   const response = await fetch(`${API_BASE}${url}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...options.headers },
   });
   let payload = {};
-  try { payload = await response.json(); } catch (_) { /* handled below */ }
+  try { payload = await response.json(); } catch  { /* handled below */ }
   if (!response.ok) throw new Error(errorMessage(payload, `Request failed with HTTP ${response.status}.`));
   return payload;
 }

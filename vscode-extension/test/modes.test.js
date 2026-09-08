@@ -27,6 +27,12 @@ Module._load = function (request) {
 const modes = require('../out/agent/modes.js');
 const loopModule = require('../out/agent/loop.js');
 const models = require('../out/agent/models.js');
+const policies = {
+    plan: { reach: 'read', approval: 'always' },
+    manual: { reach: 'workspace', approval: 'always' },
+    autoEdit: { reach: 'workspace', approval: 'commands' },
+    auto: { reach: 'workspace', approval: 'risky' },
+};
 
 let passed = 0;
 const check = (what, fn) => {
@@ -69,7 +75,7 @@ const decisions = [
 
 decisions.forEach(([mode, tool, args, expected]) => {
     check(`${mode} + ${tool} -> ${expected}`, () => {
-        assert.strictEqual(modes.decide(mode, tool, args).act, expected);
+        assert.strictEqual(modes.decide(policies[mode], tool, args).act, expected);
     });
 });
 
@@ -124,7 +130,7 @@ async function drive(mode, answer) {
     const asks = [];
     for await (const event of loopModule.run(
         'write it', root, [], { provider: '', model: 'x', apiKey: '', ollamaUrl: '' },
-        () => false, mode,
+        () => false, policies[mode],
         async (call, because) => { asks.push({ name: call.name, because }); return answer; },
     )) { /* drained */ }
     return { root, asks, written: fs.existsSync(path.join(root, 'made.txt')) };

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The S monogram used by the web app, for Android themed icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="7" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M68,37 C56,27 38,33 39,45 C40,58 68,48 69,62 C70,76 50,82 37,70"/>
+</vector>

@@ -31,6 +31,32 @@ logger = logging.getLogger("agent.models")
 
 TIMEOUT = 300
 
+
+class ProviderError(RuntimeError):
+    """A provider refusing, timing out, or being unreachable.
+
+    A RuntimeError subclass so that every existing caller keeps catching it
+    and every message reads exactly as it did before. The additions are for
+    the orchestrator, which has to tell a rate limit apart from a bad key: one
+    is worth waiting out, the other will fail identically forever.
+    """
+
+    def __init__(self, message: str, *, status: Optional[int] = None,
+                 kind: str = "error") -> None:
+        super().__init__(message)
+        self.status = status
+        self.kind = kind          # http | timeout | unreachable
+
+    @property
+    def rate_limited(self) -> bool:
+        return self.status == 429
+
+    @property
+    def worth_retrying(self) -> bool:
+        if self.kind in ("timeout", "unreachable"):
+            return True
+        return self.status in {429, 500, 502, 503, 504}
+
 #: Where each provider's OpenAI-compatible endpoint lives. DeepSeek and NVIDIA
 #: are here because the editor extension has always offered keys for them, and
 #: a key the agent cannot use is worse than no field at all.
@@ -114,8 +140,15 @@ def _ollama(model: str, messages: List[Dict]) -> str:
 
 
 async def complete(messages: List[Dict], model: str = "",
-                   provider: str = "", api_key: str = "") -> str:
-    """One reply. Raises with a readable reason rather than returning nothing."""
+                   provider: str = "", api_key: str = "",
+                   attempts: int = 2) -> str:
+    """One reply. Raises with a readable reason rather than returning nothing.
+
+    `attempts` is here for the orchestrator, which schedules its own backoff
+    across several providers and does not want this function quietly spending
+    an extra three seconds first. Everything else leaves it alone and keeps
+    the retry described below.
+    """
 
     def call() -> str:
         if provider in OPENAI_COMPATIBLE:
@@ -133,12 +166,13 @@ async def complete(messages: List[Dict], model: str = "",
     # immediately with whatever the provider said.
     RETRYABLE = {429, 500, 502, 503, 504}
 
-    for attempt in (1, 2):
+    last = max(1, attempts)
+    for attempt in range(1, last + 1):
         try:
             return await asyncio.to_thread(call)
 
         except urllib.error.HTTPError as exc:
-            if attempt == 1 and exc.code in RETRYABLE:
+            if attempt < last and exc.code in RETRYABLE:
                 logger.info("%s answered %s; trying once more",
                             provider or "the local model", exc.code)
                 await asyncio.sleep(3)
@@ -148,21 +182,24 @@ async def complete(messages: List[Dict], model: str = "",
                 detail = exc.read().decode("utf-8", "replace")[:200]
             except Exception:
                 pass
-            raise RuntimeError(
+            raise ProviderError(
                 "%s refused the request (HTTP %s). %s"
-                % (provider or "The local model", exc.code, detail)) from exc
+                % (provider or "The local model", exc.code, detail),
+                status=exc.code, kind="http") from exc
 
         except TimeoutError as exc:
-            if attempt == 1:
+            if attempt < last:
                 await asyncio.sleep(3)
                 continue
-            raise RuntimeError(
-                "%s did not answer in time." % (provider or "The local model")) from exc
+            raise ProviderError(
+                "%s did not answer in time." % (provider or "The local model"),
+                kind="timeout") from exc
 
         except urllib.error.URLError as exc:
-            raise RuntimeError(
+            raise ProviderError(
                 "Could not reach %s: %s"
-                % (provider or "the local model", exc)) from exc
+                % (provider or "the local model", exc),
+                kind="unreachable") from exc
 
-    # Unreachable: both attempts either return or raise.
-    raise RuntimeError("No reply from %s." % (provider or "the local model"))
+    # Unreachable: every attempt either returns or raises.
+    raise ProviderError("No reply from %s." % (provider or "the local model"))

@@ -1,13 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle, Blocks, CheckCircle2, ChevronDown, Loader2, Plug, Plus, RefreshCw,
-  Search, Sparkles, Trash2, Wrench, X, Code2, Play, Terminal, Database, Globe, FolderGit2, Cpu
+  Search, Sparkles, Trash2, Wrench, X, FolderGit2
 } from 'lucide-react';
-import { API_BASE } from '../context/AuthContext';
+import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { isNativeApp, loadLink } from '../utils/hostLink';
 
 /** No computer behind the phone, so nothing on this screen can run. */
 const noBackend = () => isNativeApp() && !loadLink()?.url;
+
+async function fetch(url, options) {
+  const response = await fetchWithAuth(url, options);
+  if (!response.ok) {
+    const body = await response.clone().json().catch(() => null);
+    throw new Error(typeof body?.detail === 'string' ? body.detail : `Request failed (${response.status}).`);
+  }
+  return response;
+}
 
 const MANAGE_FILTERS = [
   { id: 'plugin', label: 'Plugins', icon: Blocks },
@@ -43,6 +52,7 @@ const STATE = {
   // saying "Saved. It connects when first used." The screen contradicted
   // itself, and the alarming half was the wrong one.
   not_connected:  { label: 'Ready',    tone: 'text-zinc-400',    dot: 'bg-zinc-500' },
+  saved:          { label: 'Saved prompt', tone: 'text-zinc-400', dot: 'bg-zinc-500' },
   error:          { label: 'Failed',   tone: 'text-rose-400',    dot: 'bg-rose-400' },
   disabled:       { label: 'Off',      tone: 'text-zinc-500',    dot: 'bg-zinc-600' },
 };
@@ -62,7 +72,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     try {
       const saved = JSON.parse(localStorage.getItem('sm_custom_mcps') || '[]');
       return Array.isArray(saved) ? saved : [];
-    } catch (_) {
+    } catch  {
       return [];
     }
   });
@@ -70,7 +80,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     try {
       const saved = JSON.parse(localStorage.getItem('sm_custom_skills') || '[]');
       return Array.isArray(saved) ? saved : [];
-    } catch (_) {
+    } catch  {
       return [];
     }
   });
@@ -87,7 +97,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     try {
       const res = await fetch(`${API_BASE}/api/mcp/catalogue`, { credentials: 'include' });
       if (res.ok) setCatalogue((await res.json()).servers || []);
-    } catch (_) { /* leave it empty rather than invent entries */ }
+    } catch  { /* leave it empty rather than invent entries */ }
   }, []);
 
   const [section, setSection] = useState('plugin');
@@ -105,11 +115,14 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     try {
       const [all, mine] = await Promise.all([
         fetch(`${API_BASE}/api/plugins`, { credentials: 'include' }).then(async (r) => {
-          if (!r.ok) return [];
+          if (!r.ok) throw new Error(`Plugin registry failed (${r.status}).`);
           return r.json();
-        }).catch(() => []),
+        }),
         fetch(`${API_BASE}/api/mcp/servers`, { credentials: 'include' })
-          .then((r) => r.json()).then((d) => d.servers || []).catch(() => []),
+          .then((r) => {
+            if (!r.ok) throw new Error(`MCP registry failed (${r.status}).`);
+            return r.json();
+          }).then((d) => d.servers || []),
       ]);
 
       const rawPlugins = Array.isArray(all) ? all : Object.values(all?.plugins || all || {});
@@ -138,13 +151,14 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
 
       setRows(normalizedPlugins);
 
-      if (Array.isArray(mine) && mine.length > 0) {
-        setCustom(mine);
-      }
-    } catch (_) {
+      // An empty server list must clear stale locally cached registrations.
+      setCustom(Array.isArray(mine) ? mine : []);
+    } catch (err) {
       // The backend could not be reached. That is not a reason to show a
       // list of extensions as though they were running.
       setRows([]);
+      setCustom([]);
+      setLoadError(err.message || 'The extension registry could not be reached.');
     } finally {
       setLoading(false);
     }
@@ -189,7 +203,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
       });
       const data = await res.json().catch(() => null);
       setServerNote(data?.detail || '');
-    } catch (_) {
+    } catch  {
       setServerNote('That could not be saved.');
     } finally {
       setBusyServer('');
@@ -208,6 +222,8 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
       });
       await loadCatalogue();
       await probeServer(entry.name);
+    } catch (err) {
+      setServerNote(err.message || 'The server could not be saved.');
     } finally {
       setBusyServer('');
     }
@@ -243,12 +259,8 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
         credentials: 'include',
       });
       await load();
-    } catch (_) {
-      setRows((prev) =>
-        prev.map((p) =>
-          p.name === row.name ? { ...p, runtime_status: on ? 'disabled' : 'active' } : p
-        )
-      );
+    } catch (err) {
+      setLoadError(err.message || 'The plugin state could not be changed.');
     } finally {
       setBusy(null);
     }
@@ -257,14 +269,20 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
   const removeCustom = async (id) => {
     setBusy(id);
     try {
+      if (customSkills.some((item) => item.id === id || item.name === id)) {
+        setCustomSkills((prev) => prev.filter((item) => item.name !== id && item.id !== id));
+        return;
+      }
       await fetch(`${API_BASE}/api/mcp/servers/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         credentials: 'include',
       });
-    } catch (_) {}
-    setCustom((prev) => prev.filter((item) => item.name !== id && item.id !== id));
-    setCustomSkills((prev) => prev.filter((item) => item.name !== id && item.id !== id));
-    setBusy(null);
+      setCustom((prev) => prev.filter((item) => item.name !== id && item.id !== id));
+    } catch (err) {
+      setLoadError(err.message || 'The server could not be removed.');
+    } finally {
+      setBusy(null);
+    }
   };
 
   const handleCreateCustom = (newItem) => {
@@ -293,7 +311,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
     if (section === 'skill') {
       const safeSkills = Array.isArray(customSkills) ? customSkills : [];
       source = [
-        ...safeSkills,
+        ...safeSkills.map((skill) => ({ ...skill, runtime_status: 'saved', state: 'saved' })),
         ...rows.filter((r) => r.type === 'skill'),
       ];
     } else if (section === 'mcp') {
@@ -457,6 +475,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
               )}
 
               {/* Search */}
+              {loadError && <p role="alert" className="mt-4 text-sm text-rose-300">{loadError} Use Refresh to try again.</p>}
               <div className="relative mt-6 min-w-0 overflow-hidden">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                 <input
@@ -468,7 +487,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
               </div>
 
               {/* Tabs for Plugins */}
-              {true && (
+              {(
                 <div className="mt-6 flex flex-wrap gap-2 border-b border-zinc-800 pb-4">
                   {MANAGE_FILTERS.map(({ id, label, icon: Icon }) => (
                     <button
@@ -506,7 +525,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
 
                 <div className="divide-y divide-zinc-800/80">
                   {visible.map((row) => {
-                    const state = STATE[row.runtime_status] || STATE.active;
+                    const state = STATE[row.runtime_status] || STATE.not_connected;
                     const on = row.runtime_status === 'active' || row.state === 'connected';
 
                     return (
@@ -562,6 +581,15 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
                         </button>
 
                         <div className="flex items-center gap-3 self-end sm:self-center">
+                          {row.type === 'skill' && row.is_custom && row.instructions && (
+                            <button type="button" className="text-xs text-cyan-300 hover:text-cyan-100"
+                              onClick={() => {
+                                localStorage.setItem('sm_pending_skill_prompt', row.instructions);
+                                window.dispatchEvent(new CustomEvent('smaran:use-skill', { detail: { instructions: row.instructions } }));
+                                window.dispatchEvent(new CustomEvent('smaran:navigate', { detail: { view: 'chat' } }));
+                                onClose?.();
+                              }}>Use skill</button>
+                          )}
                           {/* The reason, not just the word.
                               "Needs setup" on its own sends you clicking into
                               the row to find out what setup - and the answer
@@ -617,9 +645,12 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
               the state was. Both now count what is actually running. */}
           <footer className="flex items-center justify-between border-t border-zinc-800 px-5 py-3 text-[11px] text-zinc-500 bg-zinc-950">
             <span>
-              {visible.filter((r) => r.runtime_status === 'active').length} of {visible.length} running
+              {running} of {visible.length} running
             </span>
             {(() => {
+              if (loadError) return <span className="font-semibold text-rose-400">● unavailable</span>;
+              if (loading) return <span>Loading…</span>;
+              if (!visible.length) return <span>No extensions in this view</span>;
               const waiting = visible.filter((r) => r.runtime_status === 'setup_required').length;
               const broken = visible.filter((r) => r.runtime_status === 'error').length;
               const ready = visible.filter((r) => r.runtime_status === 'not_connected').length;
@@ -629,6 +660,7 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
               // "all running" beside "0 of 5 running" is the same
               // contradiction this row's badge used to make, the other way up.
               if (ready) return <span className="font-semibold text-zinc-400">● {ready} ready</span>;
+              if (running !== visible.length) return <span>{visible.length - running} not running</span>;
               return <span className="font-semibold text-emerald-400">● all running</span>;
             })()}
           </footer>
@@ -712,7 +744,7 @@ const CreateStudio = ({ onClose, onCreated }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     if (!name.trim()) {
       setError('Please provide a name.');
@@ -721,12 +753,14 @@ const CreateStudio = ({ onClose, onCreated }) => {
 
     setBusy(true);
     try {
-      const parsedTools = toolsList
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .map((t) => ({ name: t }));
-
+      if (extType === 'skill' && !instructions.trim()) throw new Error('Add the instructions this skill should apply.');
+      if (extType === 'mcp') {
+        if (!targetCmd.trim()) throw new Error('Provide the MCP server command or URL.');
+        await fetch(`${API_BASE}/api/mcp/servers`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim(), target: targetCmd.trim() }),
+        });
+      }
       const item = {
         id: `custom_${Date.now()}_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
         name: name.trim(),
@@ -734,12 +768,12 @@ const CreateStudio = ({ onClose, onCreated }) => {
         type: extType,
         author: 'You (Custom)',
         is_custom: true,
-        runtime_status: 'active',
-        state: 'connected',
+        runtime_status: extType === 'skill' ? 'saved' : 'not_connected',
+        state: extType === 'skill' ? 'saved' : 'not_connected',
         target: targetCmd.trim() || undefined,
         detail: instructions.trim() || undefined,
-        capabilities: parsedTools.length > 0 ? parsedTools.map((t) => t.name) : (triggers ? triggers.split(',').map((t) => t.trim()) : ['Custom Execution']),
-        tools: parsedTools,
+        capabilities: extType === 'skill' ? ['Reusable prompt'] : [],
+        tools: [],
         triggers: triggers ? triggers.split(',').map((t) => t.trim()) : [],
         instructions: instructions.trim() || undefined,
       };
@@ -778,7 +812,6 @@ const CreateStudio = ({ onClose, onCreated }) => {
           {[
             { id: 'skill', label: 'Custom Skill', icon: Sparkles },
             { id: 'mcp', label: 'MCP Server', icon: Wrench },
-            { id: 'plugin', label: 'Plugin / Connector', icon: Blocks },
           ].map((tab) => {
             const Icon = tab.icon;
             return (
@@ -926,7 +959,7 @@ const CreateStudio = ({ onClose, onCreated }) => {
 };
 
 const DetailPanel = ({ row, onClose }) => {
-  const state = STATE[row.runtime_status] || STATE.active;
+  const state = STATE[row.runtime_status] || STATE.not_connected;
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
       <div
@@ -1087,9 +1120,7 @@ const AddServer = ({ onClose, onSaved }) => {
         credentials: 'include',
         body: JSON.stringify({ name: name.trim(), target: url.trim() }),
       });
-      if (!response.ok) {
-        // Fallback to local custom MCP save
-      }
+      await response.json();
       onSaved({
         id: `mcp_${Date.now()}`,
         name: name.trim(),
@@ -1098,23 +1129,12 @@ const AddServer = ({ onClose, onSaved }) => {
         type: 'mcp',
         author: 'Custom MCP',
         is_custom: true,
-        state: 'connected',
-        runtime_status: 'active',
-        tools: [{ name: 'custom_mcp_tool' }]
+        state: 'not_connected',
+        runtime_status: 'not_connected',
+        tools: []
       });
-    } catch (_) {
-      onSaved({
-        id: `mcp_${Date.now()}`,
-        name: name.trim(),
-        target: url.trim(),
-        description: description.trim() || url.trim(),
-        type: 'mcp',
-        author: 'Custom MCP',
-        is_custom: true,
-        state: 'connected',
-        runtime_status: 'active',
-        tools: [{ name: 'custom_mcp_tool' }]
-      });
+    } catch (err) {
+      setError(err.message || 'The server was not saved. Check the connection and retry.');
     } finally {
       setSaving(false);
     }
@@ -1167,7 +1187,7 @@ const AddServer = ({ onClose, onSaved }) => {
                        font-black text-white transition hover:bg-indigo-500 disabled:opacity-60 shadow-md"
           >
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-            Save & Connect
+            Save server
           </button>
         </div>
       </form>

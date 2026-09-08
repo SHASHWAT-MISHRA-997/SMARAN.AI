@@ -37,6 +37,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
+source "$ROOT/packaging/linux/paths.sh"
 
 APP_ID="smaran-ai"
 APP_NAME="SMARAN.AI"
@@ -49,16 +50,16 @@ PY
 echo "[linux] packaging $APP_NAME $VERSION"
 
 # ── the frozen application ────────────────────────────────────────────────
-if [ ! -x "dist/$APP_NAME/$APP_NAME" ]; then
+if [ ! -x "$FROZEN_DIR/$APP_NAME" ]; then
     echo "[linux] building the application first"
-    python3 build_exe.py
+    python3 build_exe.py --output-root "$BUILD_ROOT"
 fi
-test -x "dist/$APP_NAME/$APP_NAME" || {
-    echo "[linux] no frozen binary at dist/$APP_NAME/$APP_NAME" >&2
+test -x "$FROZEN_DIR/$APP_NAME" || {
+    echo "[linux] no frozen binary at $FROZEN_DIR/$APP_NAME" >&2
     exit 1
 }
 
-OUT="$ROOT/dist/linux"
+OUT="$PACKAGE_DIR"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
@@ -70,7 +71,7 @@ mkdir -p "$TREE/opt/$APP_ID" \
          "$TREE/usr/share/icons/hicolor/256x256/apps" \
          "$TREE/DEBIAN"
 
-cp -a "dist/$APP_NAME/." "$TREE/opt/$APP_ID/"
+cp -a "$FROZEN_DIR/." "$TREE/opt/$APP_ID/"
 chmod 755 "$TREE/opt/$APP_ID/$APP_NAME"
 
 # The launcher. Named in lower case with a dash because that is what a person
@@ -138,7 +139,7 @@ echo "[linux] built $(basename "$OUT/${APP_ID}_${VERSION}_amd64.deb")"
 # ── the portable archive, for everything that is not Debian ───────────────
 PORTABLE="$OUT/portable/$APP_ID-$VERSION"
 mkdir -p "$PORTABLE"
-cp -a "dist/$APP_NAME/." "$PORTABLE/"
+cp -a "$FROZEN_DIR/." "$PORTABLE/"
 cat > "$PORTABLE/run.sh" <<EOF
 #!/bin/sh
 # Start SMARAN.AI from wherever this folder happens to be.

@@ -138,17 +138,17 @@ export async function logoutUser() {
   try {
     // Get session token from cookie
     const sessionToken = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1];
-    
+
     const headers = {
       'X-Device-ID': getDeviceId(),
       'X-Device-Fingerprint': getDeviceFingerprint(),
     };
-    
+
     // Add Authorization header if we have a session token
     if (sessionToken) {
       headers['Authorization'] = `Bearer ${sessionToken}`;
     }
-    
+
     const res = await fetch(`${API_BASE}/api/auth/logout`, {
       method: 'POST',
       credentials: 'include',
@@ -185,7 +185,7 @@ export async function fetchWithAuth(url, options = {}) {
   const headers = {
     'X-Device-ID': deviceId,
     'X-Device-Fingerprint': deviceFingerprint,
-    ...(options.headers || {}),
+    ...options.headers,
   };
   return fetch(url, {
     ...options,

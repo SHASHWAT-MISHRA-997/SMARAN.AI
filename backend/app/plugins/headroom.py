@@ -26,6 +26,7 @@ is `headroom-ai`.
 from __future__ import annotations
 
 import logging
+import asyncio
 import re
 from typing import Any, Dict, List
 
@@ -115,6 +116,11 @@ class HeadroomPlugin(ToolPlugin):
         ]
 
     async def execute_tool(self, tool_name: str, arguments: Dict) -> Any:
+        # Tokenizer initialization and compression can load models or perform
+        # blocking I/O; keep chat and microphone requests responsive.
+        return await asyncio.to_thread(self._execute_tool, tool_name, arguments)
+
+    def _execute_tool(self, tool_name: str, arguments: Dict) -> Any:
         if tool_name == "headroom_status":
             counting = _count("probe")
             return {

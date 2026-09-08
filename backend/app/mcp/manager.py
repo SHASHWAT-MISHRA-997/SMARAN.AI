@@ -33,6 +33,7 @@ class MCPManager:
     def __init__(self) -> None:
         self._sessions: Dict[str, MCPSession] = {}
         self._errors: Dict[str, str] = {}
+        self._reports: Dict[str, dict] = {}
         self._lock = asyncio.Lock()
 
     # -- persistence -------------------------------------------------------
@@ -102,6 +103,7 @@ class MCPManager:
             return session
 
     async def disconnect(self, name: str) -> None:
+        self._reports.pop(name, None)
         session = self._sessions.pop(name, None)
         if session:
             await session.close()
@@ -140,6 +142,7 @@ class MCPManager:
                 "server": s.server_info,
                 "capabilities": sorted(s.server_capabilities.keys()),
                 "detail": "Connected.",
+                **self._reports.get(name, {}),
             }
 
         if not probe:
@@ -152,11 +155,15 @@ class MCPManager:
 
         try:
             s = await self.session(name)
+            tools = await s.list_tools()
+            resources = len(await s.list_resources())
+            prompts = len(await s.list_prompts())
         except MCPError as exc:
+            self._errors[name] = str(exc)
+            await self.disconnect(name)
             return {**base, "state": "failed", "detail": str(exc)}
 
-        tools = await s.list_tools()
-        return {
+        report = {
             **base,
             "state": "connected",
             "server": s.server_info,
@@ -165,10 +172,12 @@ class MCPManager:
                 {"name": t.get("name"), "description": t.get("description")}
                 for t in tools
             ],
-            "resources": len(await s.list_resources()),
-            "prompts": len(await s.list_prompts()),
+            "resources": resources,
+            "prompts": prompts,
             "detail": "Connected. %d tool%s." % (len(tools), "" if len(tools) == 1 else "s"),
         }
+        self._reports[name] = report
+        return report
 
     async def all_tools(self) -> List[dict]:
         """Every tool from every connected server, tagged with its origin.
@@ -184,11 +193,18 @@ class MCPManager:
                     out.append({**tool, "server": name})
             except MCPError as exc:
                 logger.warning("listing tools from %s failed: %s", name, exc)
+                self._errors[name] = str(exc)
+                await self.disconnect(name)
         return out
 
     async def call(self, server: str, tool: str, arguments: Optional[dict] = None) -> Any:
-        session = await self.session(server)
-        return await session.call_tool(tool, arguments or {})
+        try:
+            session = await self.session(server)
+            return await session.call_tool(tool, arguments or {})
+        except MCPError as exc:
+            self._errors[server] = str(exc)
+            await self.disconnect(server)
+            raise
 
 
 manager = MCPManager()

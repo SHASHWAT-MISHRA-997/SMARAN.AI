@@ -5,8 +5,9 @@ analytics.db-*
 __pycache__/
 dashboard-key.txt
 
-# Deploy-time secrets, uploaded with the deploy, never committed.
+# Raw credentials stay local; only their verification hashes are deployed.
 hosted/keys.json
+hosted/key-hashes.json
 
 # Netlify CLI scratch state (just the site id, but build noise).
 .netlify/

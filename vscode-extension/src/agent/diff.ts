@@ -147,6 +147,9 @@ export function unified(beforeText: string, afterText: string, label: string): s
     });
 
     const out: string[] = [`${label}: +${added} -${removed}`];
+    if (beforeText.endsWith('\n') !== afterText.endsWith('\n')) {
+        out.push(afterText.endsWith('\n') ? 'Final newline added.' : 'Final newline removed.');
+    }
     let skipped = 0;
     let printed = 0;
     let truncated = false;

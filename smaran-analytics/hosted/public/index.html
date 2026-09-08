@@ -203,7 +203,7 @@ function askForKey(message) {
     + 'font:400 14px/1.6 system-ui,sans-serif;color:#e8e8ea">'
     + '<h1 style="font-size:19px;font-weight:600;margin:0 0 6px">Dashboard key</h1>'
     + '<p style="color:#a1a1aa;margin:0 0 16px">' + message + '</p>'
-    + '<input id="keyInput" type="password" autocomplete="current-password" '
+    + '<input id="keyInput" type="password" aria-label="Dashboard key" autocomplete="current-password" '
     + 'placeholder="Paste the key" style="width:100%;padding:11px 13px;border-radius:9px;'
     + 'border:1px solid #3f3f46;background:#18181b;color:#fafafa;font-size:14px;outline:none">'
     + '<button type="submit" style="margin-top:12px;width:100%;padding:11px;border-radius:9px;'
@@ -234,6 +234,7 @@ async function api(path) {
     askForKey('That key was not accepted. Try again.');
     throw new Error('unauthorised');
   }
+  if (!response.ok) throw new Error(`Statistics request failed (HTTP ${response.status}).`);
   return response.json();
 }
 </script>

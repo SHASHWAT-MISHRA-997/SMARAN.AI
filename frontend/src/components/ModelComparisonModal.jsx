@@ -1,8 +1,8 @@
 import React from 'react';
-import { X, Cpu, Check, BarChart2, Sparkles, FileText, Eye, Mic, Video, Code, Brain, Trophy, Award, Target, Flame } from 'lucide-react';
+import { X, Cpu, Check, BarChart2, Sparkles, FileText, Eye, Mic, Video, Code, Brain, Trophy, Target } from 'lucide-react';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
-const positive = (value) => finite(value) && value > 0;
+
 const safeToFixed = (value, digits = 0) => {
   if (!finite(value)) return null;
   try { return value.toFixed(digits); } catch { return null; }
@@ -54,7 +54,7 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
       <div className="w-full max-w-6xl max-h-[92vh] bg-zinc-950 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 text-left">
-        
+
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800/80 bg-zinc-900/50 backdrop-blur-sm shrink-0">
           <div>

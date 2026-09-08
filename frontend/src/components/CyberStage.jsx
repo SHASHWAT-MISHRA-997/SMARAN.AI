@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { normalizeLevel } from '../utils/coreSignal';
 
 /**
  * The stage the character stands on.
@@ -41,15 +42,26 @@ const GLYPHS = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅ�
 /** Horizon sits above centre so the floor has room to run toward the viewer. */
 const HORIZON = 0.42;
 
-const CyberStage = ({ voiceState = 'idle', micVolume = 0, className = '' }) => {
+/**
+ * dim pulls the whole room back without switching it off.
+ *
+ * The stage is built to sit behind a character. With no character selected the
+ * Energy Core is the thing being looked at, and a full-strength neon floor,
+ * falling data and lightning compete with it - two elaborate animations at
+ * full brightness in the same space, neither of them the subject. Dimming is
+ * cheaper than a second code path and keeps the room recognisably the room.
+ */
+const CyberStage = ({ voiceState = 'idle', micVolume = 0, dim = 1, className = '' }) => {
   const canvasRef = useRef(null);
   // The render loop reads these every frame, so they are refs rather than
   // props closed over at mount.
   const stateRef = useRef(voiceState);
   const volumeRef = useRef(0);
+  const dimRef = useRef(dim);
 
   useEffect(() => { stateRef.current = voiceState; }, [voiceState]);
   useEffect(() => { volumeRef.current = micVolume; }, [micVolume]);
+  useEffect(() => { dimRef.current = dim; }, [dim]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -160,11 +172,14 @@ const CyberStage = ({ voiceState = 'idle', micVolume = 0, className = '' }) => {
       const mood = MOODS[stateRef.current] || MOODS.idle;
       const speed = still ? 0 : mood.speed;
       clock += dt * speed;
-      level += (Math.min(1, volumeRef.current || 0) - level) * Math.min(1, dt * 8);
+      // The parent reports level on a 0..100 scale. Clamping it straight to 1
+      // meant any sound at all pinned the room at full lift, so the floor and
+      // the horizon glowed identically for a whisper and for a shout.
+      level += (normalizeLevel(volumeRef.current) - level) * Math.min(1, dt * 8);
 
       const horizon = height * HORIZON;
       // Speaking lifts the whole scene on her own volume.
-      const lift = mood.intensity * (1 + level * 0.5);
+      const lift = mood.intensity * (1 + level * 0.5) * dimRef.current;
 
       ctx.clearRect(0, 0, width, height);
 

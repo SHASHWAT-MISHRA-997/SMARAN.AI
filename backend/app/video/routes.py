@@ -64,7 +64,7 @@ async def models():
 
 
 @router.get("/install")
-async def install_status():
+def install_status():
     """Whether the video packages are present, and what it would take."""
     from .install import status
 
@@ -72,7 +72,7 @@ async def install_status():
 
 
 @router.post("/install")
-async def install_start():
+def install_start():
     """Fetch the video packages. Reports progress; does not block."""
     from .install import start, status
 
@@ -81,7 +81,23 @@ async def install_start():
         return {"started": False, "detail": "Already installed."}
     if not current["can_install"]:
         raise HTTPException(status_code=409, detail=current["blocker"])
+    if current.get("free_space_gb") is not None \
+            and current["free_space_gb"] < current["required_free_gb"]:
+        # Refused here as well as inside the installer, so the button can say
+        # why instead of starting a job that is going to fail.
+        raise HTTPException(status_code=409, detail=(
+            "Not enough disk space: about %.0f GB is needed and %.1f GB is free."
+            % (current["required_free_gb"], current["free_space_gb"])
+        ))
     return start()
+
+
+@router.post("/install/cancel")
+def install_cancel():
+    """Stop an install in progress. Nothing already installed is affected."""
+    from .install import cancel
+
+    return cancel()
 
 
 @router.get("/hardware")

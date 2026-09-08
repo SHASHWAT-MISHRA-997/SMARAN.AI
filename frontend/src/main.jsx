@@ -18,16 +18,6 @@ if ('serviceWorker' in navigator) {
 }
 
 async function initApp() {
-  // Initialize device user (legacy fallback)
-  await ensureDeviceUser();
-  
-  // Check for existing session
-  try {
-    await getCurrentUser();
-  } catch (e) {
-    console.log('No active session, user needs to login');
-  }
-  
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
       <ThemeProvider>
@@ -37,6 +27,14 @@ async function initApp() {
       </ThemeProvider>
     </React.StrictMode>
   );
+  // A sleeping paired computer must not leave the phone on a blank splash.
+  // The local interface can render while the optional session is restored.
+  try {
+    await ensureDeviceUser();
+    await getCurrentUser();
+  } catch {
+    console.info('The local interface is available; session restoration did not finish.');
+  }
 }
 
 initApp().catch((e) => console.error('App init failed:', e));

@@ -2,7 +2,7 @@ import { getStore } from '@netlify/blobs';
 import {
   daysBetween, decodeEventKey, decodeWebKey, json, requireDashboardKey, resolveWindow,
   shiftDay, today,
-} from './_shared.mjs';
+} from '../lib/shared.mjs';
 
 /**
  * The dashboard's read API: summary, installs and recent.
@@ -357,13 +357,19 @@ export default async (req) => {
       if (req.method !== 'POST') return json({ detail: 'Use POST to erase.' }, 405);
       return await webResetRoute(url);
     }
+    if (url.pathname.endsWith('/erase')) {
+      if (req.method !== 'POST') return json({ detail: 'Use POST to erase.' }, 405, { allow: 'POST' });
+      return await eraseRoute(url);
+    }
+    if (req.method !== 'GET') return json({ detail: 'Use GET to read statistics.' }, 405, { allow: 'GET' });
     if (url.pathname.endsWith('/web')) return await webRoute(url);
     if (url.pathname.endsWith('/summary')) return await summary(url);
     if (url.pathname.endsWith('/installs')) return await installsRoute(url);
     if (url.pathname.endsWith('/recent')) return await recentRoute(url);
-    if (url.pathname.endsWith('/erase')) return await eraseRoute(url);
   } catch (err) {
-    return json({ detail: `Could not read the store: ${err.message}` }, 500);
+    if (err instanceof RangeError) return json({ detail: err.message }, 400);
+    console.error('Analytics store request failed', err);
+    return json({ detail: 'Could not read the analytics store. Try again.' }, 500);
   }
   return json({ detail: 'Unknown endpoint.' }, 404);
 };

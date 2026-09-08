@@ -14,9 +14,9 @@ python build_exe.py
 
 Output: `dist\SMARAN.AI\SMARAN.AI.exe` (plus its `_internal` payload folder).
 
-The launcher (`desktop_app.py`) starts the bundled backend in-process, waits for
-it to answer a health check, then opens the window — so users never see
-"This site can't be reached".
+The launcher (`desktop_app.py`) starts the bundled backend in-process and waits
+for its health check before opening the window. If startup fails, it reports
+the failure instead of opening a page backed by an unavailable engine.
 
 User data (database, uploads, models, vector store) lives in
 `%LOCALAPPDATA%\SMARAN.AI\data`, so it survives upgrades and uninstalls.
@@ -46,8 +46,9 @@ Windows blocks or warns on unsigned executables:
 | **SmartScreen** | "Windows protected your PC" warning; user must click "More info → Run anyway" |
 | **Some antivirus** | PyInstaller apps are a common false-positive |
 
-**This machine currently has Smart App Control ON**, which is why an unsigned
-build cannot launch here. That is a Windows policy decision, not an app bug.
+The result depends on the destination device's policy and reputation checks.
+Do not infer the current machine's policy from this document. Signing identifies
+the publisher but does not guarantee that every device will allow a release.
 
 ### Verify the policy state
 
@@ -61,10 +62,9 @@ Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' | Select Ver
 
 **A. Sign it (the real fix — do this before distributing).**
 
-Buy an **OV** (~$100–200/yr, warnings fade as reputation builds) or **EV**
-(~$300–450/yr, instant SmartScreen trust) code-signing certificate from a CA
-such as DigiCert, Sectigo, SSL.com, or Certera. Since June 2023 the private key
-must live on a hardware token or cloud HSM.
+Use an appropriate code-signing identity and secure key storage from your
+certificate provider. Verify its current issuance and storage requirements.
+An OV or EV certificate does not guarantee instant SmartScreen trust.
 
 Then sign **both** the app EXE and the installer:
 
@@ -92,9 +92,8 @@ and define `mysigntool` in Inno Setup's *Tools → Configure Sign Tools*.
 
 **B. Testing on your own machine only (not for users).**
 
-Turn Smart App Control off in *Windows Security → App & browser control →
-Smart App Control*. Note: switching it off is **permanent** until a Windows
-reinstall — Microsoft does not allow re-enabling it. Prefer testing on a VM.
+Use an isolated test VM with an appropriate development policy. Do not ask
+end users to disable their device's application-control protections.
 
 A self-signed certificate does **not** remove warnings for other users; it only
 helps if they manually trust your certificate.

@@ -1,5 +1,5 @@
 import { getStore } from '@netlify/blobs';
-import { ALLOWED_EVENTS, ALLOWED_PLATFORMS, dayOf, encodeEventKey, ingestKey, json, timingSafeEqual } from './_shared.mjs';
+import { ALLOWED_EVENTS, ALLOWED_PLATFORMS, dayOf, encodeEventKey, keyHash, json, matchesKeyHash } from '../lib/shared.mjs';
 
 /**
  * Records one event from an installation.
@@ -38,9 +38,9 @@ export default async (req) => {
   }
   if (req.method !== 'POST') return json({ detail: 'Method not allowed.' }, 405, CORS);
 
-  const expected = ingestKey();
+  const expected = keyHash('ingest');
   if (!expected) return json({ detail: 'Ingest is not configured.' }, 503, CORS);
-  if (!timingSafeEqual(req.headers.get('x-ingest-key') || '', expected)) {
+  if (!matchesKeyHash(req.headers.get('x-ingest-key') || '', expected)) {
     return json({ detail: 'Bad ingest key.' }, 401, CORS);
   }
 

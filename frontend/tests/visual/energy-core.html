@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Energy Core bench</title>
+    <style>html,body,#root{height:100%;margin:0;background:#04070d}</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // ?reduce=1 and ?reduce=0 force the reduced-motion preference either way
+      // before the component mounts and reads it. Both directions are needed:
+      // this machine reports "reduce" natively, so without an override the
+      // animated path never runs here and could not be told from a still one.
+      const forced = new URLSearchParams(location.search).get('reduce');
+      if (forced === '1' || forced === '0') {
+        const real = window.matchMedia.bind(window);
+        window.matchMedia = (query) => (
+          query.includes('prefers-reduced-motion')
+            ? {
+                matches: query.includes('no-preference') ? forced === '0' : forced === '1',
+                media: query, addEventListener() {}, removeEventListener() {},
+              }
+            : real(query)
+        );
+      }
+    </script>
+    <script type="module" src="./energy-core-harness.jsx"></script>
+  </body>
+</html>

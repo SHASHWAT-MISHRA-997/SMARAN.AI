@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Search, Cpu, Download, Trash2, CheckCircle2, BarChart2, Sparkles, Filter, ShieldCheck, Check, Layers, AlertCircle, RefreshCw, Key, ExternalLink, Zap, Cloud, Globe, Video } from 'lucide-react';
+import { X, Search, Cpu, Download, Trash2, CheckCircle2, BarChart2, Filter, Check, Layers, RefreshCw, Key, ExternalLink, Zap, Cloud, Video } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import ModelComparisonModal from './ModelComparisonModal';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
-const positive = (value) => finite(value) && value > 0;
+
 const safeToFixed = (value, digits = 0) => {
   if (!finite(value)) return null;
   try { return value.toFixed(digits); } catch { return null; }
@@ -111,7 +111,7 @@ const VideoPackages = () => {
     try {
       const res = await fetch(`${API_BASE}/api/video/install`, { credentials: 'include' });
       if (res.ok) setState(await res.json());
-    } catch (_) { /* backend not reachable; the panel stays quiet */ }
+    } catch  { /* backend not reachable; the panel stays quiet */ }
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -129,8 +129,14 @@ const VideoPackages = () => {
   const start = async () => {
     setStarting(true);
     try {
-      await fetch(`${API_BASE}/api/video/install`, { method: 'POST', credentials: 'include' });
+      const response = await fetch(`${API_BASE}/api/video/install`, { method: 'POST', credentials: 'include' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === 'string' ? body.detail : `Install request failed (${response.status}).`);
+      }
       await refresh();
+    } catch (error) {
+      setState(previous => ({ ...previous, error: error.message || 'Could not start installation. Check the local engine connection.' }));
     } finally {
       setStarting(false);
     }
@@ -154,7 +160,7 @@ const VideoPackages = () => {
               : `PyTorch and diffusers, about ${state.approx_download_gb} GB. Not shipped with the app because most installs never generate a video.`}
           </p>
         </div>
-        {!done && state.can_install && (
+        {!done && state.can_install && !state.restart_required && (
           <button
             type="button"
             onClick={start}
@@ -197,7 +203,7 @@ const VideoPackages = () => {
               </span>
               <span className="shrink-0 text-zinc-400">
                 {state.current_total
-                  ? `${formatBytes(state.current_bytes)} / ${formatBytes(state.current_total)}`
+                  ? `${state.current_percent}% · ${formatBytes(state.current_bytes)} / ${formatBytes(state.current_total)} · ${formatBytes(Math.max(0, state.current_total - state.current_bytes))} left`
                   : '—'}
               </span>
             </div>
@@ -302,7 +308,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
           } else {
             setPullNote(`${name}: ${state.percent || 0}%${state.total_gb ? ` of ${state.total_gb} GB` : ''}`);
           }
-        } catch (_) { /* keep polling */ }
+        } catch  { /* keep polling */ }
       }, 1500);
     } catch (err) {
       setPullNote(`Could not start: ${String(err).slice(0, 80)}`);
@@ -320,7 +326,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
     try {
       const saved = localStorage.getItem('sm_cloud_api_keys');
       return saved ? JSON.parse(saved) : {};
-    } catch (_) {
+    } catch  {
       return {};
     }
   });
@@ -349,7 +355,7 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
       const models = [...new Set((data.models || []).filter(Boolean))].sort((a, b) => a.localeCompare(b));
       setProviderModels((prev) => ({ ...prev, [providerId]: models }));
       setProviderNotices((prev) => ({ ...prev, [providerId]: data.notice || '' }));
-      try { const cached = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}'); localStorage.setItem('sm_cloud_provider_models', JSON.stringify({ ...cached, [providerId]: models })); } catch (_) {}
+      try { const cached = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}'); localStorage.setItem('sm_cloud_provider_models', JSON.stringify({ ...cached, [providerId]: models })); } catch  {}
       if (models.length) setCloudModels((prev) => ({ ...prev, [providerId]: prev[providerId] || models[0] }));
       else setProviderErrors((prev) => ({ ...prev, [providerId]: 'This key returned no selectable chat models.' }));
       return models.length > 0;
@@ -623,11 +629,12 @@ Download it anyway?`)) {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-150">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-150"
+           style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0px))', paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}>
         {/* dvh tracks the visible viewport as mobile browser bars show/hide, so
             the modal never extends under them and strand its scrollable pane. */}
         <div className="w-full max-w-6xl h-[94dvh] sm:h-auto sm:max-h-[94dvh] bg-zinc-950 border border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-150 text-left">
-          
+
           {/* Main Modal Header */}
           {/* Header stays a single row at every width: stacking it on mobile
               pushed the close button onto its own line and left dead space. */}
@@ -657,6 +664,7 @@ Download it anyway?`)) {
               )}
               <button
                 onClick={onClose}
+                aria-label="Close model hub"
                 className="p-2 text-zinc-400 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-xl transition-all cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -862,7 +870,7 @@ Download it anyway?`)) {
                               <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg border bg-gradient-to-r truncate whitespace-nowrap ${badgeColor}`}>
                                 {m.company}
                               </span>
-                              
+
                               <button
                                 onClick={() => toggleCompareSelection(m.id)}
                                 className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
@@ -1062,7 +1070,7 @@ Download it anyway?`)) {
           {/* TAB 2: CLOUD PROVIDER KEYS */}
           {activeTab === 'cloud' && (
             <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain flex-1 min-h-0 space-y-6">
-              
+
               {/* Informational Guidance Card */}
               <div className="p-5 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-950/30 via-zinc-900/80 to-purple-950/30 shadow-xl flex items-start gap-4">
                 <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 text-amber-400">

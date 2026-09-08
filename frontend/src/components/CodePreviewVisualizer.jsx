@@ -3,21 +3,7 @@ import {
   Play,
   Pause,
   RotateCcw,
-  Eye,
-  Code2,
-  Download,
-  Copy,
-  Check,
-  RefreshCw,
-  ExternalLink,
-  Layers,
-  Sparkles,
-  Terminal,
   Zap,
-  Box,
-  Maximize2,
-  Sliders,
-  Compass,
 } from 'lucide-react';
 
 /**
@@ -32,7 +18,7 @@ export const Maya3DCanvas = ({ code }) => {
   const [renderMode, setRenderMode] = useState('hologram'); // 'hologram' | 'wireframe' | 'solid'
   const [currentFrame, setCurrentFrame] = useState(1);
   const [fps, setFps] = useState(60);
-  const [coreColor, setCoreColor] = useState('#00f0ff'); // Cyan neon
+   // Cyan neon
 
   // Camera & Orbit State with Inertia
   const rotRef = useRef({ x: 0.38, y: 0.72 });
@@ -60,7 +46,7 @@ export const Maya3DCanvas = ({ code }) => {
         name: nameMatch ? nameMatch[1] : `Ring_${rings.length + 1}`,
       });
     }
-  } catch (_) {}
+  } catch  {}
 
   const activeRings = rings.length > 0 ? rings : [
     { radius: 4.8, subdivisions: 16, speed: 2.5, name: "Jarvis_Core_Inner" },
@@ -75,7 +61,7 @@ export const Maya3DCanvas = ({ code }) => {
     const ctx = canvas.getContext('2d');
     let animId;
     let frame = 0;
-    let lastTime = performance.now();
+    performance.now();
     let frameCounter = 0;
     let fpsTimer = performance.now();
 

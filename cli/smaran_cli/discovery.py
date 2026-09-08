@@ -29,6 +29,8 @@ SOURCE_PORT = 8000
 def _data_dirs() -> list[str]:
     """Every place the app might keep its data directory, most likely first."""
     out: list[str] = []
+    if os.getenv("DATA_DIR"):
+        out.append(os.path.abspath(os.environ["DATA_DIR"]))
 
     if sys.platform == "win32":
         local = os.getenv("LOCALAPPDATA")
@@ -56,8 +58,28 @@ def _pid_alive(pid: int) -> bool:
     are not allowed to signal is still a running process, so PermissionError
     counts as alive rather than dead.
     """
-    if not pid:
+    if not isinstance(pid, int) or isinstance(pid, bool) or not 0 < pid <= 0xFFFFFFFF:
         return False
+    if sys.platform == "win32":
+        # Unlike POSIX, os.kill(pid, 0) terminates a Windows process.
+        # A zero-duration wait only queries whether its handle is signalled.
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.WaitForSingleObject.restype = wintypes.DWORD
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if not handle:
+            return ctypes.get_last_error() == 5  # Access denied is not proof of exit.
+        try:
+            return kernel.WaitForSingleObject(handle, 0) == 0x00000102  # WAIT_TIMEOUT
+        finally:
+            kernel.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True
@@ -68,9 +90,12 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.6) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.settimeout(timeout)
-        return probe.connect_ex((host, port)) == 0
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(timeout)
+            return probe.connect_ex((host, port)) == 0
+    except OSError:
+        return False
 
 
 def find_backend() -> Optional[str]:
@@ -91,16 +116,21 @@ def find_backend() -> Optional[str]:
         except (OSError, ValueError):
             continue
 
-        port = int(record.get("port") or 0)
-        pid = int(record.get("pid") or 0)
-        if not port:
+        if not isinstance(record, dict):
+            continue
+        try:
+            port = int(record.get("port") or 0)
+            pid = int(record.get("pid") or 0)
+        except (ValueError, TypeError, OverflowError):
+            continue
+        if not 0 < port <= 65535 or not 0 <= pid <= 0xFFFFFFFF:
             continue
         # A stale file from a crashed run names a port nobody holds. Checking
         # the pid first avoids a connection attempt that will only time out.
         if pid and not _pid_alive(pid):
             continue
         if _port_open(port):
-            return record.get("url") or f"http://127.0.0.1:{port}"
+            return f"http://127.0.0.1:{port}"
 
     # Nothing advertised, but the app may be running from source without
     # having written the file. Probe both supported local defaults.

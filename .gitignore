@@ -61,6 +61,7 @@ frontend/android/keystore.properties
 # Build and tool output, not source.
 .netlify/
 frontend/playwright-report/
+frontend/test-results/
 frontend/android/.gradle-user/
 cli/build-exe/
 cli/smaran_cli.egg-info/

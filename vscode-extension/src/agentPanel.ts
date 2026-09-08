@@ -435,11 +435,11 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 name: call.name,
                 what: command || call.args.path || '',
                 because,
-                detail: call.name === 'write_file'
+                detail: call.preview ?? (call.name === 'write_file'
                     ? `${(call.args.content ?? '').split('\n').length} lines`
                     : call.args.find
                         ? `replacing ${(call.args.find ?? '').split('\n').length} line(s)`
-                        : undefined,
+                        : undefined),
             });
         });
     }

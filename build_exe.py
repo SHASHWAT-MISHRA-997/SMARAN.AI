@@ -63,7 +63,6 @@ HIDDEN_IMPORTS = [
     # silently in the frozen build - which is the one that matters.
     "app.db_guard",
     # Linux only, and absent on Windows - the import that uses it is guarded.
-    "pysqlite3",
     "app.web_intents",
     "app.analytics_config",
     "app.password_policy",
@@ -114,7 +113,7 @@ HIDDEN_IMPORTS = [
     "email_validator",
 ]
 
-def _ensure_nltk_data() -> None:
+def _ensure_nltk_data() -> str:
     r"""Fetch the corpora g2p-en needs, so the build does not depend on luck.
 
     --collect-all g2p_en gathers whatever nltk data is already on the machine.
@@ -129,9 +128,12 @@ def _ensure_nltk_data() -> None:
     try:
         import nltk
     except ImportError:
-        print("[build] nltk is not installed; the offline voice will not work "
-              "in this build.")
-        return
+        raise RuntimeError("nltk is required to package offline voice data")
+
+    corpus_dir = os.path.join(ROOT, ".cache", "build-nltk")
+    os.makedirs(corpus_dir, exist_ok=True)
+    os.environ["NLTK_DATA"] = corpus_dir
+    nltk.data.path[:] = [corpus_dir]
 
     for package, probe in (("cmudict", "corpora/cmudict"),
                            ("averaged_perceptron_tagger", "taggers/averaged_perceptron_tagger"),
@@ -141,9 +143,10 @@ def _ensure_nltk_data() -> None:
         except LookupError:
             print(f"[build] fetching nltk {package}...")
             try:
-                nltk.download(package, quiet=True)
+                nltk.download(package, download_dir=corpus_dir, quiet=True, raise_on_error=True)
             except Exception as exc:
-                print(f"[build] could not fetch {package}: {exc}")
+                raise RuntimeError(f"Required voice corpus {package} could not be fetched") from exc
+    return corpus_dir
 
 
 def _extra_binaries() -> list:
@@ -222,7 +225,6 @@ EXCLUDES = [
     "faiss",
     "sklearn",
     "scikit-learn",
-    "onnxruntime",
     "tensorflow",
     "matplotlib",
     "IPython",
@@ -241,65 +243,44 @@ def _ensure_frontend_built() -> None:
                    check=True, shell=os.name == "nt")
 
 
-def build(onefile: bool = False) -> int:
+def build(onefile: bool = False, output_root: str = ROOT, incremental: bool = False) -> int:
     _ensure_frontend_built()
-
-    # Windows keeps a handle on a directory that any process has as its
-    # working directory, even after that directory is emptied - a shell left
-    # sitting in dist/SMARAN.AI is enough. rmtree here ignores the failure,
-    # but PyInstaller then tries to remove the same folder itself and does
-    # not, so the whole build ended with WinError 32 and produced nothing.
-    #
-    # Emptying the folder always works even when removing it does not, so the
-    # contents go first. PyInstaller is then given somewhere it can write.
-    for stale in ("build", "dist"):
-        path = os.path.join(ROOT, stale)
-        if not os.path.isdir(path):
-            continue
-        for entry in os.listdir(path):
-            target = os.path.join(path, entry)
-            if os.path.isdir(target):
-                shutil.rmtree(target, ignore_errors=True)
-                # A locked subdirectory survives; empty it in place.
-                if os.path.isdir(target):
-                    for inner in os.listdir(target):
-                        inner_path = os.path.join(target, inner)
-                        if os.path.isdir(inner_path):
-                            shutil.rmtree(inner_path, ignore_errors=True)
-                        else:
-                            try:
-                                os.remove(inner_path)
-                            except OSError:
-                                pass
-            else:
-                try:
-                    os.remove(target)
-                except OSError:
-                    pass
-        shutil.rmtree(path, ignore_errors=True)
-
-    # PyInstaller replaces its output directory, and a directory Windows holds
-    # a handle on cannot be replaced - a shell left sitting in dist/SMARAN.AI
-    # is enough to keep that handle open, and the whole build then ends with
-    # WinError 32 having produced nothing. So it is given a scratch folder of
-    # its own and the result is copied into place afterwards: copying into the
-    # locked folder works even though removing it does not.
-    scratch = os.path.join(ROOT, "build", "_dist")
+    output = Path(output_root).resolve()
+    if not output.is_relative_to(Path(ROOT).resolve()):
+        raise ValueError("Build output must stay inside the SMARAN.AI folder")
+    scratch = output / "build" / "_dist"
+    if not scratch.resolve().is_relative_to(output):
+        raise ValueError("Build scratch directory escapes its output root")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    # Freeze the asset set before analysis: Vite replaces hash-named files,
+    # which otherwise vanish while a long PyInstaller build is collecting them.
+    web_snapshot = output / "build" / "frontend_dist"
+    if not web_snapshot.resolve().is_relative_to(output):
+        raise ValueError("Frontend snapshot escapes its output root")
+    shutil.rmtree(web_snapshot, ignore_errors=True)
+    shutil.copytree(FRONTEND_DIST, web_snapshot)
+    # PyInstaller owns this scratch output. Existing dist artifacts remain
+    # available until a replacement has built successfully.
     shutil.rmtree(scratch, ignore_errors=True)
+    corpus_dir = _ensure_nltk_data()
 
     sep = ";" if os.name == "nt" else ":"
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
-        "--clean",
-        "--distpath", scratch,
+        "--distpath", str(scratch),
+        "--workpath", str(output / "build" / "work"),
+        "--specpath", str(output / "build"),
         "--windowed",                      # no console window
         "--name", APP_NAME,
         "--onefile" if onefile else "--onedir",
         # Bundle the backend package and the prebuilt UI.
         "--paths", os.path.join(ROOT, "backend"),
-        "--add-data", f"{FRONTEND_DIST}{sep}frontend_dist",
+        "--add-data", f"{web_snapshot}{sep}frontend_dist",
+        "--add-data", f"{corpus_dir}{sep}nltk_data",
     ]
+    if not incremental:
+        cmd.append("--clean")
 
     # PyInstaller wants a .ico on Windows and a .png elsewhere; handing it the
     # wrong one is a warning at best and a failed build at worst.
@@ -313,6 +294,15 @@ def build(onefile: bool = False) -> int:
     for module in HIDDEN_IMPORTS:
         cmd += ["--hidden-import", module]
     for package in COLLECT_ALL:
+        if sys.platform.startswith("linux") and package == "tiktoken_ext":
+            # Namespace extension modules contain code, not package resources.
+            cmd += ["--collect-submodules", package]
+            continue
+        if sys.platform.startswith("linux") and package == "onnxruntime":
+            # Inference needs the runtime and its libraries, not quantization
+            # tooling whose optional `onnx` dependency is absent from releases.
+            cmd += ["--collect-data", package, "--collect-binaries", package]
+            continue
         cmd += ["--collect-all", package]
     for package in EXCLUDES:
         cmd += ["--exclude-module", package]
@@ -320,13 +310,12 @@ def build(onefile: bool = False) -> int:
     cmd.append(ENTRY)
 
     _write_analytics_config()
-    _ensure_nltk_data()
     print("[build] running PyInstaller...")
     result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode == 0:
         # Into the place the installer and everything else expect.
         produced = os.path.join(scratch, APP_NAME)
-        final = os.path.join(ROOT, "dist", APP_NAME)
+        final = os.path.join(output, "dist", APP_NAME)
         os.makedirs(final, exist_ok=True)
         if os.path.isdir(produced):
             for entry in os.listdir(produced):
@@ -340,7 +329,7 @@ def build(onefile: bool = False) -> int:
             tail = ".exe" if os.name == "nt" else ""
             if os.path.isfile(produced + tail):
                 shutil.copy2(produced + tail,
-                             os.path.join(ROOT, "dist", APP_NAME + tail))
+                             os.path.join(output, "dist", APP_NAME + tail))
         shutil.rmtree(scratch, ignore_errors=True)
 
     if result.returncode != 0:
@@ -348,11 +337,17 @@ def build(onefile: bool = False) -> int:
         return result.returncode
 
     tail = ".exe" if os.name == "nt" else ""
-    target = (os.path.join(ROOT, "dist", f"{APP_NAME}{tail}") if onefile
-              else os.path.join(ROOT, "dist", APP_NAME, f"{APP_NAME}{tail}"))
+    target = (os.path.join(output, "dist", f"{APP_NAME}{tail}") if onefile
+              else os.path.join(output, "dist", APP_NAME, f"{APP_NAME}{tail}"))
     print(f"[build] done -> {target}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(build(onefile="--onefile" in sys.argv))
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--onefile", action="store_true")
+    parser.add_argument("--output-root", default=ROOT)
+    parser.add_argument("--incremental", action="store_true", help="Reuse PyInstaller dependency analysis when its inputs are unchanged")
+    options = parser.parse_args()
+    raise SystemExit(build(onefile=options.onefile, output_root=options.output_root, incremental=options.incremental))

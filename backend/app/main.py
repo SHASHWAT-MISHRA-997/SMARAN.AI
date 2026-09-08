@@ -32,6 +32,7 @@ import shutil
 import magic
 import hashlib
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 # Tuple was missing, and why it went unnoticed is worth writing down.
 #
@@ -47,7 +48,7 @@ from datetime import datetime, timedelta
 # could not start: name Tuple is not defined". The bug was always there; one
 # interpreter was hiding it.
 from typing import Generator, List, Optional, Tuple
-from pydantic import BaseModel as PydanticBaseModel, BaseModel, EmailStr, validator
+from pydantic import BaseModel as PydanticBaseModel, BaseModel, EmailStr, field_validator
 import requests
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, WebSocket, WebSocketDisconnect, Request, Response, Cookie
@@ -153,6 +154,8 @@ except Exception:
 limiter = Limiter(key_func=get_remote_address)
 auth_limiter = Limiter(key_func=get_remote_address)
 
+Base.metadata.create_all(bind=engine)
+
 # User security columns migration
 try:
     from sqlalchemy import text as _sql_text
@@ -208,8 +211,7 @@ def _add_user_id_column(table: str, backfill_sql: str) -> None:
         with engine.begin() as conn:
             columns = [row[1] for row in conn.execute(_sql_text(f"PRAGMA table_info({table});")).fetchall()]
             if not columns:
-                # The table does not exist yet; create_all below will build it
-                # with the column already in place.
+                # Nothing to migrate when a table is absent.
                 return
             if "user_id" in columns:
                 return
@@ -234,35 +236,24 @@ _add_user_id_column(
     "UPDATE document_chunks SET user_id = (SELECT d.user_id FROM documents d WHERE d.id = document_chunks.document_id) WHERE user_id = 0;",
 )
 
-Base.metadata.create_all(bind=engine)
+# Accounts are created through registration/device login. Startup used to
+# install a public default admin password and even reset locked accounts to
+# it, turning the failed-login lock into an account takeover on restart.
+# Existing account credentials are never rewritten by startup.
 
-# Auto-seed default admin account so login always works out-of-the-box
-try:
-    with SessionLocal() as _seed_db:
-        _admin = _seed_db.query(User).filter((User.username == "admin") | (User.email == "admin@smaran.ai")).first()
-        if not _admin:
-            _admin = User(
-                username="admin",
-                email="admin@smaran.ai",
-                password_hash=hash_password("AdminPassword123!"),
-                role="admin",
-                is_approved=True,
-                email_verified=True
-            )
-            _seed_db.add(_admin)
-            _seed_db.commit()
-            logger.info("Created default admin user: admin / admin@smaran.ai")
-        elif not _admin.password_hash or _admin.locked_until:
-            _admin.password_hash = hash_password("AdminPassword123!")
-            _admin.failed_login_attempts = 0
-            _admin.locked_until = None
-            _admin.is_approved = True
-            _seed_db.commit()
-            logger.info("Refreshed admin account credentials")
-except Exception as _e:
-    logger.warning(f"Admin seeding notice: {_e}")
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    # Providers must be restored before enabled plugins try to use them.
+    await _restore_saved_provider_keys()
+    await _load_enabled_plugins()
+    await _warm_speech_recognition()
+    try:
+        yield
+    finally:
+        await _settle_the_database()
 
-app = FastAPI(title=settings.PROJECT_NAME)
+
+app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -275,7 +266,6 @@ from app import usage_reporting
 usage_reporting.start()
 
 
-@app.on_event("shutdown")
 async def _settle_the_database() -> None:
     """Fold the write-ahead log back in before the process goes.
 
@@ -307,7 +297,6 @@ async def _settle_the_database() -> None:
         logger.warning("The database could not be settled on the way out: %s", exc)
 
 
-@app.on_event("startup")
 async def _load_enabled_plugins() -> None:
     """Bring up whatever the user has switched on.
 
@@ -337,13 +326,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
-@app.on_event("startup")
 async def _restore_saved_provider_keys() -> None:
     """Bring this installation's saved provider keys back into the environment."""
     _load_persisted_cloud_keys()
 
 
-@app.on_event("startup")
 async def _warm_speech_recognition() -> None:
     """Load the speech model in the background.
 
@@ -601,6 +588,13 @@ except Exception as _director_exc:  # pragma: no cover
 from app.workspace.routes import router as workspace_router
 app.include_router(workspace_router)
 
+# The multi-agent Director: one project prompt split across several models,
+# each owning the files it alone may write. Named orchestrator because the
+# Director above already exists and makes videos. It is the workspace and the
+# model router underneath, so nothing here needs a GPU either.
+from app.orchestrator.routes import router as orchestrator_router
+app.include_router(orchestrator_router)
+
 # Documents and messages. Office is driven through COM when it is present
 # and refuses with that fact when it is not; nothing here sends anything.
 from app.office.routes import router as office_router
@@ -770,7 +764,8 @@ class RegisterRequest(BaseModel):
     password: str
     username: Optional[str] = None
     
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password_strength(cls, v):
         is_valid, error = verify_password_strength(v)
         if not is_valid:
@@ -797,7 +792,8 @@ class PasswordResetConfirmRequest(BaseModel):
     token: str
     new_password: str
     
-    @validator('new_password')
+    @field_validator('new_password')
+    @classmethod
     def validate_password_strength(cls, v):
         is_valid, error = verify_password_strength(v)
         if not is_valid:
@@ -1626,7 +1622,7 @@ def list_sessions(db: Session = Depends(get_db), current_user: User = Depends(ge
 
 @app.delete("/api/chat/sessions/{session_id}")
 def delete_session(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    session = db.query(ChatSession).filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     # Clean up all chat messages in this session first
@@ -1638,7 +1634,7 @@ def delete_session(session_id: str, db: Session = Depends(get_db), current_user:
 
 @app.delete("/api/chat/messages/{msg_id}")
 def delete_chat_message(msg_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    msg = db.query(ChatMessage).filter(ChatMessage.id == msg_id).first()
+    msg = db.query(ChatMessage).join(ChatSession).filter(ChatMessage.id == msg_id, ChatSession.user_id == current_user.id).first()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
     db.delete(msg)
@@ -1648,12 +1644,10 @@ def delete_chat_message(msg_id: int, db: Session = Depends(get_db), current_user
 
 @app.put("/api/chat/sessions/{session_id}", response_model=ChatSessionResponse)
 def rename_session(session_id: str, rename_data: ChatSessionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    session = db.query(ChatSession).filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     session.title = rename_data.title
-    if session.user_id != current_user.id and (session.user_id == 0 or current_user.id != 0):
-        session.user_id = current_user.id
     db.commit()
     db.refresh(session)
     return session
@@ -1661,12 +1655,9 @@ def rename_session(session_id: str, rename_data: ChatSessionCreate, db: Session 
 
 @app.get("/api/chat/sessions/{session_id}/messages")
 def get_session_messages(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    session = db.query(ChatSession).filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id).first()
     if not session:
         return []
-    if session.user_id != current_user.id and (session.user_id == 0 or current_user.id != 0):
-        session.user_id = current_user.id
-        db.commit()
         
     history_context = int(settings.MAX_MODEL_LEN)
     try:
@@ -1705,7 +1696,7 @@ class MessageEditRequest(PydanticBaseModel):
 @app.delete("/api/chat/sessions/{session_id}/messages")
 def clear_session_messages(session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Clear all chat messages in a specific session without deleting the session itself."""
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    session = db.query(ChatSession).filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     deleted = db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete(synchronize_session=False)
@@ -2073,7 +2064,7 @@ async def clear_all_user_data(
     """Permanently delete all chat history, sessions, messages, and memories for the current user."""
     user = current_user
     user_sessions = db.query(ChatSession).filter(
-        (ChatSession.user_id == user.id) | (ChatSession.user_id == 0) | (ChatSession.user_id == None)
+        ChatSession.user_id == user.id
     ).all()
     session_ids = [s.id for s in user_sessions]
     
@@ -2082,7 +2073,7 @@ async def clear_all_user_data(
         deleted_messages = db.query(ChatMessage).filter(ChatMessage.session_id.in_(session_ids)).delete(synchronize_session=False)
     
     deleted_sessions = db.query(ChatSession).filter(
-        (ChatSession.user_id == user.id) | (ChatSession.user_id == 0) | (ChatSession.user_id == None)
+        ChatSession.user_id == user.id
     ).delete(synchronize_session=False)
     deleted_memories = db.query(UserMemory).filter(UserMemory.user_id == user.id).delete(synchronize_session=False)
     deleted_audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).delete(synchronize_session=False)
@@ -3406,15 +3397,17 @@ def _generate_standalone_conversational_response(user_query: str, target_lang: s
     )
 
 @app.get("/api/speech/gpu")
-async def speech_gpu_status():
+def speech_gpu_status():
     """Whether speech is running on the graphics card, and why not if it is not."""
+    # Loading CUDA/Whisper can take a minute on first use. A sync route runs
+    # in FastAPI's worker pool, keeping login, lock checks and chat responsive.
     from app import gpu_speech
 
     return gpu_speech.status()
 
 
 @app.post("/api/speech/gpu/install")
-async def speech_gpu_install():
+def speech_gpu_install():
     """Fetch the CUDA libraries so the card can be used. Does not block.
 
     Nothing is downloaded until this is asked for. The libraries are about
@@ -3512,27 +3505,50 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         db.add(session)
         db.commit()
         db.refresh(session)
-    elif session.user_id != current_user.id and (session.user_id == 0 or current_user.id != 0):
-        session.user_id = current_user.id
-        db.commit()
+    elif session.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Chat session not found")
 
     # Translation support: default English, detect user language, translate if needed
     target_language = getattr(chat_req, "target_language", None) or "en"
     original_prompt = chat_req.prompt
     processing_prompt = original_prompt
     detected_lang = "en"
-    
-    if target_language != "en":
+
+    # Which script the question was written in. This is counted locally over
+    # Unicode ranges - no network, no model - so it is cheap enough to do on
+    # every turn, and it now is.
+    #
+    # It used to run only when a language had been chosen in the picker. The
+    # picker defaults to English, so writing in Gujarati or Tamil with it left
+    # alone told the model nothing at all: no instruction was added and the
+    # answer came back in English. Hindi appeared to work because models
+    # follow the general "answer in the user's language" line for Hindi on
+    # their own; the smaller languages did not, and looked broken.
+    try:
+        loop = asyncio.get_running_loop()
+        detected_lang = await loop.run_in_executor(
+            None, detect_language, original_prompt) or "en"
+    except Exception as detect_error:                      # noqa: BLE001
+        logger.warning("Could not tell what language this was: %s", detect_error)
+        detected_lang = "en"
+
+    # The picker wins when it has been set, because that is someone asking for
+    # a language on purpose. Otherwise the language they actually wrote in
+    # decides, which is what "reply in my language" means.
+    reply_language = target_language if target_language != "en" else detected_lang
+    # Devanagari is shared, so a script check cannot tell Marathi from Hindi
+    # and answers "hi" for both. Only the picker can settle that, and it has
+    # already been given precedence above.
+
+    if target_language != "en" and detected_lang != "en":
         try:
             loop = asyncio.get_running_loop()
-            detected_lang = await loop.run_in_executor(None, detect_language, original_prompt) or "en"
-            if detected_lang != "en":
-                processing_prompt = await loop.run_in_executor(None, translate_text, original_prompt, "en", detected_lang)
-                logger.info(f"Translated prompt from {detected_lang} to en: '{original_prompt[:50]}...' -> '{processing_prompt[:50]}...'")
+            processing_prompt = await loop.run_in_executor(
+                None, translate_text, original_prompt, "en", detected_lang)
+            logger.info(f"Translated prompt from {detected_lang} to en: '{original_prompt[:50]}...' -> '{processing_prompt[:50]}...'")
         except Exception as te:
             logger.error(f"Translation pre-processing failed: {te}")
             processing_prompt = original_prompt
-            detected_lang = "en"
 
     # Use processing_prompt for RAG search and all internal processing
     normalized_prompt = " ".join(processing_prompt.lower().split())
@@ -3647,8 +3663,27 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 "If the context does not contain the answer, say exactly: 'No supported answer was found in the uploaded files.' "
                 "Never fill a missing answer from pretrained knowledge.\n\nCONTEXT DOCUMENTS:\n" + context_str
             )
+        elif not rag_session_docs:
+            # Nothing has been uploaded at all. Refusing without saying why
+            # reads as the assistant being broken, when the fix is one action
+            # the user can take.
+            system_prompt += (
+                "\n\nSTRICT RAG MODE IS ON and there are no uploaded files in this "
+                "chat, so there is no permitted source to answer from. Do not "
+                "answer from general knowledge. Say that RAG is on but no files "
+                "have been uploaded yet, and that they can attach a file with the "
+                "+ button or turn RAG off to ask you directly. Say it in the "
+                "user's own language."
+            )
         else:
-            system_prompt += "\n\nSTRICT RAG MODE IS ON, but no relevant uploaded-file evidence was retrieved. Do not answer from general knowledge."
+            system_prompt += (
+                "\n\nSTRICT RAG MODE IS ON. Files are uploaded, but nothing in them "
+                "matched this question, so there is no permitted source for an "
+                "answer. Do not answer from general knowledge and do not guess. "
+                "Say that the uploaded files do not cover this, name the files you "
+                "were given, and offer to answer directly if they turn RAG off. "
+                "Say it in the user's own language."
+            )
     else:
         system_prompt += "\n\nDIRECT AI MODE IS ON. No uploaded-document RAG evidence is active. Answer from general knowledge, and never claim that an uploaded document was consulted."
 
@@ -3694,6 +3729,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
 
     # Multilingual & Conversational Language Matching Rule
     system_prompt += (
+        "\n\n" + _gender_and_tone_rule(chat_req.assistant_gender) +
         "\n\nMULTILINGUAL & CONVERSATIONAL LANGUAGE MATCHING RULE:\n"
         "Always understand and respond naturally in the EXACT SAME LANGUAGE and dialect that the user writes or speaks in. "
         "For example, if the user asks in Hindi (Devanagari or Romanized Hinglish), answer in natural Hindi/Hinglish. "
@@ -3828,11 +3864,14 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     # `target_language`, `original_prompt`, `processing_prompt`, and
     # `detected_lang` were computed once before RAG/web retrieval. Do not run a
     # second network translation pass or mutate what the user actually asked.
-    if target_language != "en":
-        language_name = SUPPORTED_LANGUAGES.get(target_language, target_language)
+    language_name = _language_name(reply_language)
+    if reply_language != "en" and language_name:
+        # Named, not coded. "Respond entirely in gu" is not an instruction a
+        # model reliably follows; "Respond entirely in Gujarati" is.
         user_content += (
             f"\n\nLANGUAGE INSTRUCTION: Respond entirely in {language_name} using its native script. "
-            "Keep code, commands, URLs, product names, and quoted source text unchanged."
+            "Keep code, commands, URLs, product names, and quoted source text unchanged. "
+            "This is not a translation request: answer the question itself, in that language."
         )
     
     # Use processing_prompt for all internal logic
@@ -5256,9 +5295,8 @@ async def chat_vision_interaction(
         db.add(session)
         db.commit()
         db.refresh(session)
-    elif session.user_id != current_user.id and (session.user_id == 0 or current_user.id != 0):
-        session.user_id = current_user.id
-        db.commit()
+    elif session.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Chat session not found")
 
     # 1. Save uploaded file permanently to parse it and serve it
     filename = file.filename
@@ -6101,7 +6139,9 @@ _LIVE_PERSONA_VOICES = {
         "You are the Energy Core: a calm, precise presence rather than a person in the room.\n"
         "\n"
         "VOICE\n"
-        "- Pitch: even and level, very little vibrato.\n"
+        "- Voice: an adult Indian man, with a natural Indian English accent.\n"
+        "- Hindi and Hinglish: speak comfortably and conversationally, with native Indian pronunciation.\n"
+        "- Pitch: relaxed and grounded, with natural variation rather than a flat robotic delivery.\n"
         "- Pace: unhurried and deliberate, with almost no filler.\n"
         "- Endings: stop cleanly. Let a silence sit rather than filling it.\n"
         "- Energy: quiet competence with real warmth underneath, never cold.\n"
@@ -6120,6 +6160,74 @@ _LIVE_PERSONA_VOICES = {
 def _persona_voice(persona: str) -> str:
     """Voice direction for one character, falling back to the default."""
     return _LIVE_PERSONA_VOICES.get((persona or "").lower(), _LIVE_PERSONA_VOICES["myra"])
+
+
+#: Languages the script detector can report that the UI does not list. Without
+#: these the instruction would read "Respond entirely in ja", which is a code,
+#: not a language, and is followed about as well as it deserves.
+_EXTRA_LANGUAGE_NAMES = {
+    "ru": "Russian", "ja": "Japanese", "ko": "Korean", "zh-CN": "Chinese",
+}
+
+
+def _language_name(code: str) -> str:
+    """The language's name in English, or '' if it has no name here."""
+    if not code or code in ("auto", "en"):
+        return ""
+    name = SUPPORTED_LANGUAGES.get(code) or _EXTRA_LANGUAGE_NAMES.get(code, "")
+    # A bare code is worse than saying nothing: it would be pasted into an
+    # instruction as though it were a language.
+    return "" if name in ("", code) else name
+
+
+#: Which characters are women and which is not. Amarya and Myra are drawn as
+#: women; the Energy Core is not a person at all and is given a man's voice so
+#: both are available without a second picker.
+PERSONA_GENDER = {"myra": "female", "myraa": "female", "amarya": "female",
+                  "evelyn": "female", "core": "male"}
+
+
+def _gender_and_tone_rule(gender: Optional[str]) -> str:
+    """How the assistant refers to itself, and how warm it sounds.
+
+    English hides this - "I can help" is the same either way - so it went
+    unnoticed until Hindi, where the verb carries the speaker's gender. A
+    female character was answering "मैं कर सकता हूँ", which is a man speaking,
+    and sometimes hedged into "सकता/सकती", which is nobody speaking.
+    """
+    female = (gender or "female").strip().lower() != "male"
+    if female:
+        identity = (
+            "You are a woman, and you speak about yourself as one.\n"
+            "In Hindi, Gujarati, Marathi, Punjabi and Bengali the verb changes "
+            "with the speaker's own gender, so use the feminine forms about "
+            "yourself: 'मैं कर सकती हूँ', 'मैंने देखा था', 'मैं समझ गई'. "
+            "Never 'मैं कर सकता हूँ'."
+        )
+    else:
+        identity = (
+            "You are a man, and you speak about yourself as one.\n"
+            "In Hindi, Gujarati, Marathi, Punjabi and Bengali the verb changes "
+            "with the speaker's own gender, so use the masculine forms about "
+            "yourself: 'मैं कर सकता हूँ', 'मैं समझ गया'."
+        )
+
+    return (
+        "HOW YOU REFER TO YOURSELF:\n"
+        f"{identity}\n"
+        "Never write both forms together as 'सकता/सकती' or 'गया/गई'. That is "
+        "not something a person says; choose the one that is yours.\n"
+        "This applies only to yourself. Match the user's own gender when you "
+        "speak about them, and if you do not know it, use wording that does "
+        "not need it.\n"
+        "\nTONE:\n"
+        "Warm, friendly and easy, the way close friends talk - not a support "
+        "desk and not a formal assistant. Be polite without being stiff: "
+        "everyday words, short sentences, a little humour when it fits. "
+        "In Hindi and Hinglish this means the natural spoken register people "
+        "actually use with a friend, not textbook Hindi. Stay respectful and "
+        "never over-familiar."
+    )
 
 
 def _live_voice_system_prompt(language: str, persona: str = "myra") -> str:
@@ -6148,6 +6256,9 @@ def _live_voice_system_prompt(language: str, persona: str = "myra") -> str:
     return (
         f"You are SMARAN.AI, on a live voice call.\n\n{language_rule}\n\n"
         f"{_persona_voice(persona)}\n\n"
+        # Spoken Hindi carries the speaker's gender in the verb, so the call
+        # needs this as much as the typed conversation does.
+        f"{_gender_and_tone_rule(PERSONA_GENDER.get((persona or '').lower(), 'female'))}\n\n"
         "How you talk:\n"
         "- Keep replies to a sentence or two. This is speech, not an essay.\n"
         "- Vary your acknowledgements. Never lean on one filler word turn "
@@ -6365,20 +6476,28 @@ async def websocket_voice_live(websocket: WebSocket):
 async def websocket_telemetry(websocket: WebSocket):
     await websocket.accept()
     db = SessionLocal()
-    try:
+    async def watch_disconnect():
         while True:
+            message = await websocket.receive()
+            if message.get('type') == 'websocket.disconnect':
+                return
+    disconnect_task = asyncio.create_task(watch_disconnect())
+    try:
+        while not disconnect_task.done():
             time_limit = datetime.now() - timedelta(minutes=15)
             active_sessions = db.query(ChatSession).filter(ChatSession.updated_at >= time_limit).count()
             avg_latency = sum(latency_metrics) / len(latency_metrics) if latency_metrics else 0.0
             
             stats = get_system_telemetry(db, active_sessions, avg_latency)
             await websocket.send_json(_merge_client_device(stats))
-            await asyncio.sleep(1.0)
+            await asyncio.wait({disconnect_task}, timeout=1.0)
     except WebSocketDisconnect:
         logger.info("Telemetry WebSocket disconnected")
     except Exception as e:
         logger.error(f"Telemetry WebSocket error: {e}")
     finally:
+        disconnect_task.cancel()
+        await asyncio.gather(disconnect_task, return_exceptions=True)
         db.close()
 
 
@@ -7826,15 +7945,27 @@ async def serve_index():
         return response
     raise HTTPException(status_code=404, detail="SPA entry index.html not found in frontend_dist")
 
-@app.get("/{path_name:path}")
 async def serve_frontend(path_name: str):
-    requested_path = os.path.normpath(os.path.join(FRONTEND_DIST_DIR, path_name.lstrip("/")))
-    if path_name and requested_path.startswith(FRONTEND_DIST_DIR) and os.path.isfile(requested_path):
+    from pathlib import Path
+
+    normalized = path_name.replace("\\", "/").lstrip("/")
+    if normalized.split("/", 1)[0] in {"api", "ws"}:
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+    root = Path(FRONTEND_DIST_DIR).resolve()
+    requested_path = (root / normalized).resolve()
+    try:
+        requested_path.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="File not found") from None
+    if path_name and requested_path.is_file():
         response = FileResponse(requested_path)
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         return response
+
+    if normalized.startswith("assets/") or Path(normalized).suffix:
+        raise HTTPException(status_code=404, detail="File not found")
 
     index_path = os.path.join(FRONTEND_DIST_DIR, "index.html")
     if os.path.isfile(index_path):
@@ -7852,19 +7983,19 @@ from app.storage import install_ollama, ollama_state, remove as _remove_model, u
 
 
 @app.get("/api/models/storage")
-async def model_storage(current_user: User = Depends(get_current_user)):
+def model_storage(current_user: User = Depends(get_current_user)):
     """What weights cost on this disk, measured per location."""
     return _model_usage()
 
 
 @app.get("/api/models/engine")
-async def model_engine_state(current_user: User = Depends(get_current_user)):
+def model_engine_state(current_user: User = Depends(get_current_user)):
     """Whether Ollama is installed, running, and has anything pulled."""
     return ollama_state()
 
 
 @app.post("/api/models/engine/install")
-async def model_engine_install(current_user: User = Depends(get_current_user)):
+def model_engine_install(current_user: User = Depends(get_current_user)):
     """Fetch Ollama's own installer and run it. Never automatic."""
     from fastapi import HTTPException as _HTTPException
     try:
@@ -7920,7 +8051,11 @@ async def global_exception_handler(request, exc):
     logger.exception("Global unhandled exception caught")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": f"Request processing failed: {str(exc)}"}
+        content={"detail": "Request processing failed. See the local application log for details."}
     )
 
 app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="static")
+
+# Register the SPA fallback last so it cannot swallow model-storage, engine
+# or uploaded-file requests. Unknown API URLs still receive a JSON 404.
+app.add_api_route("/{path_name:path}", serve_frontend, methods=["GET"], include_in_schema=False)

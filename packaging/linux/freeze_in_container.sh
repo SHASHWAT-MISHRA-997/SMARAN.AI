@@ -36,6 +36,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
+source "$ROOT/packaging/linux/paths.sh"
 
 IMAGE="rockylinux:8"
 echo "[freeze] pulling $IMAGE"
@@ -51,57 +52,13 @@ test -d backend/frontend_dist || {
 docker run --rm \
     -v "$ROOT:/src" \
     -w /src \
+    -e SMARAN_BUILD_SUBDIR="${BUILD_ROOT#"$ROOT"}" \
     -e SMARAN_ANALYTICS_URL="${SMARAN_ANALYTICS_URL:-}" \
     -e SMARAN_ANALYTICS_KEY="${SMARAN_ANALYTICS_KEY:-}" \
-    "$IMAGE" bash -c '
-set -euo pipefail
+    "$IMAGE" bash packaging/linux/container_build.sh
 
-# Named, not discovered. An earlier version of this took "the newest Python in
-# the image" and got 3.15.0rc2 free-threaded - a release candidate with a
-# different ABI that no dependency has wheels for.
-# expat first, and on purpose.
-#
-# Rocky 8 ships an expat older than the one its python3.12 was compiled
-# against, so pyexpat loads and immediately fails with
-#
-#     undefined symbol: XML_SetBillionLaughsAttackProtectionMaximumAmplification
-#
-# which surfaces from inside pip, three imports deep, and looks like pip is
-# broken. Updating expat first is the whole fix.
-dnf update -y -q expat >/dev/null
-
-# python3.12-pip is a separate package here. Without it the interpreter
-# installs fine and then answers "No module named pip", which reads like a
-# broken image rather than a missing package.
-dnf install -y -q python3.12 python3.12-pip python3.12-devel gcc make >/dev/null
-PY=/usr/bin/python3.12
-test -x "$PY" || { echo "[freeze] python3.12 did not install" >&2; exit 1; }
-"$PY" -m pip --version >/dev/null 2>&1 || "$PY" -m ensurepip --upgrade
-echo "[freeze] using $("$PY" -V) at $PY"
-
-"$PY" -m pip install --upgrade pip -q
-"$PY" -m pip install -q -r requirements-build.txt
-
-# Rocky 8 ships SQLite 3.26 and chromadb needs 3.35. This wheel carries its
-# own, so the document store works on every machine rather than on whichever
-# ones happen to have a new enough system library. Linux only - Windows has
-# no such problem and does not install it.
-"$PY" -m pip install -q pysqlite3-binary
-
-# The corpora the offline voice needs. Fetched here rather than left to the
-# build script so that a network failure is its own visible error.
-"$PY" -c "import nltk; [nltk.download(p, quiet=True) for p in (\"cmudict\",\"averaged_perceptron_tagger\",\"averaged_perceptron_tagger_eng\")]"
-
-"$PY" build_exe.py
-
-# Everything above ran as root inside the container, so the files it wrote are
-# owned by root on the runner too - and the next step, which is not root,
-# cannot touch them.
-chown -R "$(stat -c %u /src):$(stat -c %g /src)" dist build backend/frontend_dist 2>/dev/null || true
-'
-
-test -x "dist/SMARAN.AI/SMARAN.AI" || {
+test -x "$FROZEN_DIR/SMARAN.AI" || {
     echo "[freeze] the container produced no binary" >&2
     exit 1
 }
-echo "[freeze] done -> dist/SMARAN.AI/SMARAN.AI"
+echo "[freeze] done -> $FROZEN_DIR/SMARAN.AI"

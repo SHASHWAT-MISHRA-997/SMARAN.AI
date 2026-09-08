@@ -11,7 +11,7 @@ import io
 import logging
 from typing import List, Optional, Generator
 
-import fitz  # PyMuPDF
+import pymupdf as fitz  # PyMuPDF
 import requests
 from PIL import Image
 

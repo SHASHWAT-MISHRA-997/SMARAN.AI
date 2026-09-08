@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import WorkspacePanel from './components/WorkspacePanel';
+import DirectorPanel from './components/DirectorPanel';
 import ChatArea from './components/ChatArea';
 import CollectionManager from './components/CollectionManager';
 import SettingsModal from './components/SettingsModal';
@@ -12,7 +13,7 @@ import ModelHubModal from './components/ModelHubModal';
 import DeveloperModal from './components/DeveloperModal';
 import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
-import { couldBePinned } from './utils/device';
+import { couldBePinned, isPhone } from './utils/device';
 import AuthModal from './components/AuthModal';
 import UpdateNotice from './components/UpdateNotice';
 import ExtensionsHub from './components/ExtensionsHub';
@@ -60,6 +61,7 @@ const App = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isModelHubOpen, setIsModelHubOpen] = useState(false);
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
+  const [isDirectorOpen, setIsDirectorOpen] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
   const [isDeveloperOpen, setIsDeveloperOpen] = useState(false);
   const [isPairingOpen, setIsPairingOpen] = useState(false);
@@ -67,6 +69,16 @@ const App = () => {
   // before this; what looked like one on the extensions screen was a name
   // in an array with nothing behind it.
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  useEffect(() => {
+    const updatePhoneLayout = () => {
+      const phone = isPhone();
+      document.documentElement.classList.toggle('sm-phone-device', phone);
+      document.documentElement.classList.toggle('sm-phone-landscape', phone && window.innerWidth > window.innerHeight);
+    };
+    updatePhoneLayout();
+    window.addEventListener('resize', updatePhoneLayout);
+    return () => window.removeEventListener('resize', updatePhoneLayout);
+  }, []);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
@@ -74,7 +86,7 @@ const App = () => {
   const [selectedModel, setSelectedModel] = useState(
     () => localStorage.getItem('sm_selected_model') || 'auto',
   );
-  const [turboMode, setTurboMode] = useState(false);
+  const [turboMode] = useState(false);
   const [, setSidebarExpanded] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(() => {
     const saved = localStorage.getItem('showRightPanel');
@@ -140,7 +152,7 @@ const App = () => {
         if (!cancelled && user && (user.id || user.email || user.username)) {
           setCurrentUser({ ...LOCAL_USER, ...user });
         }
-      } catch (e) {
+      } catch {
         /* stay on the local user */
       }
     })();
@@ -320,6 +332,15 @@ const App = () => {
   }
 
   const handleDeleteSession = async (id) => {
+    if (noBackendHere() || String(id).startsWith('local-')) {
+      const remaining = (localChat.loadSessions() || []).filter((s) => s && s.id !== id);
+      localChat.saveSessions(remaining);
+      setSessions(remaining);
+      if (activeSessionId === id) {
+        setActiveSessionId(remaining.length > 0 ? remaining[0].id : null);
+      }
+      return;
+    }
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions/${id}`, {
         method: 'DELETE',
@@ -336,10 +357,25 @@ const App = () => {
       }
     } catch (err) {
       console.error(err);
+      setSessions((prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        const remaining = list.filter((s) => s && s.id !== id);
+        if (activeSessionId === id) {
+          setActiveSessionId(remaining.length > 0 ? remaining[0].id : null);
+        }
+        return remaining;
+      });
     }
   };
 
   const handleClearHistory = async () => {
+    if (noBackendHere()) {
+      localChat.saveSessions([]);
+      setSessions([]);
+      setActiveSessionId(null);
+      await handleCreateSession();
+      return true;
+    }
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/privacy/clear-all`, {
         method: 'DELETE',
@@ -355,37 +391,50 @@ const App = () => {
       }
     } catch (err) {
       console.error(err);
-      alert('Failed to clear history. Please try again.');
-      return false;
+      localChat.saveSessions([]);
+      setSessions([]);
+      setActiveSessionId(null);
+      await handleCreateSession();
+      return true;
     }
   };
+
   const handleRenameSession = async (id, newTitle) => {
-    if (!newTitle.trim()) return;
+    if (!newTitle || !newTitle.trim()) return;
+    const cleanTitle = newTitle.trim();
+    try {
+      const all = (localChat.loadSessions() || []).map((s) => (s && s.id === id ? { ...s, title: cleanTitle } : s));
+      localChat.saveSessions(all);
+    } catch {}
+    setSessions((prev) => (Array.isArray(prev) ? prev : []).map((s) => (s && s.id === id ? { ...s, title: cleanTitle } : s)));
+    if (noBackendHere() || String(id).startsWith('local-')) {
+      return;
+    }
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ title: newTitle })
+        body: JSON.stringify({ title: cleanTitle })
       });
       if (res.ok) {
         const data = await res.json();
-        setSessions((prev) => (Array.isArray(prev) ? prev : []).map((s) => s.id === id ? { ...s, title: data.title } : s));
+        setSessions((prev) => (Array.isArray(prev) ? prev : []).map((s) => (s && s.id === id ? { ...s, title: data.title || cleanTitle } : s)));
       }
     } catch (err) {
-      console.error(err);
+      console.error('Failed to sync rename with server, kept local title:', err);
     }
   };
 
   // Tracked live rather than read once, so rotating the phone or resizing a
   // window mounts and unmounts the desktop-only panels correctly.
   const [isWideScreen, setIsWideScreen] = useState(
-    () => typeof window === 'undefined' || window.matchMedia('(min-width: 768px)').matches,
+    () => typeof window === 'undefined' || (!isPhone() && window.matchMedia('(min-width: 768px)').matches),
   );
   useEffect(() => {
     const query = window.matchMedia('(min-width: 768px)');
-    const update = (event) => setIsWideScreen(event.matches);
+    const update = (event) => setIsWideScreen(!isPhone() && event.matches);
     query.addEventListener('change', update);
     return () => query.removeEventListener('change', update);
   }, []);
@@ -416,6 +465,7 @@ const App = () => {
     { open: isAnalyticsOpen, close: () => setIsAnalyticsOpen(false) },
     { open: isModelHubOpen, close: () => setIsModelHubOpen(false) },
     { open: isWorkspaceOpen, close: () => setIsWorkspaceOpen(false) },
+    { open: isDirectorOpen, close: () => setIsDirectorOpen(false) },
     { open: isTerminalOpen, close: () => setIsTerminalOpen(false) },
     { open: isSettingsOpen, close: () => setIsSettingsOpen(false) },
     { open: activeView !== 'chat', close: () => setActiveView('chat') },
@@ -477,7 +527,7 @@ const App = () => {
           </button>
         </div>
       )}
-    <div className="flex-1 min-h-0 w-full flex flex-col md:flex-row bg-[#ffffff] dark:bg-[#0c0c0e] text-[#1f1f1f] dark:text-[#e3e3e3] overflow-hidden font-sans relative transition-colors duration-300">
+    <div className="sm-app-frame flex-1 min-h-0 w-full flex flex-col md:flex-row bg-[#ffffff] dark:bg-[#0c0c0e] text-[#1f1f1f] dark:text-[#e3e3e3] overflow-hidden font-sans relative transition-colors duration-300">
       <StarfieldCanvas />
 
       {/* Sidebar Panel */}
@@ -496,6 +546,7 @@ const App = () => {
         onExpandChange={setSidebarExpanded}
         isModelHubOpen={isModelHubOpen}
         onOpenWorkspace={() => setIsWorkspaceOpen(true)}
+        onOpenDirector={() => setIsDirectorOpen(true)}
         setIsModelHubOpen={setIsModelHubOpen}
         onModelChange={setSelectedModel}
         position={sidebarPosition}
@@ -638,6 +689,7 @@ const App = () => {
       </ErrorBoundary>
 
       <WorkspacePanel isOpen={isWorkspaceOpen} onClose={() => setIsWorkspaceOpen(false)} />
+      <DirectorPanel isOpen={isDirectorOpen} onClose={() => setIsDirectorOpen(false)} />
       {/* The pet used to be wrapped in "hidden md:contents", which hid it on
           every phone. It was showing on mobile before that and sitting on top
           of the input bar; hiding it answered the nuisance by removing the

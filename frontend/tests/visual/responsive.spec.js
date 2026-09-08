@@ -32,6 +32,18 @@ test.describe('Responsive layout regression matrix', () => {
       const composer = page.getByTestId('chat-composer');
       const panel = page.getByTestId('performance-panel');
       await expect(composer).toBeVisible({ timeout: 20_000 });
+      // The product intentionally unmounts desktop telemetry on phones to
+      // avoid background polling. The old test required a retired bottom sheet.
+      if (vp.width < 768) {
+        await expect(panel).toHaveCount(0);
+        const bounds = await composer.boundingBox();
+        expect(bounds.x).toBeGreaterThanOrEqual(-1);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(vp.width + 1);
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth);
+        expect(overflow).toBeLessThanOrEqual(vp.width + 1);
+        await page.screenshot({ path: `test-results/screenshots/home__${vp.name}.png` });
+        return;
+      }
       await expect(panel).toBeVisible({ timeout: 20_000 });
 
       const pageOverflow = await page.evaluate(() => ({
@@ -95,7 +107,8 @@ test.describe('Responsive layout regression matrix', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
     const panel = page.getByTestId('performance-panel');
-    await expect(panel).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('chat-composer')).toBeVisible();
+    await expect(panel).toHaveCount(0);
     await page.setViewportSize({ width: 844, height: 390 });
     await expect(panel).toBeVisible();
     const box = await panel.boundingBox();

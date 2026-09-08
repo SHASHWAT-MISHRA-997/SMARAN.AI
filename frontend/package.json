@@ -1,12 +1,18 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "2.10.33",
+  "overrides": {
+    "xcode": {
+      "uuid": "^11.1.1"
+    }
+  },
+  "version": "2.10.34",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "oxlint",
+    "lint": "oxlint src tests",
+    "test:unit": "node --experimental-vm-modules --test tests/core-signal.test.mjs tests/native-speech.test.mjs tests/voice-status.test.mjs tests/speakable-text.test.mjs tests/core-states.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

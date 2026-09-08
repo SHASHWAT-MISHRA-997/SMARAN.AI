@@ -15,16 +15,26 @@
  * fine and small. Neither is a phone.
  */
 
+import { isNativeApp } from './hostLink';
+
 const query = (text) => (typeof window !== 'undefined' && window.matchMedia
   ? window.matchMedia(text).matches
   : false);
 
-/** Small, and driven by a finger. */
-export const isPhone = () => (
-  typeof window !== 'undefined'
-  && window.innerWidth <= 900
-  && query('(pointer: coarse)')
-);
+/** Small, and driven by a finger.
+ *
+ * Android WebView can report the physical viewport width (1080px on this
+ * device) even while it is a phone. Width alone then crosses the desktop
+ * breakpoint when the handset rotates and mounts the performance drawer.
+ * The mobile user-agent is the stable signal for a packaged phone; the
+ * coarse-pointer/width check keeps this useful for browser phones too.
+ */
+export const isPhone = () => {
+  if (typeof window === 'undefined') return false;
+  const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent || '';
+  const mobileUserAgent = /Android|webOS|iPhone|iPad|iPod|Mobile/i.test(userAgent);
+  return mobileUserAgent || (window.innerWidth <= 900 && query('(pointer: coarse)'));
+};
 
 /**
  * Could this window be a pinned picture-in-picture one?
@@ -59,11 +69,14 @@ export const couldBePinned = (maxWidth = 460) => (
  * Nothing in this app can grant itself the microphone. What it can do is say
  * which of the two doors is shut.
  */
-export const micIsBlockedByOrigin = () => (
-  typeof window !== 'undefined'
-  && !window.isSecureContext
-  && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname)
-);
+export const micIsBlockedByOrigin = () => {
+  if (isNativeApp()) return false;
+  return (
+    typeof window !== 'undefined'
+    && !window.isSecureContext
+    && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname)
+  );
+};
 
 /** Why, in the words of the thing that is actually refusing. */
 export const MIC_BLOCKED_REASON =
@@ -71,3 +84,4 @@ export const MIC_BLOCKED_REASON =
   + 'https or on localhost - so there is no microphone to reach from here. '
   + 'Typing works. For talking, use the SMARAN.AI app on this phone, where '
   + 'the microphone is available.';
+

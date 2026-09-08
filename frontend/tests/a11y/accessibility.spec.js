@@ -5,6 +5,8 @@ test.describe('Phase 3 — Accessibility (a11y) Tests', () => {
   test('Accessibility: Zero serious/critical axe violations on home view', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
+    // A scan of the startup lock spinner passed without ever checking the app.
+    await expect(page.getByTestId('chat-composer')).toBeVisible();
 
     const accessibilityScanResults = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa'])

@@ -30,6 +30,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
+source "$ROOT/packaging/linux/paths.sh"
 
 APP_ID="smaran-ai"
 APP_NAME="SMARAN.AI"
@@ -39,18 +40,18 @@ raw = io.open('backend/app/updates.py', encoding='utf-8').read()
 print(re.search(r'\"SMARAN_APP_VERSION\",\s*\"([0-9.]+)\"', raw).group(1))
 ")"
 
-test -x "dist/$APP_NAME/$APP_NAME" || {
-    echo "[appimage] no frozen binary at dist/$APP_NAME/$APP_NAME" >&2
+test -x "$FROZEN_DIR/$APP_NAME" || {
+    echo "[appimage] no frozen binary at $FROZEN_DIR/$APP_NAME" >&2
     exit 1
 }
 
-OUT="$ROOT/dist/linux"
+OUT="$PACKAGE_DIR"
 mkdir -p "$OUT"
-APPDIR="$ROOT/build/AppDir"
+APPDIR="$BUILD_ROOT/build/AppDir"
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/lib/$APP_ID" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 
-cp -a "dist/$APP_NAME/." "$APPDIR/usr/lib/$APP_ID/"
+cp -a "$FROZEN_DIR/." "$APPDIR/usr/lib/$APP_ID/"
 chmod 755 "$APPDIR/usr/lib/$APP_ID/$APP_NAME"
 
 # AppRun is what actually starts when the file is run.
@@ -95,7 +96,7 @@ cp "$APPDIR/$APP_ID.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/$APP_ID.p
 # appimagetool is itself an AppImage, and mounting one needs FUSE, which a
 # container does not have. --appimage-extract-and-run unpacks it to a
 # temporary folder and runs it from there instead.
-TOOL="$ROOT/build/appimagetool"
+TOOL="$BUILD_ROOT/build/appimagetool"
 if [ ! -x "$TOOL" ]; then
     echo "[appimage] fetching appimagetool"
     curl -fsSL -o "$TOOL" \

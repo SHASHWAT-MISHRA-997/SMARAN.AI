@@ -9,6 +9,8 @@ import logging
 import os
 import subprocess
 import sys
+import asyncio
+import re
 from typing import List, Dict, Any
 
 logger = logging.getLogger("paperclip_plugin")
@@ -88,17 +90,17 @@ class PaperclipPlugin(ToolPlugin):
         """Return the tools provided by this plugin."""
         if not self.paperclip_path:
             return []
+        if hasattr(self, '_tools_cache'):
+            return self._tools_cache
         
         # Get available commands from paperclip help
         try:
             result = subprocess.run([self.paperclip_path, "--help"], 
-                                  capture_output=True, text=True, timeout=10)
+                                  capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10)
             if result.returncode == 0:
-                # Extract common commands (simplified)
-                commands = [
-                    "agent", "team", "task", "company", "skill", 
-                    "marketplace", "dashboard", "logs", "config"
-                ]
+                # Expose only commands the installed version actually lists.
+                command_section = result.stdout.partition('Commands:')[2]
+                commands = re.findall(r'^  ([a-z][a-z0-9:-]*)(?:\|\S+)?\s', command_section, re.MULTILINE)
                 
                 tools = []
                 for cmd in commands:
@@ -116,6 +118,7 @@ class PaperclipPlugin(ToolPlugin):
                             }
                         }
                     })
+                self._tools_cache = tools
                 return tools
         except Exception as e:
             logger.error(f"Failed to get paperclip commands: {e}")
@@ -149,7 +152,10 @@ class PaperclipPlugin(ToolPlugin):
             raise RuntimeError("Paperclip CLI not available")
         
         # Handle specific command tools (e.g., paperclip_agent)
-        if tool_name.startswith("paperclip_"):
+        if tool_name == "paperclip_run" and arguments.get("command"):
+            command = arguments["command"]
+            args = arguments.get("args", [])
+        elif tool_name.startswith("paperclip_"):
             command = tool_name[len("paperclip_"):]
             args = arguments.get("args", [])
         elif tool_name == "paperclip_run":
@@ -164,8 +170,10 @@ class PaperclipPlugin(ToolPlugin):
         full_command = [self.paperclip_path, command] + args
         
         try:
-            result = subprocess.run(full_command, 
-                                  capture_output=True, text=True, timeout=60)
+            result = await asyncio.to_thread(subprocess.run, full_command,
+                                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
+            if result.returncode:
+                raise RuntimeError((result.stderr or result.stdout or 'CLI failed')[-1500:])
             return {
                 "stdout": result.stdout,
                 "stderr": result.stderr,

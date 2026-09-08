@@ -477,6 +477,156 @@ body {
   .composer-compact-tools, .composer-compact-send { display:none !important; }
 }
 
+/* A packaged Android phone reports a wide CSS viewport when held sideways.
+   Tailwind's `sm`/`md` classes then select the desktop composer even though
+   the screen is still touch-first. Keep the compact, labelled controls and
+   the one-row input on the phone in both orientations. */
+html.sm-phone-device .composer-shell {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: .4rem !important;
+  border-radius: 1rem !important;
+}
+html.sm-phone-device .composer-desktop-left,
+html.sm-phone-device .composer-desktop-right {
+  display: none !important;
+}
+html.sm-phone-device .composer-compact-tools,
+html.sm-phone-device .composer-compact-send {
+  display: flex !important;
+}
+html.sm-phone-device .composer-input {
+  order: -1 !important;
+}
+html.sm-phone-device .composer-input > button[aria-label="More"],
+html.sm-phone-device .composer-input > button[aria-label="Dictate"],
+html.sm-phone-device .composer-input > button[aria-label="Stop dictating"] {
+  display: flex !important;
+}
+html.sm-phone-device .composer-compact-tools {
+  flex-wrap: wrap !important;
+  overflow-x: visible !important;
+  justify-content: flex-start !important;
+  gap: .3rem !important;
+}
+
+/* Landscape phones have enough horizontal room for the complete composer
+   toolbar. Keep the compact drawer for portrait, but restore every action in
+   one touch-sized row when the phone is turned sideways. */
+html.sm-phone-device.sm-phone-landscape .composer-shell {
+  flex-direction: row !important;
+  /* Wraps rather than holding one row at any cost. Held to one row, the
+     toolbar took the width it wanted and squeezed the text box until even
+     "Ask from uploaded files..." broke onto a second line and was clipped.
+     Wrapping lets the toolbar drop to its own row on the phones where it does
+     not fit, which is decided by measurement rather than by a breakpoint
+     guessed in advance - this phone is 792px in landscape and sat just the
+     wrong side of the 740px one below. */
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: .35rem !important;
+  padding: .45rem !important;
+  border-radius: 1rem !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-desktop-left,
+html.sm-phone-device.sm-phone-landscape .composer-desktop-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: .25rem !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-desktop-left {
+  order: initial !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-desktop-right {
+  order: initial !important;
+  flex: 0 0 auto !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-input {
+  order: initial !important;
+  flex: 1 1 auto !important;
+  width: auto !important;
+  /* Not 0: a flex item that may shrink to nothing is what let the toolbar
+     take the row. Below this the box cannot show its own placeholder. */
+  min-width: 13rem !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-input > button[aria-label="More"] {
+  display: none !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-input > button[aria-label="Dictate"],
+html.sm-phone-device.sm-phone-landscape .composer-input > button[aria-label="Stop dictating"] {
+  display: flex !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-compact-tools,
+html.sm-phone-device.sm-phone-landscape .composer-compact-send {
+  display: none !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-desktop-right > button {
+  min-width: 2rem !important;
+  padding-inline: .4rem !important;
+  font-size: .65rem !important;
+}
+/* A phone on its side has about 360px of height and the header already takes
+   a fifth of it. Now that the toolbar can wrap to a second row, the composer
+   has to earn that row back: without this it stood roughly 40% tall and left
+   barely two lines of the conversation visible. */
+html.sm-phone-device.sm-phone-landscape .composer-shell {
+  padding: .3rem !important;
+  gap: .25rem !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-desktop-right > button,
+html.sm-phone-device.sm-phone-landscape .composer-desktop-right select {
+  padding-block: .2rem !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-input textarea {
+  min-height: 2rem !important;
+  padding-block: .25rem !important;
+}
+html.sm-phone-device.sm-phone-landscape .composer-desktop-right select {
+  max-width: 5.5rem !important;
+  font-size: .65rem !important;
+}
+
+/* Shorter landscape screens need a full-width typing row. */
+@media (max-width: 740px) {
+  html.sm-phone-device.sm-phone-landscape .composer-shell {
+    flex-wrap: wrap !important;
+  }
+  html.sm-phone-device.sm-phone-landscape .composer-input {
+    flex: 1 1 calc(100% - 3rem) !important;
+  }
+  html.sm-phone-device.sm-phone-landscape .composer-desktop-right {
+    flex: 1 1 100% !important;
+    justify-content: flex-end !important;
+    flex-wrap: wrap !important;
+  }
+}
+
+/* The desktop rail is not a usable phone navigation surface in landscape.
+   Keep the same hamburger drawer used in portrait so opening and closing the
+   navigation never depends on a tiny rail hit target. */
+html.sm-phone-device .sidebar-desktop {
+  display: none !important;
+}
+html.sm-phone-device .composer-workspace-context {
+  display: none !important;
+}
+html.sm-phone-landscape .sidebar-mobile-header {
+  padding-block: .25rem !important;
+  max-height: 3rem;
+}
+html.sm-phone-device .sidebar-mobile-header {
+  display: flex !important;
+}
+html.sm-phone-device .sidebar-mobile {
+  display: flex !important;
+}
+html.sm-phone-device .sidebar-mobile-backdrop {
+  display: block !important;
+}
+html.sm-phone-device .sm-app-frame {
+  flex-direction: column !important;
+}
+
 /* Input container auto-adjust */
 .input-container-auto-adjust {
   position: sticky;
@@ -1875,6 +2025,15 @@ body.sidebar-open { overflow:hidden; overscroll-behavior:none; }
    was eventually hidden on mobile altogether. ChatArea measures the composer
    and publishes --sm-composer-h, so the pet clears whatever height it
    actually is, including when it stacks into two rows or the text box grows. */
+/* Room at the foot of the conversation for the companion that floats over it.
+   Without this the last reply scrolls underneath her, and on a phone that is
+   exactly where a code block's copy and download buttons are. DesktopPet
+   publishes her measured height, and zero when she is turned off, so nothing
+   reserves space for a character that is not there. */
+.chat-scroll {
+  padding-bottom: calc(var(--sm-pet-h, 0px) + 1rem);
+}
+
 .sm-pet {
   bottom: calc(var(--sm-composer-h, 92px) + 1.25rem + env(safe-area-inset-bottom, 0px));
   /* Clear of the sidebar when it is on the right. The pet is fixed to the
@@ -1935,3 +2094,61 @@ html.sm-pip body {
    cannot be layered under it - it lives in the root stacking context and the
    menu does not. It waits. */
 html.sm-menu-open .sm-pet { display: none; }
+
+/* A phone held sideways has about 360px of height, and the header and the
+   composer take most of it. The companion sits above the composer, so on a
+   short screen she is not in a corner - she floats in the middle of the
+   conversation and covers it. There is no position on a landscape phone that
+   is out of the way, so she waits for portrait.
+   Hidden rather than shrunk: her height measures as zero, so the room the
+   message list reserves for her goes back to the conversation. */
+html.sm-phone-device.sm-phone-landscape .sm-pet { display: none; }
+
+/* One character per screen. The call has Amarya on it, and the companion is
+   fixed to the window, so she sat on top of the call - over the status line
+   under Amarya on a phone. */
+html.sm-voice-open .sm-pet { display: none; }
+
+/* The keyboard hint under the character describes keys. Hidden wherever the
+   pointer is a fingertip, because there are none to press. */
+@media (pointer: coarse) {
+  .mmd-key-hint { display: none; }
+}
+html.sm-phone-device .mmd-key-hint { display: none; }
+
+/* The bottom of the call screen has three things competing for one corner:
+   the character's view controls, the message box across the middle, and the
+   status pill. On a phone they overlapped - the box sat through VIEW LOCKED
+   and FACING HELD, and the pill covered SIDE and BACK.
+   Raising the box was tried first and is the wrong shape of fix: it means
+   guessing the controls' height in advance, and the guess was 88px against a
+   stack that measures about 110. The controls move out of the crowd instead,
+   to the top of the stage, which is empty background above her head. Nothing
+   then has to know how tall anything else is. */
+html.sm-phone-device .mmd-hud {
+  bottom: auto;
+  top: .5rem;
+}
+
+/* The caption is centred and full width, so moving the controls to the top
+   put them behind it. It starts below them instead. 18% of a phone stage is
+   about 80px, and the two rows of controls are taller than that. */
+html.sm-phone-device .voice-caption {
+  top: 7.5rem;
+}
+html.sm-phone-device.sm-phone-landscape .voice-caption {
+  top: 5.5rem;
+}
+/* Sideways there is very little height, and the caption may not eat it all. */
+html.sm-phone-device.sm-phone-landscape .voice-caption-scroll {
+  max-height: 30vh;
+}
+
+/* A subtitle that can be scrolled should not show a scrollbar over the
+   character; it follows on its own and can still be dragged. */
+.voice-caption-scroll {
+  scrollbar-width: none;
+}
+.voice-caption-scroll::-webkit-scrollbar {
+  display: none;
+}

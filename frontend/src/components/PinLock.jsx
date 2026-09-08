@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Delete, Loader2, Lock, ShieldCheck } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
+import { isNativeApp, loadLink } from '../utils/hostLink';
 
 /**
  * The launch screen lock.
@@ -18,8 +19,9 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'];
 
 const request = async (path, options = {}) => {
   const response = await fetch(`${API_BASE}${path}`, {
+    signal: AbortSignal.timeout(10000),
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...options.headers },
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.detail || `Request failed (${response.status}).`);
@@ -27,7 +29,8 @@ const request = async (path, options = {}) => {
 };
 
 const PinLock = ({ children }) => {
-  const [state, setState] = useState('checking'); // checking | locked | open
+  const [state, setState] = useState('checking'); // checking | unavailable | locked | open
+  const [checkAttempt, setCheckAttempt] = useState(0);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -45,19 +48,26 @@ const PinLock = ({ children }) => {
 
   useEffect(() => {
     let cancelled = false;
+    // An unpaired phone has no lock endpoint. A desktop with an unreachable
+    // endpoint must keep its private workspace hidden until the check succeeds.
+    if (isNativeApp() && !loadLink()?.url && !API_BASE) {
+      setState('open');
+      return undefined;
+    }
+    setState('checking');
     request('/api/lock/status')
       .then((data) => {
         if (cancelled) return;
+        if (typeof data.enabled !== 'boolean') throw new Error('Invalid lock status.');
+        setLockEnabled(data.enabled);
         setState(data.enabled ? 'locked' : 'open');
         if (data.locked_out_for) setCooldown(data.locked_out_for);
       })
       .catch(() => {
-        // If the check itself cannot run, do not strand the user outside their
-        // own app: a lock that fails open is better than one that never opens.
-        if (!cancelled) setState('open');
+        if (!cancelled) setState('unavailable');
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [checkAttempt]);
 
   /* Locking itself again after a while, the way a phone does.
 
@@ -70,7 +80,7 @@ const PinLock = ({ children }) => {
      not run at all rather than locking someone out of an app they never
      secured. */
   const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60];
-  const [autoLockMinutes, setAutoLockMinutes] = useState(() => {
+  const [autoLockMinutes] = useState(() => {
     const saved = Number(localStorage.getItem('sm_autolock_minutes'));
     return AUTO_LOCK_CHOICES.includes(saved) ? saved : 5;
   });
@@ -182,6 +192,16 @@ const PinLock = ({ children }) => {
   };
 
   if (state === 'open') return children;
+
+  if (state === 'unavailable') {
+    return (
+      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-[#07070b] text-zinc-200" role="alert">
+        <Lock aria-hidden="true" />
+        <p>Cannot check the app lock. Reconnect to the local engine and retry.</p>
+        <button className="rounded-lg bg-indigo-600 px-5 py-2" onClick={() => setCheckAttempt((value) => value + 1)}>Retry lock check</button>
+      </div>
+    );
+  }
 
   if (state === 'checking') {
     return (
