@@ -1246,3 +1246,62 @@ Suites: **336 backend and CLI**, **110 frontend**, lint and build clean.
 - The picker has not been exercised with a real user-supplied model on a device;
   the listing is tested, the loading path is the same one Amarya already uses.
 - The redistribution question above is open, by decision, not by oversight.
+
+---
+
+## Vega — a character with no asset behind her
+
+Asked for a character that is fully open source. Rather than sourcing another
+model whose terms someone else sets - the situation that started this - she is
+generated from primitives at runtime: no model file, no texture, nothing
+downloaded, MIT like the code around her.
+
+She is deliberately not a person. A humanoid built from spheres lands in the
+uncanny valley immediately, so she is a constructed figure: visor band across
+the eyes, tapered torso for a shoulder line, arms floating in two segments with
+no skinning and no elbow that can bend the wrong way. Nothing is rigged, which
+is also why she costs a fraction of the MMD path to load.
+
+She reads the same signals as the other avatars, so the call screen does not
+care which is on stage: the mouth opens on the assistant's real audio level,
+listening leans her in and widens the eyes, thinking tilts her and spins the
+rings up.
+
+### Two bugs the bench found that reasoning did not
+
+**A runaway canvas.** Nothing rendered at all on the first run. The host element
+measured **26,843,546 pixels tall**. `setSize(w, h, false)` sets the drawing
+buffer and deliberately does not touch CSS, so the canvas had no display size -
+which means the browser laid it out from its `width`/`height` *attributes*,
+which are the buffer, which is set from the parent's measured height. The parent
+grew to fit, the ResizeObserver fired, and the two chased each other. Fixed by
+giving the canvas an explicit `100%` CSS size, which is what `updateStyle:false`
+assumes the caller has already done.
+
+**A figure that read as a ball above a planet.** The first geometry was a head
+sphere over a body sphere with two floating hands. It looked like a snowman with
+a smile. The silhouette is what does the work: a tapered torso, a shoulder cap
+and a visor band turned the same parts into a figure. The mouth was a plane,
+which opened into a pink brick across her chin; a squashed disc is a line when
+closed and a rounded oval when open.
+
+### Verified
+
+Looked at, not assumed. A bench at `frontend/tests/visual/vega.html` mounts her
+alone with a stubbed audio source, following the pattern the Energy Core bench
+already established, so each state can be driven without a backend or a live
+voice.
+
+All four states render and are distinguishable: idle upright, listening leaning
+in, thinking tilted with the rings running, speaking with the mouth on the
+level. An empty first screenshot of `idle` was the capture beating the first
+frame, not a fault - it renders after a two second wait.
+
+110 frontend tests, lint and build clean.
+
+### Not verified
+
+- She has not been seen on the phone or inside the real call screen, only in
+  the bench.
+- Nothing about her changes the licensing position of the assets that ship
+  alongside her; Amarya and Myra are untouched, by decision.
