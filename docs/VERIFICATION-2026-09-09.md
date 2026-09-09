@@ -1430,3 +1430,29 @@ the feature is actually about.
 - Not seen on the phone.
 - The sample is a test fixture, not a shipped character. Nothing about it is
   bundled, and the licensing position of Amarya and Myra is unchanged.
+
+---
+
+## All of the above, removed
+
+The owner does not want the VRoid route. Everything built for it is reverted:
+`AvatarVRM`, the VRM bench, the user-characters folder and its endpoint, the
+listing tests, and the downloaded sample model. `data/characters/` is gone
+along with the sample it held.
+
+The sections above are kept rather than deleted with the code, because two
+findings in them are true whatever gets built:
+
+- The bundled `characters/evelyn` model states its own terms inside the PMX -
+  请勿二次配布 (do not redistribute), 请勿用于商业用途 (not for commercial use),
+  final rights to miHoYo - and it ships in the APK, installer, deb, rpm,
+  tar.gz and AppImage.
+- The `avatar-video` clips carry no attribution at all, and the pet spritesheet
+  is both unattributed and unreferenced.
+
+That is why free code signing is unavailable: SignPath Foundation, the only
+free route, requires no proprietary components. Nothing about the removal
+changes it.
+
+Amarya, Myra and the Energy Core are untouched and remain the characters. State
+after the revert: **326 backend and CLI**, **110 frontend**, build clean.

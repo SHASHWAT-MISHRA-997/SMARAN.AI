@@ -30,8 +30,7 @@ import CyberFX from './CyberFX';
 import { GESTURES } from '../utils/gestureControl';
 import { isDesktopApp } from './RightPanel';
 import AvatarVideo, { AVATAR_CHARACTERS } from './AvatarVideo';
-import AvatarMMD, { MMD_CHARACTERS, loadUserCharacters } from './AvatarMMD';
-import AvatarVRM from './AvatarVRM';
+import AvatarMMD, { MMD_CHARACTERS } from './AvatarMMD';
 import CyberStage from './CyberStage';
 import { classifyTranscriptionFailure, pollFinalTranscript, silenceWindowMs, voiceOutcomeKind } from '../utils/voiceStatus';
 import { captionScrollTop, captionSplit } from '../utils/spokenProgress';
@@ -320,33 +319,11 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     // A character that no longer exists leaves the picker showing a blank and
     // the panel rendering nothing. Riyo was removed, so anyone who had it
     // selected is moved back to a character that is still here.
-    // A user-supplied model is known by its prefix; the folder list arrives
-    // after this runs, and re-checking it here would blank the picker on every
-    // start before the request came back.
     const known = saved === 'core'
-      || String(saved || '').startsWith('user:')
       || MMD_CHARACTERS.some((c) => c.id === saved)
       || AVATAR_CHARACTERS.some((c) => c.id === saved);
     return known ? saved : 'anime-girl';
   });
-  // Models the user has added themselves. Fetched once the call opens rather
-  // than at module load, because a standalone phone has no backend to ask and
-  // the request would fail on every start for nothing.
-  const [userCharacters, setUserCharacters] = useState([]);
-  // A .vrm is loaded by a different renderer from a .pmx, and the file itself
-  // says which - so the picker does not need a type to be recorded anywhere.
-  const userVrm = userCharacters.find(
-    (c) => c.id === avatarId && /\.vrm(\?|$)/i.test(c.file || ''),
-  );
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    let cancelled = false;
-    loadUserCharacters(API_BASE).then((found) => {
-      if (!cancelled) setUserCharacters(found);
-    });
-    return () => { cancelled = true; };
-  }, [isOpen, API_BASE]);
-
   // Background ambience. Each character has its own synthesised room tone,
   // and it ducks while the assistant speaks so it never sits over words.
   const [ambienceOn, setAmbienceOn] = useState(
@@ -395,11 +372,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     // the male voice so both options are available without a second picker.
     const character =
       MMD_CHARACTERS.find((c) => c.id === avatarId) ||
-      AVATAR_CHARACTERS.find((c) => c.id === avatarId) ||
-      // A model the user added. It carries no gender - we have no idea who
-      // someone else's model is meant to be - so this falls through to the
-      // default voice below rather than guessing from a folder name.
-      userCharacters.find((c) => c.id === avatarId);
+      AVATAR_CHARACTERS.find((c) => c.id === avatarId);
     const gender = showAvatar && character?.gender ? character.gender : 'male';
     localStorage.setItem('sm_voice_gender', gender);
 
@@ -411,10 +384,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
       if (currentVoice && currentVoice.gender === gender) return current;
       return (LIVE_VOICES.find((v) => v.gender === gender) || {}).id || current;
     });
-    // userCharacters is a dependency because the list arrives after the first
-    // render: without it, a saved user model would be resolved once against an
-    // empty list and keep whatever voice that produced.
-  }, [avatarId, showAvatar, userCharacters]);
+  }, [avatarId, showAvatar]);
   useEffect(() => { localStorage.setItem('sm_voice_name', voiceName); }, [voiceName]);
   useEffect(() => { localStorage.setItem('sm_show_avatar', String(showAvatar)); }, [showAvatar]);
   const [recognizerIssue, setRecognizerIssue] = useState('');
@@ -2143,14 +2113,6 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
                   ✨ {c.name}
                 </option>
               ))}
-              {/* Models the user put in their own characters folder. Listed
-                  after the built-in one so a fresh install is not an empty
-                  picker waiting on a request. */}
-              {userCharacters.map((c) => (
-                <option key={c.id} value={c.id} className="bg-zinc-900 text-white font-bold">
-                  🌸 {c.name}
-                </option>
-              ))}
               <option value="core" className="bg-zinc-900 text-white font-bold">✦ Energy core</option>
             </select>
           </div>
@@ -2232,23 +2194,9 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
                 toneText={latestSpokenLine}
               />
             </div>
-          ) : userVrm ? (
-            /* A character the user made and owns - VRoid exports these. The
-               renderer is chosen by file type rather than by a flag, so a
-               folder holding a .vrm and one holding a .pmx both just work. */
-            <AvatarVRM
-              file={userVrm.file}
-              speechSource={speechBus?.node || null}
-              speechContext={speechBus?.context || null}
-              isSpeaking={voiceState === 'speaking' || liveState === 'speaking'}
-              isListening={voiceState === 'listening' || liveState === 'listening'}
-              isThinking={voiceState === 'thinking' || liveState === 'connecting'}
-            />
-          ) : (MMD_CHARACTERS.some((c) => c.id === avatarId)
-              || userCharacters.some((c) => c.id === avatarId)) ? (
+          ) : MMD_CHARACTERS.some((c) => c.id === avatarId) ? (
             <AvatarMMD
               characterId={avatarId}
-              models={userCharacters}
               speechSource={speechBus?.node || null}
               speechContext={speechBus?.context || null}
               isSpeaking={voiceState === 'speaking' || liveState === 'speaking'}
