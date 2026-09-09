@@ -20,7 +20,7 @@ All numbers below were produced in this session, not quoted from earlier logs.
 
 | Suite | Result |
 | --- | --- |
-| `pytest backend/tests cli/tests` | **340 passed**, 12 warnings, 55.10s |
+| `pytest backend/tests cli/tests` | **354 passed**, 12 warnings, 55.99s |
 | `npm run test:unit` (frontend) | **145 passed** |
 | `npx oxlint src/` | clean |
 | `npm run build` (frontend) | clean |
@@ -52,6 +52,7 @@ upgrading a packaged dependency blindly.
 | Share snapshot excludes system/tool messages | **Tested** | Filters to `user`/`assistant`, drops loading and non-string content. Browser suite covers preview and download. |
 | App launches report observed outcome | **Observed** | Was `Popen(...)` then `{"success": True}` on the next line. Now waits and polls: running → confirmed, exited 0 → success but unconfirmed, exited non-zero → failure with the code. Exercised against real processes (sleep / immediate return / `sys.exit(3)`), not only mocks. 8 tests. |
 | Windows browsers no longer succeed when absent | **Tested** | `Popen("start chrome", shell=True)` returned 0 with no Chrome installed, because `start` is a cmd builtin that always succeeds. Now resolves the executable and spawns it directly. |
+| Machine control can be stopped | **Observed** | There was no session and no stop; stopping a running task meant closing the app while it kept opening and typing. Scoped sessions with a check immediately before dispatch, so a stop lands between steps. Unknown tokens refused; tokens never appear in the listing. Exercised through the API — start, list, stop-all, stop-again. 14 tests. |
 
 ### Implemented, not observed
 
@@ -68,7 +69,7 @@ upgrading a packaged dependency blindly.
 | Item | Why it is not a small job |
 | --- | --- |
 | **Public chat sharing (Copy link)** | Needs hosting: a server storing immutable snapshots, opaque ids, read-only rendering, revocation, size limits. Cannot work from localhost on another device. Needs a deployment decision and owner approval. The local copy/download is not this and is not labelled as this. |
-| **Full computer-use loop** | An observe → decide → act → verify loop with Windows and Linux adapters, X11/Wayland honesty, session scoping and a stop control. What exists is a launcher, not computer use. |
+| **Full computer-use loop** | Session scoping and the stop control now exist, and launches report observed outcomes. Still missing: reading UI state, clicking and scrolling, multi-step planning with recovery, and Linux adapter acceptance. What exists is a verified launcher with a stop, not computer use. |
 | **Settings sections 1–13** | General, Profile, Appearance (partial), Voice, Personalization, Keyboard shortcuts, Analytics, Plugins/Skills/MCP, Browser, Computer use, Connections, Git, Environments. Only Appearance has landed. |
 | **Close app / clear recents (Android)** | No Android API exists for either. Requires an AccessibilityService the user enables in Settings; Play restricts apps that use it. |
 | **Send a WhatsApp message** | `wa.me` can open WhatsApp with text pre-filled; pressing send needs an AccessibilityService. |
