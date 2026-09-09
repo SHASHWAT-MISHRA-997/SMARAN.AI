@@ -20,7 +20,7 @@ All numbers below were produced in this session, not quoted from earlier logs.
 
 | Suite | Result |
 | --- | --- |
-| `pytest backend/tests cli/tests` | **332 passed**, 12 warnings, 66.78s |
+| `pytest backend/tests cli/tests` | **340 passed**, 12 warnings, 55.10s |
 | `npm run test:unit` (frontend) | **145 passed** |
 | `npx oxlint src/` | clean |
 | `npm run build` (frontend) | clean |
@@ -50,6 +50,8 @@ upgrading a packaged dependency blindly.
 | Cleared font size no longer shrinks the UI | **Tested** | `Number(null)` and `Number('')` are 0 and finite, so a cleared box passed validation and clamped to the 12px floor. Rejected before `Number()`. 6 tests. |
 | Appearance preferences actually apply | **Tested** | `index.css` consumes `--sm-code-size` and `data-reduce-motion`, confirmed by reading the consuming rules, not assumed. |
 | Share snapshot excludes system/tool messages | **Tested** | Filters to `user`/`assistant`, drops loading and non-string content. Browser suite covers preview and download. |
+| App launches report observed outcome | **Observed** | Was `Popen(...)` then `{"success": True}` on the next line. Now waits and polls: running → confirmed, exited 0 → success but unconfirmed, exited non-zero → failure with the code. Exercised against real processes (sleep / immediate return / `sys.exit(3)`), not only mocks. 8 tests. |
+| Windows browsers no longer succeed when absent | **Tested** | `Popen("start chrome", shell=True)` returned 0 with no Chrome installed, because `start` is a cmd builtin that always succeeds. Now resolves the executable and spawns it directly. |
 
 ### Implemented, not observed
 
