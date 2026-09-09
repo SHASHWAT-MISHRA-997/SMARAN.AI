@@ -91,3 +91,15 @@ Regression coverage: 131 unit tests pass; 3 production-preview mobile browser
 tests pass; lint and frontend build pass. Logs use the `voice-session-` prefix
 in `.cache/audit`. ADB still returns an empty device list. Male voice/reference
 tone and exact channel navigation remain unverified; no device install claim.
+
+## Fresh checks after preserving the review commit
+
+Review committed as 7cfc38c. Owner deferred all phone-dependent checks.
+Fresh runs: frontend 131 passed and lint clean; backend/CLI 326 passed with
+11 dependency deprecation warnings; extension compiled, 23 passed and one
+Windows symlink-privilege test skipped; production-preview browser checks
+8 passed (portrait, landscape, captions and hang-up). Evidence logs:
+`.cache/audit/handoff-unit.log`, `no-phone-backend.log`,
+`no-phone-extension.log`, `no-phone-browser.log`.
+This does not certify real provider coding, physical voice quality, installers,
+video generation or a release. No production deployment performed.
