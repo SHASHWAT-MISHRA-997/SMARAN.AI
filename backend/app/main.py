@@ -8056,6 +8056,54 @@ async def global_exception_handler(request, exc):
 
 app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="static")
 
+
+# ── characters the user supplies themselves ──────────────────────────────────
+#
+# No humanoid model ships with the app any more. The one that used to carried
+# terms in its own file forbidding redistribution, and shipping it inside a
+# public download was exactly that. See CREDITS.md.
+#
+# The feature survives without the asset: drop a model folder in here and it
+# appears in the character picker. It is read from this machine and never
+# leaves it, so whatever the model's licence permits is between the user and
+# whoever made it - which is how it should have been all along.
+#
+# A directory rather than a file upload because a PMX references its textures
+# by relative path; handed a single file, the model loads untextured.
+from urllib.parse import quote  # noqa: E402  (kept beside its only use)
+
+_CHARACTER_DIR = os.path.join(settings.DATA_DIR, "characters")
+os.makedirs(_CHARACTER_DIR, exist_ok=True)
+app.mount("/api/characters/files",
+          StaticFiles(directory=_CHARACTER_DIR), name="user_characters")
+
+
+@app.get("/api/characters", tags=["characters"])
+async def list_user_characters():
+    """Model folders the user has added, each holding one .pmx.
+
+    Only the folder name and the model file are reported. Nothing is copied,
+    converted or sent anywhere.
+    """
+    found = []
+    try:
+        for entry in sorted(os.scandir(_CHARACTER_DIR), key=lambda e: e.name.lower()):
+            if not entry.is_dir():
+                continue
+            models = [f for f in sorted(os.listdir(entry.path))
+                      if f.lower().endswith(".pmx")]
+            if not models:
+                continue
+            found.append({
+                "id": entry.name,
+                # Shown as typed; the folder name is the character's name.
+                "name": entry.name,
+                "file": f"/api/characters/files/{quote(entry.name)}/{quote(models[0])}",
+            })
+    except OSError:
+        logger.info("The characters folder could not be read.", exc_info=True)
+    return {"characters": found, "folder": _CHARACTER_DIR}
+
 # Register the SPA fallback last so it cannot swallow model-storage, engine
 # or uploaded-file requests. Unknown API URLs still receive a JSON 404.
 app.add_api_route("/{path_name:path}", serve_frontend, methods=["GET"], include_in_schema=False)

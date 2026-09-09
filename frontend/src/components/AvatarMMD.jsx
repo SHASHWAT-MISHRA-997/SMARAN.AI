@@ -18,6 +18,33 @@ export const MMD_CHARACTERS = [
 ];
 
 /**
+ * Model folders the user has put in their own characters directory.
+ *
+ * Empty on a fresh install, and empty is a perfectly good answer: the Energy
+ * Core is drawn in code and needs no files at all.
+ */
+export async function loadUserCharacters(apiBase = '') {
+  try {
+    const response = await fetch(`${apiBase}/api/characters`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    // No gender field on purpose. The caller reads `character?.gender` and
+    // falls back when it is missing; a placeholder string like 'unspecified'
+    // is truthy and would be passed to the voice picker as though it were a
+    // real answer. We do not know who someone else's model is meant to be.
+    return (data?.characters || []).map((c) => ({
+      id: `user:${c.id}`,
+      name: c.name,
+      file: apiBase ? `${apiBase}${c.file}` : c.file,
+    }));
+  } catch {
+    // Standalone phone with no backend, or the app is still starting. Neither
+    // is worth an error in the picker.
+    return [];
+  }
+}
+
+/**
  * MMD morph names are Japanese. Several spellings exist in the wild, so each
  * slot lists the candidates and whichever the model actually has is used.
  */
@@ -126,6 +153,8 @@ const MOTION = {
 
 const AvatarMMD = ({
   characterId = 'evelyn',
+  /** Models the user added themselves; see loadUserCharacters. */
+  models = [],
   /** Audio node carrying the assistant's speech. */
   speechSource = null,
   speechContext = null,
@@ -293,7 +322,20 @@ const AvatarMMD = ({
     const handles = sceneRef.current;
     if (!handles.scene) return undefined;
 
-    const chosen = MMD_CHARACTERS.find((c) => c.id === characterId) || MMD_CHARACTERS[0];
+    // The models the user added are searched alongside the one that ships, so
+    // a folder they dropped in is selectable exactly like Amarya.
+    //
+    // The guard below is not decoration. `available[0]` was `MMD_CHARACTERS[0]`
+    // and is only defined while a model ships; anything that empties that list
+    // - a build without the character, or a future decision about it - used to
+    // throw on `.file` here rather than fall back to something drawable.
+    const available = MMD_CHARACTERS.concat(models || []);
+    const chosen = available.find((c) => c.id === characterId) || available[0];
+    if (!chosen?.file) {
+      setStatus('idle');
+      setError('');
+      return undefined;
+    }
     let disposed = false;
     setStatus('loading');
     setError('');
@@ -463,7 +505,7 @@ const AvatarMMD = ({
     // The patience timer must not outlive this effect, or it would reveal
     // a model that has already been torn down.
     return () => { disposed = true; window.clearTimeout(patience); };
-  }, [characterId]);
+  }, [characterId, models]);
 
   // ── View controls ──────────────────────────────────────────────────────
   const VIEWS = { 1: 0, 2: Math.PI / 4, 3: Math.PI / 2, 4: Math.PI };

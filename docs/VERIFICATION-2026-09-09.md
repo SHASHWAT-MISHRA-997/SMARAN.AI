@@ -1180,3 +1180,69 @@ reads back at 33,632,226 bytes, the same build.
 - Opening apps by voice was exercised with WhatsApp and Chrome. Music, YouTube
   and spoken web addresses are covered by tests but were not run on the phone.
 - The installer remains unsigned, and the rpm untested on an rpm-based distro.
+
+---
+
+## Bundled media, and a folder for models of your own
+
+### What an audit of the shipped assets found
+
+Started from a request to set up free code signing. The only genuinely free
+route is the [SignPath Foundation](https://signpath.io/solutions/open-source-community),
+which Microsoft's own documentation recommends and which signs qualifying
+open-source projects at no cost. It requires an OSI licence **and no
+proprietary component**, so the bundled media had to be checked.
+
+| Asset | Provenance |
+| --- | --- |
+| `characters/evelyn` ("Amarya") | Terms inside the PMX: 请勿二次配布 (do not redistribute), 请勿用于商业用途 (not for commercial use), author 观海子, 最终解释权归属 miHoYo |
+| `avatar-video/*.mp4` ("Myra") | No attribution, metadata stripped; an audit of another application found byte-identical clips |
+| `pets/smaru/spritesheet.webp` | No attribution; also **unreferenced** - the pets are drawn in code |
+| `headaudio` | MIT, Mika Suominen ✓ |
+| `mediapipe` | Google, Apache-2.0 ✓ |
+
+The PMX terms are readable with a short decode of the header: PMX 2.0 stores
+name and comment as length-prefixed UTF-16LE, and the comment is the author's
+licence. Recolouring and physics fixes are permitted there; redistribution is
+not, and the model currently ships in the APK, installer, deb, rpm, tar.gz and
+AppImage.
+
+**The owner's decision is to keep the character.** That is recorded here as an
+open item rather than argued with: free code signing stays unavailable while a
+proprietary component ships, and the redistribution question is unresolved. No
+asset was removed.
+
+### The folder beside her
+
+What was added instead is additive and removes nothing. `DATA_DIR/characters/`
+is served read-only at `/api/characters/files` and listed by `GET
+/api/characters`; a folder dropped in there appears in the character picker
+alongside Amarya. A directory rather than a file upload, because a PMX
+references its textures by relative path and a lone file loads untextured.
+
+Nothing is copied, converted or sent anywhere - the model is read from the
+user's own machine, so whatever its licence permits stays between them and
+whoever made it.
+
+10 tests on the listing. The ones that earned their place: a loose `.pmx` at the
+top level is not a character (its textures would be missing), a folder without a
+model is skipped rather than half-listed, a name with spaces survives as an
+encoded URL, a name containing `..` is encoded rather than obeyed, and a folder
+deleted while the app runs is an empty list rather than a crash.
+
+Two things were reverted after the owner said to keep the character: the picker
+default returned to `anime-girl`, and the ambience profile to its original
+per-character form. What is left changes no existing behaviour.
+
+One defensive change was kept deliberately. `MMD_CHARACTERS[0]` was the fallback
+when a saved character id no longer matched, and it is only defined while a
+model ships - so any build without one threw on `.file` rather than falling back
+to something drawable. It now checks.
+
+Suites: **336 backend and CLI**, **110 frontend**, lint and build clean.
+
+### Not verified
+
+- The picker has not been exercised with a real user-supplied model on a device;
+  the listing is tested, the loading path is the same one Amarya already uses.
+- The redistribution question above is open, by decision, not by oversight.
