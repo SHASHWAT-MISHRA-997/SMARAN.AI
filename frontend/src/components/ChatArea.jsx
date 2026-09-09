@@ -6,6 +6,7 @@ import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '..
 import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening } from '../utils/deviceControl';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
 import { voicePersonaRule } from '../utils/voicePersona';
+import ShareConversation from './ShareConversation';
 import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 import { useBackClose } from '../utils/backStack';
 import { parseCodeFence } from '../utils/codeFence';
@@ -4170,6 +4171,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
         <div className="flex items-center gap-2.5 shrink-0">
           {/* Clear Current Chat */}
+          <ShareConversation messages={messages} />
           {messages.length > 0 && (
             <button
               onClick={handleClearCurrentChat}

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { applyAppearance, loadAppearance } from '../utils/appearancePreferences';
 
 /**
  * Two themes, both of them chosen.
@@ -50,6 +51,7 @@ export const ThemeProvider = ({ children }) => {
 
   useEffect(() => {
     applyThemeToDocument(theme);
+    applyAppearance(loadAppearance());
   }, [theme]);
 
   const isCurrentlyDark = theme !== 'light';

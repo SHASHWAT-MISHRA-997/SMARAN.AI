@@ -37,6 +37,19 @@ test('Speak stays open when replacing the phone tools sheet and Back closes only
   await expect(page.getByTestId('chat-composer')).toBeVisible();
 });
 
+test('share previews completed messages and downloads a snapshot', async ({ page }) => {
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Share conversation' });
+  await expect(dialog).toContainText('Forward Deploy Engineer');
+  await expect(dialog).toContainText('Public links are not configured');
+  const downloadEvent = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download snapshot' }).click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toBe('smaran-conversation.txt');
+  await dialog.getByRole('button', { name: 'Close share preview' }).click();
+  await expect(dialog).toBeHidden();
+});
+
 test('mobile handset ends the call instead of only pausing the microphone', async ({ page }) => {
   const renderLoops = [];
   page.on('console', message => {

@@ -2236,3 +2236,22 @@ html.sm-pip .voice-stage { padding: 0 !important; }
   .voice-caption-said { color: #ffffff; text-shadow: none; }
   .voice-caption-ahead { color: rgba(255, 255, 255, 0.8); }
 }
+
+/* Saved accessibility preferences, shared by chat and settings. */
+html code, html pre { font-size: var(--sm-code-size, 13px); }
+html[data-reduce-motion="on"] *, html[data-reduce-motion="on"] *::before,
+html[data-reduce-motion="on"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-reduce-motion="system"] *, html[data-reduce-motion="system"] *::before,
+  html[data-reduce-motion="system"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
