@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VRM bench</title>
+    <style>html,body,#root{height:100%;margin:0;background:#04070d}</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Same reduced-motion override the other benches use: this machine
+      // reports "reduce" natively, so without forcing it the animated path
+      // never runs here and a still frame cannot be told from a broken one.
+      const forced = new URLSearchParams(location.search).get('reduce');
+      if (forced === '1' || forced === '0') {
+        const real = window.matchMedia.bind(window);
+        window.matchMedia = (query) => (
+          query.includes('prefers-reduced-motion')
+            ? {
+                matches: query.includes('no-preference') ? forced === '0' : forced === '1',
+                media: query, addEventListener() {}, removeEventListener() {},
+              }
+            : real(query)
+        );
+      }
+    </script>
+    <script type="module" src="./vrm-harness.jsx"></script>
+  </body>
+</html>
