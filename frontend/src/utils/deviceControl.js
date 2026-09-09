@@ -24,6 +24,15 @@ const device = registerPlugin('SmaranDevice');
  * A failure to float is never a failure of the command. The app opened, which
  * is what was asked for; the window merely stayed full size behind it.
  */
+/** Whether the app is already in a floating window. */
+const isFloating = async () => {
+  try {
+    return Boolean((await device.isFloating())?.floating);
+  } catch {
+    return false;
+  }
+};
+
 const armFloating = async () => {
   try {
     const result = await device.prepareFloating();
@@ -40,8 +49,12 @@ const armFloating = async () => {
  */
 export async function runDeviceCommand(command) {
   let result = { opened: false };
-  // Before the launch; see armFloating for why the order is not a choice.
-  const floated = await armFloating();
+  // Arm auto-enter first. This alone floats the app for a launcher intent -
+  // "open WhatsApp" - because that sends this task properly to the background.
+  // It does not fire for every app: YouTube forwards the search intent on to
+  // its own main activity, bringing an existing task forward, and this one
+  // never leaves in the way auto-enter watches for.
+  const armed = await armFloating();
   try {
     switch (command.action) {
       case 'app':
@@ -64,7 +77,24 @@ export async function runDeviceCommand(command) {
     result = { opened: false, reason: 'refused' };
   }
 
-  return { spoken: describeOutcome(command, result), floated: floated && Boolean(result?.opened) };
+  // If auto-enter did not fire, ask for the window outright.
+  //
+  // Auto-enter is the better mechanism where it works, because Android picks
+  // the moment. Where it does not, this is the fallback: a short wait for the
+  // launched app to settle, then a direct request. It is a request, not a
+  // guarantee - a paused activity is refused - so the result is checked rather
+  // than assumed, and a refusal only means the app stayed full size behind
+  // whatever opened.
+  let floated = armed && Boolean(result?.opened);
+  if (result?.opened && !(await isFloating())) {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    try {
+      floated = Boolean((await device.enterFloating())?.floating) || floated;
+    } catch {
+      // Older phone, or refused. Neither is a failure of the command.
+    }
+  }
+  return { spoken: describeOutcome(command, result), floated };
 }
 
 /**

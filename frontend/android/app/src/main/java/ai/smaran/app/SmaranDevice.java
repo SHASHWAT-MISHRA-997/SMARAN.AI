@@ -73,7 +73,24 @@ public class SmaranDevice extends Plugin {
      * reached if the activity has already gone.
      */
     private boolean launch(Intent intent) {
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        // NEW_TASK puts the launched app in its own task. RESET_TASK_IF_NEEDED
+        // is here because of the floating window, not the launch.
+        //
+        // Auto-enter picture-in-picture fires when this activity goes to the
+        // background the way leaving it does. "open WhatsApp" floated and
+        // "youtube par ... search karo" did not, and the difference was the
+        // intent: getLaunchIntentForPackage returns a launcher intent carrying
+        // both flags, while the YouTube search intent had only NEW_TASK and was
+        // then forwarded on internally by YouTube - which brought its existing
+        // task forward without this one ever leaving properly.
+        //
+        // Giving every launch the same task semantics as the one that already
+        // worked is the smaller fix. The alternative - asking for the floating
+        // window explicitly after the launch - races the activity losing focus,
+        // and asking before it removes the visible non-pinned window the launch
+        // itself depends on.
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+            | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         try {
             if (getActivity() != null) {
                 getActivity().startActivity(intent);
@@ -305,6 +322,15 @@ public class SmaranDevice extends Plugin {
         } catch (Exception e) {
             Log.w(TAG, "could not disarm the floating window", e);
         }
+    }
+
+    /** Whether the app is in a floating window right now. */
+    @PluginMethod
+    public void isFloating(PluginCall call) {
+        boolean floating = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+            && getActivity() != null
+            && getActivity().isInPictureInPictureMode();
+        call.resolve(new JSObject().put("floating", floating));
     }
 
     /**
