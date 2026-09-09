@@ -309,7 +309,24 @@ public class SmaranSpeech extends Plugin {
         });
     }
 
+    /**
+     * Stop listening when the app leaves - but a floating window has not left.
+     *
+     * Entering picture-in-picture pauses the activity, so this ran and tore the
+     * recognizer down the instant the call floated: the window appeared, the
+     * character was there, and it had gone deaf and silent at the same moment.
+     * A floating call that cannot hear is not a call.
+     *
+     * The distinction is exactly picture-in-picture. The window is still on
+     * screen and the microphone is still legitimately ours; anything else -
+     * Home, another app, the screen off - is a real departure and still stops.
+     */
     @Override protected void handleOnPause() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                && getActivity() != null
+                && getActivity().isInPictureInPictureMode()) {
+            return;
+        }
         getActivity().runOnUiThread(() -> {
             if (recognizer != null) {
                 release();

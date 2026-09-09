@@ -44,6 +44,32 @@ public class MainActivity extends BridgeActivity {
         return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
+    /**
+     * Tell the page when it is floating, so it can show the character alone.
+     *
+     * A picture-in-picture window is roughly a quarter the width of the phone.
+     * The call screen laid out for a full screen does not survive that: the
+     * header, the caption - which may take half the height - and the footer are
+     * all fixed, so the figure between them is squeezed to nothing and the
+     * floating window shows everything except the character, which is the one
+     * thing anyone put it there to watch.
+     *
+     * The page cannot detect this on its own. A WebView is not told it is in a
+     * picture-in-picture window; the size changes and nothing says why, and a
+     * width test would also catch a small phone in split screen.
+     */
+    @Override
+    public void onPictureInPictureModeChanged(boolean inPictureInPicture,
+                                              android.content.res.Configuration config) {
+        super.onPictureInPictureModeChanged(inPictureInPicture, config);
+        if (getBridge() == null || getBridge().getWebView() == null) return;
+        getBridge().getWebView().evaluateJavascript(
+            "document.documentElement.classList.toggle('sm-pip', " + inPictureInPicture + ");"
+            + "window.dispatchEvent(new CustomEvent('smaran:pip',{detail:{floating:"
+            + inPictureInPicture + "}}));",
+            null);
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(SmaranSpeech.class);

@@ -207,20 +207,28 @@ public class SmaranDevice extends Plugin {
     /**
      * YouTube, either a search or a specific video.
      *
-     * The app is preferred when it is installed, because a video opened in the
-     * app behaves the way people expect on a phone. Falling back to the web
-     * address rather than reporting failure means this still works on a device
-     * without the YouTube app.
+     * Two ways in, and the order matters. `ACTION_SEARCH` aimed at the YouTube
+     * package opens the results inside the app, which is what a phone user
+     * expects. The web address is the fallback and works everywhere, including
+     * a device with no YouTube app - it simply opens the app anyway if one is
+     * installed and claims the link.
+     *
+     * `resolveActivity` deliberately does *not* gate this any more. Since
+     * Android 11 it answers through the package-visibility filter, so it
+     * returns null for a package this app has not declared an interest in -
+     * even one that handles the intent perfectly well. The manifest lists
+     * MAIN/LAUNCHER and a couple of others, not ACTION_SEARCH, so the check
+     * failed here and reported no YouTube on a phone that plainly has it.
+     * Trying the launch and catching the failure asks the real question.
      */
     @PluginMethod
     public void openYouTube(PluginCall call) {
         String query = call.getString("query", "");
         String text = query == null ? "" : query.trim();
-        PackageManager pm = getContext().getPackageManager();
         Intent search = new Intent(Intent.ACTION_SEARCH)
             .setPackage("com.google.android.youtube")
             .putExtra("query", text);
-        if (!text.isEmpty() && search.resolveActivity(pm) != null && launch(search)) {
+        if (!text.isEmpty() && launch(search)) {
             call.resolve(new JSObject().put("opened", true).put("via", "app"));
             return;
         }

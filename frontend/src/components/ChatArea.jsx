@@ -3460,6 +3460,42 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       }
       return;
     }
+    // On the phone, do it on the phone - from here too, not only from a call.
+    //
+    // This check used to live solely in handleSendVoicePrompt, which is the
+    // in-call path. Dictate does not go through it: it puts its words in the
+    // composer and sends them like typing, so "youtube par lofi search karo"
+    // reached the model and came back as instructions for opening YouTube by
+    // hand - on the phone that was being asked to open it.
+    //
+    // Placed after the empty/streaming guard so a command is never swallowed
+    // mid-answer, and before anything is added to the transcript, because a
+    // command that opens an app is not a question anyone wants a record of.
+    const deviceOutcome = await handleIfDeviceCommand(userPrompt);
+    if (deviceOutcome) {
+      setInput('');
+      // If this is going to float, float something worth looking at.
+      //
+      // The app shrinks into a picture-in-picture window after it opens
+      // something, and that window shows whatever screen was in front. Asked
+      // from the chat, that is the chat - so the float came up showing torn
+      // fragments of a conversation and no character at all, which is what was
+      // reported. Opening the call first puts the character in the window, and
+      // keeps the microphone live inside it, which is the other half of what
+      // was asked for.
+      if (deviceOutcome.floated && !isVoiceModeOpenRef.current) {
+        setIsVoiceModeOpen(true);
+      }
+      // Said aloud, and shown. emitVoiceReply fills the call bubble, which is
+      // not on screen when the command was typed - so without the second line
+      // a typed command would answer with nothing visible at all.
+      emitVoiceReply(deviceOutcome.spoken);
+      window.dispatchEvent(new CustomEvent('smaran:pet-state', {
+        detail: { state: 'waving', message: deviceOutcome.spoken },
+      }));
+      return;
+    }
+
     window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'running', message: 'Working on it…' } }));
 
     // Spoken turns are answered conversationally, without web/document grounding.

@@ -2176,6 +2176,36 @@ html.sm-phone-device.sm-phone-landscape .voice-footer { display: none; }
 
 /* A subtitle that can be scrolled should not show a scrollbar over the
    character; it follows on its own and can still be dragged. */
+/* Floating in a picture-in-picture window.
+ *
+ * The window is about a quarter of the phone's width, and the call screen laid
+ * out for a full screen does not survive it: header, caption and footer are all
+ * fixed height, so the figure between them collapses and the float shows
+ * everything except the character - the one thing it is being watched for.
+ *
+ * So in that window she is the only thing drawn. Nothing here is hidden for
+ * tidiness: each of these either cannot be read at this size or cannot be
+ * pressed, because a picture-in-picture window does not receive taps.
+ *
+ * The class is set by MainActivity.onPictureInPictureModeChanged. A width test
+ * would be wrong - it would also catch a small phone in split screen, where
+ * the controls still work and are still wanted. */
+html.sm-pip .voice-header,
+html.sm-pip .voice-caption,
+html.sm-pip .voice-footer,
+html.sm-pip .voice-callbar,
+html.sm-pip .mmd-hud {
+  display: none !important;
+}
+html.sm-pip .voice-main { flex-direction: column !important; }
+html.sm-pip .voice-figure {
+  flex: 1 1 100% !important;
+  min-height: 0;
+}
+/* Edge to edge: the window is small enough that padding is a real fraction of
+   it, and the character should fill what there is. */
+html.sm-pip .voice-stage { padding: 0 !important; }
+
 .voice-caption-scroll {
   scrollbar-width: none;
 }
