@@ -36,3 +36,17 @@ test('Speak stays open when replacing the phone tools sheet and Back closes only
   await expect(close).toBeHidden();
   await expect(page.getByTestId('chat-composer')).toBeVisible();
 });
+
+test('mobile handset ends the call instead of only pausing the microphone', async ({ page }) => {
+  const renderLoops = [];
+  page.on('console', message => {
+    if (message.text().includes('Maximum update depth exceeded')) renderLoops.push(message.text());
+  });
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('button', { name: 'Speak Voice conversation', exact: true }).click();
+  await page.getByRole('button', { name: 'End the conversation', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Close Jarvis', exact: true })).toBeHidden();
+  await expect(page.getByTestId('chat-composer')).toBeVisible();
+  await page.waitForTimeout(250);
+  expect(renderLoops).toEqual([]);
+});

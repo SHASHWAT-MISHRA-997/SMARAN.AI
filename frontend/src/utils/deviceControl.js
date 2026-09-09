@@ -83,7 +83,7 @@ export async function runDeviceCommand(command) {
   // It does not fire for every app: YouTube forwards the search intent on to
   // its own main activity, bringing an existing task forward, and this one
   // never leaves in the way auto-enter watches for.
-  const armed = await armFloating();
+  await armFloating();
   try {
     switch (command.action) {
       case 'app':
@@ -114,11 +114,11 @@ export async function runDeviceCommand(command) {
   // guarantee - a paused activity is refused - so the result is checked rather
   // than assumed, and a refusal only means the app stayed full size behind
   // whatever opened.
-  let floated = armed && Boolean(result?.opened);
-  if (result?.opened && !(await isFloating())) {
+  let floated = Boolean(result?.opened) && await isFloating();
+  if (result?.opened && !floated) {
     await new Promise((resolve) => setTimeout(resolve, 350));
     try {
-      floated = Boolean((await device.enterFloating())?.floating) || floated;
+      floated = Boolean((await device.enterFloating())?.floating);
     } catch {
       // Older phone, or refused. Neither is a failure of the command.
     }

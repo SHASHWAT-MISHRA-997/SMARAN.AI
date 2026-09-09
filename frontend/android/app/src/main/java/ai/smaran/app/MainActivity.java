@@ -16,6 +16,16 @@ import java.net.URI;
 
 /** Request microphone/camera permission when our page actually needs it. */
 public class MainActivity extends BridgeActivity {
+    @Override public void onStart() {
+        SmaranVoiceService.setUiVisible(true);
+        super.onStart();
+    }
+
+    @Override public void onStop() {
+        super.onStop();
+        SmaranVoiceService.setUiVisible(false);
+    }
+
     /** The dispatcher runs before the IME gets a chance to consume Back. */
     private boolean isKeyboardVisible() {
         View decor = getWindow().getDecorView();

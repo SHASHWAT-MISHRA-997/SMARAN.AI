@@ -12,7 +12,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint src tests",
-    "test:unit": "node --experimental-vm-modules --test tests/core-signal.test.mjs tests/native-speech.test.mjs tests/voice-status.test.mjs tests/speakable-text.test.mjs tests/core-states.test.mjs",
+    "test:unit": "node --experimental-vm-modules --test tests/*.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

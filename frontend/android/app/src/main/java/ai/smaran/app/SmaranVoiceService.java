@@ -48,6 +48,24 @@ public class SmaranVoiceService extends Service {
 
     /** Read by the plugin so the page can show whether it is on. */
     static volatile boolean running = false;
+    private static boolean uiVisible = false;
+    private static SmaranVoiceService instance;
+
+    // Activity lifecycle callbacks and Service callbacks run on the main
+    // thread. Only one owner may hold recognition at a time, including PiP.
+    static void setUiVisible(boolean visible) {
+        uiVisible = visible;
+        if (instance != null) {
+            instance.main.removeCallbacksAndMessages(null);
+            if (instance.recognizer != null) {
+                instance.recognizer.destroy();
+                instance.recognizer = null;
+            }
+            if (!visible && !instance.stopping) {
+                instance.main.postDelayed(instance::listen, 350);
+            }
+        }
+    }
 
     private SpeechRecognizer recognizer;
     private TextToSpeech tts;
@@ -64,13 +82,15 @@ public class SmaranVoiceService extends Service {
         }
         startForeground(NOTIFICATION_ID, buildNotification("Listening"));
         running = true;
+        instance = this;
         stopping = false;
         if (tts == null) {
             tts = new TextToSpeech(this, status -> {
                 if (status == TextToSpeech.SUCCESS) tts.setLanguage(new Locale("en", "IN"));
             });
         }
-        main.post(this::listen);
+        main.removeCallbacksAndMessages(null);
+        if (!uiVisible) main.post(this::listen);
         // START_STICKY so Android brings it back if it is killed for memory;
         // a listener that quietly stops listening is worse than one that does
         // not start.
@@ -121,7 +141,7 @@ public class SmaranVoiceService extends Service {
      * after the service has been told to stop.
      */
     private void listen() {
-        if (stopping) return;
+        if (stopping || uiVisible) return;
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             Log.w(TAG, "no recognition service on this device");
             stopSelf();
@@ -143,6 +163,7 @@ public class SmaranVoiceService extends Service {
 
             @Override
             public void onError(int error) {
+                if (stopping || uiVisible) return;
                 // Silence and no-match are ordinary: nobody spoke. Anything
                 // else is worth a breath before trying again, so a persistent
                 // fault does not become a tight loop holding the microphone.
@@ -153,6 +174,7 @@ public class SmaranVoiceService extends Service {
 
             @Override
             public void onResults(android.os.Bundle results) {
+                if (stopping || uiVisible) return;
                 ArrayList<String> heard =
                     results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 String said = (heard == null || heard.isEmpty()) ? "" : heard.get(0);
@@ -193,6 +215,7 @@ public class SmaranVoiceService extends Service {
     public void onDestroy() {
         stopping = true;
         running = false;
+        if (instance == this) instance = null;
         main.removeCallbacksAndMessages(null);
         if (recognizer != null) {
             recognizer.destroy();

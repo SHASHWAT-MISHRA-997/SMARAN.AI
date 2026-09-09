@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Box } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
 import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening } from '../utils/deviceControl';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
+import { voicePersonaRule } from '../utils/voicePersona';
 import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 import { useBackClose } from '../utils/backStack';
 import { parseCodeFence } from '../utils/codeFence';
@@ -1546,6 +1547,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
   // Refs to avoid stale closures in RAF loops and recognition callbacks
   const isVoiceModeOpenRef = useRef(false);
+  const voiceSessionRef = useRef(0);
 
 
   const voicesLoadedRef = useRef(false);
@@ -1579,10 +1581,12 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     (localStorage.getItem('sm_voice_gender') || 'female').toLowerCase();
 
   const ttsChunksRef = useRef([]);
+  const speechEpochRef = useRef(0);
   const generatedAudioRef = useRef(null);
   const generatedAudioUrlRef = useRef('');
 
   const speakNativeText = (text, langCode = selectedLanguage) => {
+    const epoch = speechEpochRef.current;
     // Check if audio is globally enabled
     if (!audioEnabled) {
       console.log('Audio is disabled globally');
@@ -1620,6 +1624,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       });
 
       const speakSegment = (index) => {
+        if (epoch !== speechEpochRef.current) return;
         if (index >= segments.length) {
           setIsSpeakingAudio(false);
           setSpeechProgress({ charIndex: -1, spokenText: '' });
@@ -1634,11 +1639,13 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           rate: 0.95,
           pitch: 1.0,
           onStart: () => {
+            if (epoch !== speechEpochRef.current) return;
             setIsSpeakingAudio(true);
             setSpeechProgress({ charIndex: starts[index], spokenText: clean });
             if (isVoiceModeOpenRef.current) setVoiceState('speaking');
           },
           onRange: (start) => {
+            if (epoch !== speechEpochRef.current) return;
             setSpeechProgress((previous) => (
               previous.spokenText === clean
                 ? { charIndex: starts[index] + start, spokenText: clean }
@@ -1915,6 +1922,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     // supported language. Windows itself usually ships English-only voices, so
     // going native first would read Hindi/Gujarati/Tamil in an English accent.
     // The browser voice remains the fallback when the backend cannot synthesize.
+    const epoch = speechEpochRef.current;
     try {
       const response = await fetch(`${API_BASE}/api/tts/local`, {
         method: 'POST',
@@ -1934,6 +1942,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       });
       if (!response.ok) throw new Error(`Local TTS returned ${response.status}`);
       const blob = await response.blob();
+      if (epoch !== speechEpochRef.current) return;
       if (!blob.size) throw new Error('Local TTS returned empty audio');
       const url = URL.createObjectURL(blob);
       generatedAudioUrlRef.current = url;
@@ -1952,6 +1961,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         if (generatedAudioRef.current === audio) generatedAudioRef.current = null;
       };
       audio.onerror = () => {
+        if (epoch !== speechEpochRef.current) return;
         setIsSpeakingAudio(false);
         URL.revokeObjectURL(url);
         if (generatedAudioUrlRef.current === url) generatedAudioUrlRef.current = '';
@@ -1963,6 +1973,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         noteForLog(`play() resolved: ${blob.size} bytes, duration=${audio.duration}, `
           + `muted=${audio.muted}, volume=${audio.volume}, paused=${audio.paused}`);
       } catch (playErr) {
+        if (epoch !== speechEpochRef.current) return;
         if (playErr?.name === 'AbortError') {
           // Play was intentionally superseded or paused
           return;
@@ -1970,6 +1981,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         reportSpeechFailure(`audio.play() error: ${playErr?.message || playErr}`, clean, langCode);
       }
     } catch (error) {
+      if (epoch !== speechEpochRef.current) return;
       reportSpeechFailure(`${error?.name || 'Error'}: ${error?.message || error}`,
                           clean, langCode);
     }
@@ -2009,7 +2021,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     console.warn(`Could not play the voice: ${reason}`);
   };
 
-  const stopSpeaking = () => {
+  const stopSpeaking = useCallback(() => {
+    speechEpochRef.current += 1;
     if (isNativeApp()) {
       nativeSpeech.stopSpeaking().catch(() => {});
     }
@@ -2034,7 +2047,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       window.speechSynthesis.cancel();
     }
     setIsSpeakingAudio(false);
-  };
+  }, []);
 
   /**
    * Send what has been recorded so far and get the text back.
@@ -2147,6 +2160,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     }
     stopSpeaking();
     setIsVoiceModeOpen(true);
+    voiceSessionRef.current += 1;
     isVoiceModeOpenRef.current = true;
     setVoiceTranscript('');
     setVoiceAiResponse('');
@@ -2160,7 +2174,9 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
   const closeVoiceMode = () => {
     setIsVoiceModeOpen(false);
+    voiceSessionRef.current += 1;
     isVoiceModeOpenRef.current = false;
+    pendingVoiceCommandRef.current = null;
     // Ending the call ends the listening, and takes the notification with it.
     // A microphone left held after the call is over is the thing nobody
     // forgives, and the notification would be the only sign of it.
@@ -3357,6 +3373,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         content: 'You are SMARAN.AI, a helpful assistant running on the '
           + "person's own device. Answer directly and plainly. If you do not "
           + 'know something, say so rather than inventing it.'
+          + '\n' + voicePersonaRule(assistantGender())
           + (facts.length
             ? ['', '', 'Things this person has asked you to remember:', ...facts].join('\n')
             : ''),
@@ -3367,7 +3384,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
   /** Answer with no backend, streaming into the bubble already on screen. */
-  const answerOnDevice = async ({ prompt, sessionId, assistantId, spoken }) => {
+  const answerOnDevice = async ({ prompt, sessionId, assistantId, spoken, voiceSession }) => {
     const provider = standalone.getProvider();
     const key = standalone.loadKeys()[provider];
     let model = standalone.getModel();
@@ -3459,7 +3476,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         created_at: new Date().toISOString(),
       });
 
-      if (spoken) {
+      if (spoken && isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current) {
         setVoiceAiResponse(sofar);
         speakText(sofar, selectedLanguage);
       }
@@ -3483,6 +3500,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
   const handleSend = async (e, directPrompt = null, isVoicePrompt = false) => {
+    const voiceSession = voiceSessionRef.current;
     if (e && e.preventDefault) e.preventDefault();
     const userPrompt = (directPrompt || input || '').trim();
     /* A spoken turn must never end in silence.
@@ -3498,7 +3516,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     if (!userPrompt || streaming) {
       if (userPrompt && streaming && (isVoicePrompt || isVoiceModeOpenRef.current)) {
         emitVoiceReply(selectedLanguage === 'hi'
-          ? 'मैं अभी पिछला जवाब दे रहा हूँ। एक पल रुकिए और फिर कहिए।'
+          ? (assistantGender() === 'female' ? 'मैं अभी पिछला जवाब दे रही हूँ। एक पल रुकिए और फिर कहिए।' : 'मैं अभी पिछला जवाब दे रहा हूँ। एक पल रुकिए और फिर कहिए।')
           : 'I am still answering the last one. Give me a moment, then say it again.');
       }
       return;
@@ -3515,6 +3533,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     // mid-answer, and before anything is added to the transcript, because a
     // command that opens an app is not a question anyone wants a record of.
     const deviceOutcome = await handleIfDeviceCommand(userPrompt);
+    if (isVoicePrompt && voiceSession !== voiceSessionRef.current) return;
     if (deviceOutcome) {
       setInput('');
       // If this is going to float, float something worth looking at.
@@ -3624,6 +3643,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         assistantId: assistantMessage.id,
         userMessage,
         spoken: isVoiceTurn,
+        voiceSession,
       });
       return;
     }
@@ -3706,7 +3726,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               setStreaming(false);
               streamingRef.current = false;
               window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'waving', message: 'Done!' } }));
-              if (isVoicePrompt || isVoiceModeOpen || isVoiceModeOpenRef.current) {
+              if (isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current) {
                 speakText(execData.message || 'Done, sir.');
               }
               return;
@@ -3897,7 +3917,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       setStreaming(false);
       streamingRef.current = false;
       window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'idle', message: '' } })), 1300);
-      if (isVoicePrompt || isVoiceModeOpen || isVoiceModeOpenRef.current) {
+      if (isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current) {
         const finalVoiceReply = finalResult || (selectedLanguage === 'hi' ? "मॉडल से कोई उत्तर नहीं मिला। कृपया मॉडल या API स्थिति जाँचें।" : "The selected model returned no answer. Please check its runtime or API status.");
         setVoiceAiResponse(finalVoiceReply);
         if (autoSpeakEnabled && audioEnabled) {
@@ -3910,7 +3930,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   // Speak a J.A.R.V.I.S. reply directly (bypasses the chat model) and surface it
   // in the voice bubble. Used for desktop/OS control confirmations & results.
   const emitVoiceReply = (spokenText) => {
-    if (!spokenText) return;
+    if (!spokenText || !isVoiceModeOpenRef.current) return;
     setVoiceAiResponse(spokenText);
     if (autoSpeakEnabled && audioEnabled) {
       speakText(spokenText, selectedLanguage);
@@ -3997,6 +4017,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   // it was handled (executed or a confirmation was requested), so the caller can
   // skip the conversational model.
   const tryVoiceDesktopCommand = async (queryText) => {
+    const voiceSession = voiceSessionRef.current;
+    const sessionActive = () => isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current;
     // 1) Resolve any pending yes/no confirmation first.
     const pending = pendingVoiceCommandRef.current;
     if (pending) {
@@ -4014,9 +4036,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
             body: JSON.stringify({ text: pending.text, language: selectedLanguage, confirmed: true }),
           });
           const data = await res.json();
+          if (!sessionActive()) return true;
           emitVoiceReply(data?.message || 'Done.');
         } catch  {
-          emitVoiceReply(selectedLanguage === 'en' ? 'That action could not be completed.' : 'Action could not be completed.');
+          if (sessionActive()) emitVoiceReply(selectedLanguage === 'en' ? 'That action could not be completed.' : 'Action could not be completed.');
         }
         return true;
       }
@@ -4038,6 +4061,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       });
       if (!res.ok) return false;
       const data = await res.json();
+          if (!sessionActive()) return true;
       if (!data?.handled) return false;
       if (data.ui_action) {
         applyVoiceUiAction(data.ui_action);
@@ -4054,6 +4078,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   };
 
   const handleSendVoicePrompt = async (queryText) => {
+    const voiceSession = voiceSessionRef.current;
     if (!queryText || !queryText.trim()) return;
     const query = queryText.trim();
     setVoiceAiResponse('');
@@ -4065,6 +4090,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     // desktop, and certainly not a paragraph explaining how to open Chrome on
     // Windows, which is what a model answered before this existed.
     const onDevice = await handleIfDeviceCommand(query);
+    if (!isVoiceModeOpenRef.current || voiceSession !== voiceSessionRef.current) return;
     if (onDevice) {
       setVoiceAiResponse(onDevice.spoken);
       speakNativeText(onDevice.spoken);
@@ -4073,7 +4099,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
 
     // Otherwise, try to fulfil the utterance as a hands-free desktop/OS command.
     const handled = await tryVoiceDesktopCommand(query);
-    if (handled) return;
+    if (handled || !isVoiceModeOpenRef.current || voiceSession !== voiceSessionRef.current) return;
     // Otherwise answer conversationally with the selected model.
     await handleSend(null, query, true);
   };

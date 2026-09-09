@@ -2241,7 +2241,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
               {/* Zero-width, and where the voice currently is. The scroll
                   effect measures this rather than counting characters, so it
                   stays correct however the paragraph happens to wrap. */}
-              <span ref={spokenEdgeRef} aria-hidden="true">{'​'}</span>
+              {latestSpokenLine ? <span ref={spokenEdgeRef} aria-hidden="true">{'​'}</span> : null}
               <span className="voice-caption-ahead">{spokenAhead}</span>
             </p>
           </div>
@@ -2401,7 +2401,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
           <button
             type="button"
             onClick={async () => {
-              if (isMobileVoiceDevice()) { toggleMute(); return; }
+              if (isMobileVoiceDevice()) { stopSpeaking?.(); onClose?.(); return; }
               if (!liveActive) { startLiveSession(); return; }
               /* Hanging up leaves the call, the way hanging up does.
                *
@@ -2417,18 +2417,18 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
             }}
             className={`group relative -mb-1 flex h-16 w-16 items-center justify-center rounded-full
               transition-all duration-300 active:scale-95 sm:h-[72px] sm:w-[72px] ${
-              (isMobileVoiceDevice() ? !isMuted : liveActive)
+              (isMobileVoiceDevice() || liveActive)
                 ? 'bg-rose-600 shadow-[0_0_28px_rgba(225,29,72,.55)] hover:bg-rose-500'
                 : 'bg-emerald-500 shadow-[0_0_28px_rgba(16,185,129,.5)] hover:bg-emerald-400'
             }`}
-            title={isMobileVoiceDevice() ? (isMuted ? 'Resume listening' : 'Pause listening') : (liveActive ? 'End the conversation' : 'Start talking')}
+            title={isMobileVoiceDevice() ? 'End the conversation' : (liveActive ? 'End the conversation' : 'Start talking')}
           >
             {/* A ring that breathes while the call is live. */}
-            {(isMobileVoiceDevice() ? !isMuted : liveActive) && (
+            {(isMobileVoiceDevice() || liveActive) && (
               <span className="absolute inset-0 animate-ping rounded-full bg-rose-500/40" aria-hidden="true" />
             )}
             <PhoneIcon className={`relative h-7 w-7 text-white transition-transform duration-300 ${
-              (isMobileVoiceDevice() ? !isMuted : liveActive) ? 'rotate-[135deg]' : 'group-hover:scale-110'
+              (isMobileVoiceDevice() || liveActive) ? 'rotate-[135deg]' : 'group-hover:scale-110'
             }`} />
           </button>
 
@@ -2439,7 +2439,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
               start". The word does. */}
           <span className="pointer-events-none absolute translate-y-[3.1rem] whitespace-nowrap text-[10px] font-bold uppercase tracking-wider text-white/70">
             {isMobileVoiceDevice()
-              ? (isMuted ? 'Resume' : 'Pause')
+              ? 'End'
               : liveActive
                 /* The clock, not the word. A number that is changing is the
                    one thing that cannot be mistaken for a label. */

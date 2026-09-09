@@ -3,6 +3,7 @@ import { registerPlugin } from '@capacitor/core';
 const speech = registerPlugin('SmaranSpeech');
 let activeListening = null;
 let activeSpeechCleanup = null;
+let speechGeneration = 0;
 const errorMessage = (code) => ({
   1: 'Speech recognition timed out. Check the phone’s connection and try again.',
   2: 'Speech recognition could not reach its service. Check the phone’s connection.',
@@ -21,7 +22,9 @@ export const available = async () => {
 };
 
 export const speak = async ({ text, language = 'en-IN', gender = 'male', rate = 0.95, pitch = 1.0, onStart, onEnd, onError, onRange }) => {
-  await stopSpeaking();
+  const generation = ++speechGeneration;
+  await stopSpeaking(false);
+  if (generation !== speechGeneration) return;
   const handles = [];
   const cleanup = async () => {
     await Promise.allSettled(handles.splice(0).map(h => h.remove()));
@@ -32,32 +35,36 @@ export const speak = async ({ text, language = 'en-IN', gender = 'male', rate = 
     const utteranceId = `tts_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
     handles.push(await speech.addListener('ttsStart', (data) => {
-      if (data.utteranceId === utteranceId) onStart?.();
+      if (generation === speechGeneration && data.utteranceId === utteranceId) onStart?.();
     }));
     handles.push(await speech.addListener('ttsEnd', async (data) => {
       if (data.utteranceId === utteranceId) {
         await cleanup();
-        onEnd?.();
+        if (generation === speechGeneration) onEnd?.();
       }
     }));
     handles.push(await speech.addListener('ttsError', async (data) => {
       if (data.utteranceId === utteranceId) {
         await cleanup();
-        onError?.(data);
+        if (generation === speechGeneration) onError?.(data);
       }
     }));
     // Where the voice is, word by word, so the caption can follow it. Only
     // engines that implement onRangeStart send this; when none arrives the
     // caption simply never highlights, which is the intended degradation.
     handles.push(await speech.addListener('ttsRange', (data) => {
-      if (data.utteranceId === utteranceId) onRange?.(Number(data.start) || 0);
+      if (generation === speechGeneration && data.utteranceId === utteranceId) onRange?.(Number(data.start) || 0);
     }));
 
+    if (generation !== speechGeneration) { await cleanup(); return; }
     await speech.speak({ text, language, gender, rate, pitch, utteranceId });
     return {
       stop: async () => {
         await cleanup();
-        await speech.stopSpeaking();
+        if (generation === speechGeneration) {
+          speechGeneration++;
+          await speech.stopSpeaking();
+        }
       }
     };
   } catch (err) {
@@ -67,7 +74,8 @@ export const speak = async ({ text, language = 'en-IN', gender = 'male', rate = 
   }
 };
 
-export const stopSpeaking = async () => {
+export const stopSpeaking = async (invalidate = true) => {
+  if (invalidate) speechGeneration++;
   if (activeSpeechCleanup) await activeSpeechCleanup();
   try {
     await speech.stopSpeaking();

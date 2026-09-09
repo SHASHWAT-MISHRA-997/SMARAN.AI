@@ -67,6 +67,7 @@ final class DeviceActions {
         "(?:bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|play\\s+karo)";
 
     private static final Pattern[] YOUTUBE_QUERY = {
+        Pattern.compile("^(.+?)\\s+(?:youtube|यूट्यूब)\\s+(?:pe|par|पर|पे)\\s+(?:channel|चैनल)\\s+(?:(?:ko|को)\\s+)?(?:open\\s+karo|kholo|khol\\s+do|खोलो|खोल\\s+दो)$", Pattern.CASE_INSENSITIVE),
         Pattern.compile("(?:" + OPEN_FIRST + "|" + PLAY_FIRST
             + "|search|dikhao)\\s+(?:on\\s+|pe\\s+|par\\s+)?youtube\\s+(.+)$", Pattern.CASE_INSENSITIVE),
         Pattern.compile("youtube\\s+(?:pe|par|mein|mai|men)\\s+(.+?)\\s+(?:" + PLAY_LAST

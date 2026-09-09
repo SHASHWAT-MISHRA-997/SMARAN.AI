@@ -45,6 +45,13 @@ test('opening YouTube with nothing to search for', () => {
 });
 
 // ---- music -----------------------------------------------------------------
+test('spoken channel request routes to YouTube instead of an app name', () => {
+  for (const sentence of ['Shashwat Mishra Techie youtube par channel ko open karo',
+    'Shashwat Mishra Techie यूट्यूब पर चैनल को खोलो']) {
+    assert.deepEqual(detectDeviceCommand(sentence), { action: 'youtube', query: 'Shashwat Mishra Techie' });
+  }
+  assert.equal(detectDeviceCommand('Shashwat Mishra Techie youtube par channel ko open karo mat'), null);
+});
 
 test('a song, named or not', () => {
   assert.deepEqual(detectDeviceCommand('gaana bajao'), { action: 'music' });
