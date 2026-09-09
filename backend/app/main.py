@@ -8251,6 +8251,10 @@ async def view_shared_page(share_id: str, db: Session = Depends(get_db)):
     return HTMLResponse(_share.render_public_share_html(data))
 
 
+from app import companion as _companion  # noqa: E402
+app.include_router(_companion.router)
+
+
 # Register the SPA fallback last so it cannot swallow model-storage, engine
 # or uploaded-file requests. Unknown API URLs still receive a JSON 404.
 app.add_api_route("/{path_name:path}", serve_frontend, methods=["GET"], include_in_schema=False)

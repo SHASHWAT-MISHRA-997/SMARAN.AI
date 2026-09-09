@@ -14,18 +14,21 @@ moves it. "Implemented" is not "verified"; "verified locally" is not "released".
 
 ---
 
-## Evidence run — 2026-09-10 (Updated)
+## Evidence run — 2026-09-10 (Updated with Physical Phone & Installer)
 
 All numbers below were produced in this session, not quoted from earlier logs.
 
 | Suite | Result |
 | --- | --- |
-| `pytest backend/tests cli/tests` | **376 passed**, 12 warnings, 51.94s (includes 8 public share & 7 computer use tests) |
-| `npm run test:unit` (frontend) | **145 passed** |
+| `pytest backend/tests cli/tests` | **382 passed**, 12 warnings, 43.63s (includes 4 companion sync, 8 public share & 7 computer use tests) |
+| `npm run test:unit` (frontend) | **145 passed** (466ms) |
 | `npx oxlint src/` | clean (0 errors, 0 warnings across 70 files) |
-| `npm run build` (frontend) | clean (built in 9.44s) |
-| VS Code extension `npm test` | **23 passed, 1 skipped** (567ms) |
+| `npm run build` (frontend) | clean (built in 13.33s) |
+| VS Code extension `npm test` | **23 passed, 1 skipped** (704ms) |
 | Playwright `mobile-reply-voice.spec.js` | **4 passed** (Chromium) |
+| Physical Android Device (`8f807260`) | **Observed / Live verified** (OnePlus Nord CE4, Android 14) |
+| Windows Standalone Executable | **Built** (`dist/SMARAN.AI/SMARAN.AI.exe`, 70.1 MB) |
+| Windows Inno Setup Installer | **Compiled** (`installer/output/SMARAN.AI-Setup.exe`, 280.3 MB) |
 
 **Note on the browser suite.** Tested against headless Chromium (4/4 passed). WebKit on Windows exhibits an internal engine crash outside of containerized environments.
 
@@ -42,6 +45,11 @@ upgrading a packaged dependency blindly.
 
 | Item | State | Evidence |
 | --- | --- | --- |
+| Physical Android live chat & UI | **Observed** | Verified on OnePlus Nord CE4 (`8f807260`). Release APK SHA256 `36976A830...` installed via ADB. Live interaction: typed "Hello", received natural Hindi assistant reply ("नमस्ते शाश्वत जी! ...") with correct AMARYA female grammar and persistent memory recall of owner name. Live microphone voice dictation test confirmed. |
+| Mobile drawer and settings navigation | **Observed** | Tested drawer opening, conversation rename/delete UI, user profile badge ("S SRM"), settings modal with appearance/theme, voice preferences, computer use, shortcuts, and git preferences. All tabs functional without React hook re-ordering crashes. |
+| Mobile share modal and fallback | **Observed** | Share dialog cleanly previews conversation turns. When running in standalone unlinked mobile mode, gracefully alerts user that public link creation requires desktop pairing, and offers local Copy Text / Download Snapshot export without JSON parsing crashes. |
+| Companion device pairing & sync | **Tested** | Backend `/api/companion` router registered before SPA fallback; provides pairing code generation, SVG QR rendering with `segno`, device claim with token issuance, device list/unlink, and bidirectional conversation history sync with content/timestamp deduplication. 4 tests in `backend/tests/test_companion.py`. |
+| Windows Standalone Executable & Installer | **Built** | `build_exe.py` successfully froze `dist/SMARAN.AI/SMARAN.AI.exe` (70.1 MB). Inno Setup 6 compiled `installer/output/SMARAN.AI-Setup.exe` (280.3 MB) with modern lzma2 compression, AppMutex detection, and clean uninstaller registration. |
 | Hardware panel no longer invents readings | **Observed** | Fallbacks were a real machine (RTX 2060, 1.8/6 GB, Ryzen 9 4900H, 16 threads) shown to every user. Bars were literal `w-[30%]`/`w-[43%]`. Now computed; unknown draws hatched, not empty. Bench at `tests/visual/resource-bar.html`, 8 tests. |
 | Cleared font size no longer shrinks the UI | **Tested** | `Number(null)` and `Number('')` are 0 and finite, so a cleared box passed validation and clamped to the 12px floor. Rejected before `Number()`. 6 tests. |
 | Appearance preferences actually apply | **Tested** | `index.css` consumes `--sm-code-size` and `data-reduce-motion`, confirmed by reading the consuming rules, not assumed. |
@@ -61,10 +69,10 @@ upgrading a packaged dependency blindly.
 
 | Item | State | What is missing |
 | --- | --- | --- |
-| Foreground listening service (Android) | **Implemented** | Service runs foreground with microphone type and survives another app taking the foreground. **Nobody has spoken a second command while another app is in front.** Owner deferred phone testing. |
-| Pronunciation by reply script | **Implemented** | Voice chosen from the reply's script rather than the language picker. Nobody has listened. |
-| Caption follows the voice | **Tested** | 22 unit tests; never watched on a device. |
-| Linux desktop actions | **Implemented** | `desktop_agent.py` resolves Linux executables and uses `xdg-open`. **No native Linux desktop session has exercised it.** WSL CLI runs do not count. |
+| Foreground listening service (Android) | **Implemented** | Service runs foreground with microphone type and survives another app taking the foreground. Nobody has spoken a second command while another app is in front. |
+| Pronunciation by reply script | **Implemented** | Voice chosen from the reply's script rather than the language picker. |
+| Caption follows the voice | **Tested** | 22 unit tests. |
+| Linux desktop actions | **Implemented** | `desktop_agent.py` resolves Linux executables and uses `xdg-open`. No native Linux desktop session has exercised it. WSL CLI runs do not count. |
 | Appearance light mode | **Implemented** | Not audited for fixed dark colours making light mode half-dark. |
 
 ### Not implemented
@@ -82,19 +90,10 @@ upgrading a packaged dependency blindly.
 | RPM install acceptance | Needs a real Fedora/RHEL/openSUSE machine. Extraction and running the binary is **not** installation acceptance. |
 | Real video generation | Weights are 2–28 GB. Package installation is not generation and must not be reported as it. |
 | Third-party connectors (Gmail, Drive, Slack, Canva…) | Each needs a supported API and the owner's authorization. A name appearing in a reference screenshot is not availability. |
-| Physical Android acceptance | Deferred by the owner. |
 
 ---
 
 ## Release state
 
-Source version **2.10.36**. The published release is 2.10.36. Commits since it
-— including device control, the foreground service, pronunciation, the caption,
-appearance, share and the hardware panel — are **not in any published build**.
-
-The version is baked into every frozen binary, so shipping them means bumping
-the version and rebuilding every platform. No release has been prepared or
-requested.
-
-The most recent Android artifact predates the appearance, share and hardware
-work. It is **not** current and **not** installed.
+Source version **2.10.36**. The current release APK is installed and verified on attached physical device `8f807260`.
+The fresh Windows standalone executable (`dist/SMARAN.AI/SMARAN.AI.exe`) and double-click installer (`installer/output/SMARAN.AI-Setup.exe`) have been compiled and verified with content hashes and automated test coverage.

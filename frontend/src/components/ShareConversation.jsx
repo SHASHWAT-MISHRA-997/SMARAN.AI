@@ -33,9 +33,16 @@ export default function ShareConversation({ messages }) {
           messages: snapshot,
         }),
       });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to create share link.');
+      const contentType = resp.headers.get('content-type') || '';
+      if (!resp.ok || !contentType.includes('application/json')) {
+        let errMsg = 'Failed to create share link.';
+        if (contentType.includes('application/json')) {
+          const err = await resp.json().catch(() => ({}));
+          errMsg = err.detail || errMsg;
+        } else {
+          errMsg = 'Public link sharing requires a paired SMARAN desktop backend. You can export as text or snapshot below.';
+        }
+        throw new Error(errMsg);
       }
       const data = await resp.json();
       setShareData(data);
@@ -54,14 +61,16 @@ export default function ShareConversation({ messages }) {
       const resp = await fetch(`${API_BASE}/api/share/${shareData.share_id}?secret=${encodeURIComponent(shareData.revocation_token)}`, {
         method: 'DELETE',
       });
-      if (resp.ok) {
+      const contentType = resp.headers.get('content-type') || '';
+      if (resp.ok && contentType.includes('application/json')) {
         setShareData(null);
         setNotice('Public link revoked and permanently disabled.');
       } else {
-        setNotice('Could not revoke link.');
+        const err = contentType.includes('application/json') ? await resp.json().catch(() => ({})) : {};
+        setNotice(err.detail || 'Could not revoke link.');
       }
-    } catch {
-      setNotice('Network error while revoking link.');
+    } catch (err) {
+      setNotice(err.message || 'Could not revoke link.');
     }
   };
 
