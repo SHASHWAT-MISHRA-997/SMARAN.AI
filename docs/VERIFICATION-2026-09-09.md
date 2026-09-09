@@ -746,3 +746,240 @@ phone install it rather than open it. The size fallbacks read back as 267 MB,
 - The Windows installer remains unsigned. SmartScreen will warn and Smart App
   Control will block it, which the release notes state.
 - Speech accuracy is unchanged and untested, as it has been throughout.
+# Fresh continuation audit — delayed speech final result
+
+Read the newly supplied handoff and checked HEAD `e15fe8b`. Existing mobile
+layout/release changes were preserved. Fresh backend/CLI execution: **325 passed,
+12 warnings in 45.08s** (`.cache/audit/current-backend-tests.log`). Fresh frontend
+baseline: **68 passed**.
+
+Found a race in `pollFinalTranscript`: a delayed final result took precedence
+over resumed speech, allowing a preceding phrase to end a turn while the user
+was speaking again. Added a regression exercising both conditions together;
+it failed before the fix. Resumed speech now precedes final text, while closed
+or muted calls retain highest priority. Frontend suite after the change:
+**69 passed**. Evidence: `current-voice-race-before.log` and
+`current-frontend-tests-after.log` under `.cache/audit/`.
+
+Physical accuracy is still not verified: the fresh `adb devices` command
+returned an empty device list. This timing fix is not an acoustic recognition
+accuracy claim. No APK installation, release, deployment, or merge was made
+in this continuation.
+# Connected-device follow-up
+
+ADB serial `8f807260` authorized, Android user 0. Rebuilt Android release:
+`current-android-build-retry.log`, BUILD SUCCESSFUL in 31s. The first build
+did not leave a final success result and was not treated as verified.
+`adb install -r` returned Success; user data preserved. APK SHA256:
+`FA54E293CD311D436A677B1A781676F3AB86D172BA6400DD303459648C9CDAA3`.
+Compared APK index.html and index JS bytes to current frontend build: equal.
+Launched installed app and observed chat render in `current-phone.png`.
+
+Browser run initially passed 6/7: one test clicked a reply's Speak button
+instead of the composer voice-conversation button. Scoped its locator to
+`chat-composer`, without weakening assertions. Fresh rerun: **7 passed in
+11.8s**, including portrait/landscape separation of character and captions.
+Logs: `current-mobile-browser.log`, `current-mobile-browser-after.log`.
+
+Requested a known Hindi/Hinglish reference utterance with a two-second pause
+on the newly installed APK. Physical accuracy remains pending that comparison.
+No release deployment, merge, or Windows/Linux rebuild in this follow-up.
+
+## Owner acceptance — Dictate
+
+The owner confirmed: "HA ye maine test kiya Accuracy sahi hai" for the
+requested Hindi/Hinglish reference sentence with a two-second pause on the
+new APK. Record this as **owner-confirmed Dictate accuracy for that sample**,
+not as an automated observation or proof for all languages. Speak recognition,
+answer correctness, and perceived voice quality still need separate acceptance.
+
+## Speak failure and follow-up fix
+
+Opened Speak on the connected phone and observed Amarya with no desktop view
+HUD (`speak-open.png`). Owner then reported no recognition and no reply. This
+is a **failed Speak acceptance test** despite Dictate passing. Android log
+reported recognizer error 7. Code inspection found Speak opens a WebView
+recorder concurrently with Android recognition, unlike Dictate. Removed that
+parallel capture on native Android; text events retain turn timing. This is
+a plausible microphone-contention fix, not yet proof of acoustic recovery.
+Frontend units: 69 pass; lint/build and Capacitor sync completed.
+
+Also reproduced desktop startup failure with a broken system HTTP proxy and
+a real local HTTP health server. Both readiness and existing-instance probes
+now use an explicit proxy-free opener, restricted to their fixed loopback URL.
+Regression failed before the fix; all 13 native desktop tests pass afterward.
+Evidence: `proxy-before.log`, `proxy-after.log` under `.cache/audit/`.
+
+Android follow-up built successfully in 36s and `adb install -r` returned
+Success. APK SHA256:
+`46FD9FF7C33713B157D7C35E76BA7217EC41813F567EE03615627198DE3259A9`.
+App relaunched. Actual Speak acceptance on this microphone-ownership change
+remains pending; the preceding failure is not erased. Desktop source fix has
+not yet been rebuilt into the published Windows/Linux packages.
+
+## Owner acceptance — Speak after microphone ownership fix
+
+The owner confirmed "ha aab sahi kaam kar raha hai" after installing APK
+SHA256 46FD9FF7C33713B157D7C35E76BA7217EC41813F567EE03615627198DE3259A9
+and being asked to repeat the Speak question. Record as owner-confirmed
+Speak functioning after the fix. Together with the earlier Dictate sample,
+both reported mobile voice workflows now have user acceptance. This does
+not establish all-language accuracy, subjective voice naturalness, or
+completion of unrelated release/platform work.
+
+## Final-work continuation: builds and real coding workflow
+
+Fresh full backend/CLI run after the loopback proxy fix: 326 passed, 12
+warnings in 51.03s (`current-full-final.log`).
+
+Downloaded Windows and Linux CLI assets directly from GitHub v2.10.34 into
+project audit storage. Both SHA256 hashes match their staged release assets;
+both downloaded binaries actually run and report `smaran 2.10.34`.
+Evidence: `downloaded-cli-verify.json`, `downloaded-linux-cli-verify.json`,
+`downloaded-cli-version.log`, `downloaded-linux-cli-version.log`.
+
+Started current Windows and Linux frozen builds in isolated output trees.
+An initial Linux snapshot cleanup failed (FileExistsError); retried in a new
+isolated output tree, preserving release artifacts. Build completion and
+packaged startup are not yet verified.
+
+Real VS Code host: configured Groq key was unavailable, recorded from fresh
+host logs. Extended the scenario harness to allow the installed local Ollama
+model without credentials and to persist missing-credential failures. Local
+qwen2.5-coder:7b opened the actual agent panel and wrote stats.cjs, but wrote
+Markdown fences into JavaScript and subsequently produced malformed calls.
+At this checkpoint the run is still in bounded retries, not an acceptance pass.
+Audit: `.cache/current-coding/extension-live-scenario.json`.
+
+GPU probe: RTX 2060, 6 GB total / 5 GB free VRAM, CUDA available. This does not
+prove video generation (`current-video-hardware.json`). No new release or
+production deployment in this continuation.
+
+---
+
+## Continuation after Codex — verifying its work, and finishing the packaging
+
+Picked up a working tree where Codex had made changes but committed none; HEAD
+was still `e15fe8b`. Nothing was reset or discarded. What follows is my own
+execution, not a reading of Codex's notes.
+
+### Its changes, run rather than reviewed
+
+| Suite | Result |
+| --- | --- |
+| `backend/tests/` | **312 passed**, 12 warnings, 67s |
+| `cli/tests/` | **14 passed** |
+| `frontend/tests/*.test.mjs` | **69 passed** |
+| `vscode-extension/test/*.test.js` | **9 passed** |
+
+The frontend suite needs `node --experimental-vm-modules`; without it
+`native-speech.test.mjs` dies on `vm.SyntheticModule is not a constructor`,
+which is a harness gap and not a failure of the code under test.
+
+Two of the changes are worth stating plainly because they are corrections to
+work of mine:
+
+- **`pollFinalTranscript` had the precedence backwards.** I had `final` ahead of
+  `resumed`, so a recogniser that committed "Please open" during a breath would
+  send it while the speaker was still finishing the sentence — the same
+  cut-off-sentence bug the function exists to prevent, arriving by a different
+  route. Codex swapped the two and added a regression that fails on the old
+  order. Correct. I updated the docstring, which still described the old
+  precedence and would have invited the change to be reverted as a mistake.
+- **`desktop_app.py` now bypasses the proxy for its own loopback health check**
+  (`build_opener(ProxyHandler({}))`). I had previously chased this as an
+  environment problem and set `NO_PROXY` in my own test runs; the app itself was
+  still exposed to it. Doing it in code is the right fix, and
+  `test_local_health_ignores_broken_system_proxy` pins it with a real server
+  behind a deliberately dead proxy.
+
+### The live coding scenario — a real run, and an honest failure
+
+Previously blocked on provider quota. Codex extended the harness so an empty
+`smaran.provider` selects local Ollama, which is how this extension has always
+addressed `127.0.0.1:11434`, so no credential is involved.
+
+Run against `qwen2.5-coder:7b` with `--extensionDevelopmentPath` **and**
+`--extensionTestsPath` (the first is not optional; without it VS Code opens,
+exits, and leaves the previous result file to be misread as a pass — which has
+happened here before). The result file was deleted first for the same reason.
+
+`code.cmd` returns immediately on Windows, so the first attempt reported "no
+result file" after two seconds. The runner now waits on the `running` flag the
+scenario itself writes.
+
+**The scenario fails, and it should.** The model opened the real agent panel and
+called `list_files` correctly, then wrote this as the contents of `stats.cjs`:
+
+```
+```javascript
+module.exports = {
+  summarize(numbers) {
+```
+
+A Markdown fence inside a `.js` file. It then produced three malformed tool
+calls in a row and the run stopped with:
+
+> The model returned unusable tool calls three times in a row. The task is
+> incomplete. Try a different coding model; files already written are preserved.
+
+`"passed": false`. That is the correct outcome: a 7B local model is not able to
+complete this task, and the extension now says so in three attempts instead of
+looping. The retry cap is Codex's, and this run is the evidence it works.
+
+**What this does and does not show.** It shows the extension driving a real
+model in a real VS Code host, refusing to report completion it did not achieve,
+and preserving written files. It does **not** show the extension completing a
+coding task, because no model that can was available. That still needs a
+capable provider.
+
+### Linux packages, which Codex had not built
+
+Codex left fresh Windows and Android builds but no Linux packages. Both fresh
+dists carry frontend bundle `B6fxkF2r`; the artifacts published as 2.10.34 carry
+`eqH8Q4pS`, so the published Linux packages predate the voice work.
+
+Built from `.cache/audit/linux-voice-final`, whose `dist/linux` did not exist,
+so `build_linux.sh`'s `rm -rf` could not reach the published `linux-sep9`
+artifacts — checked before starting, and those four files are still there.
+
+```
+smaran-ai_2.10.34_amd64.deb            306064440
+smaran-ai-2.10.34-linux-x86_64.tar.gz  399260618
+smaran-ai-2.10.34-1.x86_64.rpm         397331618
+SMARAN.AI-2.10.34-x86_64.AppImage      369089016
+```
+
+The rpm permission fix has **not** regressed:
+
+```
+entries: 1759   world-writable: 0   owner: root root
+-rwxr-xr-x  root root  41823176  /opt/smaran-ai/SMARAN.AI
+```
+
+and the rpm payload carries `index-v2.10.34-B6fxkF2r.js`, so these packages do
+contain the voice work.
+
+One thing that looked wrong and is not: the new AppImage is 369089016 bytes,
+byte-for-byte the same size as the published one. Its SHA-256 is
+`e8b8218...`, against the published `55389cf...`, so it is a different build;
+squashfs simply landed on the same total.
+
+### Owner acceptance
+
+The owner reports that Dictate and Speak both now work correctly, tested by
+them on the phone. Recorded as **owner acceptance**, which is what it is — I
+have no microphone and made no acoustic measurement. This closes the item that
+has been open since the first pass, and it closes it on the owner's word rather
+than on anything I observed.
+
+### Not verified
+
+- Every current artifact is built but **none of it is published**. The live
+  2.10.34 release and the website still serve the pre-voice-fix builds. Nobody
+  downloading today gets the Speak fix.
+- The extension has still never completed the live coding task, only failed it
+  correctly.
+- Energy Core / Amarya voice quality and arm motion remain unjudged.
+- The Windows installer is still unsigned; the rpm still untested on an
+  rpm-based distribution.

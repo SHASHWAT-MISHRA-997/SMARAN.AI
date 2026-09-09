@@ -456,6 +456,7 @@ ${DELEGATE_SYSTEM}` : '')
     try {
 
     const limit = asDelegate ? DELEGATE_STEPS : MAX_STEPS;
+    let malformedReplies = 0;
     for (let step = 1; step <= limit; step += 1) {
         if (stopped()) {
             return;
@@ -502,6 +503,11 @@ ${DELEGATE_SYSTEM}` : '')
                understands. What must never happen is the tag itself being
                printed as though it were the reply. */
             if (looksTruncated(reply) || callStarts(reply) >= 0) {
+                malformedReplies += 1;
+                if (malformedReplies >= 3) {
+                    yield { type: 'error', message: 'The model returned unusable tool calls three times in a row. The task is incomplete. Try a different coding model; files already written are preserved.' };
+                    return;
+                }
                 const said = proseBefore(reply);
                 if (said) yield { type: 'message', text: said };
                 yield {
@@ -524,6 +530,7 @@ ${DELEGATE_SYSTEM}` : '')
             return;
         }
 
+        malformedReplies = 0;
         // The successful-call path used to bypass proseBefore, leaking the
         // enclosing <tool_calls> tag even though malformed calls were clean.
         const spoken = proseBefore(reply);

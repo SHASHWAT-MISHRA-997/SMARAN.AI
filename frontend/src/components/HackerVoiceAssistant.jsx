@@ -756,6 +756,9 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
             return;
           }
           nativeStopRef.current = stopListening;
+          setMicStatus('granted');
+          setVoiceState('listening');
+          voiceStateRef.current = 'listening';
           setRecognizerStatus('active');
           setRecognizerIssue('');
         } catch (error) {
@@ -1258,6 +1261,16 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
         setRecognizerIssue('');
         setVoiceState('permission');
         voiceStateRef.current = 'permission';
+
+        // Android's recognizer owns microphone capture. Opening a WebView
+        // recorder at the same time can silence the recognizer on devices
+        // that do not share input streams. Native text events drive the
+        // existing silence watchdog; a second recorder is unnecessary here.
+        if (isNativeApp()) {
+          setMicStatus('idle');
+          startRecognition();
+          return;
+        }
 
         if (!navigator.mediaDevices?.getUserMedia) {
           // Capacitor can expose no WebView media device on a particular

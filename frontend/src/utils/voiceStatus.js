@@ -78,10 +78,17 @@ export function silenceWindowMs({ spokenChars = 0, base = 850, max = 2200 } = {}
  * arrived - the reported "it cuts my sentences".
  *
  * Pure so the ordering can be asserted. The precedence matters: a cancelled
- * call beats everything, resumed speech beats a final that has not arrived,
- * and the deadline is the last resort.
+ * call beats everything, resumed speech beats a final result even once one has
+ * arrived, and the deadline is the last resort.
  *
- *   final      the recogniser committed; send that
+ * That middle rule is the one worth stating, because the obvious order is
+ * wrong. A recogniser can commit "Please open" while the speaker is already
+ * saying the rest of the sentence; sending it because a final exists is the
+ * same cut-off sentence this function was written to prevent, just arriving by
+ * a different route. Resumed audio means the pause was a breath, so whatever
+ * was committed during it belongs to a sentence that is still being spoken.
+ *
+ *   final      the recogniser committed and nobody spoke after; send that
  *   resumed    audio came back, so the pause was a breath - send nothing
  *   cancelled  muted or closed; there is nobody to answer
  *   timeout    nothing final arrived; the caller falls back to the interim
@@ -96,8 +103,8 @@ export function pollFinalTranscript({
   expired = false,
 } = {}) {
   if (muted || !open) return 'cancelled';
-  if (String(finalText).trim()) return 'final';
   if (lastSpeechAt > quietSince) return 'resumed';
+  if (String(finalText).trim()) return 'final';
   if (expired) return 'timeout';
   return 'wait';
 }

@@ -251,7 +251,7 @@ def _wait_until_ready(port: int, timeout: float = STARTUP_TIMEOUT_SECONDS,
         if server is not None and server.error is not None:
             return False
         try:
-            with urllib.request.urlopen(url, timeout=2) as response:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url, timeout=2) as response:
                 if response.status < 500:
                     # An answer on this port is not proof that *our* server is
                     # the one answering. Start a second copy while the first
@@ -343,7 +343,7 @@ def _existing_instance() -> "int | None":
     if not isinstance(port, int):
         return None
     try:
-        with urllib.request.urlopen(
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
                 f"http://127.0.0.1:{port}{HEALTH_PATH}", timeout=2) as response:
             if response.status < 500:
                 return port

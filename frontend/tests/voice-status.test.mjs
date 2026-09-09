@@ -161,3 +161,8 @@ test('it is bounded at both ends whatever it is handed', () => {
   assert.equal(silenceWindowMs(), 850);
   assert.ok(silenceWindowMs({ spokenChars: 1e9 }) <= 2200);
 });
+test('resumed speech prevents sending a delayed final from before the pause', () => {
+  assert.equal(pollFinalTranscript({
+    finalText: 'Please open', lastSpeechAt: 1600, quietSince: 1000,
+  }), 'resumed');
+});

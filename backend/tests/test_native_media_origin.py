@@ -46,3 +46,34 @@ def test_port_probe_rejects_an_existing_loopback_listener():
         existing.listen()
         occupied = existing.getsockname()[1]
         assert desktop._find_free_port(occupied) != occupied
+def test_local_health_ignores_broken_system_proxy(monkeypatch, tmp_path):
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Health(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+
+        def log_message(self, *args):
+            pass
+
+    monkeypatch.setattr(desktop.urllib.request, 'getproxies',
+                        lambda: {'http': 'http://127.0.0.1:1'})
+    monkeypatch.setattr(desktop.urllib.request, 'proxy_bypass', lambda host: False)
+    monkeypatch.setattr(desktop.urllib.request, '_opener', None)
+    with ThreadingHTTPServer(('127.0.0.1', 0), Health) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_port
+            runtime = tmp_path / 'runtime.json'
+            runtime.write_text(json.dumps({'port': port}))
+            monkeypatch.setattr(desktop, '_runtime_file', lambda: str(runtime))
+            assert desktop._wait_until_ready(port, timeout=1)
+            assert desktop._existing_instance() == port
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)

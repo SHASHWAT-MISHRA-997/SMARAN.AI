@@ -43,7 +43,9 @@ const openCall = async (page) => {
     // `.first()` can land on the compact sheet's copy, which is in the DOM but
     // hidden sideways; clicking that opens nothing and the wait below then
     // fails for a reason that has nothing to do with the layout under test.
-    await page.getByRole('button', { name: /^Speak/ }).locator('visible=true').first().click();
+    // Reply bubbles also have a Speak button. Scope to the composer so a
+    // loaded reply cannot redirect this click to text-to-speech playback.
+    await page.getByTestId('chat-composer').getByRole('button', { name: /^Speak/ }).locator('visible=true').click();
   }
   await expect(page.getByRole('button', { name: 'Close Jarvis', exact: true })).toBeVisible();
 };

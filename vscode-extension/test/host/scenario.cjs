@@ -60,9 +60,12 @@ exports.run = async function () {
     return allowed;
   };
   const keyFile = path.join(audit, '../../data/cloud_keys.json');
-  const provider = process.env.SMARAN_AUDIT_PROVIDER || 'openrouter';
-  const key = String((provider === 'openrouter' && process.env.SMARAN_AUDIT_OPENROUTER_KEY) || JSON.parse(fs.readFileSync(keyFile, 'utf8'))[provider] || '').trim();
-  assert.ok(key, 'A project-configured provider key is needed for the live scenario');
+  const provider = process.env.SMARAN_AUDIT_PROVIDER === 'ollama' ? '' : (process.env.SMARAN_AUDIT_PROVIDER || 'openrouter');
+  const key = provider ? String((provider === 'openrouter' && process.env.SMARAN_AUDIT_OPENROUTER_KEY) || JSON.parse(fs.readFileSync(keyFile, 'utf8'))[provider] || '').trim() : '';
+  if (provider && !key) {
+    save({ passed: false, running: false, error: 'Configured provider credential is unavailable' });
+    throw new Error('A project-configured provider key is needed for the live scenario');
+  }
   Keys.prototype.get = async function (requested) { return requested === provider ? key : ''; };
   try {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
