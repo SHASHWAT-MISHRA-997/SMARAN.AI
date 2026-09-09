@@ -72,8 +72,12 @@ function Harness() {
 
   return (
     <div
-      style={{ height: '100%', display: 'flex', flexDirection: 'column', color: '#cfe',
-               outline: dropping ? '2px dashed #22e2ff' : 'none' }}
+      // Fixed to the viewport rather than 100% of a parent. With height:100%
+      // the controls row pushed the stage past the bottom of the window - the
+      // canvas measured 940px inside an 860px viewport - so what the bench
+      // showed was not what the app would show.
+      style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column',
+               color: '#cfe', outline: dropping ? '2px dashed #22e2ff' : 'none' }}
       onDragOver={(e) => { e.preventDefault(); setDropping(true); }}
       onDragLeave={() => setDropping(false)}
       onDrop={(e) => {

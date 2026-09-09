@@ -257,6 +257,32 @@ const AvatarVRM = ({
         const head = vrm.humanoid?.getNormalizedBoneNode('head');
         const spine = vrm.humanoid?.getNormalizedBoneNode('spine');
         const breath = calm ? 0 : Math.sin(t * 1.2) * 0.012;
+
+        // Arms down, not out.
+        //
+        // VRM defines the rest pose as a T-pose and three-vrm's *normalized*
+        // bones are expressed in that space, so identity means arms straight
+        // out sideways - which is how this loads and is not how anyone stands.
+        // Because that space is defined by the spec rather than by the model,
+        // an absolute rotation lands in the same place on every character; a
+        // relative nudge would over-rotate an export that was already posed.
+        const armSway = calm ? 0 : Math.sin(t * 0.8) * 0.02;
+        const poseArm = (name, sign) => {
+          const upper = vrm.humanoid?.getNormalizedBoneNode(name);
+          if (!upper) return;
+          upper.rotation.z = approach(upper.rotation.z, sign * (1.24 + armSway), 4, delta);
+          // A little forward, so she is not a cardboard cut-out from the side.
+          upper.rotation.x = approach(upper.rotation.x, 0.12, 4, delta);
+        };
+        poseArm('leftUpperArm', -1);
+        poseArm('rightUpperArm', 1);
+        const bendElbow = (name, sign) => {
+          const lower = vrm.humanoid?.getNormalizedBoneNode(name);
+          if (!lower) return;
+          lower.rotation.z = approach(lower.rotation.z, sign * 0.16, 4, delta);
+        };
+        bendElbow('leftLowerArm', -1);
+        bendElbow('rightLowerArm', 1);
         if (head) {
           head.rotation.y = approach(head.rotation.y, gaze.x, 3, delta);
           head.rotation.x = approach(head.rotation.x, -gaze.y + tilt * 0.3, 3, delta);

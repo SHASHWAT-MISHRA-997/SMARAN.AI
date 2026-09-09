@@ -1372,3 +1372,61 @@ Suites: **339 backend and CLI**, **110 frontend**, lint and build clean.
   fetching one would repeat the licensing mistake. The loader, the renderer and
   the routing are written and typecheck-clean but have never run against a real
   model. This is the next thing to test, on the owner's own export.
+
+---
+
+## The VRM loader, run against a real model at last
+
+No `.vrm` existed on this machine and the owner's VRoid install had not
+finished, so with permission a sample was downloaded purely to test with:
+`VRM1_Constraint_Twist_Sample.vrm` from pixiv's own three-vrm repository, which
+is MIT. 10,776,032 bytes, magic bytes `glTF`.
+
+**It loads.** First run put a real anime character on screen - face, hair,
+clothing - through the same component the call screen uses. The listing found
+it correctly too, reporting `name: "SampleGirl"` without the suffix and
+`id: "SampleGirl.vrm"` with it.
+
+### Three things the first real run exposed
+
+**A T-pose.** She loaded with her arms straight out sideways. That is not a
+fault in the export: VRM *defines* the rest pose as a T-pose, and three-vrm's
+normalized bones are expressed in that space, so identity means arms out. The
+fix has to be an absolute rotation rather than a relative nudge - because the
+space is defined by the specification rather than by the model, the same
+absolute value lands correctly on every character, while a relative offset
+would over-rotate an export that already had its arms down.
+
+**A bench that lied about its own size.** The stage measured 940px inside an
+860px viewport, so what the bench showed was not what the app would show.
+`height: 100%` let the controls row push the stage past the bottom of the
+window; `position: fixed; inset: 0` fixes it. It still reports 872 against 860
+and that is cosmetic to the bench alone, not to the app.
+
+**A model staged where it would have shipped.** To serve the file to the bench
+it was copied to `frontend/public/`, which is bundled into every build - the
+installer, the APK, the AppImage, all of it. Removed. The file lives in
+`data/characters/` instead, which is gitignored user data and is also the folder
+the feature is actually about.
+
+### Verified by looking
+
+| | |
+| --- | --- |
+| Loads and renders | a real character, not a placeholder |
+| Arms | posed down from the spec T-pose |
+| Mouth | open in `speaking`, closed in `idle` - the visemes are driven by the audio level |
+| Hair | present and hanging, so spring bones are being updated |
+| Listing | single `.vrm` offered, name without suffix |
+
+110 frontend tests, lint and build clean.
+
+### Not verified
+
+- Only one model has been through it. A VRoid export is a different rig with
+  different expressions, and the camera framing in particular is set from
+  generic proportions and will want adjusting per character.
+- Not yet seen inside the real call screen, only in the bench.
+- Not seen on the phone.
+- The sample is a test fixture, not a shipped character. Nothing about it is
+  bundled, and the licensing position of Amarya and Myra is unchanged.
