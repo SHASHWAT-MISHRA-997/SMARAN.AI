@@ -27,6 +27,25 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- "Chrome kholo" has to be turned into a package before anything can
+             be launched, which means seeing what is installed. MAIN/LAUNCHER
+             shows only apps that appear in the launcher - exactly the set a
+             person can name out loud - and unlike QUERY_ALL_PACKAGES it is not
+             a permission Play asks anyone to justify. Same reasoning as the
+             two entries above. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- Opening a web address, and asking whichever music app the user
+             chose to play something. Neither names a package. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+        </intent>
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -52,9 +71,17 @@
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
 
+        <!-- supportsPictureInPicture, so the call can shrink into a floating
+             window and stay visible over whatever it was just asked to open.
+             It relies on the configChanges below: the activity already handles
+             screenSize and screenLayout itself, which is what resizing into
+             and out of that window produces. Without them Android recreates
+             the activity, and the call would restart the moment it floated. -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"

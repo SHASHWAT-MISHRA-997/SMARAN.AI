@@ -3,6 +3,7 @@ import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, Use
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
+import { handleIfDeviceCommand } from '../utils/deviceControl';
 import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 import { useBackClose } from '../utils/backStack';
 import { parseCodeFence } from '../utils/codeFence';
@@ -3977,7 +3978,21 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     if (!queryText || !queryText.trim()) return;
     const query = queryText.trim();
     setVoiceAiResponse('');
-    // First, try to fulfil the utterance as a hands-free desktop/OS command.
+
+    // On the phone, do it on the phone.
+    //
+    // Ahead of the desktop path because this runs inside the Android app, and
+    // "Chrome kholo" said into the phone means this phone - not the paired
+    // desktop, and certainly not a paragraph explaining how to open Chrome on
+    // Windows, which is what a model answered before this existed.
+    const onDevice = await handleIfDeviceCommand(query);
+    if (onDevice) {
+      setVoiceAiResponse(onDevice.spoken);
+      speakNativeText(onDevice.spoken);
+      return;
+    }
+
+    // Otherwise, try to fulfil the utterance as a hands-free desktop/OS command.
     const handled = await tryVoiceDesktopCommand(query);
     if (handled) return;
     // Otherwise answer conversationally with the selected model.

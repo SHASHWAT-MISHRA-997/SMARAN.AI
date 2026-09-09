@@ -47,6 +47,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(SmaranSpeech.class);
+        registerPlugin(SmaranDevice.class);
         super.onCreate(savedInstanceState);
         // BridgeActivity displays its own error screen when WebView is missing.
         if (getBridge() == null) return;
