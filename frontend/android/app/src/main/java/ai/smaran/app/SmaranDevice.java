@@ -324,6 +324,43 @@ public class SmaranDevice extends Plugin {
         }
     }
 
+    /**
+     * Start listening even when the app is not on screen.
+     *
+     * This is the answer to "the second command does nothing". The activity is
+     * stopped as soon as another app opens, and a stopped activity does not
+     * hear, does not run the page, and cannot float itself. The service is not
+     * subject to any of that.
+     */
+    @PluginMethod
+    public void startListeningService(PluginCall call) {
+        try {
+            Intent service = new Intent(getContext(), SmaranVoiceService.class)
+                .setAction(SmaranVoiceService.ACTION_START);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(service);
+            } else {
+                getContext().startService(service);
+            }
+            call.resolve(new JSObject().put("listening", true));
+        } catch (Exception e) {
+            Log.w(TAG, "could not start the listening service", e);
+            call.resolve(new JSObject().put("listening", false)
+                .put("reason", String.valueOf(e.getMessage())));
+        }
+    }
+
+    @PluginMethod
+    public void stopListeningService(PluginCall call) {
+        getContext().stopService(new Intent(getContext(), SmaranVoiceService.class));
+        call.resolve(new JSObject().put("listening", false));
+    }
+
+    @PluginMethod
+    public void isListeningService(PluginCall call) {
+        call.resolve(new JSObject().put("listening", SmaranVoiceService.running));
+    }
+
     /** Whether the app is in a floating window right now. */
     @PluginMethod
     public void isFloating(PluginCall call) {

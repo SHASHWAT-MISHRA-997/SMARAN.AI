@@ -3,7 +3,7 @@ import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, Use
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
-import { handleIfDeviceCommand } from '../utils/deviceControl';
+import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening } from '../utils/deviceControl';
 import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 import { useBackClose } from '../utils/backStack';
 import { parseCodeFence } from '../utils/codeFence';
@@ -2117,11 +2117,20 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     setVoiceTranscript('');
     setVoiceAiResponse('');
     setVoiceState('listening');
+    // Keep hearing commands after this app stops being the one on screen.
+    // Opening something puts it in the background, and everything in this file
+    // stops running there; the service does not. Started with the call so the
+    // notification only exists while a call does.
+    startBackgroundListening();
   };
 
   const closeVoiceMode = () => {
     setIsVoiceModeOpen(false);
     isVoiceModeOpenRef.current = false;
+    // Ending the call ends the listening, and takes the notification with it.
+    // A microphone left held after the call is over is the thing nobody
+    // forgives, and the notification would be the only sign of it.
+    stopBackgroundListening();
     stopSpeaking();
     setVoiceState('idle');
     // Ending a call should end what was on screen with it. These were left

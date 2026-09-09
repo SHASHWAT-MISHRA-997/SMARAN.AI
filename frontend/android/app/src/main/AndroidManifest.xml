@@ -55,6 +55,16 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Speak: the microphone. Gesture Mode and screen vision: the camera. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Listening while the app is not on screen.
+         Without a foreground service the activity is stopped the moment another
+         app opens, and a stopped activity hears nothing - so a second spoken
+         command never worked. Android 14 requires the microphone type to be
+         declared alongside the generic permission, and Android 13 requires
+         asking before a notification can be posted; the service cannot run
+         without its notification, so both are needed for it to start at all. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.CAMERA" />
 
@@ -103,5 +113,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Keeps listening while another app is in front. Not exported: it is
+             started by this app and by its own notification action, and nothing
+             else has any business starting something that holds a microphone. -->
+        <service
+            android:name=".SmaranVoiceService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 </manifest>

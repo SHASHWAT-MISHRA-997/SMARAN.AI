@@ -24,6 +24,35 @@ const device = registerPlugin('SmaranDevice');
  * A failure to float is never a failure of the command. The app opened, which
  * is what was asked for; the window merely stayed full size behind it.
  */
+/**
+ * Keep listening while the app is not on screen.
+ *
+ * The activity is stopped the moment another app opens, and a stopped activity
+ * hears nothing and runs none of this. A foreground service is not stopped, so
+ * a second and third command work - which is the whole reason it exists. It
+ * posts a notification that cannot be dismissed, and that is not a side effect
+ * to hide: an app holding the microphone while you are elsewhere should be
+ * visibly doing so, and the notification carries the button that stops it.
+ */
+export async function startBackgroundListening() {
+  if (!isNativeApp()) return false;
+  try {
+    return Boolean((await device.startListeningService())?.listening);
+  } catch {
+    return false;
+  }
+}
+
+export async function stopBackgroundListening() {
+  if (!isNativeApp()) return false;
+  try {
+    await device.stopListeningService();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether the app is already in a floating window. */
 const isFloating = async () => {
   try {
