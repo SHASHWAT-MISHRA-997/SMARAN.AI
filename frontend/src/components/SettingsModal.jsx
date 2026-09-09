@@ -536,15 +536,19 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
     if (isMobile && activeTab === "updates") setActiveTab("general");
   }, [isMobile, activeTab]);
 
+  // Hooks MUST stay above the early return below so React's hook count
+  // remains invariant whether the modal is open or closed.
+  const [memoryError, setMemoryError] = useState("");
+  const [customInstructions, setCustomInstructions] = useState(
+    () => localStorage.getItem("sm_custom_instructions") || ""
+  );
+  const [memoryEnabled, setMemoryEnabled] = useState(
+    () => localStorage.getItem("sm_memory_enabled") !== "false"
+  );
+
   if (!isOpen) return null;
 
-  // These two used to change React state and nothing else when a backend was
-  // present: an added fact lived until the panel closed, and a deleted one came
-  // back, because the row was never touched in the database. The id was invented
-  // locally as `mem_<timestamp>` too, so it could never have matched a real row
-  // to delete. Both now go to the server and take their answer from it.
-  const [memoryError, setMemoryError] = useState("");
-
+  // Handlers can stay below early return as they are not React hooks.
   const handleAddMemoryFact = async () => {
     const fact = newFact.trim();
     if (!fact) return;
@@ -590,13 +594,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
       console.warn("memory delete failed:", error);
     }
   };
-
-  const [customInstructions, setCustomInstructions] = useState(
-    () => localStorage.getItem("sm_custom_instructions") || ""
-  );
-  const [memoryEnabled, setMemoryEnabled] = useState(
-    () => localStorage.getItem("sm_memory_enabled") !== "false"
-  );
 
   const handleClearAllMemory = async () => {
     if (!window.confirm("Are you sure you want to permanently erase all saved memory facts?")) return;

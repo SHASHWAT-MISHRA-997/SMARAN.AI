@@ -3739,13 +3739,6 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         system_prompt += plugin_prompt_context
 
     # Fetch active user memory vault facts (gated by memory_enabled setting)
-    # This used to end in `if not chat_req.rag_enabled and not
-    # chat_req.web_search else []`, so who you are was withheld whenever RAG
-    # or web search was on. Asked "my name is what?" with web search on, the
-    # model had the web and no memory, and answered about a song called "My
-    # Name Is...". The name was in the database the whole time.
-    #
-    # Identity is the wrong thing to economise context on. Capped instead.
     memory_is_active = getattr(chat_req, "memory_enabled", True)
     if memory_is_active:
         user_mems = (db.query(UserMemory)
@@ -3754,23 +3747,67 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                      .limit(MAX_MEMORY_FACTS_IN_PROMPT)
                      .all())
         if user_mems:
-            mem_lines = [f" {m.fact}" for m in user_mems]
-            system_prompt += "\n\n STORED USER MEMORY VAULT FACTS\n" + "\n".join(mem_lines) + "\n"
+            mem_lines = [f"• [{m.category or 'fact'}]: {m.fact}" for m in user_mems]
+            system_prompt += "\n\nLONG-TERM PERSISTENT USER MEMORY VAULT (Persists across all conversations):\n" + "\n".join(mem_lines) + "\n"
 
-    # Auto-extract user personal facts into Memory Vault (only if memory is enabled)
+    # Cross-session recent episodic history (Remember context across threads/new chats like Claude/ChatGPT)
+    try:
+        recent_other_sessions = (
+            db.query(ChatSession)
+            .filter(ChatSession.user_id == current_user.id, ChatSession.id != session.id)
+            .order_by(ChatSession.updated_at.desc())
+            .limit(4)
+            .all()
+        )
+        if recent_other_sessions:
+            cross_session_snippets = []
+            for osess in recent_other_sessions:
+                last_turns = (
+                    db.query(ChatMessage)
+                    .filter(ChatMessage.session_id == osess.id)
+                    .order_by(ChatMessage.created_at.desc())
+                    .limit(2)
+                    .all()
+                )
+                if last_turns:
+                    last_turns.reverse()
+                    turn_texts = [
+                        f"{t.role}: {t.content[:140].strip()}..." if len(t.content) > 140 else f"{t.role}: {t.content.strip()}"
+                        for t in last_turns
+                    ]
+                    cross_session_snippets.append(f"- Previous Thread '{osess.title}': " + " | ".join(turn_texts))
+            if cross_session_snippets:
+                system_prompt += (
+                    "\n\nRECENT CONVERSATION HISTORY ACROSS SESSIONS (Short/Medium-Term Memory):\n"
+                    "The user was recently discussing these topics in previous sessions. If they refer back to them, continue seamlessly:\n"
+                    + "\n".join(cross_session_snippets) + "\n"
+                )
+    except Exception as ex_recent:
+        logger.debug(f"Cross-session history fetch error: {ex_recent}")
+
+    # Auto-extract user personal facts, project details, and preferences into Memory Vault
     prompt_strip = chat_req.prompt.strip()
     prompt_lower_strip = prompt_strip.lower()
-    fact_triggers = ["my name is", "i am ", "i work at", "i am working on", "my role is", "my preference is", "i prefer", "remember this", "remember that", "store in memory", "save in memory", "yaad rakhna", "yaad rakho"]
+    fact_triggers = [
+        "my name is", "i am ", "i work at", "i am working on", "my role is", "my preference is", "i prefer",
+        "remember this", "remember that", "store in memory", "save in memory", "yaad rakhna", "yaad rakho",
+        "my project is", "i am building", "i am developing", "the app is called", "tech stack is", "always use", "never use"
+    ]
     if memory_is_active and any(ft in prompt_lower_strip for ft in fact_triggers) and len(prompt_strip) > 5:
         try:
             clean_fact = prompt_strip
-            for pfx in ["remember this permanently in memory:", "remember this permanently in memory", "remember this in memory:", "remember this:", "remember that:", "store in memory:", "save in memory:", "remember this", "remember that", "remember:"]:
+            for pfx in [
+                "remember this permanently in memory:", "remember this permanently in memory",
+                "remember this in memory:", "remember this:", "remember that:", "store in memory:",
+                "save in memory:", "remember this", "remember that", "remember:"
+            ]:
                 if clean_fact.lower().startswith(pfx):
                     clean_fact = clean_fact[len(pfx):].strip().lstrip(":- ").strip()
                     break
             existing_fact = db.query(UserMemory).filter(UserMemory.user_id == current_user.id, UserMemory.fact == clean_fact).first()
             if not existing_fact:
-                db.add(UserMemory(user_id=current_user.id, fact=clean_fact, source_session_id=session.id))
+                cat = _categorise_fact(clean_fact) if "_categorise_fact" in globals() else "durable_record"
+                db.add(UserMemory(user_id=current_user.id, fact=clean_fact, category=cat, source_session_id=session.id))
                 db.commit()
         except Exception:
             db.rollback()
@@ -3828,15 +3865,20 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
 
     messages_payload = [{"role": "system", "content": system_prompt}]
     
-    # 4. Sliding Window Chat History (Zep AI with DB fallback)
-    # Old Direct-AI answers must not leak into a document-only RAG turn.
+    # 4. In-Session Sliding Window Chat History (Short-term context)
+    # Generous 3000-word window (up to 24 turns) preserving multi-turn conversational context & code
     pruned_history = [] if chat_req.rag_enabled else await zep_get_history(session.id)
     if not chat_req.rag_enabled and not pruned_history:
-        # Fallback to local SQL pruner if Zep is empty or offline
-        max_history_words = 250 if chat_req.web_search else 250
+        max_history_words = 3000
         pruned_history = []
         current_words = 0
-        past_messages = db.query(ChatMessage).filter(ChatMessage.session_id == session.id).order_by(ChatMessage.created_at.desc()).all()
+        past_messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session.id)
+            .order_by(ChatMessage.created_at.desc())
+            .limit(24)
+            .all()
+        )
         for pm in past_messages:
             msg_words = len(pm.content.split())
             if current_words + msg_words > max_history_words:
