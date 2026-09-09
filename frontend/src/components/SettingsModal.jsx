@@ -8,12 +8,14 @@ import { Lock,
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
 import { useTheme } from "../context/ThemeContext";
+import AppearancePreferences from './AppearancePreferences';
 
 import { detectClientDevice } from './RightPanel';
 import { isPhone } from '../utils/device';
 import { isNativeApp, loadLink } from '../utils/hostLink';
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
+import { usagePercent } from '../utils/usageBar';
 
 /* Written in at build time, from package.json. It used to be the string
    "2.8.6" typed into the markup, so a phone that could not check for
@@ -24,6 +26,41 @@ const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'unknown';
 
 
 
+
+/**
+ * A resource bar that refuses to invent a reading.
+ *
+ * These were literal widths - `w-[30%]` and `w-[43%]` - identical on every
+ * machine. With the figures above them now saying "Not reported", a confident
+ * bar underneath was the most misleading part of the panel.
+ *
+ * An unmeasured bar is drawn differently rather than left empty, because an
+ * empty track and a zero-percent track are the same picture: a machine that
+ * reports nothing would be indistinguishable from one using no memory.
+ */
+const ResourceBar = ({ percent, colour, label }) => {
+  const unknown = percent === null;
+  return (
+    <div
+      className="w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 mt-2 overflow-hidden"
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      // Omitted rather than zeroed when unknown, which is what tells a screen
+      // reader the bar is indeterminate instead of empty.
+      aria-valuenow={unknown ? undefined : Math.round(percent)}
+      title={unknown ? `${label}: not reported by this device` : `${label}: ${Math.round(percent)}%`}
+    >
+      {unknown ? (
+        // Hatched and faint: visibly not a measurement.
+        <div className="h-full w-full opacity-40 bg-[repeating-linear-gradient(45deg,currentColor_0_4px,transparent_4px_8px)] text-zinc-400" />
+      ) : (
+        <div className={`h-full ${colour} transition-all duration-500`} style={{ width: `${percent}%` }} />
+      )}
+    </div>
+  );
+};
 
 const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange, selectedModel = "auto", sidebarPosition = "left", onSidebarPositionChange, performancePosition = "right", onPerformancePositionChange, onOpenConnections, onOpenModels, onOpenAnalytics }) => {
   const { theme, setTheme } = useTheme();
@@ -352,18 +389,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
 
   // Hardware Specs - Real detected hardware
   const [deviceSpecs, setDeviceSpecs] = useState({
-    source: "telemetry",
-    client_os: "Windows 11 (Laptop)",
-    gpu_available: true,
-    gpu_name: "NVIDIA GeForce RTX 2060",
-    gpu_vram_total: 6.0,
-    gpu_vram_used: 1.8,
-    memory_total_gb: 15.4,
-    memory_used_gb: 6.7,
-    cpu_name: "AMD Ryzen 9 4900H with Radeon Graphics",
-    cpu_cores: 8,
-    cpu_threads: 16,
-    cpu_usage: 32,
+    client_os: 'Not reported', gpu_name: 'Not reported', cpu_name: 'Not reported',
+    gpu_vram_total: null, gpu_vram_used: null, memory_total_gb: null,
+    memory_used_gb: null, cpu_threads: null,
   });
 
   useEffect(() => {
@@ -374,14 +402,14 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
       if (info) {
         setDeviceSpecs((prev) => ({
           ...prev,
-          client_os: info.os ? `${info.os} (${info.deviceType || 'Laptop'})` : "Windows 11 (Laptop)",
-          gpu_name: info.gpu?.name || "NVIDIA GeForce RTX 2060",
-          gpu_vram_total: info.gpu?.vram_total || 6.0,
-          gpu_vram_used: info.gpu?.vram_used || 1.8,
-          memory_total_gb: info.memory?.total_gb || 15.4,
-          memory_used_gb: info.memory?.used_gb || 6.7,
-          cpu_name: info.cpu?.name || "AMD Ryzen 9 4900H with Radeon Graphics",
-          cpu_threads: info.cpu?.threads || (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : 16) || 16,
+          client_os: info.os ? `${info.os} (${info.deviceType || 'Laptop'})` : "Not reported",
+          gpu_name: info.gpu?.name || "Not reported",
+          gpu_vram_total: info.gpu?.vram_total ?? null,
+          gpu_vram_used: info.gpu?.vram_used ?? null,
+          memory_total_gb: info.memory?.total_gb ?? null,
+          memory_used_gb: info.memory?.used_gb ?? null,
+          cpu_name: info.cpu?.name || "Not reported",
+          cpu_threads: info.cpu?.threads || (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : null) || null,
         }));
       }
     }).catch(() => {});
@@ -527,6 +555,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
 
   const TABS = [
     { id: "general", label: "General & Theme", icon: SlidersHorizontal },
+    { id: "appearance", label: "Appearance", icon: Sun },
     // First, and only where it is the thing standing between you and a
     // working app: on a phone with no computer linked, nothing answers until
     // a provider and a key are set.
@@ -632,6 +661,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-7 space-y-5 sm:space-y-6 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
 
             {/* 1. GENERAL & THEME TAB */}
+            {activeTab === 'appearance' && <AppearancePreferences />}
             {activeTab === "general" && (
               <div className="space-y-6">
                 <div>
@@ -1201,21 +1231,25 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                   <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
                     <span className="text-[11px] font-bold text-zinc-500">GPU VRAM</span>
                     <div className="text-xl font-black text-zinc-900 dark:text-white mt-1">
-                      {deviceSpecs.gpu_vram_used || '1.8'} / {deviceSpecs.gpu_vram_total || '6.0'} GB
+                      {deviceSpecs.gpu_vram_used ?? 'Not reported'} / {deviceSpecs.gpu_vram_total ?? 'Not reported'} GB
                     </div>
-                    <div className="w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 mt-2 overflow-hidden">
-                      <div className="h-full bg-indigo-500 w-[30%]" />
-                    </div>
+                    <ResourceBar
+                      percent={usagePercent(deviceSpecs.gpu_vram_used, deviceSpecs.gpu_vram_total)}
+                      colour="bg-indigo-500"
+                      label="GPU VRAM"
+                    />
                   </div>
 
                   <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
                     <span className="text-[11px] font-bold text-zinc-500">System RAM</span>
                     <div className="text-xl font-black text-zinc-900 dark:text-white mt-1">
-                      {deviceSpecs.memory_used_gb || '6.7'} / {deviceSpecs.memory_total_gb || '15.4'} GB
+                      {deviceSpecs.memory_used_gb ?? 'Not reported'} / {deviceSpecs.memory_total_gb ?? 'Not reported'} GB
                     </div>
-                    <div className="w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 mt-2 overflow-hidden">
-                      <div className="h-full bg-pink-500 w-[43%]" />
-                    </div>
+                    <ResourceBar
+                      percent={usagePercent(deviceSpecs.memory_used_gb, deviceSpecs.memory_total_gb)}
+                      colour="bg-pink-500"
+                      label="System RAM"
+                    />
                   </div>
                 </div>
 
