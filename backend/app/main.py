@@ -8056,6 +8056,53 @@ async def global_exception_handler(request, exc):
 
 app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="static")
 
+
+# ── stopping the machine control ─────────────────────────────────────────────
+#
+# Desktop actions had no session and no way to stop them. Once a multi-step task
+# was running, "stop" meant closing the app - while the task carried on opening
+# and typing into things. These three endpoints are the smallest surface that
+# makes stopping real: start a scope, see what is running, stop it.
+#
+# The stop endpoint takes no token by default and stops everything, because the
+# moment somebody wants control to stop is not the moment to ask them which
+# session they meant.
+from . import control_session as _control_session  # noqa: E402
+
+
+@app.post("/api/control/session", tags=["control"])
+async def start_control_session(payload: dict | None = None):
+    """Open a scope that desktop actions can be run under, and stopped as one."""
+    reason = (payload or {}).get("reason", "")
+    token = _control_session.begin(reason)
+    # The token is returned once, to the caller that opened the session. It
+    # authorises further control, so it is never included in the listing below.
+    return {"session": token, "active": _control_session.active()}
+
+
+@app.get("/api/control/session", tags=["control"])
+async def list_control_sessions():
+    """What is currently allowed to drive this machine."""
+    running = _control_session.active()
+    return {"active": running, "running": bool(running)}
+
+
+@app.post("/api/control/stop", tags=["control"])
+async def stop_control(payload: dict | None = None):
+    """Stop one session, or all of them.
+
+    Stopping something already stopped is reported as success: a person
+    pressing stop twice means the same thing both times, and an error there
+    would be noise at exactly the moment they want certainty.
+    """
+    token = (payload or {}).get("session")
+    outcome = _control_session.stop(token)
+    return {
+        "stopped": outcome["stopped"],
+        "known": outcome["known"],
+        "active": _control_session.active(),
+    }
+
 # Register the SPA fallback last so it cannot swallow model-storage, engine
 # or uploaded-file requests. Unknown API URLs still receive a JSON 404.
 app.add_api_route("/{path_name:path}", serve_frontend, methods=["GET"], include_in_schema=False)

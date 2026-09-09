@@ -21,6 +21,8 @@ import shutil
 import subprocess
 import sys
 import time
+
+from . import control_session
 import webbrowser
 from urllib.parse import urlencode
 from pathlib import Path
@@ -729,10 +731,29 @@ class DesktopAgent:
                 "risk": spec["risk"],
             }
 
+        # Checked here, immediately before acting, rather than when the plan was
+        # made. A stop pressed part-way through a multi-step task has to land
+        # between steps; checked earlier it would be read once and every
+        # remaining step would run anyway.
+        #
+        # It cannot interrupt a step already in flight - nothing in-process can -
+        # so what this promises is the honest thing: no further step is taken.
+        session = params.get("control_session") if isinstance(params, dict) else None
+        if not control_session.is_running(session):
+            stopped = {
+                "success": False,
+                "stopped": True,
+                "action": action_id,
+                "error": "Control was stopped, so this step was not taken.",
+            }
+            record_operation(action_id, params, stopped)
+            return stopped
+
         # Dispatch to handler
         handler = getattr(DesktopAgent, f"_action_{action_id}", None)
         if not handler:
             return {"success": False, "error": f"Action handler not implemented: {action_id}"}
+        control_session.note_step(session)
 
         try:
             result = await asyncio.to_thread(handler, params)
