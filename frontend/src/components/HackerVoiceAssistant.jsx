@@ -33,7 +33,7 @@ import AvatarVideo, { AVATAR_CHARACTERS } from './AvatarVideo';
 import AvatarMMD, { MMD_CHARACTERS } from './AvatarMMD';
 import CyberStage from './CyberStage';
 import { classifyTranscriptionFailure, pollFinalTranscript, silenceWindowMs, voiceOutcomeKind } from '../utils/voiceStatus';
-import { captionSplit } from '../utils/spokenProgress';
+import { captionScrollTop, captionSplit } from '../utils/spokenProgress';
 
 /* Prebuilt Gemini Live voices, grouped so a user can simply pick male or
    female. The service decides the exact timbre; these are its own voices. */
@@ -211,6 +211,9 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
   // Scrolled to its newest line by the effect further down, once the line it
   // follows has been worked out.
   const captionRef = useRef(null);
+  // A zero-width marker sitting exactly between the spoken and unspoken text,
+  // so the scroll can find the voice without measuring characters.
+  const spokenEdgeRef = useRef(null);
 
   // Whether there is a network at all. The core had no way to show this, so
   // with the connection gone it went on drawing a healthy cyan idle core while
@@ -1948,6 +1951,42 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     if (distanceFromBottom < 48) box.scrollTop = box.scrollHeight;
   }, [transcript, interimTranscript, voiceAiResponse, chatHistory]);
 
+  // Follow the voice down a long answer.
+  //
+  // The effect above only fires when the text changes, and while a reply is
+  // being spoken it does not change at all - so the highlight walked out of
+  // the visible area and kept going, which is exactly what was reported. This
+  // watches the spoken position instead, and moves the box only once the
+  // boundary has left a comfortable band, so it steps rather than jitters.
+  //
+  // Above the early return for the same reason as the effect above it: a hook
+  // that runs on some renders and not others is rejected by React, and putting
+  // one below the return has already caused error #310 on the device here.
+  useEffect(() => {
+    const box = captionRef.current;
+    const edge = spokenEdgeRef.current;
+    if (!box || !edge) return;
+    // Measured against the box rather than through offsetTop, because the
+    // marker's offsetParent is the paragraph, not the scrolling element.
+    const boxRect = box.getBoundingClientRect();
+    const edgeRect = edge.getBoundingClientRect();
+    const edgeOffset = (edgeRect.top - boxRect.top) + box.scrollTop;
+    const target = captionScrollTop({
+      boxHeight: box.clientHeight,
+      boxScrollTop: box.scrollTop,
+      scrollHeight: box.scrollHeight,
+      edgeOffset,
+    });
+    if (target === null) return;
+    const gentle = typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    if (typeof box.scrollTo === 'function') {
+      box.scrollTo({ top: target, behavior: gentle ? 'auto' : 'smooth' });
+    } else {
+      box.scrollTop = target;
+    }
+  }, [speechProgress?.charIndex, speechProgress?.spokenText]);
+
   if (!isOpen) return null;
 
   const currentSpeakingText = transcript || interimTranscript;
@@ -2199,6 +2238,10 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
                   aria-live reads the paragraph, and splitting the text does not
                   change what it contains, so a screen reader is unaffected. */}
               {spokenSoFar ? <span className="voice-caption-said">{spokenSoFar}</span> : null}
+              {/* Zero-width, and where the voice currently is. The scroll
+                  effect measures this rather than counting characters, so it
+                  stays correct however the paragraph happens to wrap. */}
+              <span ref={spokenEdgeRef} aria-hidden="true">{'​'}</span>
               <span className="voice-caption-ahead">{spokenAhead}</span>
             </p>
           </div>

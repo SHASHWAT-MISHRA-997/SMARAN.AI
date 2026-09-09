@@ -115,3 +115,56 @@ test('the last word can be reached', () => {
   });
   assert.equal(offset, displayText.length);
 });
+
+// ---- following the voice down a long caption -------------------------------
+
+import { captionScrollTop } from '../src/utils/spokenProgress.js';
+
+const box = { boxHeight: 200, scrollHeight: 1000 };
+
+test('a caption that fits is never scrolled', () => {
+  assert.equal(captionScrollTop({
+    boxHeight: 200, scrollHeight: 150, boxScrollTop: 0, edgeOffset: 40,
+  }), null);
+});
+
+test('the box stays still while the voice is comfortably in view', () => {
+  // 25%-70% of the height is the band it is allowed to move within.
+  assert.equal(captionScrollTop({ ...box, boxScrollTop: 0, edgeOffset: 60 }), null);
+  assert.equal(captionScrollTop({ ...box, boxScrollTop: 0, edgeOffset: 130 }), null);
+});
+
+test('the box follows once the voice drops below the band', () => {
+  const top = captionScrollTop({ ...box, boxScrollTop: 0, edgeOffset: 400 });
+  assert.ok(top !== null, 'expected a scroll');
+  // The spoken word lands above the middle, leaving room for what comes next.
+  assert.ok(top < 400 && top > 250, `unexpected scrollTop ${top}`);
+});
+
+test('it also catches up when the voice is above the visible area', () => {
+  // Happens when a new, shorter reply replaces a long one that was scrolled.
+  const top = captionScrollTop({ ...box, boxScrollTop: 600, edgeOffset: 100 });
+  assert.ok(top !== null && top < 600, `expected to scroll up, got ${top}`);
+});
+
+test('it never scrolls past the end of the content', () => {
+  const top = captionScrollTop({ ...box, boxScrollTop: 0, edgeOffset: 990 });
+  assert.ok(top <= 1000 - 200, `overscrolled to ${top}`);
+});
+
+test('it never scrolls above the start', () => {
+  const top = captionScrollTop({ ...box, boxScrollTop: 500, edgeOffset: 5 });
+  assert.ok(top >= 0, `negative scrollTop ${top}`);
+});
+
+test('a move of a pixel or two is not worth a scroll', () => {
+  // Guards against firing a scroll on every single word.
+  assert.equal(captionScrollTop({
+    ...box, boxScrollTop: 316, edgeOffset: 400,
+  }), null);
+});
+
+test('nothing is scrolled before the voice starts', () => {
+  assert.equal(captionScrollTop({ ...box, boxScrollTop: 0, edgeOffset: -1 }), null);
+  assert.equal(captionScrollTop({}), null);
+});

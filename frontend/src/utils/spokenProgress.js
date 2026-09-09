@@ -137,4 +137,45 @@ export function captionSplit({ displayText = '', spokenText = '', charIndex = -1
   return { spoken: text.slice(0, offset), pending: text.slice(offset), offset };
 }
 
+/**
+ * Where the caption box should be scrolled to keep the voice in view.
+ *
+ * The caption already scrolled itself to the bottom when new text arrived, and
+ * that is the wrong motion for this: while a reply is being spoken the text
+ * does not grow at all, so nothing fired, and the voice simply walked out of
+ * the visible area and kept going. Following the *bottom* would also be wrong
+ * once it did fire, because the voice starts at the top of a long answer.
+ *
+ * So this follows the boundary between the spoken and unspoken halves, and
+ * only when that boundary has drifted out of a comfortable band. Scrolling on
+ * every word would fight the reader and jitter the line; letting it leave the
+ * box entirely is the reported problem. The band gives it room to move a few
+ * lines before the box catches up, which is how a lyric view behaves.
+ *
+ * @param {{boxHeight: number, boxScrollTop: number, scrollHeight: number,
+ *          edgeOffset: number}} input  edgeOffset is measured from the top of
+ *          the scrollable content, not from the viewport
+ * @returns {number|null} the scrollTop to move to, or null to leave it alone
+ */
+export function captionScrollTop({
+  boxHeight = 0, boxScrollTop = 0, scrollHeight = 0, edgeOffset = -1,
+} = {}) {
+  if (!(boxHeight > 0) || !(scrollHeight > 0)) return null;
+  if (!Number.isFinite(edgeOffset) || edgeOffset < 0) return null;
+  // Nothing to scroll: the whole caption already fits.
+  if (scrollHeight <= boxHeight) return null;
+
+  const visibleTop = edgeOffset - boxScrollTop;
+  const comfortableTop = boxHeight * 0.25;
+  const comfortableBottom = boxHeight * 0.7;
+  if (visibleTop >= comfortableTop && visibleTop <= comfortableBottom) return null;
+
+  // Put the current word a bit above the middle, so the words about to be
+  // spoken are the ones with room beneath them.
+  const wanted = Math.round(edgeOffset - boxHeight * 0.42);
+  const clamped = Math.max(0, Math.min(wanted, Math.round(scrollHeight - boxHeight)));
+  // A move of a pixel or two is not worth a scroll event.
+  return Math.abs(clamped - boxScrollTop) < 4 ? null : clamped;
+}
+
 export default captionSplit;
