@@ -1305,3 +1305,70 @@ frame, not a fault - it renders after a two second wait.
   the bench.
 - Nothing about her changes the licensing position of the assets that ship
   alongside her; Amarya and Myra are untouched, by decision.
+
+---
+
+## VRM characters, and Vega deleted
+
+The owner's verdict on the code-drawn character was unambiguous: ugly, not
+futuristic, not attractive. That is fair, and the underlying reason is worth
+recording rather than tuning around. **Ultrarealistic is not reachable with
+hand-written primitives.** A convincing face needs a sculpted mesh, PBR
+textures, hair geometry and skin shading - an *asset*, which is exactly what
+the licensing problem is about. Spheres and cylinders written in JavaScript will
+not get there however long they are adjusted.
+
+`AvatarVega.jsx` and its bench are deleted. Recoverable from `5ee1cf3` if it is
+ever wanted.
+
+### The route chosen instead
+
+VRoid Studio: free software from pixiv where the owner designs the character
+themselves, and **owns what they make**. That clears the licence question at the
+source rather than working around it, and it would make the project eligible for
+free code signing if the other assets were ever resolved too.
+
+`@pixiv/three-vrm` 3.5.5 turned out to be **already a dependency and completely
+unused** - declared by an earlier pass and never wired up. So this needed no new
+package.
+
+### What VRM gives that MMD does not
+
+The MMD path matches morph names against a list of spellings seen in the wild,
+because PMX models disagree about what a mouth shape is called. VRM standardises
+it: real visemes (`aa`/`ih`/`ou`/`ee`/`oh`), `blink`, moods, a humanoid skeleton
+with named bones, and a look-at rig. None of it has to be guessed.
+
+`AvatarVRM.jsx` drives visemes from the assistant's own audio, blinks on a
+timer, leans the spine when listening, tilts the head when thinking, and calls
+`vrm.update(delta)` every frame - without which spring bones never move and the
+hair is welded in place.
+
+Two details that would otherwise bite:
+
+- `VRMUtils.rotateVRM0` turns a VRM 0.x model round. Without it an older export
+  stands with her back to the person talking to her.
+- The canvas gets an explicit CSS size, the same fix the deleted component
+  needed: `setSize(w, h, false)` leaves style alone by design, and a canvas with
+  no CSS size is laid out from its buffer attributes, which are set from its
+  parent's height.
+
+### The characters folder now takes either
+
+A `.vrm` is one file carrying its own textures, so it can sit directly in
+`DATA_DIR/characters/`. A `.pmx` references textures by relative path and still
+needs a folder. Both are listed, and the page picks a renderer from the file
+extension rather than from a type recorded anywhere.
+
+13 tests on the listing. The pair that matter: a loose `.pmx` is **not** offered,
+because it would load untextured, while a loose `.vrm` **is**, because it is
+complete on its own. A folder holding both prefers the VRM.
+
+Suites: **339 backend and CLI**, **110 frontend**, lint and build clean.
+
+### Not verified
+
+- **No VRM has been loaded.** There is no `.vrm` file on this machine and
+  fetching one would repeat the licensing mistake. The loader, the renderer and
+  the routing are written and typecheck-clean but have never run against a real
+  model. This is the next thing to test, on the owner's own export.

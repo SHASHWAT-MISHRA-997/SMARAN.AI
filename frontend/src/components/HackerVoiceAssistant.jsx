@@ -31,7 +31,7 @@ import { GESTURES } from '../utils/gestureControl';
 import { isDesktopApp } from './RightPanel';
 import AvatarVideo, { AVATAR_CHARACTERS } from './AvatarVideo';
 import AvatarMMD, { MMD_CHARACTERS, loadUserCharacters } from './AvatarMMD';
-import AvatarVega, { VEGA_CHARACTER } from './AvatarVega';
+import AvatarVRM from './AvatarVRM';
 import CyberStage from './CyberStage';
 import { classifyTranscriptionFailure, pollFinalTranscript, silenceWindowMs, voiceOutcomeKind } from '../utils/voiceStatus';
 import { captionScrollTop, captionSplit } from '../utils/spokenProgress';
@@ -324,7 +324,6 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     // after this runs, and re-checking it here would blank the picker on every
     // start before the request came back.
     const known = saved === 'core'
-      || saved === VEGA_CHARACTER.id
       || String(saved || '').startsWith('user:')
       || MMD_CHARACTERS.some((c) => c.id === saved)
       || AVATAR_CHARACTERS.some((c) => c.id === saved);
@@ -334,6 +333,11 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
   // than at module load, because a standalone phone has no backend to ask and
   // the request would fail on every start for nothing.
   const [userCharacters, setUserCharacters] = useState([]);
+  // A .vrm is loaded by a different renderer from a .pmx, and the file itself
+  // says which - so the picker does not need a type to be recorded anywhere.
+  const userVrm = userCharacters.find(
+    (c) => c.id === avatarId && /\.vrm(\?|$)/i.test(c.file || ''),
+  );
   useEffect(() => {
     if (!isOpen) return undefined;
     let cancelled = false;
@@ -390,7 +394,6 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     // The drawn characters carry their own gender; the abstract core is given
     // the male voice so both options are available without a second picker.
     const character =
-      (avatarId === VEGA_CHARACTER.id ? VEGA_CHARACTER : null) ||
       MMD_CHARACTERS.find((c) => c.id === avatarId) ||
       AVATAR_CHARACTERS.find((c) => c.id === avatarId) ||
       // A model the user added. It carries no gender - we have no idea who
@@ -2140,11 +2143,6 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
                   ✨ {c.name}
                 </option>
               ))}
-              {/* Drawn entirely in code, so she ships everywhere the app
-                  ships without anyone else's licence attached to her. */}
-              <option value={VEGA_CHARACTER.id} className="bg-zinc-900 text-white font-bold">
-                ◈ {VEGA_CHARACTER.name}
-              </option>
               {/* Models the user put in their own characters folder. Listed
                   after the built-in one so a fresh install is not an empty
                   picker waiting on a request. */}
@@ -2234,8 +2232,12 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
                 toneText={latestSpokenLine}
               />
             </div>
-          ) : avatarId === 'vega' ? (
-            <AvatarVega
+          ) : userVrm ? (
+            /* A character the user made and owns - VRoid exports these. The
+               renderer is chosen by file type rather than by a flag, so a
+               folder holding a .vrm and one holding a .pmx both just work. */
+            <AvatarVRM
+              file={userVrm.file}
               speechSource={speechBus?.node || null}
               speechContext={speechBus?.context || null}
               isSpeaking={voiceState === 'speaking' || liveState === 'speaking'}

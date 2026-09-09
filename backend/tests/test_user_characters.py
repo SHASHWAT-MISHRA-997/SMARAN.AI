@@ -58,10 +58,38 @@ def test_a_folder_with_no_pmx_is_skipped(characters):
     assert listed()["characters"] == []
 
 
-def test_a_loose_file_is_not_a_character(characters):
+def test_a_loose_pmx_is_not_a_character(characters):
     # A PMX dropped straight into the folder has no directory for its textures,
-    # so it would load untextured. Only folders are offered.
+    # so it would load untextured. Only a folder will do for that format.
     (characters / "stray.pmx").write_bytes(b"PMX ")
+    assert listed()["characters"] == []
+
+
+def test_a_loose_vrm_is_a_character(characters):
+    # A VRM is the opposite case: it carries its own textures, so a single file
+    # is complete and asking for a folder around it would be pointless
+    # ceremony. This is the file VRoid Studio exports.
+    (characters / "Aiko.vrm").write_bytes(b"glTF")
+    entry = listed()["characters"][0]
+    # Shown without the suffix - "Aiko.vrm" is not a name anyone wants in a
+    # picker - while the id stays the filename so it round-trips.
+    assert entry["name"] == "Aiko"
+    assert entry["id"] == "Aiko.vrm"
+    assert entry["file"] == "/api/characters/files/Aiko.vrm"
+
+
+def test_a_vrm_wins_over_a_pmx_in_the_same_folder(characters):
+    # Both would load, but only the VRM is certain to have its textures and a
+    # standard expression set beside it.
+    (characters / "Both").mkdir()
+    (characters / "Both" / "model.pmx").write_bytes(b"PMX ")
+    (characters / "Both" / "model.vrm").write_bytes(b"glTF")
+    assert listed()["characters"][0]["file"].endswith("model.vrm")
+
+
+def test_an_unrelated_loose_file_is_ignored(characters):
+    (characters / "notes.txt").write_text("not a character")
+    (characters / "photo.png").write_bytes(b"\x89PNG")
     assert listed()["characters"] == []
 
 

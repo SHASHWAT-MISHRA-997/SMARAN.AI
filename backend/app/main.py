@@ -8078,30 +8078,67 @@ app.mount("/api/characters/files",
           StaticFiles(directory=_CHARACTER_DIR), name="user_characters")
 
 
+# A .vrm is one file that carries its own textures, so it can sit directly in
+# the characters folder; a .pmx references textures by relative path and needs
+# the folder around it. Both are offered, and the page picks a renderer from the
+# extension.
+_MODEL_SUFFIXES = (".vrm", ".pmx")
+
+
+def _model_in(directory):
+    """The first model file in a directory, preferring .vrm.
+
+    Preferred because a VRM carries its own textures and expression set, so it
+    is the one that will load correctly without anything else beside it.
+    """
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return None
+    for suffix in _MODEL_SUFFIXES:
+        for name in names:
+            if name.lower().endswith(suffix):
+                return name
+    return None
+
+
 @app.get("/api/characters", tags=["characters"])
 async def list_user_characters():
-    """Model folders the user has added, each holding one .pmx.
+    """Models the user has added: a .vrm on its own, or a folder holding one.
 
-    Only the folder name and the model file are reported. Nothing is copied,
-    converted or sent anywhere.
+    Only names and paths are reported. Nothing is copied, converted or sent
+    anywhere - the file is read from this machine and stays on it.
     """
     found = []
     try:
-        for entry in sorted(os.scandir(_CHARACTER_DIR), key=lambda e: e.name.lower()):
-            if not entry.is_dir():
-                continue
-            models = [f for f in sorted(os.listdir(entry.path))
-                      if f.lower().endswith(".pmx")]
-            if not models:
+        entries = sorted(os.scandir(_CHARACTER_DIR), key=lambda e: e.name.lower())
+    except OSError:
+        logger.info("The characters folder could not be read.", exc_info=True)
+        return {"characters": found, "folder": _CHARACTER_DIR}
+
+    for entry in entries:
+        if entry.is_file():
+            # A VRM dropped straight in. Named by the file, without its suffix,
+            # because "Aiko.vrm" is not what anyone wants to see in a picker.
+            if not entry.name.lower().endswith(".vrm"):
                 continue
             found.append({
                 "id": entry.name,
-                # Shown as typed; the folder name is the character's name.
-                "name": entry.name,
-                "file": f"/api/characters/files/{quote(entry.name)}/{quote(models[0])}",
+                "name": os.path.splitext(entry.name)[0],
+                "file": f"/api/characters/files/{quote(entry.name)}",
             })
-    except OSError:
-        logger.info("The characters folder could not be read.", exc_info=True)
+            continue
+        if not entry.is_dir():
+            continue
+        model = _model_in(entry.path)
+        if not model:
+            continue
+        found.append({
+            "id": entry.name,
+            # Shown as typed; the folder name is the character's name.
+            "name": entry.name,
+            "file": f"/api/characters/files/{quote(entry.name)}/{quote(model)}",
+        })
     return {"characters": found, "folder": _CHARACTER_DIR}
 
 # Register the SPA fallback last so it cannot swallow model-storage, engine
