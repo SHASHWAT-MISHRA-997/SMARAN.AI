@@ -518,3 +518,102 @@ Against what SMARAN has today:
 The licence permits building the missing pieces or self-hosting the project.
 Nothing here claims parity: three of seven are absent, and the two sites that
 could not be read may describe capabilities not represented above at all.
+
+---
+
+## The .rpm, and a world-writable payload that the .deb did not have
+
+The rpm built on the first attempt and was the right size, which is exactly why
+it needed opening. `rpm -qlvp` on it showed `drwxrwxrwx` and `-rwxrwxrwx` for
+every entry — including `/opt/smaran-ai/SMARAN.AI`, the application binary. A
+world-writable binary in `/opt` is a local privilege-escalation primitive: any
+user on the machine can overwrite it and wait for the next person to run it.
+
+The `.deb`, built from the same tree in the same script run, was correct. That
+difference is the whole diagnosis. The tree lives under `/mnt/c`, which WSL
+mounts 9p/drvfs **without `metadata`**, so `chmod` does not persist and every
+path reads back as 0777 no matter what was asked for. `build_deb.sh` runs
+inside `fakeroot`, which remembers the modes it was asked for and hands them to
+`dpkg-deb` in the same session. `rpmbuild` ran outside any such session and
+read the real filesystem.
+
+Two fixes were rejected before the right one. A `%defattr(0644,root,root,0755)`
+in the spec would have set the modes, and would also have stripped the execute
+bit from bundled helpers such as ffmpeg. Exporting a shell function and calling
+`fakeroot bash -c rpm_build_cmd` did not carry the function through — it failed
+with `rpm_build_cmd: command not found`, and because of `set -e` that run
+produced neither an rpm nor an AppImage.
+
+The fix is `packaging/linux/build_rpm.sh`, invoked under fakeroot exactly the
+way `build_deb.sh` already was. Same normalisation pass, same session, so rpm
+gets the view dpkg-deb had.
+
+### Read back from the rebuilt package
+
+```
+entries: 1759
+world-writable: 0
+owner/group: root root  (1759 of 1759)
+
+drwxr-xr-x  root root         0  /opt/smaran-ai
+-rwxr-xr-x  root root  41823080  /opt/smaran-ai/SMARAN.AI
+-rwxr-xr-x  root root        47  /usr/bin/smaran-ai
+-rwxr-xr-x  root root       186  /usr/share/applications/smaran-ai.desktop
+
+distinct modes present: 1443 -rwxr-xr-x, 316 drwxr-xr-x
+```
+
+One honest note on that last line: every regular file is 755 rather than data
+files landing on 644. `chmod a=rX,u+w` keeps the execute bit on files that
+already had one, and on drvfs every file already reads as executable, so `X`
+matched all of them. Nothing is world-writable and nothing is group-writable,
+which is the property that mattered; the `.deb` has the same shape. Building on
+a filesystem that carries Unix metadata would give the tighter split.
+
+### Extracted and started
+
+`rpm2archive` (cpio is not installed here; the payload is the same either way)
+into `~/rpmextract`, which is ext4, so the modes persist and can be read back:
+
+```
+-rwxr-xr-x  /home/shash/rpmextract/opt/smaran-ai/SMARAN.AI
+-rwxr-xr-x  /home/shash/rpmextract/usr/bin/smaran-ai
+drwxr-xr-x  /home/shash/rpmextract/opt/smaran-ai
+```
+
+Then run directly:
+
+```
+port 3003, ready after ~18s
+ping: {"status":"ok","app":"SMARAN.AI","version":"2.10.34"}
+frontend: 200
+index title: <title>SMARAN.AI - Autonomous AI Coding Assistant</title>
+Plugins running: code-risk-scan, github-reader, headroom, hyperframes,
+  long-term-memory, meeting-notes-import, paperclip, provider-latency,
+  task-observer, text-reverse, ui-ux-review, web-page-reader
+```
+
+`xdg-open` fails in this WSL because no browser is installed there. That is the
+environment, not the package — the app falls through its browser list and keeps
+serving, which is the behaviour `_open_browser_window` is written for.
+
+### All four artifacts, from one build
+
+```
+sha256                                                            bytes      file
+55389cf3ce87fec9c87e132d18ffb08789fd390916979a0c47879a29becb4117  369089016  SMARAN.AI-2.10.34-x86_64.AppImage
+1026edfa00d59999ce2d3a7ea6cc123053e271d467d7a64a296ec798b1db78fd  397331333  smaran-ai-2.10.34-1.x86_64.rpm
+d78bf98e12a0dd473848df22a4fe32a1375dc02b8834c5574819e48e22b3fd7c  399259516  smaran-ai-2.10.34-linux-x86_64.tar.gz
+3838fdaaefef8e4e3cb806ec8a2f76e24288acf9ed43b92fd80d5727a710672c  306066488  smaran-ai_2.10.34_amd64.deb
+```
+
+`rpmbuild` 4.18.2 was installed without root, by `apt-get download` and
+`dpkg -x` into `~/rpmlocal/root` with `PATH`, `LD_LIBRARY_PATH` and
+`RPM_CONFIGDIR` pointed at it. No password was needed and none was requested.
+
+### Not verified
+
+The rpm was extracted and run, not installed with `rpm -i` — that needs root on
+a machine with an rpm database, and this is Ubuntu. Install scriptlets
+(`%post`, `update-desktop-database`) and dependency resolution on a real
+Fedora, RHEL or openSUSE machine remain untested.

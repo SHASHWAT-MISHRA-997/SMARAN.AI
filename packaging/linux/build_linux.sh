@@ -202,7 +202,31 @@ EOF
     # shared object and writes a Requires for each one - including the private
     # copies this bundle carries - and the package then refuses to install on
     # the machine it was built for.
-    rpmbuild --quiet         --define "_topdir $RPMROOT"         --define "_rpmdir $OUT"         --define "_build_id_links none"         --buildroot "$TREE"         -bb "$RPMROOT/SPECS/$APP_ID.spec"
+    # Built under fakeroot, with the same permission pass the .deb gets.
+    #
+    # Without this the rpm shipped every file and directory as 0777 -
+    # world-writable, including the application binary in /opt - while the
+    # .deb from the very same tree was correct. The reason is the filesystem:
+    # this tree lives on /mnt/c, mounted 9p/drvfs without `metadata`, where
+    # chmod does not persist and everything reads back as 0777. build_deb.sh
+    # runs under fakeroot, which remembers the modes it was asked for, so
+    # dpkg-deb saw them. rpmbuild ran outside that session and saw the disk.
+    #
+    # Normalising and packaging inside one fakeroot session gives rpm the same
+    # view dpkg-deb had, which is also what the comment above this section
+    # promises: two packages that cannot drift apart.
+    # A script rather than an exported shell function: `fakeroot bash -c` did
+    # not carry the function through, and the failure was "rpm_build_cmd:
+    # command not found" followed by no rpm and, because of set -e, no
+    # AppImage either. build_deb.sh is invoked the same way for the same
+    # reason.
+    if command -v fakeroot >/dev/null 2>&1; then
+        fakeroot bash "$ROOT/packaging/linux/build_rpm.sh" \
+            "$TREE" "$RPMROOT" "$OUT" "$APP_ID" "$RPMROOT/SPECS/$APP_ID.spec"
+    else
+        bash "$ROOT/packaging/linux/build_rpm.sh" \
+            "$TREE" "$RPMROOT" "$OUT" "$APP_ID" "$RPMROOT/SPECS/$APP_ID.spec"
+    fi
     find "$OUT" -name '*.rpm' -exec mv -f {} "$OUT/" ';' 2>/dev/null || true
     rm -rf "$RPMROOT" "$OUT/x86_64"
     echo "[linux] built $(cd "$OUT" && ls *.rpm)"
