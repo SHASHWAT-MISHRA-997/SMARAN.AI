@@ -4,6 +4,7 @@ import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
 import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening } from '../utils/deviceControl';
+import { speechSegments, dominantLanguage } from '../utils/speechSegments';
 import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 import { useBackClose } from '../utils/backStack';
 import { parseCodeFence } from '../utils/codeFence';
@@ -1595,37 +1596,65 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     if (isNativeApp()) {
       setIsSpeakingAudio(true);
       if (isVoiceModeOpenRef.current) setVoiceState('speaking');
-      nativeSpeech.speak({
-        text: clean,
-        language: langCode === 'en' ? 'en-IN' : getRecognitionLang(langCode),
-        gender: assistantGender(),
-        rate: 0.95,
-        pitch: 1.0,
-        onStart: () => {
-          setIsSpeakingAudio(true);
-          setSpeechProgress({ charIndex: 0, spokenText: clean });
-          if (isVoiceModeOpenRef.current) setVoiceState('speaking');
-        },
-        onRange: (start) => {
-          setSpeechProgress((previous) => (
-            previous.spokenText === clean ? { charIndex: start, spokenText: clean } : previous
-          ));
-        },
-        onEnd: () => {
-          setIsSpeakingAudio(false);
-          setSpeechProgress({ charIndex: -1, spokenText: '' });
-          if (isVoiceModeOpenRef.current) setVoiceState('idle');
-        },
-        onError: () => {
-          setIsSpeakingAudio(false);
-          setSpeechProgress({ charIndex: -1, spokenText: '' });
-          if (isVoiceModeOpenRef.current) setVoiceState('idle');
-        },
-      }).catch((err) => {
-        console.warn('Native speech error:', err);
-        setIsSpeakingAudio(false);
-        setSpeechProgress({ charIndex: -1, spokenText: '' });
+
+      // The voice comes from the reply, not from the picker.
+      //
+      // It used to be `langCode`, which is whatever the reply-language setting
+      // said - so an answer containing Hindi was read by an English voice
+      // whenever that setting was English, and a mixed answer was always read
+      // by one wrong voice for half its length. Segmenting by script gives each
+      // part the voice that can pronounce it.
+      const fallback = langCode === 'en' ? 'en-IN' : (getRecognitionLang(langCode) || 'en-IN');
+      const segments = speechSegments(clean, fallback);
+      if (!segments.length) return;
+
+      // Where each segment starts in `clean`, so the caption highlight keeps
+      // following the voice across a change of language rather than restarting
+      // at zero on every segment.
+      let cursor = 0;
+      const starts = segments.map((segment) => {
+        const at = clean.indexOf(segment.text, cursor);
+        const found = at === -1 ? cursor : at;
+        cursor = found + segment.text.length;
+        return found;
       });
+
+      const speakSegment = (index) => {
+        if (index >= segments.length) {
+          setIsSpeakingAudio(false);
+          setSpeechProgress({ charIndex: -1, spokenText: '' });
+          if (isVoiceModeOpenRef.current) setVoiceState('idle');
+          return;
+        }
+        const segment = segments[index];
+        nativeSpeech.speak({
+          text: segment.text,
+          language: segment.lang,
+          gender: assistantGender(),
+          rate: 0.95,
+          pitch: 1.0,
+          onStart: () => {
+            setIsSpeakingAudio(true);
+            setSpeechProgress({ charIndex: starts[index], spokenText: clean });
+            if (isVoiceModeOpenRef.current) setVoiceState('speaking');
+          },
+          onRange: (start) => {
+            setSpeechProgress((previous) => (
+              previous.spokenText === clean
+                ? { charIndex: starts[index] + start, spokenText: clean }
+                : previous
+            ));
+          },
+          // Each segment hands on to the next, so a reply that changes script
+          // is still one continuous answer rather than only its first clause.
+          onEnd: () => speakSegment(index + 1),
+          onError: () => speakSegment(index + 1),
+        }).catch((err) => {
+          console.warn('Native speech error:', err);
+          speakSegment(index + 1);
+        });
+      };
+      speakSegment(0);
       return;
     }
 
@@ -1662,7 +1691,12 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       if (sentences.length === 0) return;
 
       ttsChunksRef.current = [...sentences];
-      const targetLang = langCode === 'en' ? 'en-IN' : (getRecognitionLang(langCode) || 'en-IN');
+      // One voice for the whole reply here, because this path speaks a chunk at
+      // a time and a SpeechSynthesisUtterance cannot change language partway.
+      // Whichever language covers most of the text is still a better answer
+      // than the picker, which was not looking at the text at all.
+      const preferred = langCode === 'en' ? 'en-IN' : (getRecognitionLang(langCode) || 'en-IN');
+      const targetLang = dominantLanguage(clean, preferred);
 
       window._activeSpeechUtterances = window._activeSpeechUtterances || [];
       window._activeSpeechUtterances = [];
