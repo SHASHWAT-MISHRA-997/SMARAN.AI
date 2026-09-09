@@ -983,3 +983,92 @@ than on anything I observed.
 - Energy Core / Amarya voice quality and arm motion remain unjudged.
 - The Windows installer is still unsigned; the rpm still untested on an
   rpm-based distribution.
+
+---
+
+## 2.10.35 — version bump, full rebuild, published
+
+2.10.34 was published earlier the same day and then found to be wrong: Speak was
+broken on Android and the desktop app could refuse to start behind a system
+proxy. The owner chose a real version bump over replacing 2.10.34's assets in
+place, so that two different builds never share one version number.
+
+### The bump
+
+The version is baked into every frozen binary, so a bump means rebuilding
+everything. Six source locations, all of them:
+
+```
+backend/app/updates.py            APP_VERSION
+backend/app/usage_reporting.py    APP_VERSION
+cli/smaran_cli/__init__.py        __version__
+frontend/android/app/build.gradle versionName 2.10.35, versionCode 21035
+frontend/package.json             version
+installer/SMARAN.AI.iss           AppVersion
+```
+
+`cli/pyproject.toml` needed no edit; its version is `dynamic` and read from
+`smaran_cli.__version__`. The Android `versionCode` matters as much as the name:
+Android refuses to install an update whose code has not increased.
+
+Suites after the bump: **312 backend, 14 CLI, 69 frontend**, unchanged.
+
+### Rebuilt, and checked by running rather than by date
+
+| Artifact | Evidence |
+| --- | --- |
+| Frontend | bundle `index-v2.10.35-_zVm7Sms.js` |
+| Windows app | started; `{"status":"ok","app":"SMARAN.AI","version":"2.10.35"}`, frontend 200 |
+| Windows installer | compiled against the new dist, 280,263,461 bytes |
+| Linux app | extracted from the rpm and started; same ping, version **2.10.35**, frontend 200 |
+| Linux packages | four, all 2.10.35 |
+| APK | carries `index-v2.10.35-_zVm7Sms.js`, versionCode 21035 |
+| Windows CLI | `smaran 2.10.35` |
+| Linux CLI | `smaran 2.10.35`, run with `PYTHONPATH` unset |
+
+The rpm permission fix has not regressed across either rebuild:
+
+```
+entries: 1759   world-writable: 0   owner: root root
+-rwxr-xr-x  root root  41823176  /opt/smaran-ai/SMARAN.AI
+```
+
+Two build-environment notes. `ISCC.exe` is at
+`C:\Users\shash\AppData\Local\Programs\Inno Setup 6\`, not under
+`Program Files (x86)`; the first compile failed on that path. And the Windows
+run logged `WinError 4551, An Application Control policy has blocked this file`
+for `video-packages\torch\lib\caffe2_nvrtc.dll` — that is this machine's Smart
+App Control refusing an unsigned DLL under user data. The app started and served
+anyway; it is the same unsigned-code limitation already recorded, not a fault in
+the build.
+
+### Published
+
+`v2.10.35`, eight assets, same fixed filenames so the website's
+`releases/latest/download/<name>` links keep resolving. Every URL requested
+afterwards:
+
+```
+SMARAN.AI-Setup.exe              200   280263461
+SMARAN.AI-x86_64.AppImage        200   369089016
+smaran-ai_amd64.deb              200   306065774
+smaran-ai.x86_64.rpm             200   397327886
+smaran-ai-linux-x86_64.tar.gz    200   399254137
+smaran-linux-x86_64              200     8182776
+smaran.exe                       200    10010401
+SMARAN-AI.apk                    200    33627158
+```
+
+Every Content-Length matches the staged file. Website deployed; the APK it
+serves directly reads back at 33,627,158 bytes, the same build. The one size
+fallback that actually moved was `smaran.exe`, 9.7 → 9.5 MB.
+
+### Not verified
+
+- Nobody has installed these from GitHub; the checks are on staged bytes and on
+  the URLs resolving.
+- The installer is still unsigned, and the rpm still untested on an rpm-based
+  distribution.
+- Speak and Dictate are owner-accepted on the phone, on a build with the same
+  frontend as this one — but the owner tested the APK Codex installed, not this
+  release APK. The code is identical; the installation was not repeated.
