@@ -2093,6 +2093,47 @@ async def clear_user_memory(db: Session = Depends(get_db), current_user: User = 
     return {"message": f"Memory cleared. {deleted} facts erased.", "cleared_count": deleted}
 
 
+@app.post("/api/memory")
+async def add_memory_fact(payload: dict, db: Session = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """Store one memory fact the user typed themselves.
+
+    There was no way to do this. The Settings panel had an add box that built
+    an object, put it in React state and stopped there - so a fact appeared in
+    the list, survived until the panel closed, and was gone on reopening. The
+    delete button was the same in reverse: it filtered state while the row sat
+    untouched in the database, so a "deleted" memory came back.
+
+    Returned in the same shape as GET /api/memory so the caller can insert the
+    row it gets back rather than guessing at an id, which is what produced the
+    invented `mem_<timestamp>` ids that never matched anything real.
+    """
+    fact = str(payload.get("fact", "")).strip()
+    if not fact:
+        raise HTTPException(status_code=400, detail="A memory needs some text.")
+    # Bounded because this is stored per user and read into prompts; an
+    # unbounded field here becomes an unbounded prompt later.
+    if len(fact) > 2000:
+        raise HTTPException(status_code=400, detail="That memory is too long (2000 characters maximum).")
+
+    category = str(payload.get("category") or "durable_record")
+    if category not in MEMORY_CATEGORY_LABELS:
+        category = "durable_record"
+
+    entry = UserMemory(user_id=current_user.id, fact=fact, category=category)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    logger.info(f"Added memory fact id={entry.id} for user_id={current_user.id}")
+    return {
+        "id": entry.id,
+        "fact": entry.fact,
+        "category": entry.category or "durable_record",
+        "category_label": MEMORY_CATEGORY_LABELS.get(entry.category or "durable_record", "Durable Record"),
+        "created_at": entry.created_at,
+    }
+
+
 @app.delete("/api/memory/{memory_id}")
 async def delete_single_memory(memory_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Delete a single memory fact by its ID (selective memory management)."""

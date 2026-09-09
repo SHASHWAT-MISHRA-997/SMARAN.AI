@@ -533,24 +533,57 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
 
   if (!isOpen) return null;
 
-  const handleAddMemoryFact = () => {
-    if (!newFact.trim()) return;
+  // These two used to change React state and nothing else when a backend was
+  // present: an added fact lived until the panel closed, and a deleted one came
+  // back, because the row was never touched in the database. The id was invented
+  // locally as `mem_<timestamp>` too, so it could never have matched a real row
+  // to delete. Both now go to the server and take their answer from it.
+  const [memoryError, setMemoryError] = useState("");
+
+  const handleAddMemoryFact = async () => {
+    const fact = newFact.trim();
+    if (!fact) return;
+    setMemoryError("");
     if (noBackend()) {
-      setMemoryFacts(localChat.addFact(newFact.trim()));
+      setMemoryFacts(localChat.addFact(fact));
       setNewFact("");
       return;
     }
-    const item = { id: `mem_${Date.now()}`, fact: newFact.trim() };
-    setMemoryFacts((prev) => [item, ...prev]);
-    setNewFact("");
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/memory`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fact }),
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      // The saved row, with the id the database gave it - not one made up here.
+      const saved = await res.json();
+      setMemoryFacts((prev) => [saved, ...prev]);
+      setNewFact("");
+    } catch (error) {
+      // The box keeps what was typed, so a failure does not also lose the text.
+      setMemoryError("That memory could not be saved. It has not been stored.");
+      console.warn("memory add failed:", error);
+    }
   };
 
-  const handleDeleteMemoryFact = (id) => {
+  const handleDeleteMemoryFact = async (id) => {
+    setMemoryError("");
     if (noBackend()) {
       setMemoryFacts(localChat.removeFact(id));
       return;
     }
-    setMemoryFacts((prev) => prev.filter((f) => f.id !== id));
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/memory/${id}`, { method: "DELETE" });
+      // 404 means it is already gone, which is the state being asked for.
+      if (!res.ok && res.status !== 404) throw new Error(`Server returned ${res.status}`);
+      setMemoryFacts((prev) => prev.filter((f) => f.id !== id));
+    } catch (error) {
+      // Left on screen deliberately. Removing the row here would show it as
+      // deleted while it is still stored, which is the bug being fixed.
+      setMemoryError("That memory could not be deleted. It is still stored.");
+      console.warn("memory delete failed:", error);
+    }
   };
 
   const TABS = [
@@ -1299,6 +1332,14 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                     Add Fact
                   </button>
                 </div>
+
+                {/* Said out loud rather than swallowed. A memory that failed to
+                    save used to look saved until the panel was reopened. */}
+                {memoryError && (
+                  <p role="alert" className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                    {memoryError}
+                  </p>
+                )}
 
                 <div className="space-y-2">
                   {memoryFacts.map((f) => (
