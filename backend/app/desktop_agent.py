@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 import webbrowser
+from urllib.parse import urlencode
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
@@ -753,8 +754,9 @@ class DesktopAgent:
             return {"success": False, "error": "No URL provided."}
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
-        webbrowser.open(url)
-        return {"success": True, "message": f"Opened {url} in browser.", "url": url}
+        if not webbrowser.open(url):
+            return {"success": False, "error": "No browser accepted the URL.", "url": url}
+        return {"success": True, "message": "Sent the URL to the browser.", "url": url}
 
     @staticmethod
     def _action_open_website(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -764,7 +766,8 @@ class DesktopAgent:
         url = URL_REGISTRY.get(name)
         if not url:
             url = f"https://www.{name}.com"
-        webbrowser.open(url)
+        if not webbrowser.open(url):
+            return {"success": False, "error": "No browser accepted the website.", "url": url}
         return {"success": True, "message": f"Opened {name} in browser.", "url": url}
 
     @staticmethod
@@ -772,8 +775,9 @@ class DesktopAgent:
         query = params.get("query", "").strip()
         if not query:
             return {"success": False, "error": "No search query provided."}
-        url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
-        webbrowser.open(url)
+        url = "https://www.youtube.com/results?" + urlencode({"search_query": query})
+        if not webbrowser.open(url):
+            return {"success": False, "error": "No browser accepted the YouTube search.", "url": url}
         return {"success": True, "message": f"Searching YouTube for: {query}", "url": url}
 
     @staticmethod
@@ -781,6 +785,23 @@ class DesktopAgent:
         name = params.get("name", "").strip().lower()
         if not name:
             return {"success": False, "error": "No application name provided."}
+
+        if sys.platform.startswith("linux"):
+            aliases = {
+                "chrome": ("google-chrome", "chromium", "chromium-browser"),
+                "firefox": ("firefox",),
+                "calculator": ("gnome-calculator", "kcalc", "galculator"),
+                "terminal": ("x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal"),
+                "file explorer": ("nautilus", "dolphin", "thunar"),
+                "vs code": ("code", "codium"),
+            }
+            candidates = aliases.get(name, (name,))
+            executable = next((path for candidate in candidates
+                               if (path := shutil.which(candidate))), None)
+            if not executable:
+                return {"success": False, "error": f"No installed executable found for '{name}'."}
+            subprocess.Popen([executable], shell=False)
+            return {"success": True, "message": f"Launch requested for {name}.", "app": name}
 
         # Direct Windows known app execution for instant reliable launch
         if sys.platform == "win32":
@@ -858,6 +879,15 @@ class DesktopAgent:
         folder = _safe_path(path_str)
         if not folder.exists():
             return {"success": False, "error": f"Folder not found: {folder}"}
+        if sys.platform.startswith("linux"):
+            opener = shutil.which("xdg-open")
+            if not opener:
+                return {"success": False, "error": "xdg-open is unavailable in this desktop session."}
+            target = folder if folder.is_dir() else folder.parent
+            result = subprocess.run([opener, str(target)], capture_output=True, text=True, timeout=15)
+            if result.returncode:
+                return {"success": False, "error": "The desktop file manager rejected the folder."}
+            return {"success": True, "message": f"Sent {target.name} to the file manager."}
         if not folder.is_dir():
             subprocess.Popen(["explorer.exe", "/select,", str(folder)], creationflags=WIN_NO_WINDOW)
             return {"success": True, "message": f"Opened folder containing {folder.name}."}
@@ -1442,10 +1472,19 @@ class DesktopAgent:
         text = str(params.get("text", "")).strip()
         if not text:
             return {"success": False, "error": "No text was provided to type."}
+        if sys.platform.startswith("linux"):
+            if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+                return {"success": False, "error": "Typing into other applications needs an authorized desktop-control session on Wayland."}
+            tool = shutil.which("xdotool")
+            if not tool or not os.environ.get("DISPLAY"):
+                return {"success": False, "error": "Typing requires an X11 desktop and installed xdotool."}
+            result = subprocess.run([tool, "type", "--clearmodifiers", "--file", "-"],
+                                    input=text, text=True, capture_output=True, timeout=15)
+            return {"success": result.returncode == 0,
+                    **({"message": "Text sent to the focused window."} if result.returncode == 0
+                       else {"error": "The desktop rejected text input."})}
         # SendKeys treats these as control characters, so they are escaped.
-        escaped = text
-        for char in "+^%~(){}[]":
-            escaped = escaped.replace(char, "{" + char + "}")
+        escaped = "".join("{" + char + "}" if char in "+^%~(){}[]" else char for char in text)
         escaped = escaped.replace("'", "''")
         result = DesktopAgent._send_keys(escaped, f"Typed: {text[:60]}")
         return result

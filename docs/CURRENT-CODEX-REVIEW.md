@@ -103,3 +103,14 @@ Windows symlink-privilege test skipped; production-preview browser checks
 `no-phone-extension.log`, `no-phone-browser.log`.
 This does not certify real provider coding, physical voice quality, installers,
 video generation or a release. No production deployment performed.
+
+## PC control implementation, 2026-09-10
+
+Added Linux executable resolution and xdg-open folder handling instead of
+Windows start/explorer commands. Browser refusal now returns failure; YouTube
+queries preserve Unicode and URL delimiters. Fixed Windows SendKeys escaping
+and added X11 xdotool text input with explicit unsupported Wayland result.
+32 focused launch/voice-command tests pass. Full suite stopped after making no
+further progress at 65%; that run is not a pass (pc-control-tests.log).
+Actual Linux desktop input and full autonomous screen/browser agent are not
+verified or complete. No release or deployment.
