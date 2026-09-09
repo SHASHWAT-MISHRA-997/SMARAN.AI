@@ -1072,3 +1072,111 @@ fallback that actually moved was `smaran.exe`, 9.7 → 9.5 MB.
 - Speak and Dictate are owner-accepted on the phone, on a build with the same
   frontend as this one — but the owner tested the APK Codex installed, not this
   release APK. The code is identical; the installation was not repeated.
+
+---
+
+## Device control on the phone, and 2.10.36
+
+### What the logs settled that reasoning did not
+
+Opening an app from the plugin failed silently at first: the call reported
+success, nothing was refused, and the app never appeared. The cause was the
+context. `getContext()` on a Capacitor plugin is the Application context, and
+an activity started from it is a background launch, which Android has
+restricted since 10. Launching from `getActivity()` fixed it, and the log then
+said exactly why it now worked:
+
+```
+START u0 {... pkg=com.android.chrome ...} mCallingUid=10470
+  with LAUNCH_SINGLE_INSTANCE_PER_TASK
+  (BAL_ALLOW_VISIBLE_WINDOW (callingUid has visible non-pinned window))
+  result code=0
+```
+
+That same line then explained why the floating window could not work the way it
+was first written. The launch is allowed because this app has a **visible,
+non-pinned** window - and a picture-in-picture window is pinned. Floating first
+removes the permission the launch depends on. Floating afterwards fails too:
+by then the launched app is resumed and this one is not, and
+`enterPictureInPictureMode` is only honoured for a foreground activity.
+
+`setAutoEnterEnabled` is the resolution. The window is armed while still in
+front, the launch proceeds under the allowance it needs, and Android floats the
+activity itself as it steps aside. It is disarmed on the next resume, because
+auto-enter is a property of the activity rather than of one launch, and leaving
+it on would float the app every time Home was pressed for any reason.
+
+Observed in one run on the phone:
+
+```
+isAutoPipEnabled=true            (armed, 11 log lines)
+START u0 ... pkg=com.whatsapp    (the app launched)
+PipTransitionState(mState=entered-pip)  aspectRatio=9/16
+```
+
+and the call said "Opening WhatsApp." aloud. Chrome was seen starting the same
+way on an earlier run. Detection, launch, spoken confirmation and the float are
+therefore all evidenced.
+
+### Two bugs the tests caught before the device did
+
+- The music patterns have no capture group, so `match[1]` was `undefined` and
+  the rule treated a perfectly good match as a failure. "gaana bajao" did
+  nothing.
+- Politeness lands *after* the verb in Hinglish - "Chrome kholo zara" - which is
+  past the anchor the verb-last pattern needs, so it has to come off the
+  sentence before matching rather than off the captured name afterwards.
+  `karo` and `kar do` are deliberately excluded from that list: they are the
+  verb in "chalu karo", and stripping them leaves "calculator chalu", which
+  matches nothing.
+
+18 tests on detection, including that a refusal, a question and a quoted
+command do not run, and that "awaz band karo" is still an instruction.
+
+### The caption follows the voice
+
+Highlight verified on the device earlier: mid-sentence the lit text ran through
+`**On a computer` while the rest stayed dim, and those asterisks being inside
+the highlight is the word alignment working, since the voice never says them.
+
+The scroll rule has 8 tests of its own. It follows the boundary between spoken
+and unspoken text and only once that boundary leaves a band between a quarter
+and seven tenths down the box, so it steps rather than jitters.
+
+**Not watched on the device.** Repeated attempts to drive a long reply by adb
+taps ended in a muted microphone, an ended call and a fresh session with
+nothing to re-speak. The rule is unit tested and the code path is shared with
+the highlight that was seen working, but the scrolling itself has not been
+observed on the phone.
+
+### 2.10.36
+
+Same six version locations as 2.10.35, `versionCode` 21036 with it. Checked by
+running, not by date:
+
+| Artifact | Evidence |
+| --- | --- |
+| Linux app, from the rpm | `{"status":"ok","app":"SMARAN.AI","version":"2.10.36"}`, frontend 200 |
+| Linux packages | four, bundle `index-v2.10.36-B2VLBXb8.js` inside the rpm |
+| rpm permissions | 1759 entries, **0 world-writable**, root:root |
+| APK | carries the same 2.10.36 bundle |
+| Windows CLI | `smaran 2.10.36` |
+| Linux CLI | `smaran 2.10.36`, `PYTHONPATH` unset |
+
+110 frontend tests, lint and build clean.
+
+Published as `v2.10.36`, eight assets under the same fixed filenames. Every
+download URL requested afterwards returned 200 with a Content-Length matching
+the staged file byte for byte. Website deployed; the APK it serves directly
+reads back at 33,632,226 bytes, the same build.
+
+### Not verified
+
+- The caption scrolling, on the device (above).
+- Nobody has installed these from GitHub; the checks are on staged bytes and
+  URLs resolving.
+- The Windows app at 2.10.36 was frozen and packaged but not started; the Linux
+  one was. Both come from the same source and the same frontend bundle.
+- Opening apps by voice was exercised with WhatsApp and Chrome. Music, YouTube
+  and spoken web addresses are covered by tests but were not run on the phone.
+- The installer remains unsigned, and the rpm untested on an rpm-based distro.
