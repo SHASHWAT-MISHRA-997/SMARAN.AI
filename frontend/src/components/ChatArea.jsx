@@ -3775,6 +3775,8 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
           // Spoken turns get short, proactive replies written to be heard.
           voice_mode: isVoiceTurn,
           target_language: selectedLanguage === 'en' ? undefined : selectedLanguage,
+          custom_instructions: localStorage.getItem('sm_custom_instructions') || undefined,
+          memory_enabled: localStorage.getItem('sm_memory_enabled') !== 'false',
           ...getCloudRoutingPayload(),
         }),
       });

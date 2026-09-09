@@ -49,6 +49,8 @@ class ChatRequest(BaseModel):
     cloud_model: Optional[str] = None
     cloud_api_key: Optional[str] = None
     cloud_fallbacks: List[dict] = []
+    custom_instructions: Optional[str] = None
+    memory_enabled: bool = True
 
 class VisionChatRequest(BaseModel):
     """Schema for vision-based chat requests (image analysis)."""

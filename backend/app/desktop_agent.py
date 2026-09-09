@@ -425,6 +425,32 @@ DESKTOP_ACTION_CATALOG: Dict[str, Dict[str, Any]] = {
         "risk": "medium", "changes_system": False, "requires_confirmation": True,
         "parameters": {"text": "Text to type"}, "category": "input",
     },
+    "mouse_click": {
+        "title": "Click mouse",
+        "description": "Click at specific screen coordinates or at the current mouse position.",
+        "risk": "medium", "changes_system": True, "requires_confirmation": False,
+        "parameters": {
+            "x": "Optional X screen coordinate",
+            "y": "Optional Y screen coordinate",
+            "button": "Button: left, right, or double (default left)",
+        },
+        "category": "input",
+    },
+    "mouse_scroll": {
+        "title": "Scroll mouse",
+        "description": "Scroll the active window or cursor position up or down.",
+        "risk": "low", "changes_system": False, "requires_confirmation": False,
+        "parameters": {
+            "delta": "Scroll amount (positive for up, negative for down; default -120)",
+        },
+        "category": "input",
+    },
+    "read_screen_state": {
+        "title": "Read current screen and UI state",
+        "description": "Observe display bounds, active window title and position, cursor position, and visible open windows.",
+        "risk": "read_only", "changes_system": False, "requires_confirmation": False,
+        "parameters": {}, "category": "system",
+    },
     "get_time": {
         "title": "Current date and time",
         "description": "Report the machine's current date and time.",
@@ -1574,6 +1600,165 @@ class DesktopAgent:
         escaped = escaped.replace("'", "''")
         result = DesktopAgent._send_keys(escaped, f"Typed: {text[:60]}")
         return result
+
+    @staticmethod
+    def _action_mouse_click(params: Dict[str, Any]) -> Dict[str, Any]:
+        x = params.get("x")
+        y = params.get("y")
+        button = str(params.get("button", "left")).lower().strip()
+
+        if sys.platform == "win32":
+            user32 = ctypes.windll.user32
+            if x is not None and y is not None:
+                try:
+                    ix, iy = int(x), int(y)
+                    user32.SetCursorPos(ix, iy)
+                except (ValueError, TypeError):
+                    return {"success": False, "error": "Invalid x or y coordinates."}
+
+            MOUSEEVENTF_LEFTDOWN = 0x0002
+            MOUSEEVENTF_LEFTUP = 0x0004
+            MOUSEEVENTF_RIGHTDOWN = 0x0008
+            MOUSEEVENTF_RIGHTUP = 0x0010
+
+            if button == "right":
+                user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+                return {"success": True, "message": "Right click dispatched.", "button": "right"}
+            elif button in ("double", "double_click"):
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                time.sleep(0.05)
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                return {"success": True, "message": "Double click dispatched.", "button": "double"}
+            else:
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                return {"success": True, "message": "Click dispatched.", "button": "left"}
+
+        elif sys.platform.startswith("linux"):
+            if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+                return {"success": False, "error": "Mouse control requires an authorized desktop-control session on Wayland."}
+            tool = shutil.which("xdotool")
+            if not tool or not os.environ.get("DISPLAY"):
+                return {"success": False, "error": "Mouse control requires an X11 desktop and installed xdotool."}
+
+            if x is not None and y is not None:
+                subprocess.run([tool, "mousemove", str(int(x)), str(int(y))], check=False)
+
+            btn_arg = "3" if button == "right" else "1"
+            if button in ("double", "double_click"):
+                cmd = [tool, "click", "--repeat", "2", "--delay", "50", "1"]
+            else:
+                cmd = [tool, "click", btn_arg]
+            res = subprocess.run(cmd, capture_output=True, timeout=5)
+            return {"success": res.returncode == 0, "button": button, "message": f"{button.capitalize()} clicked via xdotool."}
+
+        return {"success": False, "error": f"Mouse click is not supported on {sys.platform}."}
+
+    @staticmethod
+    def _action_mouse_scroll(params: Dict[str, Any]) -> Dict[str, Any]:
+        delta = params.get("delta", -120)
+        try:
+            idelta = int(delta)
+        except (ValueError, TypeError):
+            idelta = -120
+
+        if sys.platform == "win32":
+            MOUSEEVENTF_WHEEL = 0x0800
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, idelta, 0)
+            direction = "up" if idelta > 0 else "down"
+            return {"success": True, "message": f"Scrolled {direction}.", "delta": idelta}
+
+        elif sys.platform.startswith("linux"):
+            if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+                return {"success": False, "error": "Mouse scrolling requires an authorized desktop-control session on Wayland."}
+            tool = shutil.which("xdotool")
+            if not tool or not os.environ.get("DISPLAY"):
+                return {"success": False, "error": "Mouse scrolling requires an X11 desktop and installed xdotool."}
+            btn = "4" if idelta > 0 else "5"
+            clicks = max(1, abs(idelta) // 120)
+            res = subprocess.run([tool, "click", "--repeat", str(clicks), btn], capture_output=True, timeout=5)
+            return {"success": res.returncode == 0, "message": f"Scrolled {clicks} units."}
+
+        return {"success": False, "error": f"Mouse scroll is not supported on {sys.platform}."}
+
+    @staticmethod
+    def _action_read_screen_state(params: Dict[str, Any]) -> Dict[str, Any]:
+        state = {
+            "platform": sys.platform,
+            "cursor": None,
+            "screen_size": None,
+            "active_window": None,
+            "open_windows_count": 0,
+        }
+        if sys.platform == "win32":
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+
+            w = user32.GetSystemMetrics(0)
+            h = user32.GetSystemMetrics(1)
+            state["screen_size"] = {"width": w, "height": h}
+
+            class POINT(ctypes.Structure):
+                _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+            pt = POINT()
+            if user32.GetCursorPos(ctypes.byref(pt)):
+                state["cursor"] = {"x": pt.x, "y": pt.y}
+
+            hwnd = user32.GetForegroundWindow()
+            if hwnd:
+                length = user32.GetWindowTextLengthW(hwnd)
+                buff = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buff, length + 1)
+                rect = wintypes.RECT()
+                user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                state["active_window"] = {
+                    "hwnd": hwnd,
+                    "title": buff.value,
+                    "bounds": {
+                        "left": rect.left, "top": rect.top,
+                        "right": rect.right, "bottom": rect.bottom,
+                        "width": rect.right - rect.left, "height": rect.bottom - rect.top,
+                    },
+                }
+
+            try:
+                open_wins = DesktopAgent._get_open_windows()
+                state["open_windows_count"] = len(open_wins)
+                state["open_windows"] = [w.get("title") for w in open_wins[:15] if w.get("title")]
+            except Exception:
+                pass
+
+            return {
+                "success": True,
+                "state": state,
+                "message": f"Screen: {w}x{h}, Active: {state['active_window']['title'] if state['active_window'] else 'None'}",
+            }
+
+        elif sys.platform.startswith("linux"):
+            if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+                return {
+                    "success": True,
+                    "state": {
+                        "platform": "linux",
+                        "display_server": "wayland",
+                        "note": "Detailed UI coordinates restricted by Wayland security policy.",
+                    },
+                }
+            tool = shutil.which("xdotool")
+            if tool and os.environ.get("DISPLAY"):
+                res = subprocess.run([tool, "getactivewindow", "getwindowname"], capture_output=True, text=True, timeout=5)
+                active_title = res.stdout.strip() if res.returncode == 0 else "Unknown"
+                res_cur = subprocess.run([tool, "getmouselocation"], capture_output=True, text=True, timeout=5)
+                cur_text = res_cur.stdout.strip() if res_cur.returncode == 0 else ""
+                state["active_window"] = {"title": active_title}
+                state["raw_cursor"] = cur_text
+                return {"success": True, "state": state, "message": f"Active window: {active_title}"}
+            return {"success": True, "state": state, "message": "Linux X11 state inspection without xdotool."}
+
+        return {"success": False, "error": f"Screen state inspection not supported on {sys.platform}."}
 
     @staticmethod
     def _action_get_time(params: Dict[str, Any]) -> Dict[str, Any]:

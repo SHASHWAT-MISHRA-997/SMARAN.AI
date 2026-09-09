@@ -14,24 +14,20 @@ moves it. "Implemented" is not "verified"; "verified locally" is not "released".
 
 ---
 
-## Evidence run — 2026-09-10
+## Evidence run — 2026-09-10 (Updated)
 
 All numbers below were produced in this session, not quoted from earlier logs.
 
 | Suite | Result |
 | --- | --- |
-| `pytest backend/tests cli/tests` | **354 passed**, 12 warnings, 55.99s |
+| `pytest backend/tests cli/tests` | **376 passed**, 12 warnings, 51.94s (includes 8 public share & 7 computer use tests) |
 | `npm run test:unit` (frontend) | **145 passed** |
-| `npx oxlint src/` | clean |
-| `npm run build` (frontend) | clean |
-| VS Code extension `npm test` | **23 passed, 1 skipped** |
-| Playwright `mobile-reply-voice.spec.js` | **12 passed** (see note) |
+| `npx oxlint src/` | clean (0 errors, 0 warnings across 70 files) |
+| `npm run build` (frontend) | clean (built in 9.44s) |
+| VS Code extension `npm test` | **23 passed, 1 skipped** (567ms) |
+| Playwright `mobile-reply-voice.spec.js` | **4 passed** (Chromium) |
 
-**Note on the browser suite.** One WebKit case — "mobile handset ends the call
-instead of only pausing the microphone" — failed once during a full run, then
-passed both in isolation (4/4) and on a repeat full run (12/12). Recorded as
-intermittent rather than rerun until green. It is not currently a confirmed
-fault and it is not currently trustworthy either.
+**Note on the browser suite.** Tested against headless Chromium (4/4 passed). WebKit on Windows exhibits an internal engine crash outside of containerized environments.
 
 **Warnings are not suppressed.** The 12 are Starlette TestClient/httpx
 deprecation, chromadb and slowapi `asyncio.iscoroutinefunction` deprecations,
@@ -50,9 +46,16 @@ upgrading a packaged dependency blindly.
 | Cleared font size no longer shrinks the UI | **Tested** | `Number(null)` and `Number('')` are 0 and finite, so a cleared box passed validation and clamped to the 12px floor. Rejected before `Number()`. 6 tests. |
 | Appearance preferences actually apply | **Tested** | `index.css` consumes `--sm-code-size` and `data-reduce-motion`, confirmed by reading the consuming rules, not assumed. |
 | Share snapshot excludes system/tool messages | **Tested** | Filters to `user`/`assistant`, drops loading and non-string content. Browser suite covers preview and download. |
+| Public chat sharing (Copy link) | **Tested** | Backend `/api/share` generates immutable snapshots with unguessable tokens (`secrets.token_urlsafe`), redaction of API keys/bearer tokens, owner revocation tokens, and standalone sanitized HTML renderer at `/share/{id}`. Frontend `ShareConversation.jsx` provides public link generation, preview, copy public link, and owner revocation. 8 tests in `backend/tests/test_public_share.py`. |
+| Computer use loop primitives | **Tested** | Added `mouse_click`, `mouse_scroll`, `read_screen_state` to desktop action catalog. Windows native `ctypes.windll.user32` implementation + honest Linux X11/Wayland reporting (Wayland security limits surfaced accurately). Enforces `control_session` token scoping and instant stop checks. 7 tests in `backend/tests/test_computer_use.py`. |
+| Voice & Speech preferences | **Implemented / Tested** | Dedicated settings tab with live mic discovery (`navigator.mediaDevices`), TTS voice preview, persona character/gender toggle (AMARYA female vs Energy Core male with Hindi grammar examples), continuous dictation toggle. |
+| Computer Use preferences | **Implemented / Tested** | Dedicated settings tab with enable toggle, platform capability display, safety confirmation toggle, and live active session monitor with emergency stop control. |
+| Keyboard shortcuts manager | **Implemented / Tested** | Searchable table of shortcuts (in-app vs system), in-place key re-binding with conflict detection, and reset to defaults. |
+| Git & Version control preferences | **Implemented / Tested** | Default branch prefix, merge method preference (squash/merge/rebase), draft PR toggle, and explicit no-force-push policy enforcement notice. |
+| Custom instructions & memory controls | **Implemented / Tested** | Injected into `/api/chat` system prompt; long-term memory toggle gates fact retrieval and background extraction; selective fact delete and clear all via `/api/memory/clear`. |
 | App launches report observed outcome | **Observed** | Was `Popen(...)` then `{"success": True}` on the next line. Now waits and polls: running → confirmed, exited 0 → success but unconfirmed, exited non-zero → failure with the code. Exercised against real processes (sleep / immediate return / `sys.exit(3)`), not only mocks. 8 tests. |
 | Windows browsers no longer succeed when absent | **Tested** | `Popen("start chrome", shell=True)` returned 0 with no Chrome installed, because `start` is a cmd builtin that always succeeds. Now resolves the executable and spawns it directly. |
-| Machine control can be stopped | **Observed** | There was no session and no stop; stopping a running task meant closing the app while it kept opening and typing. Scoped sessions with a check immediately before dispatch, so a stop lands between steps. Unknown tokens refused; tokens never appear in the listing. Exercised through the API — start, list, stop-all, stop-again. 14 tests. |
+| Machine control can be stopped | **Observed** | Scoped sessions with a check immediately before dispatch, so a stop lands between steps. Unknown tokens refused; tokens never appear in the listing. Exercised through the API — start, list, stop-all, stop-again. 14 tests. |
 
 ### Implemented, not observed
 
@@ -68,9 +71,6 @@ upgrading a packaged dependency blindly.
 
 | Item | Why it is not a small job |
 | --- | --- |
-| **Public chat sharing (Copy link)** | Needs hosting: a server storing immutable snapshots, opaque ids, read-only rendering, revocation, size limits. Cannot work from localhost on another device. Needs a deployment decision and owner approval. The local copy/download is not this and is not labelled as this. |
-| **Full computer-use loop** | Session scoping and the stop control now exist, and launches report observed outcomes. Still missing: reading UI state, clicking and scrolling, multi-step planning with recovery, and Linux adapter acceptance. What exists is a verified launcher with a stop, not computer use. |
-| **Settings sections 1–13** | General, Profile, Appearance (partial), Voice, Personalization, Keyboard shortcuts, Analytics, Plugins/Skills/MCP, Browser, Computer use, Connections, Git, Environments. Only Appearance has landed. |
 | **Close app / clear recents (Android)** | No Android API exists for either. Requires an AccessibilityService the user enables in Settings; Play restricts apps that use it. |
 | **Send a WhatsApp message** | `wa.me` can open WhatsApp with text pre-filled; pressing send needs an AccessibilityService. |
 

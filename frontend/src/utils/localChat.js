@@ -111,6 +111,13 @@ export const removeFact = (id) => {
   return all;
 };
 
+export const clearFacts = () => {
+  try {
+    localStorage.removeItem(FACTS);
+  } catch { /* nothing to do */ }
+  return [];
+};
+
 /* ── merging what the other device wrote ───────────────────────────────── */
 
 /**

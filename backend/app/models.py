@@ -179,5 +179,22 @@ class CustomPlugin(Base):
     user = relationship("User")
 
 
+class SharedConversation(Base):
+    """An immutable public snapshot of selected conversation messages.
 
+    Contains only sanitized role/content pairs. No credentials, tokens,
+    hidden system prompts, internal tool traces, or personal account identifiers.
+    Can be revoked by the creator using the secret revocation_token.
+    """
+    __tablename__ = "shared_conversations"
 
+    id = Column(String, primary_key=True, index=True)  # opaque unguessable token
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    title = Column(String, nullable=False, default="Conversation")
+    snapshot_json = Column(Text, nullable=False)  # JSON array of [{role: "user"|"assistant", content: "..."}]
+    revocation_token = Column(String, nullable=False, index=True)
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
+    views = Column(Integer, default=0, nullable=False)
+
+    user = relationship("User")

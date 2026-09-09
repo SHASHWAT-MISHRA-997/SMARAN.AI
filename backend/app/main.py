@@ -53,13 +53,13 @@ import requests
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, WebSocket, WebSocketDisconnect, Request, Response, Cookie
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import engine, Base, SessionLocal, get_db
 from app.config import settings
-from app.models import User, Collection, Document, DocumentChunk, AuditLog, ChatSession, ChatMessage, UserMemory, CustomPlugin
+from app.models import User, Collection, Document, DocumentChunk, AuditLog, ChatSession, ChatMessage, UserMemory, CustomPlugin, SharedConversation
 from app.schemas import (
     UserMemoryCreate, UserMemoryResponse,
     CollectionCreate, CollectionResponse, DocumentResponse,
@@ -3728,12 +3728,17 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     else:
         system_prompt += "\n\nDIRECT AI MODE IS ON. No uploaded-document RAG evidence is active. Answer from general knowledge, and never claim that an uploaded document was consulted."
 
+    # Inject User Custom Instructions if configured
+    custom_inst = getattr(chat_req, "custom_instructions", None)
+    if custom_inst and isinstance(custom_inst, str) and custom_inst.strip():
+        system_prompt += f"\n\nUSER CUSTOM INSTRUCTIONS:\n{custom_inst.strip()[:2000]}\n"
+
     # Inject Active Plugins, Skills & Connectors into AI System Context
     plugin_prompt_context = plugin_manager.get_active_plugins_prompt_context()
     if plugin_prompt_context:
         system_prompt += plugin_prompt_context
 
-    # Fetch active user memory vault facts
+    # Fetch active user memory vault facts (gated by memory_enabled setting)
     # This used to end in `if not chat_req.rag_enabled and not
     # chat_req.web_search else []`, so who you are was withheld whenever RAG
     # or web search was on. Asked "my name is what?" with web search on, the
@@ -3741,20 +3746,22 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     # Name Is...". The name was in the database the whole time.
     #
     # Identity is the wrong thing to economise context on. Capped instead.
-    user_mems = (db.query(UserMemory)
-                 .filter(UserMemory.user_id == current_user.id)
-                 .order_by(UserMemory.updated_at.desc())
-                 .limit(MAX_MEMORY_FACTS_IN_PROMPT)
-                 .all())
-    if user_mems:
-        mem_lines = [f" {m.fact}" for m in user_mems]
-        system_prompt += "\n\n STORED USER MEMORY VAULT FACTS\n" + "\n".join(mem_lines) + "\n"
+    memory_is_active = getattr(chat_req, "memory_enabled", True)
+    if memory_is_active:
+        user_mems = (db.query(UserMemory)
+                     .filter(UserMemory.user_id == current_user.id)
+                     .order_by(UserMemory.updated_at.desc())
+                     .limit(MAX_MEMORY_FACTS_IN_PROMPT)
+                     .all())
+        if user_mems:
+            mem_lines = [f" {m.fact}" for m in user_mems]
+            system_prompt += "\n\n STORED USER MEMORY VAULT FACTS\n" + "\n".join(mem_lines) + "\n"
 
-    # Auto-extract user personal facts into Memory Vault
+    # Auto-extract user personal facts into Memory Vault (only if memory is enabled)
     prompt_strip = chat_req.prompt.strip()
     prompt_lower_strip = prompt_strip.lower()
     fact_triggers = ["my name is", "i am ", "i work at", "i am working on", "my role is", "my preference is", "i prefer", "remember this", "remember that", "store in memory", "save in memory", "yaad rakhna", "yaad rakho"]
-    if any(ft in prompt_lower_strip for ft in fact_triggers) and len(prompt_strip) > 5:
+    if memory_is_active and any(ft in prompt_lower_strip for ft in fact_triggers) and len(prompt_strip) > 5:
         try:
             clean_fact = prompt_strip
             for pfx in ["remember this permanently in memory:", "remember this permanently in memory", "remember this in memory:", "remember this:", "remember that:", "store in memory:", "save in memory:", "remember this", "remember that", "remember:"]:
@@ -8144,6 +8151,65 @@ async def stop_control(payload: dict | None = None):
         "active": _control_session.active(),
     }
 
+
+# ---------------------------------------------------------------------------
+# Immutable Public Chat Sharing
+# ---------------------------------------------------------------------------
+from app import share as _share  # noqa: E402
+
+
+@app.post("/api/share", tags=["share"])
+async def create_public_share(payload: dict, db: Session = Depends(get_db)):
+    """Create an immutable public snapshot of selected conversation messages.
+
+    Sanitizes content, checks length bounds, and returns an opaque share ID
+    along with a private revocation secret for the creator.
+    """
+    messages = (payload or {}).get("messages", [])
+    title = (payload or {}).get("title")
+    try:
+        result = _share.create_share(db, messages, title=title)
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/share/{share_id}", tags=["share"])
+async def get_public_share(share_id: str, db: Session = Depends(get_db)):
+    """Retrieve an immutable public conversation snapshot."""
+    data = _share.get_share(db, share_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Shared conversation not found or has been revoked.")
+    return data
+
+
+@app.delete("/api/share/{share_id}", tags=["share"])
+async def revoke_public_share(share_id: str, secret: str = "", db: Session = Depends(get_db)):
+    """Revoke and permanently disable an immutable public conversation snapshot."""
+    revoked = _share.revoke_share(db, share_id, secret=secret)
+    if not revoked:
+        raise HTTPException(status_code=403, detail="Invalid revocation token or share not found.")
+    return {"success": True, "revoked": True}
+
+
+@app.get("/share/{share_id}", response_class=HTMLResponse, include_in_schema=False)
+async def view_shared_page(share_id: str, db: Session = Depends(get_db)):
+    """Render a standalone, accessible HTML page for direct browser access."""
+    data = _share.get_share(db, share_id)
+    if not data:
+        return HTMLResponse(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Share Not Found — SMARAN.AI</title></head>"
+            "<body style='font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:60px 20px;background:#09090e;color:#f0f0f5;'>"
+            "<h2 style='font-size:22px;font-weight:800;margin-bottom:12px;'>Conversation Not Available</h2>"
+            "<p style='color:#8e8e9f;font-size:14px;max-width:440px;margin:0 auto 24px;line-height:1.5;'>This shared snapshot does not exist or has been revoked by its author.</p>"
+            "<a href='/' style='display:inline-block;padding:10px 20px;background:#6366f1;color:#fff;text-decoration:none;border-radius:10px;font-weight:700;font-size:13px;'>Go to SMARAN.AI</a>"
+            "</body></html>",
+            status_code=404,
+        )
+    return HTMLResponse(_share.render_public_share_html(data))
+
+
 # Register the SPA fallback last so it cannot swallow model-storage, engine
 # or uploaded-file requests. Unknown API URLs still receive a JSON 404.
 app.add_api_route("/{path_name:path}", serve_frontend, methods=["GET"], include_in_schema=False)
+

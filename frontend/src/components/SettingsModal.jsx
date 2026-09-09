@@ -3,12 +3,17 @@ import { Lock,
   X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint,
   UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop,
   RefreshCw, Trash2, CheckCircle2,
-  ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe
+  ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe,
+  Mic, Monitor, Keyboard, GitBranch
 } from "lucide-react";
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
 import { useTheme } from "../context/ThemeContext";
 import AppearancePreferences from './AppearancePreferences';
+import VoicePreferences from './VoicePreferences';
+import ComputerUsePreferences from './ComputerUsePreferences';
+import ShortcutsPreferences from './ShortcutsPreferences';
+import GitPreferences from './GitPreferences';
 
 import { detectClientDevice } from './RightPanel';
 import { isPhone } from '../utils/device';
@@ -586,9 +591,37 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
     }
   };
 
+  const [customInstructions, setCustomInstructions] = useState(
+    () => localStorage.getItem("sm_custom_instructions") || ""
+  );
+  const [memoryEnabled, setMemoryEnabled] = useState(
+    () => localStorage.getItem("sm_memory_enabled") !== "false"
+  );
+
+  const handleClearAllMemory = async () => {
+    if (!window.confirm("Are you sure you want to permanently erase all saved memory facts?")) return;
+    setMemoryError("");
+    if (noBackend()) {
+      localChat.clearFacts();
+      setMemoryFacts([]);
+      return;
+    }
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/memory/clear`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      setMemoryFacts([]);
+    } catch (error) {
+      setMemoryError("Could not clear memory: " + (error?.message || "failed"));
+    }
+  };
+
   const TABS = [
     { id: "general", label: "General & Theme", icon: SlidersHorizontal },
     { id: "appearance", label: "Appearance", icon: Sun },
+    { id: "voice", label: "Voice & Speech", icon: Mic },
+    ...(!isMobile ? [{ id: "computer_use", label: "Computer Use", icon: Monitor }] : []),
+    { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
+    ...(!isMobile ? [{ id: "git", label: "Git & VCS", icon: GitBranch }] : []),
     // First, and only where it is the thing standing between you and a
     // working app: on a phone with no computer linked, nothing answers until
     // a provider and a key are set.
@@ -599,7 +632,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
     // "0 models confirmed" with controls that could not do anything.
     ...(isMobile ? [] : [{ id: "models", label: "Model Matrix", icon: Boxes }]),
     ...(!isMobile ? [{ id: "analytics", label: "Analytics & Telemetry", icon: ChartNoAxesCombined }] : []),
-    { id: "memory", label: "AI Memory", icon: Brain },
+    { id: "memory", label: "AI Memory & Prompts", icon: Brain },
     { id: "connections", label: "Device Connections", icon: Wifi },
     { id: "pets", label: isMobile ? "Mobile Pets" : "Desktop Pets", icon: PawPrint },
     /* Not on a phone. Every button on that screen asks a backend - check,
@@ -693,8 +726,12 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
               put a horizontal scrollbar across the bottom of it. */}
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-7 space-y-5 sm:space-y-6 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
 
-            {/* 1. GENERAL & THEME TAB */}
+            {/* PREFERENCE TABS */}
             {activeTab === 'appearance' && <AppearancePreferences />}
+            {activeTab === 'voice' && <VoicePreferences />}
+            {activeTab === 'computer_use' && <ComputerUsePreferences />}
+            {activeTab === 'shortcuts' && <ShortcutsPreferences />}
+            {activeTab === 'git' && <GitPreferences />}
             {activeTab === "general" && (
               <div className="space-y-6">
                 <div>
@@ -1303,59 +1340,131 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
               </div>
             )}
 
-            {/* 5. AI MEMORY TAB */}
+            {/* 5. AI MEMORY & CUSTOM INSTRUCTIONS TAB */}
             {activeTab === "memory" && (
-              <div className="space-y-5">
+              <div className="space-y-6">
                 <div>
                   <h3 className="text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
-                    <Brain className="w-5 h-5 text-indigo-500" /> AI Long-term Memory Facts
+                    <Brain className="w-5 h-5 text-indigo-500" /> AI Memory & Custom Instructions
                   </h3>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    Facts and preferences that SMARAN.AI remembers across sessions.
+                    Personalize how SMARAN.AI responds and what facts it remembers across sessions.
                   </p>
                 </div>
 
-                <div className="flex gap-2">
-                  <input
-                    value={newFact}
-                    onChange={(e) => setNewFact(e.target.value)}
-                    // An input's placeholder cannot wrap, so on a phone the long
-                    // form was cut to "Add a new custom rule or fact f".
-                    placeholder={isMobile ? "Add a rule or fact…" : "Add a new custom rule or fact for the AI…"}
-                    className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2 text-xs outline-none focus:border-indigo-500"
+                {/* Persistent Custom Instructions */}
+                <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="block text-xs font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
+                      Persistent Custom Instructions
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-mono">
+                      {customInstructions.length} / 2000 chars
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                    Instructions injected into every prompt. For example: preferred coding frameworks, response tone, or constraints.
+                  </p>
+                  <textarea
+                    rows={3}
+                    maxLength={2000}
+                    value={customInstructions}
+                    onChange={(e) => {
+                      setCustomInstructions(e.target.value);
+                      localStorage.setItem("sm_custom_instructions", e.target.value);
+                    }}
+                    placeholder="e.g. Always write code in TypeScript with concise explanations. Avoid verbose boilerplate."
+                    className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-3 text-xs outline-none focus:border-indigo-500 font-mono leading-relaxed resize-y text-zinc-900 dark:text-zinc-100"
                   />
+                </div>
+
+                {/* Long-term Memory Toggle */}
+                <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <span className="block text-xs font-black text-zinc-900 dark:text-white">Enable Long-Term Fact Extraction</span>
+                    <span className="block text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                      Automatically retrieve and remember relevant personal facts during conversations.
+                    </span>
+                  </div>
                   <button
-                    onClick={handleAddMemoryFact}
-                    disabled={!newFact.trim()}
-                    className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-500 disabled:opacity-40"
+                    type="button"
+                    onClick={() => {
+                      const next = !memoryEnabled;
+                      setMemoryEnabled(next);
+                      localStorage.setItem("sm_memory_enabled", String(next));
+                    }}
+                    className={`shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+                      memoryEnabled
+                        ? "bg-indigo-600 text-white shadow-sm"
+                        : "bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+                    }`}
                   >
-                    Add Fact
+                    {memoryEnabled ? "Enabled" : "Disabled"}
                   </button>
                 </div>
 
-                {/* Said out loud rather than swallowed. A memory that failed to
-                    save used to look saved until the panel was reopened. */}
-                {memoryError && (
-                  <p role="alert" className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-                    {memoryError}
-                  </p>
-                )}
-
-                <div className="space-y-2">
-                  {memoryFacts.map((f) => (
-                    <div
-                      key={f.id}
-                      className="flex items-center justify-between p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 text-xs"
-                    >
-                      <span className="text-zinc-800 dark:text-zinc-200">{f.fact || f.content}</span>
+                {/* Stored Memory Facts */}
+                <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="block text-xs font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
+                      Stored Memory Facts ({memoryFacts.length})
+                    </span>
+                    {memoryFacts.length > 0 && (
                       <button
-                        onClick={() => handleDeleteMemoryFact(f.id)}
-                        className="text-zinc-400 hover:text-rose-500 p-1"
+                        type="button"
+                        onClick={handleClearAllMemory}
+                        className="text-[11px] font-bold text-rose-500 hover:text-rose-600 hover:underline flex items-center gap-1"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3 h-3" /> Clear All Facts
                       </button>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      value={newFact}
+                      onChange={(e) => setNewFact(e.target.value)}
+                      placeholder={isMobile ? "Add a rule or fact…" : "Add a new custom rule or fact for the AI…"}
+                      className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2 text-xs outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      onClick={handleAddMemoryFact}
+                      disabled={!newFact.trim()}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-500 disabled:opacity-40"
+                    >
+                      Add Fact
+                    </button>
+                  </div>
+
+                  {memoryError && (
+                    <p role="alert" className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                      {memoryError}
+                    </p>
+                  )}
+
+                  {memoryFacts.length === 0 ? (
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500 py-3 text-center">
+                      No memories stored yet. Type a fact above or enable long-term memory extraction.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {memoryFacts.map((f) => (
+                        <div
+                          key={f.id}
+                          className="flex items-center justify-between p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs"
+                        >
+                          <span className="text-zinc-800 dark:text-zinc-200 pr-2">{f.fact || f.content}</span>
+                          <button
+                            onClick={() => handleDeleteMemoryFact(f.id)}
+                            className="text-zinc-400 hover:text-rose-500 p-1 shrink-0"
+                            title="Delete memory"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             )}
