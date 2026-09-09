@@ -725,7 +725,19 @@ when that request fails. It had drifted far enough to be misleading on its own
 fallbacks were corrected to 267 MB, 352 MB, 33.6 MB and 9.7 MB, computed with
 the same divisor `main.js` uses for each file.
 
-**Not deployed.** The website changes are committed but not pushed to Netlify.
+Deployed to production, `smaran-ai.netlify.app`, two files changed. Read back
+from the live site rather than from the deploy log:
+
+```
+$ curl -I https://smaran-ai.netlify.app/downloads/SMARAN-AI.apk
+HTTP/1.1 200 OK
+Content-Length: 33627132
+Content-Type: application/vnd.android.package-archive
+```
+
+That is the Sep 9 build, byte for byte, served with the MIME type that makes a
+phone install it rather than open it. The size fallbacks read back as 267 MB,
+33.6 MB, 352 MB and 9.7 MB.
 
 ### Not verified
 
