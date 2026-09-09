@@ -12,6 +12,56 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ---------------------------------------------------------------------------
+   Semantic surfaces.
+
+   The app was painted dark by literal value - `bg-[#07070b]`, `bg-zinc-900`,
+   `text-white` - so light mode came out half and half: white page, black
+   panels, and in places white text on white. It was bad enough that the
+   "System Sync" theme was removed rather than risk landing in it by accident.
+
+   The repair is not a `dark:` twin for every one of those, because a twin can
+   be added to a background and forgotten on the text sitting on it, which is
+   how you get an invisible label. One token carries both halves, so a surface
+   and its ink cannot drift apart.
+
+   Pick by role, not by shade: `surface` is the page, `raised` is a panel or
+   modal sitting on it, `sunken` is an input or well cut into it.
+   --------------------------------------------------------------------------- */
+/* Declared here so Tailwind generates `bg-surface`, `text-ink` and friends,
+   then overridden under `.dark` below. Note the absence of `@theme inline`:
+   `inline` substitutes the literal value into the utility at build time, which
+   freezes the light value and leaves the theme toggle painting nothing. The
+   plain form emits `var(--color-*)`, which resolves per element and so follows
+   the class on <html>. Muted and faint inks are chosen to clear 4.5:1 against
+   their own surface in *both* themes; `frontend/tests/visual/theme-contrast`
+   measures it rather than trusting the swatches. */
+@theme {
+  --color-surface: #f5f5f8;
+  --color-raised: #ffffff;
+  --color-sunken: #ebecf1;
+  --color-ink: #101014;
+  --color-ink-muted: #4b4b55;
+  --color-ink-faint: #5f5f6b;
+  --color-line: #d9dae1;
+  --color-line-strong: #b9bac4;
+  /* Backdrop behind a modal. Dark in both themes on purpose: it is a shadow
+     cast over the page, not a surface of its own. */
+  --color-veil: rgba(16, 16, 20, 0.45);
+}
+
+.dark {
+  --color-surface: #07070b;
+  --color-raised: #101017;
+  --color-sunken: #17171f;
+  --color-ink: #ffffff;
+  --color-ink-muted: #b4b4bd;
+  --color-ink-faint: #9a9aa6;
+  --color-line: #2b2b34;
+  --color-line-strong: #45454f;
+  --color-veil: rgba(0, 0, 0, 0.85);
+}
+
 @layer base {
   body {
     @apply transition-colors duration-300 antialiased selection:bg-indigo-500/30 selection:text-indigo-200;

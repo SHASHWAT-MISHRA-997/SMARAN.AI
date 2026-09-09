@@ -195,7 +195,7 @@ const PinLock = ({ children }) => {
 
   if (state === 'unavailable') {
     return (
-      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-[#07070b] text-zinc-200" role="alert">
+      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-surface text-ink" role="alert">
         <Lock aria-hidden="true" />
         <p>Cannot check the app lock. Reconnect to the local engine and retry.</p>
         <button className="rounded-lg bg-indigo-600 px-5 py-2" onClick={() => setCheckAttempt((value) => value + 1)}>Retry lock check</button>
@@ -205,15 +205,15 @@ const PinLock = ({ children }) => {
 
   if (state === 'checking') {
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#07070b]">
-        <Lock className="h-6 w-6 animate-pulse text-zinc-700" />
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-surface">
+        <Lock className="h-6 w-6 animate-pulse text-ink-faint" />
       </div>
     );
   }
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#07070b] px-6"
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-surface px-6"
       onKeyDown={onKeyDown}
       tabIndex={-1}
       ref={inputRef}
@@ -231,8 +231,8 @@ const PinLock = ({ children }) => {
             <Lock className="h-6 w-6 text-red-300" />
           </div>
           <div className="text-center">
-            <h1 className="text-lg font-black tracking-wide text-white">SMARAN.AI is locked</h1>
-            <p className="mt-1 text-[11px] text-zinc-500">Enter your PIN to continue.</p>
+            <h1 className="text-lg font-black tracking-wide text-ink">SMARAN.AI is locked</h1>
+            <p className="mt-1 text-[11px] text-ink-faint">Enter your PIN to continue.</p>
           </div>
         </div>
 
@@ -244,7 +244,7 @@ const PinLock = ({ children }) => {
               className={`h-3 w-3 rounded-full border transition-all ${
                 index < pin.length
                   ? 'border-red-400 bg-red-400 shadow-[0_0_10px_rgba(248,113,113,.7)]'
-                  : 'border-zinc-700 bg-transparent'
+                  : 'border-line-strong bg-transparent'
               }`}
             />
           ))}
@@ -258,9 +258,9 @@ const PinLock = ({ children }) => {
                 type="button"
                 onClick={() => press(key)}
                 disabled={Boolean(cooldown)}
-                className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[.04] text-lg font-black text-zinc-100 backdrop-blur-md transition-all hover:border-red-400/40 hover:bg-red-500/10 active:scale-95 disabled:opacity-30"
+                className="flex h-16 w-16 items-center justify-center rounded-2xl border border-line bg-raised text-lg font-black text-ink backdrop-blur-md transition-all hover:border-red-400/40 hover:bg-red-500/10 active:scale-95 disabled:opacity-30"
               >
-                {key === 'del' ? <Delete className="h-5 w-5 text-zinc-400" /> : key}
+                {key === 'del' ? <Delete className="h-5 w-5 text-ink-muted" /> : key}
               </button>
             )
           ))}
@@ -282,26 +282,26 @@ const PinLock = ({ children }) => {
         <button
           type="button"
           onClick={() => { setRecovering(true); setRecoverError(''); }}
-          className="text-[11px] font-bold text-zinc-500 underline-offset-4 transition hover:text-red-300 hover:underline"
+          className="text-[11px] font-bold text-ink-faint underline-offset-4 transition hover:text-red-300 hover:underline"
         >
           Forgotten your PIN?
         </button>
 
-        <p className="flex items-center gap-1.5 text-[10px] text-zinc-600">
+        <p className="flex items-center gap-1.5 text-[10px] text-ink-faint">
           <ShieldCheck className="h-3 w-3" />
           The PIN is stored only as a hash on this machine.
         </p>
       </div>
 
       {recovering && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/85 p-6 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-veil p-6 backdrop-blur-sm">
           <form
             onSubmit={recover}
-            className="w-full max-w-sm overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl"
+            className="w-full max-w-sm overflow-hidden rounded-2xl border border-line bg-raised shadow-2xl"
           >
-            <div className="border-b border-zinc-800 px-5 py-4">
-              <h2 className="text-sm font-black text-white">Set a new PIN</h2>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+            <div className="border-b border-line px-5 py-4">
+              <h2 className="text-sm font-black text-ink">Set a new PIN</h2>
+              <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
                 Sign in with your account to choose a new one. Nobody else can do
                 this for you, and nothing is sent anywhere.
               </p>
@@ -315,7 +315,7 @@ const PinLock = ({ children }) => {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 autoComplete="email"
-                className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-red-400/60"
+                className="w-full rounded-xl border border-line bg-sunken px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-red-400/60"
               />
               <input
                 type="password"
@@ -324,7 +324,7 @@ const PinLock = ({ children }) => {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Account password"
                 autoComplete="current-password"
-                className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-red-400/60"
+                className="w-full rounded-xl border border-line bg-sunken px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-red-400/60"
               />
               <input
                 type="text"
@@ -336,7 +336,7 @@ const PinLock = ({ children }) => {
                 value={newPin}
                 onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
                 placeholder="New PIN (4 to 12 digits)"
-                className="w-full rounded-xl border border-zinc-700 bg-black/40 px-3 py-2.5 text-center text-lg tracking-[0.4em] text-zinc-100 outline-none placeholder:text-sm placeholder:tracking-normal placeholder:text-zinc-600 focus:border-red-400/60"
+                className="w-full rounded-xl border border-line bg-sunken px-3 py-2.5 text-center text-lg tracking-[0.4em] text-ink outline-none placeholder:text-sm placeholder:tracking-normal placeholder:text-ink-faint focus:border-red-400/60"
               />
 
               {recoverError && (
@@ -357,7 +357,7 @@ const PinLock = ({ children }) => {
               <button
                 type="button"
                 onClick={() => setRecovering(false)}
-                className="w-full rounded-xl border border-zinc-700 py-2 text-[11px] font-bold text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-200"
+                className="w-full rounded-xl border border-line py-2 text-[11px] font-bold text-ink-muted transition hover:bg-sunken hover:text-ink"
               >
                 Back
               </button>
