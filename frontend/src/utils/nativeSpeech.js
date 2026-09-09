@@ -20,7 +20,7 @@ export const available = async () => {
   try { return Boolean((await speech.available())?.available); } catch { return false; }
 };
 
-export const speak = async ({ text, language = 'en-IN', gender = 'male', rate = 0.95, pitch = 1.0, onStart, onEnd, onError }) => {
+export const speak = async ({ text, language = 'en-IN', gender = 'male', rate = 0.95, pitch = 1.0, onStart, onEnd, onError, onRange }) => {
   await stopSpeaking();
   const handles = [];
   const cleanup = async () => {
@@ -45,6 +45,12 @@ export const speak = async ({ text, language = 'en-IN', gender = 'male', rate = 
         await cleanup();
         onError?.(data);
       }
+    }));
+    // Where the voice is, word by word, so the caption can follow it. Only
+    // engines that implement onRangeStart send this; when none arrives the
+    // caption simply never highlights, which is the intended degradation.
+    handles.push(await speech.addListener('ttsRange', (data) => {
+      if (data.utteranceId === utteranceId) onRange?.(Number(data.start) || 0);
     }));
 
     await speech.speak({ text, language, gender, rate, pitch, utteranceId });

@@ -33,6 +33,7 @@ import AvatarVideo, { AVATAR_CHARACTERS } from './AvatarVideo';
 import AvatarMMD, { MMD_CHARACTERS } from './AvatarMMD';
 import CyberStage from './CyberStage';
 import { classifyTranscriptionFailure, pollFinalTranscript, silenceWindowMs, voiceOutcomeKind } from '../utils/voiceStatus';
+import { captionSplit } from '../utils/spokenProgress';
 
 /* Prebuilt Gemini Live voices, grouped so a user can simply pick male or
    female. The service decides the exact timbre; these are its own voices. */
@@ -122,7 +123,7 @@ const isMobileVoiceDevice = () => typeof window !== 'undefined' && window.matchM
 /** A short boot log, so the panel has something to say before data arrives. */
 
 
-export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingAudio, stopSpeaking, speakText, selectedLanguage = 'hi', voiceAiResponse = '', activeModelDisplay = 'Auto Model', API_BASE, token, audioEnabled, autoSpeakEnabled }) => {
+export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingAudio, speechProgress, stopSpeaking, speakText, selectedLanguage = 'hi', voiceAiResponse = '', activeModelDisplay = 'Auto Model', API_BASE, token, audioEnabled, autoSpeakEnabled }) => {
   const [voiceState, setVoiceState] = useState('idle');
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -1972,6 +1973,15 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     ? (currentSpeakingText || voiceAiResponse || lastAssistantLine)
     : '';
 
+  // Split at wherever the voice has reached. The engine reports its position in
+  // the stripped text it was given, not in this line, so the two are matched up
+  // by word; see utils/spokenProgress.js.
+  const { spoken: spokenSoFar, pending: spokenAhead } = captionSplit({
+    displayText: latestSpokenLine,
+    spokenText: speechProgress?.spokenText || '',
+    charIndex: speechProgress?.charIndex ?? -1,
+  });
+
 
   const statusToneClasses = {
     amber: 'text-amber-400',
@@ -2181,7 +2191,15 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
               aria-live="polite"
               className="text-center text-lg sm:text-2xl md:text-3xl leading-relaxed font-medium text-white drop-shadow-[0_2px_18px_rgba(0,0,0,0.9)]"
             >
-              {latestSpokenLine}
+              {/* The words already said, then the rest - the way a lyric line
+                  fills in as it is sung. Both halves stay in one <p> so the
+                  text wraps as a single paragraph; two elements would break the
+                  line at the boundary, which moves as the voice advances.
+
+                  aria-live reads the paragraph, and splitting the text does not
+                  change what it contains, so a screen reader is unaffected. */}
+              {spokenSoFar ? <span className="voice-caption-said">{spokenSoFar}</span> : null}
+              <span className="voice-caption-ahead">{spokenAhead}</span>
             </p>
           </div>
         </div>

@@ -1464,6 +1464,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
   const [, setVoiceTranscript] = useState('');
   const [voiceAiResponse, setVoiceAiResponse] = useState('');
   const [isSpeakingAudio, setIsSpeakingAudio] = useState(false);
+  // Where the voice has reached, so the caption can follow it the way lyrics
+  // follow a song. `spokenText` is the stripped form the engine was handed -
+  // the caption shows the original, so the two are aligned by word rather than
+  // by offset. charIndex -1 means nothing is being spoken.
+  const [speechProgress, setSpeechProgress] = useState({ charIndex: -1, spokenText: '' });
 
   const recognitionRef = useRef(null);
   const sidebarDictationRef = useRef(null);
@@ -1597,19 +1602,28 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         pitch: 1.0,
         onStart: () => {
           setIsSpeakingAudio(true);
+          setSpeechProgress({ charIndex: 0, spokenText: clean });
           if (isVoiceModeOpenRef.current) setVoiceState('speaking');
+        },
+        onRange: (start) => {
+          setSpeechProgress((previous) => (
+            previous.spokenText === clean ? { charIndex: start, spokenText: clean } : previous
+          ));
         },
         onEnd: () => {
           setIsSpeakingAudio(false);
+          setSpeechProgress({ charIndex: -1, spokenText: '' });
           if (isVoiceModeOpenRef.current) setVoiceState('idle');
         },
         onError: () => {
           setIsSpeakingAudio(false);
+          setSpeechProgress({ charIndex: -1, spokenText: '' });
           if (isVoiceModeOpenRef.current) setVoiceState('idle');
         },
       }).catch((err) => {
         console.warn('Native speech error:', err);
         setIsSpeakingAudio(false);
+        setSpeechProgress({ charIndex: -1, spokenText: '' });
       });
       return;
     }
@@ -1661,9 +1675,19 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       //   }
       // }, 3500);
 
+      // The caption follows the voice, and the voice arrives one chunk at a
+      // time. `onboundary` reports an offset into the *chunk*, so the offsets
+      // of the chunks already spoken have to be added back to get a position in
+      // the whole utterance. Rebuilt with the same single space used to join
+      // chunks above, so the two strings agree character for character.
+      const spokenWhole = sentences.join(' ');
+      let spokenBase = 0;
+      setSpeechProgress({ charIndex: 0, spokenText: spokenWhole });
+
       const speakNextSentence = () => {
         if (ttsChunksRef.current.length === 0) {
           setIsSpeakingAudio(false);
+          setSpeechProgress({ charIndex: -1, spokenText: '' });
           if (window._ttsKeepAliveInterval) clearInterval(window._ttsKeepAliveInterval);
           return;
         }
@@ -1671,6 +1695,17 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         const sentence = ttsChunksRef.current.shift();
         const utterance = new SpeechSynthesisUtterance(sentence);
         window._activeSpeechUtterances.push(utterance); // Prevent GC
+
+        const chunkStart = spokenBase;
+        spokenBase += sentence.length + 1;   // + the joining space
+        utterance.onboundary = (event) => {
+          if (event.name && event.name !== 'word') return;
+          setSpeechProgress((previous) => (
+            previous.spokenText === spokenWhole
+              ? { charIndex: chunkStart + (event.charIndex || 0), spokenText: spokenWhole }
+              : previous
+          ));
+        };
 
         utterance.lang = targetLang;
         utterance.rate = 0.95; // Natural human pace
@@ -1943,6 +1978,10 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
     if (isNativeApp()) {
       nativeSpeech.stopSpeaking().catch(() => {});
     }
+    // Nothing is being said any more, so the caption must stop looking as
+    // though it is being read out. Ending a call already stops the voice; a
+    // caption frozen mid-highlight would be the visible half of that old bug.
+    setSpeechProgress({ charIndex: -1, spokenText: '' });
     ttsChunksRef.current = [];
     if (generatedAudioRef.current) {
       try {
@@ -4845,6 +4884,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
         onClose={closeVoiceMode}
         onSendQuery={(queryText) => handleSendVoicePrompt(queryText)}
         isSpeakingAudio={isSpeakingAudio}
+        speechProgress={speechProgress}
         stopSpeaking={stopSpeaking}
         speakText={speakText}
         selectedLanguage={selectedLanguage}

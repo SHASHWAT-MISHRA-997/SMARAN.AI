@@ -54,6 +54,26 @@ public class SmaranSpeech extends Plugin {
                             public void onDone(String utteranceId) {
                                 notifyListeners("ttsEnd", new JSObject().put("utteranceId", utteranceId));
                             }
+                            /**
+                             * Which word is being said, so the caption can follow the voice.
+                             *
+                             * Added in API 26 and only delivered by engines that support it;
+                             * minSdk here is 24. On an older device, or an engine that does not
+                             * report ranges, this simply never fires and the caption stays
+                             * unhighlighted - which is why the page treats a missing range as
+                             * "not speaking" rather than waiting for one.
+                             *
+                             * `start` is an offset into the text handed to speak(), which is the
+                             * stripped spoken form rather than the text on screen. The page maps
+                             * it across; see utils/spokenProgress.js.
+                             */
+                            @Override
+                            public void onRangeStart(String utteranceId, int start, int end, int frame) {
+                                notifyListeners("ttsRange", new JSObject()
+                                    .put("utteranceId", utteranceId)
+                                    .put("start", start)
+                                    .put("end", end));
+                            }
                             @Override
                             public void onError(String utteranceId) {
                                 notifyListeners("ttsError", new JSObject().put("utteranceId", utteranceId));

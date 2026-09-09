@@ -57,7 +57,23 @@ test('Indian male speech preferences reach native TTS and stopping releases list
   assert.equal(fixture.counts.spoken.language, 'en-IN');
   assert.equal(fixture.counts.spoken.gender, 'male');
   assert.equal(fixture.counts.spoken.pitch, 1);
-  assert.equal(fixture.listeners.size, 3);
+  // start, end, error, and range - the fourth carries the word position the
+  // caption follows. The number matters because every one of them has to be
+  // released again below; a listener left behind on each reply is a leak.
+  assert.equal(fixture.listeners.size, 4);
+  await fixture.stopSpeaking();
+  assert.equal(fixture.listeners.size, 0);
+});
+
+test('the word-position listener is released like the others', async () => {
+  // The range listener was added for the caption highlight. It is registered
+  // on every reply, so if stopping ever stopped releasing it the leak would
+  // grow one listener per spoken answer.
+  const fixture = await setup();
+  const positions = [];
+  await fixture.speak({ text: 'Opening Chrome now.', onRange: (start) => positions.push(start) });
+  await fixture.emit('ttsRange', { utteranceId: fixture.counts.spoken.utteranceId, start: 8, end: 14 });
+  assert.deepEqual(positions, [8]);
   await fixture.stopSpeaking();
   assert.equal(fixture.listeners.size, 0);
 });

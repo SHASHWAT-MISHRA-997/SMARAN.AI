@@ -2182,3 +2182,27 @@ html.sm-phone-device.sm-phone-landscape .voice-footer { display: none; }
 .voice-caption-scroll::-webkit-scrollbar {
   display: none;
 }
+
+/* The caption follows the voice the way a lyric line fills in as it is sung.
+   The words already said are lit; the ones still coming are dimmed but stay
+   readable - this is a caption, so the text ahead has to be legible rather
+   than hinted at. Both halves keep the same size and weight, because changing
+   either would reflow the paragraph on every word and make the line jitter. */
+.voice-caption-said {
+  color: #6ee7b7;
+  text-shadow: 0 0 18px rgba(110, 231, 183, 0.35);
+}
+.voice-caption-ahead {
+  color: rgba(255, 255, 255, 0.62);
+}
+/* Someone who has asked for less motion still gets the highlight - it carries
+   the meaning here - but without the glow moving under the text. */
+@media (prefers-reduced-motion: reduce) {
+  .voice-caption-said { text-shadow: none; }
+}
+/* A high-contrast preference wants plain white against the background rather
+   than a tinted pair. Keep the distinction, drop the colour. */
+@media (prefers-contrast: more) {
+  .voice-caption-said { color: #ffffff; text-shadow: none; }
+  .voice-caption-ahead { color: rgba(255, 255, 255, 0.8); }
+}
