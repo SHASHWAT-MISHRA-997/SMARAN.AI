@@ -8074,6 +8074,34 @@ from urllib.parse import quote  # noqa: E402  (kept beside its only use)
 
 _CHARACTER_DIR = os.path.join(settings.DATA_DIR, "characters")
 os.makedirs(_CHARACTER_DIR, exist_ok=True)
+
+# Written next to the folder, because an empty directory explains nothing and
+# `data/` is not in the repository - so a note committed there would exist on
+# the machine it was written on and nowhere else. Never overwritten: it is in
+# the user's own data folder, and they may have replaced it.
+_CHARACTER_README = os.path.join(_CHARACTER_DIR, "README.txt")
+if not os.path.exists(_CHARACTER_README):
+    try:
+        with open(_CHARACTER_README, "w", encoding="utf-8") as handle:
+            handle.write(
+                "Characters you add yourself\n"
+                "===========================\n\n"
+                "Drop a character in this folder and it appears in the voice\n"
+                "call's character picker.\n\n"
+                "  Aiko.vrm               a single file - VRoid Studio exports these\n"
+                "  MyCharacter/model.vrm  a folder works too\n"
+                "  MyCharacter/model.pmx  MMD models need a folder, for their textures\n\n"
+                "A .vrm carries its textures inside the file, so it does not need a\n"
+                "folder around it. A .pmx points at its textures by relative path, so\n"
+                "it does.\n\n"
+                "Nothing here is copied, converted or uploaded. The file is read from\n"
+                "this machine and stays on it - so whatever licence your model came\n"
+                "with is between you and whoever made it.\n\n"
+                "VRoid Studio (https://vroid.com/en/studio) is free, and the character\n"
+                "you design in it is yours.\n"
+            )
+    except OSError:
+        logger.info("The characters README could not be written.", exc_info=True)
 app.mount("/api/characters/files",
           StaticFiles(directory=_CHARACTER_DIR), name="user_characters")
 
