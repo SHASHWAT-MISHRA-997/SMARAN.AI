@@ -617,3 +617,120 @@ The rpm was extracted and run, not installed with `rpm -i` — that needs root o
 a machine with an rpm database, and this is Ubuntu. Install scriptlets
 (`%post`, `update-desktop-database`) and dependency resolution on a real
 Fedora, RHEL or openSUSE machine remain untested.
+
+---
+
+## Linux CLI built, and 2.10.34 published
+
+### The CLI
+
+`smaran-linux-x86_64` was the one asset in v2.10.33 with no current build
+anywhere on disk. Frozen with PyInstaller 6.22.2 from `~/smaran-build/libs`,
+the same environment the Linux desktop app was frozen in, so the two come out
+of one toolchain.
+
+```
+ELF 64-bit LSB executable, x86-64, dynamically linked, for GNU/Linux 3.2.0, stripped
+8180600 bytes
+```
+
+Run with `PYTHONPATH` unset, the way someone who downloads the file has it:
+
+```
+smaran 2.10.34
+usage: smaran [-h] [--version] {status,models,ask,chat} ...
+```
+
+Then against the app that came out of the rpm:
+
+```
+$ smaran status
+Running at http://127.0.0.1:3003
+  account    device_local_default_user
+
+$ smaran models
+63 in the catalogue, 0 downloaded
+engine: unavailable
+```
+
+and with nothing running, it explains itself rather than throwing a traceback:
+
+```
+[!] SMARAN.AI does not appear to be running.
+Start the desktop app, then try again.
+If it is running on an unusual address, set SMARAN_URL.
+exit: 1
+```
+
+No analytics endpoint or key was set, so `analytics_config` was generated empty
+and the binary reports nothing. A search of the binary for either string finds
+zero matches.
+
+### Two staleness checks that changed what shipped
+
+Timestamps alone were not enough to tell which artifact was current, because
+drvfs does not preserve them through a copy. Both dists were therefore checked
+by content, for CSS class names that only exist after the voice-layout commit:
+
+| Bundle | `voice-callbar` | `sm-phone-device` |
+| --- | --- | --- |
+| Windows dist (`windows-build/dist`) | present | present |
+| Linux dist (`linux-sep9/dist`) | present | present |
+
+That check found a real problem on the third artifact. The APK staged from
+`website/downloads/SMARAN-AI.apk` was 33,626,744 bytes from Sep 8 23:44 — while
+the actual current build, `frontend/android/app/build/outputs/apk/release/
+app-release.apk`, was 33,627,132 bytes from Sep 9 02:57, matching the Capacitor
+assets synced at the same minute. The stale APK would have shipped a phone
+build without the call-screen fixes, which is the release's headline change.
+Both the release asset and the website's own copy were replaced.
+
+The Windows installer had the same trap: `dist-release/SMARAN.AI-Setup.exe`
+(Sep 8 01:14, 280,229,708 bytes) is older than
+`.cache/audit/windows-installer/SMARAN.AI-Setup.exe` (Sep 9 03:43,
+280,316,613 bytes). The newer one was published.
+
+### Published
+
+`v2.10.34` on `SHASHWAT-MISHRA-997/SMARAN.AI-downloads`, eight assets, the same
+names v2.10.33 used so the website's fixed URLs keep resolving. Each URL the
+download page actually links to was requested afterwards:
+
+```
+SMARAN.AI-Setup.exe              200   280316613
+SMARAN.AI-x86_64.AppImage        200   369089016
+smaran-ai_amd64.deb              200   306066488
+smaran-ai.x86_64.rpm             200   397331333
+smaran-ai-linux-x86_64.tar.gz    200   399259516
+smaran-linux-x86_64              200     8180600
+smaran.exe                       200    10184306
+SMARAN-AI.apk                    200    33627132
+```
+
+Every Content-Length matches the staged file byte for byte.
+
+The release notes lead with the rpm permission fix and say plainly that anyone
+who installed the 2.10.33 rpm should replace it, since that package is the one
+that shipped a world-writable binary in `/opt`.
+
+### Website
+
+`website/downloads/SMARAN-AI.apk` refreshed to the current build — the download
+page serves that file directly rather than redirecting to the release.
+
+The size labels in `index.html` are replaced on load from the releases API, so
+they were already going to be correct; the hardcoded text is only the fallback
+when that request fails. It had drifted far enough to be misleading on its own
+(202 MB against a 267 MB installer, 299 MB against a 352 MB AppImage), so the
+fallbacks were corrected to 267 MB, 352 MB, 33.6 MB and 9.7 MB, computed with
+the same divisor `main.js` uses for each file.
+
+**Not deployed.** The website changes are committed but not pushed to Netlify.
+
+### Not verified
+
+- Nobody has downloaded and installed these artifacts from GitHub; the checks
+  above are on the staged bytes and on the URLs resolving.
+- The Windows installer remains unsigned. SmartScreen will warn and Smart App
+  Control will block it, which the release notes state.
+- Speech accuracy is unchanged and untested, as it has been throughout.
