@@ -747,6 +747,74 @@ class DesktopAgent:
 
     # ---- App & URL Launchers ----
 
+    # How long to let a process settle before deciding whether it survived.
+    # Long enough that a program failing on startup - a missing DLL, a refused
+    # policy - has exited by the time we look; short enough not to be felt.
+    _LAUNCH_SETTLE_SECONDS = 0.6
+
+    @staticmethod
+    def _confirm_launch(process, app: str, settle: float = None) -> Dict[str, Any]:
+        """Report what was observed after spawning, not that spawning returned.
+
+        Every launcher here previously did `Popen(...)` and returned
+        `{"success": True, "message": "Launched X."}` on the next line. That is
+        an assumption, not an observation: Popen succeeding means a process was
+        created, and says nothing about whether it stayed alive. An application
+        blocked by policy, missing a dependency, or refusing to start reported
+        exactly the same success as one that opened.
+
+        Three outcomes, kept distinct because they are genuinely different:
+
+        - still running   the strongest evidence available without inspecting
+                          windows, and the ordinary case for a real application
+        - exited cleanly   normal for a launcher that hands off to an already
+                          running instance, so not a failure - but not a
+                          confirmation either, and it says so
+        - exited badly    a real failure, with the exit code that proves it
+        """
+        if process is None:
+            return {"success": True, "confirmed": False, "app": app,
+                    "message": f"Launch requested for {app}; this path cannot confirm it started."}
+        try:
+            time.sleep(settle if settle is not None else DesktopAgent._LAUNCH_SETTLE_SECONDS)
+            code = process.poll()
+        except Exception:
+            # Polling itself failing tells us nothing about the application.
+            return {"success": True, "confirmed": False, "app": app,
+                    "message": f"Launch requested for {app}; its state could not be read."}
+
+        if code is None:
+            return {"success": True, "confirmed": True, "app": app,
+                    "message": f"{app} is running."}
+        if code == 0:
+            return {"success": True, "confirmed": False, "app": app,
+                    "message": f"{app} was launched and the starter exited; "
+                               "it may have handed off to an existing window."}
+        return {"success": False, "confirmed": False, "app": app, "exit_code": code,
+                "error": f"{app} exited immediately with code {code}."}
+
+    @staticmethod
+    def _launch_windows_browser(executable: str, app: str) -> Dict[str, Any]:
+        """Start a Windows browser without asking the shell to lie for us.
+
+        These were `Popen("start chrome", shell=True)`. `start` is a cmd
+        builtin that returns 0 whether or not it found anything, and the shell
+        exits immediately either way - so a machine without Chrome reported
+        "Launched Google Chrome." exactly as loudly as one with it.
+
+        Resolving the executable first turns "not installed" into something we
+        can actually say, and spawning it directly leaves a process to observe.
+        """
+        path = shutil.which(executable)
+        if not path:
+            return {"success": False, "app": app,
+                    "error": f"{app} does not appear to be installed on this machine."}
+        try:
+            process = subprocess.Popen([path], shell=False)
+        except OSError as error:
+            return {"success": False, "app": app, "error": f"{app} could not be started: {error}"}
+        return DesktopAgent._confirm_launch(process, app)
+
     @staticmethod
     def _action_open_url(params: Dict[str, Any]) -> Dict[str, Any]:
         url = params.get("url", "").strip()
@@ -800,51 +868,48 @@ class DesktopAgent:
                                if (path := shutil.which(candidate))), None)
             if not executable:
                 return {"success": False, "error": f"No installed executable found for '{name}'."}
-            subprocess.Popen([executable], shell=False)
-            return {"success": True, "message": f"Launch requested for {name}.", "app": name}
+            process = subprocess.Popen([executable], shell=False)
+            return DesktopAgent._confirm_launch(process, name)
 
         # Direct Windows known app execution for instant reliable launch
         if sys.platform == "win32":
             try:
                 if name in ("notepad", "notepad.exe"):
-                    subprocess.Popen(["notepad.exe"])
-                    return {"success": True, "message": "Launched Notepad.", "app": "Notepad"}
+                    process = subprocess.Popen(["notepad.exe"])
+                    return DesktopAgent._confirm_launch(process, "Notepad")
                 elif name in ("calculator", "calc", "calc.exe"):
-                    subprocess.Popen(["calc.exe"])
-                    return {"success": True, "message": "Launched Calculator.", "app": "Calculator"}
+                    process = subprocess.Popen(["calc.exe"])
+                    return DesktopAgent._confirm_launch(process, "Calculator")
                 elif name in ("paint", "mspaint", "mspaint.exe"):
-                    subprocess.Popen(["mspaint.exe"])
-                    return {"success": True, "message": "Launched Paint.", "app": "Paint"}
+                    process = subprocess.Popen(["mspaint.exe"])
+                    return DesktopAgent._confirm_launch(process, "Paint")
                 elif name in ("task manager", "taskmgr", "taskmgr.exe"):
-                    subprocess.Popen(["taskmgr.exe"])
-                    return {"success": True, "message": "Launched Task Manager.", "app": "Task Manager"}
+                    process = subprocess.Popen(["taskmgr.exe"])
+                    return DesktopAgent._confirm_launch(process, "Task Manager")
                 elif name in ("file explorer", "explorer", "my computer"):
-                    subprocess.Popen(["explorer.exe"])
-                    return {"success": True, "message": "Launched File Explorer.", "app": "File Explorer"}
+                    process = subprocess.Popen(["explorer.exe"])
+                    return DesktopAgent._confirm_launch(process, "File Explorer")
                 elif name in ("settings", "windows settings"):
                     os.system("start ms-settings:")
                     return {"success": True, "message": "Opened Windows Settings.", "app": "Settings"}
                 elif name in ("terminal", "windows terminal", "wt"):
-                    subprocess.Popen(["wt.exe"])
-                    return {"success": True, "message": "Launched Windows Terminal.", "app": "Terminal"}
+                    process = subprocess.Popen(["wt.exe"])
+                    return DesktopAgent._confirm_launch(process, "Terminal")
                 elif name in ("cmd", "command prompt"):
-                    subprocess.Popen(["cmd.exe"])
-                    return {"success": True, "message": "Launched Command Prompt.", "app": "Command Prompt"}
+                    process = subprocess.Popen(["cmd.exe"])
+                    return DesktopAgent._confirm_launch(process, "Command Prompt")
                 elif name in ("powershell", "ps"):
-                    subprocess.Popen(["powershell.exe"])
-                    return {"success": True, "message": "Launched PowerShell.", "app": "PowerShell"}
+                    process = subprocess.Popen(["powershell.exe"])
+                    return DesktopAgent._confirm_launch(process, "PowerShell")
                 elif name in ("vscode", "vs code", "code", "visual studio code"):
                     subprocess.Popen("code", shell=True)
                     return {"success": True, "message": "Launched VS Code.", "app": "VS Code"}
                 elif name in ("chrome", "google chrome"):
-                    subprocess.Popen("start chrome", shell=True)
-                    return {"success": True, "message": "Launched Google Chrome.", "app": "Chrome"}
+                    return DesktopAgent._launch_windows_browser("chrome", "Chrome")
                 elif name in ("brave", "brave browser"):
-                    subprocess.Popen("start brave", shell=True)
-                    return {"success": True, "message": "Launched Brave Browser.", "app": "Brave"}
+                    return DesktopAgent._launch_windows_browser("brave", "Brave")
                 elif name in ("edge", "microsoft edge"):
-                    subprocess.Popen("start msedge", shell=True)
-                    return {"success": True, "message": "Launched Microsoft Edge.", "app": "Edge"}
+                    return DesktopAgent._launch_windows_browser("msedge", "Edge")
                 elif name in ("spotify",):
                     subprocess.Popen("start spotify:", shell=True)
                     return {"success": True, "message": "Launched Spotify.", "app": "Spotify"}
