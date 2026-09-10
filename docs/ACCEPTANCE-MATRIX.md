@@ -14,17 +14,17 @@ moves it. "Implemented" is not "verified"; "verified locally" is not "released".
 
 ---
 
-## Evidence run — 2026-09-10 (Updated with Physical Phone & Installer)
+## Evidence run — 2026-09-10 (Updated with Coding Sync, Persistent Memory & Section Separation)
 
 All numbers below were produced in this session, not quoted from earlier logs.
 
 | Suite | Result |
 | --- | --- |
-| `pytest backend/tests cli/tests` | **382 passed**, 12 warnings, 43.63s (includes 4 companion sync, 8 public share & 7 computer use tests) |
-| `npm run test:unit` (frontend) | **145 passed** (466ms) |
-| `npx oxlint src/` | clean (0 errors, 0 warnings across 70 files) |
-| `npm run build` (frontend) | clean (built in 13.33s) |
-| VS Code extension `npm test` | **23 passed, 1 skipped** (704ms) |
+| `pytest backend/tests cli/tests` | **395 passed**, 12 warnings, 34.33s (includes 7 coding sync & memory tests, 4 companion sync, 8 public share & 7 computer use tests) |
+| `npm run test:unit` (frontend) | **145 passed** (409ms) |
+| `npm run build` (frontend) | clean (built in 12.80s into `backend/frontend_dist/` and synced to Android assets) |
+| VS Code extension `npm test` | **23 passed, 1 skipped** (526ms) |
+| VS Code extension package | **Built** (`vscode-extension/smaran-ai-codex-2.20.1.vsix`, 207.59 KB) |
 | Playwright `mobile-reply-voice.spec.js` | **4 passed** (Chromium) |
 | Physical Android Device (`8f807260`) | **Observed / Live verified** (OnePlus Nord CE4, Android 14) |
 | Windows Standalone Executable | **Built** (`dist/SMARAN.AI/SMARAN.AI.exe`, 70.1 MB) |
@@ -61,6 +61,11 @@ upgrading a packaged dependency blindly.
 | Keyboard shortcuts manager | **Implemented / Tested** | Searchable table of shortcuts (in-app vs system), in-place key re-binding with conflict detection, and reset to defaults. |
 | Git & Version control preferences | **Implemented / Tested** | Default branch prefix, merge method preference (squash/merge/rebase), draft PR toggle, and explicit no-force-push policy enforcement notice. |
 | Custom instructions & memory controls | **Implemented / Tested** | Injected into `/api/chat` system prompt; long-term memory toggle gates fact retrieval and background extraction; selective fact delete and clear all via `/api/memory/clear`. |
+| Desktop–VS Code bidirectional sync | **Tested** | Authoritative SQLite `coding_tasks` storage with revision-checked optimistic locking (`expected_revision`), idempotency, and tombstone deletion. Tested in `backend/tests/test_coding_sync.py` with multi-step updates, conflict 409, and tombstone clears. VS Code extension `SessionStore` syncs via `/api/code/tasks`. |
+| Two product sections (Chat vs Code) | **Tested** | Clean separation in database (`chat_sessions.section`), API queries (`/api/chat/sessions?section=...`), section migration (`PUT /api/chat/sessions/{id}/section`), and UI segmented switcher. Ordinary Chat & Speak history is strictly excluded from VS Code extension history. Tested in `test_coding_sync.py`. |
+| Persistent Memory across models & surfaces | **Tested** | Durable user facts stored independently of model provider in `user_memory`. Endpoints for CRUD, keyword/stemmed search (`/api/memory/search`), and export (`/api/memory/export`). Context injection respects section scoping so chat memories never leak into coding tasks. Tested in `test_coding_sync.py`. |
+| Computer use execution policy | **Tested** | `sm_computer_use_enabled` preference is enforced at runtime in `DesktopAgent.execute` and `/api/desktop/execute`; destructive actions are gated; returns HTTP 403 when disabled. Tested in `test_coding_sync.py`. |
+| YouTube channel intent & direct navigation | **Tested** | Channel regex parser resolves natural queries like *"Shashwat Mishra Techie YouTube channel open karo"* directly to YouTube channel URL rather than generic video search. Tested in `test_coding_sync.py`. |
 | App launches report observed outcome | **Observed** | Was `Popen(...)` then `{"success": True}` on the next line. Now waits and polls: running → confirmed, exited 0 → success but unconfirmed, exited non-zero → failure with the code. Exercised against real processes (sleep / immediate return / `sys.exit(3)`), not only mocks. 8 tests. |
 | Windows browsers no longer succeed when absent | **Tested** | `Popen("start chrome", shell=True)` returned 0 with no Chrome installed, because `start` is a cmd builtin that always succeeds. Now resolves the executable and spawns it directly. |
 | Machine control can be stopped | **Observed** | Scoped sessions with a check immediately before dispatch, so a stop lands between steps. Unknown tokens refused; tokens never appear in the listing. Exercised through the API — start, list, stop-all, stop-again. 14 tests. |

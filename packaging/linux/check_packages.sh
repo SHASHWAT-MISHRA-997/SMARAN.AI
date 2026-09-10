@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/packaging/linux/paths.sh"
 cd "$PACKAGE_DIR"
-SCRATCH="$(mktemp -d "$PWD/.package-check.XXXXXX")"
+SCRATCH="$(mktemp -d /tmp/package-check.XXXXXX)"
 trap 'rm -rf -- "$SCRATCH"' EXIT
 
 fail=0

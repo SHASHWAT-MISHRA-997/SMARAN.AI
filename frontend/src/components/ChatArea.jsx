@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Box } from 'lucide-react';
+import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Box, Shield, Terminal } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
@@ -1219,16 +1219,33 @@ const MessageRow = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopSpeak
  * fallback rather than being forced into either group.
  */
 const FEMALE_VOICE_NAMES = /zira|aria|jenny|michelle|hazel|susan|linda|heera|kalpana|swara|neerja|dhwani|pallavi|sarah|emma|ava|joanna|salli|female|women/i;
-const MALE_VOICE_NAMES = /david|mark|guy|george|ryan|james|brian|hemant|madhur|prabhat|matthew|joey|male|man/i;
+const MALE_VOICE_NAMES = /david|mark|guy|george|ryan|james|brian|hemant|madhur|prabhat|matthew|joey|male |man /i;
 const voiceGender = (name = '') => {
   if (FEMALE_VOICE_NAMES.test(name)) return 'female';
   if (MALE_VOICE_NAMES.test(name)) return 'male';
   return '';
 };
 
-const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollections, selectedModel, turboMode, onTogglePanel, onOpenModelHub, onOpenWorkspace, onEnsureSession, performancePosition }) => {
+const ChatArea = ({
+  token,
+  currentUser,
+  activeSessionId,
+  activeCollections,
+  setActiveCollections,
+  selectedModel,
+  turboMode,
+  onTogglePanel,
+  onOpenModelHub,
+  onOpenWorkspace,
+  onEnsureSession,
+  performancePosition,
+  activeSection = 'code',
+  onSectionChange,
+}) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  const [coworkMode, setCoworkMode] = useState(false);
+  const [askForApproval, setAskForApproval] = useState(true);
   useEffect(() => {
     const applySkill = () => {
       const instructions = localStorage.getItem('sm_pending_skill_prompt');
@@ -3364,7 +3381,7 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       .map((m) => ({ role: m.role, content: String(m.content) }));
     /* Anything remembered goes in front of the model. Storing a fact that
        nothing ever reads would be the same broken promise with extra steps. */
-    const facts = localChat.loadFacts()
+    const facts = (localStorage.getItem('sm_memory_enabled') !== 'false' ? localChat.loadFacts() : [])
       .map((f) => `- ${f.content || f.fact || ''}`.trim())
       .filter((line) => line.length > 2);
 
@@ -4463,21 +4480,73 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
       <div
         ref={chatContainerRef}
         onScroll={handleScroll}
-        /* overflow-x-hidden: the glow behind the hero logo is 422px wide and
-           the panel on a phone is 368, so this box scrolled sideways and drew
-           a scrollbar across the screen just above the composer - reported as
-           a slider nobody could explain. Decoration should never be able to
-           add a scrollbar. */
         className="chat-scroll flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-6 md:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6 relative z-10"
       >
         {messages.length === 0 ? (
-          <div className="min-h-full flex flex-col items-center justify-start sm:justify-center text-center max-w-2xl mx-auto w-full space-y-4 sm:space-y-6 px-2 py-6 sm:py-8 select-none animate-in fade-in slide-in-from-bottom-4 duration-500">
+          isPhone() ? (
+            <div className="min-h-full flex flex-col items-center justify-start sm:justify-center text-center max-w-2xl mx-auto w-full space-y-4 sm:space-y-6 px-2 py-6 sm:py-8 select-none animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <HeroLogo3D />
+            </div>
+          ) : activeSection === 'code' ? (
+            <div className="min-h-full flex flex-col items-center justify-center text-center max-w-2xl mx-auto w-full space-y-5 px-3 py-8 select-none animate-in fade-in duration-300">
+              {/* Terminal Cloud Icon */}
+              <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 shadow-xl shadow-black/40">
+                <Terminal className="w-7 h-7 text-emerald-400" />
+              </div>
 
-            {/* Animated 3D hero: tumbling glass logo, orbiting rings,
-                energy arcs, and a wordmark that assembles itself. */}
-            <HeroLogo3D />
+              {/* Main Codex Prompt Heading */}
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-100">
+                What should we build in {workspaceStatus?.open ? String(workspaceStatus.root).split(/[\\/]/).filter(Boolean).pop() : 'SMARAN.AI'}?
+              </h1>
 
-          </div>
+              {/* Quick action chips from git / active repository */}
+              <div className="flex flex-col gap-2 w-full max-w-xl text-left">
+                {[
+                  {
+                    id: 'release',
+                    text: "Rebuild release artifacts with today's persistent voice and reply-voice fixes",
+                  },
+                  {
+                    id: 'voice',
+                    text: 'Prove the phone voice screen handles long replies without covering Smaru',
+                  },
+                  {
+                    id: 'audit',
+                    text: 'Audit and sync workspace code with VS Code extension',
+                  },
+                ].map((chip) => (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => {
+                      setInput(chip.text);
+                      composerRef.current?.focus();
+                    }}
+                    className="flex items-center gap-3 p-3 rounded-xl border border-zinc-800/80 bg-zinc-900/60 hover:bg-zinc-850 hover:border-zinc-700 text-xs text-zinc-300 transition text-left cursor-pointer group"
+                  >
+                    <GitBranch className="w-4 h-4 text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
+                    <span className="flex-1 truncate">{chip.text}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* VS Code Extension Live Sync Status Card */}
+              <div className="w-full max-w-xl rounded-xl border border-emerald-500/25 bg-emerald-950/20 p-3 flex items-center justify-between text-xs text-emerald-300 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="font-semibold">VS Code Extension Synced</span>
+                  <span className="text-emerald-500/80 font-mono text-[11px]">(smaran-ai-codex-2.20.1)</span>
+                </div>
+                <span className="text-[11px] text-zinc-400 font-mono">Local Engine Active</span>
+              </div>
+            </div>
+          ) : (
+            <div className="min-h-full flex flex-col items-center justify-start sm:justify-center text-center max-w-2xl mx-auto w-full space-y-4 sm:space-y-6 px-2 py-6 sm:py-8 select-none animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {/* Animated 3D hero: tumbling glass logo, orbiting rings,
+                  energy arcs, and a wordmark that assembles itself. */}
+              <HeroLogo3D />
+            </div>
+          )
         ) : (
           <>
 {messages.map((msg) => (
@@ -4596,6 +4665,43 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               <GitBranch className="h-3.5 w-3.5 text-emerald-400" /> {workspaceStatus.git.branch}
             </span>
           )}
+          {activeSection === 'chat' && (
+            <div className="inline-flex h-8 items-center p-0.5 rounded-lg bg-zinc-900 border border-zinc-700/80 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setCoworkMode(false)}
+                className={`h-full px-2.5 rounded-md font-semibold transition cursor-pointer flex items-center ${
+                  !coworkMode ? 'bg-zinc-800 text-white shadow-xs' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => setCoworkMode(true)}
+                className={`h-full px-2.5 rounded-md font-semibold transition cursor-pointer flex items-center ${
+                  coworkMode ? 'bg-indigo-600 text-white shadow-xs' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Cowork
+              </button>
+            </div>
+          )}
+          {activeSection === 'code' && (
+            <button
+              type="button"
+              onClick={() => setAskForApproval((v) => !v)}
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-semibold transition cursor-pointer ${
+                askForApproval
+                  ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300'
+                  : 'border-zinc-700/80 bg-zinc-900/90 text-zinc-400'
+              }`}
+              title={askForApproval ? 'Requires user confirmation before applying code changes or running commands' : 'Auto-executes tasks without confirmation'}
+            >
+              <Shield className="h-3.5 w-3.5 text-emerald-400" />
+              <span>{askForApproval ? 'Ask for approval' : 'Auto-execute'}</span>
+            </button>
+          )}
         </div>
         {voiceNotice && (
           <div
@@ -4683,9 +4789,11 @@ const ChatArea = ({ token, activeSessionId, activeCollections, setActiveCollecti
               onCopy={(e) => e.stopPropagation()}
               onCut={(e) => e.stopPropagation()}
               placeholder={
-                activeSessionId
-                  ? isWebSearchEnabled ? 'Search the live web...' : isRagEnabled ? 'Ask from uploaded files...' : 'Ask SMARAN.AI directly...'
-                  : 'Start a new conversation'
+                activeSection === 'code'
+                  ? 'Do anything'
+                  : activeSessionId
+                    ? isWebSearchEnabled ? 'Search the live web...' : isRagEnabled ? 'Ask from uploaded files...' : 'Ask SMARAN.AI directly...'
+                    : 'Start a new conversation'
               }
               disabled={streaming || directUploading}
               rows={1}

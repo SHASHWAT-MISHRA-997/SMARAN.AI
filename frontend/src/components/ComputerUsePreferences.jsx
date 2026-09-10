@@ -11,7 +11,7 @@ export default function ComputerUsePreferences() {
   useEffect(() => {
     // Check active control sessions
     fetch(`${API_BASE}/api/control/session`)
-      .then(res => res.json())
+      .then(res => { if (!res.ok) throw new Error('Control status unavailable'); return res.json(); })
       .then(data => {
         if (data && typeof data.active === 'number') {
           setActiveSessions(data.active);
@@ -39,6 +39,7 @@ export default function ComputerUsePreferences() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
+      if (!res.ok) throw new Error(`Control stop failed (${res.status})`);
       const data = await res.json();
       setActiveSessions(data.active || 0);
       setStopNotice(`Stopped. Active sessions: ${data.active || 0}.`);

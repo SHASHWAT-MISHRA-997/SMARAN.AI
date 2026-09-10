@@ -20,6 +20,7 @@ import ExtensionsHub from './components/ExtensionsHub';
 import SitesHub from './components/SitesHub';
 import DesktopPet from './components/DesktopPet';
 import TerminalPanel from './components/TerminalPanel';
+import SmaranDesignView from './components/SmaranDesignView';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 import { isNativeApp, loadLink } from './utils/hostLink';
 import { useBackClose } from './utils/backStack';
@@ -102,6 +103,16 @@ const App = () => {
     const saved = localStorage.getItem('sm_performance_position');
     return ['left', 'right', 'hidden'].includes(saved) ? saved : 'right';
   });
+  const [activeSection, setActiveSection] = useState(
+    () => (typeof window !== 'undefined' ? localStorage.getItem('sm_active_section') || 'code' : 'code'),
+  );
+
+  const handleSectionChange = (section) => {
+    setActiveSection(section);
+    if (typeof window !== 'undefined') localStorage.setItem('sm_active_section', section);
+    setActiveSessionId(null);
+    fetchSessions(section);
+  };
 
   /* The pinned layout follows the window, not the button.
 
@@ -195,13 +206,13 @@ const App = () => {
   // would not take typing: an empty session list was handled, but a request
   // that simply failed was not, and that left the id null. On a phone talking
   // to a paired computer, a failed request is the common case.
-  async function fetchSessions() {
+  async function fetchSessions(section = activeSection) {
     /* No backend: the conversation list lives on the device.
        Without this a fresh session id was invented on every launch, so the
        previous conversation was still on disk and nothing ever went looking
        for it - the app opened empty every time. */
     if (noBackendHere()) {
-      const stored = localChat.loadSessions();
+      const stored = (localChat.loadSessions() || []).filter(s => !s.section || s.section === section);
       if (stored.length) {
         setSessions(stored);
         setActiveSessionId(current => current || stored[0].id);
@@ -209,7 +220,8 @@ const App = () => {
       }
       const first = {
         id: `local-${Date.now()}`,
-        title: 'New Conversation',
+        title: section === 'code' ? 'New Coding Task' : 'New Conversation',
+        section,
         created_at: new Date().toISOString(),
       };
       localChat.saveSessions([first]);
@@ -218,45 +230,28 @@ const App = () => {
       return;
     }
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions`);
+      const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions?section=${encodeURIComponent(section)}`);
       if (res.ok) {
         const data = await res.json();
         if (!sessionsMountedRef.current) return;
         const sessionList = Array.isArray(data) ? data : [];
         setSessions(sessionList);
         if (sessionList.length > 0) {
-          if (!activeSessionId) {
-            /* The conversation you were having, not the newest row.
-               Sessions are ordered by when they were touched, and the newest
-               is very often an empty one - 49 of 53 on this machine had no
-               messages in them. Opening that puts you in a blank screen and
-               makes everything you wrote look lost, which is exactly how it
-               was reported. */
-            const withContent = sessionList.find((item) => (item.message_count || 0) > 0);
-            setActiveSessionId(current => current || (withContent || sessionList[0]).id);
-          }
+          const withContent = sessionList.find((item) => (item.message_count || 0) > 0);
+          setActiveSessionId(current => current || (withContent || sessionList[0]).id);
           return;
+        } else {
+          setActiveSessionId(null);
         }
-        // An empty database is a successful first launch, not a connection
-        // failure. Sending creates the first session; polling here forever
-        // wasted requests and retained a stale selected-session closure.
         return;
       }
     } catch (err) {
       console.error(err);
     }
 
-    /* Nothing is created here.
-     *
-     * This used to call handleCreateSession when the request failed - and at
-     * launch it fails routinely, because the window is up before the backend
-     * is listening. Every start that lost that race minted an empty session:
-     * fifteen of them in one day. The app can sit with no session at all;
-     * sending a message creates one, which is the moment it is actually
-     * needed. */
     if (!activeSessionId && sessionsMountedRef.current) {
       clearTimeout(sessionRetryRef.current);
-      sessionRetryRef.current = setTimeout(() => { void fetchSessions(); }, 2000);
+      sessionRetryRef.current = setTimeout(() => { void fetchSessions(section); }, 2000);
     }
   }
 
@@ -309,12 +304,13 @@ const App = () => {
     if (noBackendHere()) {
       const created = {
         id: `local-${Date.now()}`,
-        title: 'New Conversation',
+        title: activeSection === 'code' ? 'New Coding Task' : 'New Conversation',
+        section: activeSection,
         created_at: new Date().toISOString(),
       };
       const all = [created, ...localChat.loadSessions()].slice(0, 60);
       localChat.saveSessions(all);
-      setSessions(all);
+      setSessions(all.filter(s => !s.section || s.section === activeSection));
       setActiveSessionId(created.id);
       setActiveView('chat');
       return created;
@@ -322,6 +318,11 @@ const App = () => {
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          section: activeSection,
+          title: activeSection === 'code' ? 'New Coding Task' : 'New Conversation',
+        }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -335,7 +336,8 @@ const App = () => {
     }
     const localSession = {
       id: `local-${Date.now()}`,
-      title: 'New Conversation',
+      title: activeSection === 'code' ? 'New Coding Task' : 'New Conversation',
+      section: activeSection,
       created_at: new Date().toISOString(),
     };
     setSessions((prev) => [localSession, ...(Array.isArray(prev) ? prev : [])]);
@@ -343,6 +345,21 @@ const App = () => {
     setActiveView('chat');
     return localSession;
   }
+
+  const handleMoveSession = async (id, targetSection) => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/chat/sessions/${id}/section`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ section: targetSection }),
+      });
+      if (res.ok) {
+        fetchSessions(activeSection);
+      }
+    } catch (err) {
+      console.error('Failed to move session section:', err);
+    }
+  };
 
   const handleDeleteSession = async (id) => {
     if (noBackendHere() || String(id).startsWith('local-')) {
@@ -571,6 +588,9 @@ const App = () => {
         onOpenAuth={() => setIsAuthOpen(true)}
         token={currentUser?.session_token}
         user={currentUser}
+        activeSection={activeSection}
+        onSectionChange={handleSectionChange}
+        onMoveSession={handleMoveSession}
       />
 
       {/* Main Workspace Frame */}
@@ -591,7 +611,8 @@ const App = () => {
             <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
               {activeView === 'sites' ? 'Sites'
                 : activeView === 'plugins' ? 'Plugins & Skills'
-                : activeView === 'collections' ? 'Collections' : ''}
+                : activeView === 'collections' ? 'Collections'
+                : activeView === 'design' ? 'SMARAN Design' : ''}
             </span>
           </div>
         )}
@@ -610,12 +631,18 @@ const App = () => {
             onOpenAnalytics={() => setIsAnalyticsOpen(true)}
             onOpenWorkspace={() => setIsWorkspaceOpen(true)}
             onEnsureSession={handleCreateSession}
-            // So the header can stop offering a panel that has been switched
-            // off: the button stayed, and pressing it did nothing visible.
             performancePosition={performancePosition}
+            activeSection={activeSection}
+            onSectionChange={handleSectionChange}
           />
         )}
         
+        {activeView === 'design' && (
+          <SmaranDesignView
+            onClose={() => setActiveView('chat')}
+            onOpenTerminal={() => setIsTerminalOpen(true)}
+          />
+        )}
         {activeView === 'collections' && (
           <CollectionManager />
         )}

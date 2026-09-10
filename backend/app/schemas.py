@@ -76,6 +76,7 @@ class ChatMessageResponse(BaseModel):
 class ChatSessionResponse(BaseModel):
     id: str
     title: str
+    section: str = "chat"
     created_at: datetime
     updated_at: datetime
     # How many messages are in it, so the app can reopen the conversation you
@@ -86,6 +87,7 @@ class ChatSessionResponse(BaseModel):
 
 class ChatSessionCreate(BaseModel):
     title: str
+    section: Optional[str] = "chat"
 
 
 class UserMemoryCreate(BaseModel):

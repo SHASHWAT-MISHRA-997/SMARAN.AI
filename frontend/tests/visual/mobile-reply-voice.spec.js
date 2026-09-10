@@ -37,6 +37,15 @@ test('Speak stays open when replacing the phone tools sheet and Back closes only
   await expect(page.getByTestId('chat-composer')).toBeVisible();
 });
 
+test('mobile settings omit keyboard shortcuts in portrait and landscape', async ({ page }) => {
+  await page.getByRole('button', { name: 'Open navigation menu' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'General & Theme', exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Shortcuts', exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect(page.getByRole('button', { name: 'Shortcuts', exact: true })).toHaveCount(0);
+});
+
 test('share previews completed messages and downloads a snapshot', async ({ page }) => {
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Share conversation' });

@@ -4,7 +4,7 @@ import { Lock,
   UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop,
   RefreshCw, Trash2, CheckCircle2,
   ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe,
-  Mic, Monitor, Keyboard, GitBranch
+  Mic, Monitor, Keyboard, GitBranch, Pencil, Check, Search, Users
 } from "lucide-react";
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
@@ -14,6 +14,10 @@ import VoicePreferences from './VoicePreferences';
 import ComputerUsePreferences from './ComputerUsePreferences';
 import ShortcutsPreferences from './ShortcutsPreferences';
 import GitPreferences from './GitPreferences';
+import CoworkPreferences from './CoworkPreferences';
+import ChromeExtensionPreferences from './ChromeExtensionPreferences';
+import DesktopGeneralPreferences from './DesktopGeneralPreferences';
+import MemoryPreferences from './MemoryPreferences';
 
 import { detectClientDevice } from './RightPanel';
 import { isPhone } from '../utils/device';
@@ -70,6 +74,7 @@ const ResourceBar = ({ percent, colour, label }) => {
 const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange, selectedModel = "auto", sidebarPosition = "left", onSidebarPositionChange, performancePosition = "right", onPerformancePositionChange, onOpenConnections, onOpenModels, onOpenAnalytics }) => {
   const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState(initialTab || "general");
+  const [settingsSearch, setSettingsSearch] = useState("");
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -390,6 +395,10 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
   // Memory State
   const [memoryFacts, setMemoryFacts] = useState([]);
   const [newFact, setNewFact] = useState("");
+  const [memoryCategory, setMemoryCategory] = useState("durable_record");
+  const [memorySearchQuery, setMemorySearchQuery] = useState("");
+  const [editingMemoryId, setEditingMemoryId] = useState(null);
+  const [editingMemoryText, setEditingMemoryText] = useState("");
   const [, setLoadingMemory] = useState(false);
 
   // Hardware Specs - Real detected hardware
@@ -533,7 +542,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
      #310 - the whole app fell over to "Something went wrong" the moment you
      tapped Settings. */
   useEffect(() => {
-    if (isMobile && activeTab === "updates") setActiveTab("general");
+    if (isMobile && ["updates", "shortcuts", "computer_use", "git"].includes(activeTab)) setActiveTab("general");
   }, [isMobile, activeTab]);
 
   // Hooks MUST stay above the early return below so React's hook count
@@ -549,6 +558,89 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
   if (!isOpen) return null;
 
   // Handlers can stay below early return as they are not React hooks.
+  const handleSearchMemory = async (q) => {
+    setMemorySearchQuery(q);
+    if (!q.trim()) {
+      if (noBackend()) {
+        setMemoryFacts(localChat.loadFacts());
+        return;
+      }
+      try {
+        const res = await fetchWithAuth(`${API_BASE}/api/memory`);
+        if (res.ok) {
+          const data = await res.json();
+          setMemoryFacts(Array.isArray(data) ? data : []);
+        }
+      } catch {}
+      return;
+    }
+    if (noBackend()) {
+      const all = localChat.loadFacts() || [];
+      setMemoryFacts(all.filter(f => (f.fact || f.content || '').toLowerCase().includes(q.toLowerCase())));
+      return;
+    }
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/memory/search?q=${encodeURIComponent(q.trim())}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMemoryFacts(Array.isArray(data) ? data : []);
+      }
+    } catch {}
+  };
+
+  const handleExportMemory = async () => {
+    if (noBackend()) {
+      const data = localChat.loadFacts() || [];
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `smaran_memory_${Date.now()}.json`;
+      a.click();
+      return;
+    }
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/memory/export`);
+      if (res.ok) {
+        const data = await res.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `smaran_memory_${Date.now()}.json`;
+        a.click();
+      }
+    } catch (err) {
+      console.warn('Memory export failed:', err);
+    }
+  };
+
+  const handleUpdateMemoryFact = async (id, newText) => {
+    if (!newText.trim()) return;
+    if (noBackend()) {
+      const all = localChat.loadFacts() || [];
+      const updated = all.map(f => f.id === id ? { ...f, fact: newText.trim() } : f);
+      localChat.saveFacts?.(updated);
+      setMemoryFacts(updated);
+      setEditingMemoryId(null);
+      return;
+    }
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/memory/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fact: newText.trim() }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setMemoryFacts((prev) => prev.map((f) => f.id === id ? { ...f, fact: updated.fact } : f));
+        setEditingMemoryId(null);
+      }
+    } catch (err) {
+      console.warn('Memory edit failed:', err);
+    }
+  };
+
   const handleAddMemoryFact = async () => {
     const fact = newFact.trim();
     if (!fact) return;
@@ -562,7 +654,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
       const res = await fetchWithAuth(`${API_BASE}/api/memory`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fact }),
+        body: JSON.stringify({ fact, category: memoryCategory }),
       });
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       // The saved row, with the id the database gave it - not one made up here.
@@ -613,32 +705,29 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
   };
 
   const TABS = [
-    { id: "general", label: "General & Theme", icon: SlidersHorizontal },
-    { id: "appearance", label: "Appearance", icon: Sun },
-    { id: "voice", label: "Voice & Speech", icon: Mic },
-    ...(!isMobile ? [{ id: "computer_use", label: "Computer Use", icon: Monitor }] : []),
-    { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
-    ...(!isMobile ? [{ id: "git", label: "Git & VCS", icon: GitBranch }] : []),
-    // First, and only where it is the thing standing between you and a
-    // working app: on a phone with no computer linked, nothing answers until
-    // a provider and a key are set.
-    ...(noBackend() ? [{ id: "provider", label: "AI Provider", icon: Boxes }] : []),
-    { id: "account", label: "Account & Profile", icon: UserRound },
-    // The Model Matrix downloads and compares models that run on the machine's
-    // own hardware. A phone has none of that, and the screen was showing
-    // "0 models confirmed" with controls that could not do anything.
-    ...(isMobile ? [] : [{ id: "models", label: "Model Matrix", icon: Boxes }]),
-    ...(!isMobile ? [{ id: "analytics", label: "Analytics & Telemetry", icon: ChartNoAxesCombined }] : []),
-    { id: "memory", label: "AI Memory & Prompts", icon: Brain },
-    { id: "connections", label: "Device Connections", icon: Wifi },
-    { id: "pets", label: isMobile ? "Mobile Pets" : "Desktop Pets", icon: PawPrint },
-    /* Not on a phone. Every button on that screen asks a backend - check,
-       download, install - and a phone app installs its own updates through
-       the store it came from. With no computer linked there was nothing it
-       could do but explain why it could do nothing, which is a screen worth
-       removing rather than writing. */
-    ...(isMobile ? [] : [{ id: "updates", label: "Software Updates", icon: ArrowDownToLine }]),
-    { id: "developer", label: "About Developer", icon: UserCheck },
+    // Settings Category (Claude Desktop Screenshots 1 & 2)
+    { id: "general", label: "General & Theme", category: "Settings", icon: SlidersHorizontal },
+    { id: "account", label: "Account & Profile", category: "Settings", icon: UserRound },
+    { id: "appearance", label: "Appearance", category: "Settings", icon: Sun },
+    { id: "voice", label: "Voice & Speech", category: "Settings", icon: Mic },
+    ...(!isMobile ? [{ id: "computer_use", label: "Capabilities", category: "Settings", icon: Monitor }] : []),
+    ...(!isMobile ? [{ id: "git", label: "SMARAN Code", category: "Settings", icon: GitBranch }] : []),
+    ...(!isMobile ? [{ id: "cowork", label: "Cowork", category: "Settings", icon: Users }] : []),
+    ...(!isMobile ? [{ id: "chrome", label: "SMARAN in Chrome", category: "Settings", icon: Globe }] : []),
+
+    // Desktop app Category (Screenshot 3)
+    ...(!isMobile ? [{ id: "desktop_general", label: "General (Desktop)", category: "Desktop app", icon: Laptop }] : []),
+    ...(!isMobile ? [{ id: "shortcuts", label: "Shortcuts", category: "Desktop app", icon: Keyboard }] : []),
+    ...(isMobile ? [] : [{ id: "models", label: "Model Matrix", category: "Desktop app", icon: Boxes }]),
+    ...(!isMobile ? [{ id: "analytics", label: "Usage & Telemetry", category: "Desktop app", icon: ChartNoAxesCombined }] : []),
+    ...(isMobile ? [] : [{ id: "updates", label: "Software Updates", category: "Desktop app", icon: ArrowDownToLine }]),
+    { id: "developer", label: "Developer", category: "Desktop app", icon: UserCheck },
+
+    // Customize Category (Screenshot 4)
+    ...(noBackend() ? [{ id: "provider", label: "AI Provider", category: "Customize", icon: Boxes }] : []),
+    { id: "memory", label: "Memory", category: "Customize", icon: Brain },
+    { id: "connections", label: "Connectors & Devices", category: "Customize", icon: Wifi },
+    { id: "pets", label: isMobile ? "Mobile Pets" : "Desktop Pets", category: "Customize", icon: PawPrint },
   ];
 
   return (
@@ -690,45 +779,72 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
 
         {/* Modal Body with Left Navigation (Desktop) & Content Area */}
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          {/* Left Navigation (Desktop) */}
-          <nav className="hidden sm:flex w-56 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-950 p-3 space-y-1 overflow-y-auto">
-            <p className="px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-              Preferences
-            </p>
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.id;
+          {/* Left Navigation (Desktop) matching Claude Desktop Screenshots */}
+          <nav className="hidden sm:flex w-60 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-950 p-3 space-y-3 overflow-y-auto">
+            {/* Search Input matching Screenshot */}
+            <div className="relative mb-0.5">
+              <input
+                type="text"
+                value={settingsSearch}
+                onChange={(e) => setSettingsSearch(e.target.value)}
+                placeholder="Search"
+                className="w-full pl-8 pr-2.5 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 outline-none focus:border-indigo-500"
+              />
+              <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-2.5" />
+            </div>
+
+            {/* Categorized groups */}
+            {['Settings', 'Desktop app', 'Customize'].map((cat) => {
+              const catTabs = TABS.filter(
+                (t) =>
+                  t.category === cat &&
+                  (!settingsSearch.trim() ||
+                    t.label.toLowerCase().includes(settingsSearch.toLowerCase()) ||
+                    t.id.toLowerCase().includes(settingsSearch.toLowerCase()))
+              );
+              if (!catTabs.length) return null;
               return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2.5 w-full rounded-xl px-3 py-2.5 text-xs font-bold transition text-left cursor-pointer ${
-                    active
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
-                      : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-100"
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{tab.label}</span>
-                </button>
+                <div key={cat} className="space-y-0.5">
+                  <p className="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                    {cat}
+                  </p>
+                  {catTabs.map((tab) => {
+                    const Icon = tab.icon;
+                    const active = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`flex items-center gap-2.5 w-full rounded-xl px-3 py-2 text-xs font-bold transition text-left cursor-pointer ${
+                          active
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+                            : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-zinc-100"
+                        }`}
+                      >
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span className="truncate">{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </nav>
 
           {/* Right Content Area */}
-          {/* min-w-0 and overflow-x-hidden: a flex child sizes to its content
-              by default, so one wide thing inside - a release note with a long
-              unbroken line, a file path - widened this pane past the dialog and
-              put a horizontal scrollbar across the bottom of it. */}
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-7 space-y-5 sm:space-y-6 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
 
             {/* PREFERENCE TABS */}
             {activeTab === 'appearance' && <AppearancePreferences />}
             {activeTab === 'voice' && <VoicePreferences />}
             {activeTab === 'computer_use' && <ComputerUsePreferences />}
-            {activeTab === 'shortcuts' && <ShortcutsPreferences />}
+            {activeTab === 'shortcuts' && !isMobile && <ShortcutsPreferences />}
             {activeTab === 'git' && <GitPreferences />}
+            {activeTab === 'cowork' && <CoworkPreferences />}
+            {activeTab === 'chrome' && <ChromeExtensionPreferences />}
+            {activeTab === 'desktop_general' && <DesktopGeneralPreferences />}
+            {activeTab === 'memory' && <MemoryPreferences />}
             {activeTab === "general" && (
               <div className="space-y-6">
                 <div>
@@ -1333,135 +1449,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                     <span className="text-zinc-500">CPU Architecture:</span>
                     <span className="font-bold text-zinc-800 dark:text-zinc-200">{deviceSpecs.cpu_name} ({deviceSpecs.cpu_threads} Threads)</span>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* 5. AI MEMORY & CUSTOM INSTRUCTIONS TAB */}
-            {activeTab === "memory" && (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
-                    <Brain className="w-5 h-5 text-indigo-500" /> AI Memory & Custom Instructions
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    Personalize how SMARAN.AI responds and what facts it remembers across sessions.
-                  </p>
-                </div>
-
-                {/* Persistent Custom Instructions */}
-                <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="block text-xs font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
-                      Persistent Custom Instructions
-                    </span>
-                    <span className="text-[10px] text-zinc-400 font-mono">
-                      {customInstructions.length} / 2000 chars
-                    </span>
-                  </div>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                    Instructions injected into every prompt. For example: preferred coding frameworks, response tone, or constraints.
-                  </p>
-                  <textarea
-                    rows={3}
-                    maxLength={2000}
-                    value={customInstructions}
-                    onChange={(e) => {
-                      setCustomInstructions(e.target.value);
-                      localStorage.setItem("sm_custom_instructions", e.target.value);
-                    }}
-                    placeholder="e.g. Always write code in TypeScript with concise explanations. Avoid verbose boilerplate."
-                    className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-3 text-xs outline-none focus:border-indigo-500 font-mono leading-relaxed resize-y text-zinc-900 dark:text-zinc-100"
-                  />
-                </div>
-
-                {/* Long-term Memory Toggle */}
-                <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <span className="block text-xs font-black text-zinc-900 dark:text-white">Enable Long-Term Fact Extraction</span>
-                    <span className="block text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                      Automatically retrieve and remember relevant personal facts during conversations.
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !memoryEnabled;
-                      setMemoryEnabled(next);
-                      localStorage.setItem("sm_memory_enabled", String(next));
-                    }}
-                    className={`shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
-                      memoryEnabled
-                        ? "bg-indigo-600 text-white shadow-sm"
-                        : "bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
-                    }`}
-                  >
-                    {memoryEnabled ? "Enabled" : "Disabled"}
-                  </button>
-                </div>
-
-                {/* Stored Memory Facts */}
-                <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="block text-xs font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
-                      Stored Memory Facts ({memoryFacts.length})
-                    </span>
-                    {memoryFacts.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleClearAllMemory}
-                        className="text-[11px] font-bold text-rose-500 hover:text-rose-600 hover:underline flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3 h-3" /> Clear All Facts
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2">
-                    <input
-                      value={newFact}
-                      onChange={(e) => setNewFact(e.target.value)}
-                      placeholder={isMobile ? "Add a rule or fact…" : "Add a new custom rule or fact for the AI…"}
-                      className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2 text-xs outline-none focus:border-indigo-500"
-                    />
-                    <button
-                      onClick={handleAddMemoryFact}
-                      disabled={!newFact.trim()}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-500 disabled:opacity-40"
-                    >
-                      Add Fact
-                    </button>
-                  </div>
-
-                  {memoryError && (
-                    <p role="alert" className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-                      {memoryError}
-                    </p>
-                  )}
-
-                  {memoryFacts.length === 0 ? (
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500 py-3 text-center">
-                      No memories stored yet. Type a fact above or enable long-term memory extraction.
-                    </p>
-                  ) : (
-                    <div className="space-y-2 max-h-60 overflow-y-auto">
-                      {memoryFacts.map((f) => (
-                        <div
-                          key={f.id}
-                          className="flex items-center justify-between p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs"
-                        >
-                          <span className="text-zinc-800 dark:text-zinc-200 pr-2">{f.fact || f.content}</span>
-                          <button
-                            onClick={() => handleDeleteMemoryFact(f.id)}
-                            className="text-zinc-400 hover:text-rose-500 p-1 shrink-0"
-                            title="Delete memory"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
             )}

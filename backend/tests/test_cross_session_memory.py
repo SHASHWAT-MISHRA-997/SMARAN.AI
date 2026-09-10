@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.models import Base, User, ChatSession, ChatMessage, UserMemory
 from app.schemas import ChatRequest
+from app.conversation_memory import recent_context
 
 
 @pytest.fixture
@@ -58,7 +59,7 @@ def test_cross_session_memory_retrieval(memory_db):
     last_turns = (
         memory_db.query(ChatMessage)
         .filter(ChatMessage.session_id == other_sessions[0].id)
-        .order_by(ChatMessage.created_at.desc())
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
         .limit(2)
         .all()
     )
@@ -84,23 +85,14 @@ def test_sliding_window_short_term_memory(memory_db):
     memory_db.commit()
     
     # Retrieve with the expanded 3000-word limit
-    max_history_words = 3000
-    pruned_history = []
-    current_words = 0
     past_messages = (
         memory_db.query(ChatMessage)
         .filter(ChatMessage.session_id == "session_multi_turn")
-        .order_by(ChatMessage.created_at.desc())
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
         .limit(24)
         .all()
     )
-    for pm in past_messages:
-        msg_words = len(pm.content.split())
-        if current_words + msg_words > max_history_words:
-            break
-        pruned_history.append({"role": pm.role, "content": pm.content})
-        current_words += msg_words
-    pruned_history.reverse()
+    pruned_history = recent_context(past_messages)
     
     # All 20 messages (10 user + 10 assistant) are retained without being wiped out
     assert len(pruned_history) == 20

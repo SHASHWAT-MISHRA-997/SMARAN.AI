@@ -95,12 +95,28 @@ class AuditLog(Base):
     # Relationships
     user = relationship("User", back_populates="audit_logs")
 
+class CodingTask(Base):
+    """Coding-only snapshots shared by desktop and editor clients."""
+    __tablename__ = "coding_tasks"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    revision = Column(Integer, nullable=False, default=1)
+    payload = Column(Text, nullable=False)
+    archived = Column(Boolean, nullable=False, default=False)
+    deleted = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.datetime.now)
+
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id = Column(String, primary_key=True, index=True)  # UUID stored as string
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String, nullable=False)
+    section = Column(String, default="chat", nullable=False, index=True)  # 'chat' or 'code'
     created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
 

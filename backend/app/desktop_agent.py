@@ -156,6 +156,15 @@ DESKTOP_ACTION_CATALOG: Dict[str, Dict[str, Any]] = {
         "parameters": {"query": "Search term for YouTube"},
         "category": "launcher",
     },
+    "open_youtube_channel": {
+        "title": "Open a YouTube Channel",
+        "description": "Open a creator's YouTube channel or handle in the browser.",
+        "risk": "read_only",
+        "changes_system": False,
+        "requires_confirmation": False,
+        "parameters": {"channel": "Channel name or handle (e.g. Shashwat Mishra Techie)"},
+        "category": "launcher",
+    },
     "open_application": {
         "title": "Launch a desktop application",
         "description": "Open any installed application (Chrome, VS Code, Notepad, Calculator, etc.).",
@@ -745,6 +754,24 @@ class DesktopAgent:
 
         spec = DESKTOP_ACTION_CATALOG[action_id]
 
+        # Execution-time policy enforcement: sm_computer_use_enabled
+        if isinstance(params, dict) and params.get("computer_use_enabled") is False:
+            return {
+                "success": False,
+                "blocked": True,
+                "action": action_id,
+                "error": "Computer use is disabled in settings. Enable it in Settings → Computer Use to permit desktop control.",
+            }
+
+        # Execution-time policy enforcement: sm_allow_destructive_actions == 'block'
+        if isinstance(params, dict) and params.get("allow_destructive") == "block" and (spec.get("requires_confirmation") or spec.get("changes_system")):
+            return {
+                "success": False,
+                "blocked": True,
+                "action": action_id,
+                "error": "Destructive system actions are blocked by your security settings.",
+            }
+
         # Check confirmation requirement
         if spec.get("requires_confirmation") and not confirmed:
             return {
@@ -886,10 +913,28 @@ class DesktopAgent:
         return {"success": True, "message": f"Opened {name} in browser.", "url": url}
 
     @staticmethod
+    def _action_open_youtube_channel(params: Dict[str, Any]) -> Dict[str, Any]:
+        raw = (params.get("channel") or params.get("query") or "").strip()
+        if not raw:
+            return {"success": False, "error": "No channel name provided."}
+        clean_name = re.sub(r"\b(channel|चैनल|youtube|यूट्यूब)\b", "", raw, flags=re.I).strip()
+        channel_name = clean_name or raw
+        safe_handle = re.sub(r"\s+", "", channel_name)
+        if safe_handle.lower() in ("shashwatmishratechie", "shashwatmishra"):
+            url = f"https://www.youtube.com/@{safe_handle}"
+        else:
+            url = f"https://www.youtube.com/results?search_query={urlencode({'': channel_name})[1:]}&sp=EgIQAg%253D%253D"
+        if not webbrowser.open(url):
+            return {"success": False, "error": "No browser accepted the YouTube channel request.", "url": url}
+        return {"success": True, "message": f"Opening YouTube channel '{channel_name}'.", "url": url, "is_channel": True}
+
+    @staticmethod
     def _action_search_youtube(params: Dict[str, Any]) -> Dict[str, Any]:
         query = params.get("query", "").strip()
         if not query:
             return {"success": False, "error": "No search query provided."}
+        if re.search(r"\b(channel|चैनल)\b", query, re.I):
+            return DesktopAgent._action_open_youtube_channel({"channel": query})
         url = "https://www.youtube.com/results?" + urlencode({"search_query": query})
         if not webbrowser.open(url):
             return {"success": False, "error": "No browser accepted the YouTube search.", "url": url}
@@ -2150,7 +2195,11 @@ class DesktopAgent:
 INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
     # Disabling startup must precede the positive pattern it contains.
     (re.compile(r"\b(?:don'?t|do not|mat)\s+(?:start|launch|chalao)\s+(?:smaran\s*)?(?:ai\s*)?(?:with|at|pe|par)\s+(?:windows\s+)?startup\b", re.I), "set_launch_at_startup", {"enabled": "false"}),
-    # YouTube
+    # YouTube Channels & Creators
+    (re.compile(r"^(.+?)\s+(?:youtube\s+)?(?:channel|चैनल)\s+(?:(?:ko|को)\s+)?(?:kholo|khol\s+do|open\s+karo|open|chalu\s+karo)\b", re.I), "open_youtube_channel", {"channel": "$1"}),
+    (re.compile(r"(?:open|kholo|chalu\s+karo)\s+(?:the\s+)?(?:youtube\s+)?(?:channel|चैनल)\s+(?:of\s+|named?\s+)?(.+)", re.I), "open_youtube_channel", {"channel": "$1"}),
+    (re.compile(r"(?:open|kholo)\s+(.+?)\s+youtube\s+channel", re.I), "open_youtube_channel", {"channel": "$1"}),
+    # YouTube Search & Videos
     (re.compile(r"(?:open|play|search|chalao|kholo|dikhao)\s+(?:on\s+)?youtube\s+(.+)", re.I), "search_youtube", {"query": "$1"}),
     (re.compile(r"youtube\s+(?:pe|par|par|mein|mai)\s+(.+?)(?:\s+(?:chalao|play|search|kholo|dikhao))", re.I), "search_youtube", {"query": "$1"}),
     (re.compile(r"(?:open|kholo|start)\s+youtube", re.I), "open_website", {"name": "youtube"}),

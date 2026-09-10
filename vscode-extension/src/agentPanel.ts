@@ -31,7 +31,7 @@ import {
     pullOllamaModel,
 } from './providers';
 import { isOfficeFile, officeText } from './office';
-import { Entry, Session, SessionStore } from './sessions';
+import { Entry, Session, SessionStore, SyncConfig } from './sessions';
 import { McpRegistry } from './agent/mcpRegistry';
 import { Keys, lmStudioUrl, mcpServers, ollamaUrl, resolveChoice } from './settings';
 
@@ -167,6 +167,7 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                 break;
 
             case 'listSessions':
+                await this.sessions.pullFromBackend(this.syncConfig());
                 this.post({
                     type: 'sessions',
                     sessions: this.sessions.all().map((s) => ({
@@ -185,7 +186,7 @@ export class AgentPanel implements vscode.WebviewViewProvider {
             }
 
             case 'deleteSession':
-                await this.sessions.remove(String(message.id));
+                await this.sessions.remove(String(message.id), this.syncConfig());
                 if (this.session?.id === message.id) {
                     this.session = undefined;
                     this.post({ type: 'cleared' });
@@ -203,7 +204,7 @@ export class AgentPanel implements vscode.WebviewViewProvider {
                     'Delete all',
                 );
                 if (answer !== 'Delete all') break;
-                await this.sessions.clear();
+                await this.sessions.clear(this.syncConfig());
                 this.session = undefined;
                 this.post({ type: 'cleared' });
                 void this.handle({ type: 'listSessions' });
@@ -399,7 +400,16 @@ export class AgentPanel implements vscode.WebviewViewProvider {
         return { reach: 'workspace', approval: 'always' };
     }
 
+    private syncConfig(): SyncConfig {
+        const config = vscode.workspace.getConfiguration('smaran');
+        const backendUrl = config.get<string>('backendUrl') || 'http://127.0.0.1:3003';
+        const folderPath = this.folder();
+        const projectId = folderPath ? path.basename(folderPath as string) : 'default';
+        return { backendUrl, projectId };
+    }
+
     private async announce(): Promise<void> {
+        void this.sessions.pullFromBackend(this.syncConfig());
         const choice = await resolveChoice(this.keys);
         const provider = PROVIDERS.find((p) => p.id === choice.provider);
         this.post({
@@ -702,7 +712,7 @@ ${words.slice(0, ATTACH_LIMIT)}`,
         } else {
             this.session.entries.push(entry);
         }
-        void this.sessions.save(this.session);
+        void this.sessions.save(this.session, this.syncConfig());
     }
 
     private async start(task: string): Promise<void> {
@@ -826,7 +836,7 @@ ${words.slice(0, ATTACH_LIMIT)}`,
                     // what was already done rather than starting from nothing.
                     this.session.history.push({ role: 'user', content: composed });
                     this.session.history.push({ role: 'assistant', content: event.text });
-                    await this.sessions.save(this.session);
+                    await this.sessions.save(this.session, this.syncConfig());
                 }
             }
             if (this.stopRequested) {
