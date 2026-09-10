@@ -318,7 +318,12 @@ def test_cowork_desktop_settings_and_memory_import(sync_db):
     # 4. Desktop settings
     res_desktop_get = client.get("/api/desktop/settings", headers=headers)
     assert res_desktop_get.status_code == 200
-    assert res_desktop_get.json()["version"] == "2.10.36"
+    # Compared against the one place that holds the version, not a literal.
+    # Written out, this line had to be edited every release, and a test that
+    # needs editing to stay green is a test that will be edited to stay green.
+    from app.updates import APP_VERSION
+
+    assert res_desktop_get.json()["version"] == APP_VERSION
 
     # 5. Browser extension status
     res_ext_status = client.get("/api/browser-extension/status", headers=headers)

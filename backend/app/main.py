@@ -2334,8 +2334,13 @@ async def get_desktop_settings(current_user: User = Depends(get_current_user)):
             return json.loads(settings_file.read_text(encoding="utf-8"))
         except Exception:
             pass
+    # Read, not typed. A literal here is one more place a release has to
+    # remember to edit, and the one in the ping endpoint had already been left
+    # behind four versions before somebody noticed.
+    from app.updates import APP_VERSION
+
     return {
-        "version": "2.10.36",
+        "version": APP_VERSION,
         "run_on_startup": False,
         "quick_entry_shortcut": "Ctrl+Alt+Space",
         "system_tray": True,
