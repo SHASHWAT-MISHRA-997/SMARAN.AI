@@ -5,7 +5,7 @@ import {
   Settings, Pencil, Check, Brain,
   ChevronDown, PanelLeftOpen, PanelLeftClose, Menu, Database,
   LogIn, Blocks, FolderOpen, Globe2, ArrowDownToLine, Terminal, Users,
-  ArrowRightLeft, Palette, Clock, Layers, Sparkles, Smartphone, Code2
+  Palette, Clock, Smartphone
 } from 'lucide-react';
 import { isNativeApp } from '../utils/hostLink';
 import ModelHubModal from './ModelHubModal';
@@ -105,7 +105,9 @@ const Sidebar = ({
   onOpenAuth,
   activeSection = 'code',
   onSectionChange,
-  onMoveSession,
+  // `onMoveSession` is still passed by App but no longer read: the move-section
+  // arrow has been taken off the conversation rows in both the desktop list and
+  // the mobile drawer.
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -479,40 +481,40 @@ const Sidebar = ({
         )}
       </div>
 
-      {/* SECTION SWITCHER: SMARAN Chat & Cowork vs SMARAN Code */}
+      {/* SECTION SWITCHER: SMARAN Chat vs SMARAN Code */}
       <div className={`shrink-0 ${expanded ? 'px-2 pb-2 pt-1' : 'flex flex-col items-center gap-1.5 px-2 pb-2 pt-1'}`}>
         {expanded ? (
-          <div className="flex items-center p-0.5 rounded-xl bg-zinc-200/90 dark:bg-zinc-800/90 border border-zinc-300 dark:border-zinc-700/80 shadow-xs">
+          <div className="flex items-center p-1 rounded-xl bg-zinc-900/90 dark:bg-zinc-900/90 border border-zinc-700/80 dark:border-zinc-700/80 shadow-inner">
             <button
               type="button"
               onClick={() => onSectionChange?.('chat')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeSection === 'chat'
-                  ? 'bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white shadow-xs'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40 border border-indigo-400/50 font-extrabold'
+                  : 'text-zinc-300 hover:text-white hover:bg-zinc-800/60 border border-transparent'
               }`}
             >
-              <MessageSquare className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Chat and Cowork</span>
+              <MessageSquare className={`w-3.5 h-3.5 ${activeSection === 'chat' ? 'text-white' : 'text-indigo-400'}`} />
+              <span className={activeSection === 'chat' ? 'text-white' : 'text-zinc-300'}>Chat</span>
             </button>
             <button
               type="button"
               onClick={() => onSectionChange?.('code')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeSection === 'code'
-                  ? 'bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white shadow-xs'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40 border border-indigo-400/50 font-extrabold'
+                  : 'text-zinc-300 hover:text-white hover:bg-zinc-800/60 border border-transparent'
               }`}
             >
-              <Terminal className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Code</span>
+              <Terminal className={`w-3.5 h-3.5 ${activeSection === 'code' ? 'text-white' : 'text-emerald-400'}`} />
+              <span className={activeSection === 'code' ? 'text-white' : 'text-zinc-300'}>Code</span>
             </button>
           </div>
         ) : (
           <>
             <RailBtn
               icon={<MessageSquare className="w-5 h-5 text-indigo-500" />}
-              label="Chat and Cowork"
+              label="Chat"
               active={activeSection === 'chat'}
               onClick={() => onSectionChange?.('chat')}
             />
@@ -546,10 +548,23 @@ const Sidebar = ({
         )}
       </div>
 
-      {/* Product destinations stay visible instead of being buried in a modal. */}
+      {/* Destinations and conversations scroll together.
+
+          They used to be two blocks: the destinations fixed with `shrink-0`,
+          the conversations `flex-1` underneath. The destinations always took
+          their full height first, so whatever was left went to the list -
+          measured at 245px on a 720px screen and 125px on a 600px one, about
+          two conversations out of forty. The list was scrollable the whole
+          time; there was just so little of it that it did not look like it,
+          which is why this was reported as "does not scroll".
+
+          Sharing one scroller means a short window costs the nav some room
+          rather than taking it all from the conversations. */}
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
       <div className={`shrink-0 ${expanded ? 'px-2 pb-2 space-y-0.5' : 'px-2 py-2 flex flex-col items-center gap-1'}`}>
         {expanded ? <>
           <button onClick={() => onNavigate('sites')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'sites' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Globe2 className="h-4 w-4"/> Sites</button>
+          <button onClick={() => onNavigate('design')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'design' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Palette className="h-4 w-4"/> Design</button>
           <button onClick={() => onNavigate('plugins')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'plugins' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Blocks className="h-4 w-4"/> Plugins</button>
           <button onClick={() => onNavigate('terminal')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Terminal className="h-4 w-4"/> Terminal</button>
           <button onClick={() => onNavigate('scheduled')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Clock className="h-4 w-4"/> Scheduled</button>
@@ -581,8 +596,8 @@ const Sidebar = ({
         </>}
       </div>
 
-      {/* Chat history */}
-      <div className={`flex-1 overflow-y-auto ${expanded ? 'px-3 py-1' : 'px-2 py-1 flex flex-col items-center gap-1'}`}>
+      {/* Chat history. Scrolls with the destinations above, not against them. */}
+      <div className={`${expanded ? 'px-3 py-1' : 'px-2 py-1 flex flex-col items-center gap-1'}`}>
         {expanded && (
           <span className="block text-xs font-medium text-zinc-500 px-3 mb-2 mt-2">
             {activeSection === 'code' ? 'Coding Tasks' : 'Recents'}
@@ -629,13 +644,6 @@ const Sidebar = ({
                   </div>
                 ) : (
                   <>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onMoveSession?.(s.id, activeSection === 'chat' ? 'code' : 'chat'); }}
-                      className="p-1 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded cursor-pointer"
-                      title={activeSection === 'chat' ? "Move to SMARAN Code" : "Move to SMARAN Chat"}
-                    >
-                      <ArrowRightLeft className="w-3.5 h-3.5" />
-                    </button>
                     <button onClick={e => handleStartEdit(e, s)} className="p-1 text-zinc-500 hover:text-indigo-400 hover:bg-zinc-800 rounded cursor-pointer" title="Rename session"><Pencil className="w-3.5 h-3.5" /></button>
                     {confirmDeleteId === s.id ? (
                       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
@@ -651,6 +659,7 @@ const Sidebar = ({
             </div>
           );
         })}
+      </div>
       </div>
 
       {/* BOTTOM: Actions */}
@@ -697,19 +706,8 @@ const Sidebar = ({
               </div>
             )}
 
-            {/* Design Studio Link */}
-            <button
-              type="button"
-              onClick={() => onNavigate('design')}
-              className={`nav-neon sheen w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-bold transition cursor-pointer mb-2 ${
-                activeView === 'design'
-                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-                  : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'
-              }`}
-            >
-              <Palette className="w-4 h-4 text-amber-500 shrink-0" />
-              <span>Design</span>
-            </button>
+            {/* Design now sits with the other destinations, under Sites, rather
+                than alone down here below Settings and Clear. */}
 
             {/* Distinct User Profile & Sign In Row */}
             <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-2 shadow-xs">
@@ -948,15 +946,6 @@ const Sidebar = ({
                       <span className="truncate">{s.title}</span>
                     </div>
                     <div className="flex items-center gap-0.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={e => { e.stopPropagation(); onMoveSession?.(s.id, activeSection === 'chat' ? 'code' : 'chat'); }}
-                        className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-xl cursor-pointer transition-colors"
-                        title={activeSection === 'chat' ? "Move to SMARAN Code" : "Move to SMARAN Chat"}
-                        aria-label="Move conversation section"
-                      >
-                        <ArrowRightLeft className="w-4 h-4" />
-                      </button>
                       <button
                         type="button"
                         onClick={e => handleStartEdit(e, s)}

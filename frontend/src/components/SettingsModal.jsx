@@ -1,11 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Lock,
-  X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint,
-  UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop,
-  RefreshCw, Trash2, CheckCircle2,
-  ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe,
-  Mic, Monitor, Keyboard, GitBranch, Pencil, Check, Search, Users
-} from "lucide-react";
+import React, { useEffect, useState, useCallback } from "react";
+import { Lock, X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint, UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop, RefreshCw, CheckCircle2, ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe, Mic, Monitor, Keyboard, GitBranch, Search, Users } from "lucide-react";
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
 import { useTheme } from "../context/ThemeContext";
@@ -393,12 +387,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
 
 
   // Memory State
-  const [memoryFacts, setMemoryFacts] = useState([]);
-  const [newFact, setNewFact] = useState("");
-  const [memoryCategory, setMemoryCategory] = useState("durable_record");
-  const [memorySearchQuery, setMemorySearchQuery] = useState("");
-  const [editingMemoryId, setEditingMemoryId] = useState(null);
-  const [editingMemoryText, setEditingMemoryText] = useState("");
+  const [, setMemoryFacts] = useState([]);
   const [, setLoadingMemory] = useState(false);
 
   // Hardware Specs - Real detected hardware
@@ -506,6 +495,30 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
     .split(/[\s._-]+/).filter(Boolean).slice(0, 2)
     .map((part) => part[0].toUpperCase()).join('') || 'Y';
 
+  const [pairedDevices, setPairedDevices] = useState([]);
+  const [loadingDevices, setLoadingDevices] = useState(false);
+
+  const fetchPairedDevices = useCallback(async () => {
+    setLoadingDevices(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/companion/devices`);
+      if (res.ok) {
+        const data = await res.json();
+        setPairedDevices(data.devices || []);
+      }
+    } catch {
+      // fallback
+    } finally {
+      setLoadingDevices(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'connections') {
+      fetchPairedDevices();
+    }
+  }, [isOpen, activeTab, fetchPairedDevices]);
+
   /* A narrow window is not a phone.
    *
    * This asked only about width, so dragging the desktop window to half the
@@ -547,163 +560,10 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
 
   // Hooks MUST stay above the early return below so React's hook count
   // remains invariant whether the modal is open or closed.
-  const [memoryError, setMemoryError] = useState("");
-  const [customInstructions, setCustomInstructions] = useState(
-    () => localStorage.getItem("sm_custom_instructions") || ""
-  );
-  const [memoryEnabled, setMemoryEnabled] = useState(
-    () => localStorage.getItem("sm_memory_enabled") !== "false"
-  );
 
   if (!isOpen) return null;
 
   // Handlers can stay below early return as they are not React hooks.
-  const handleSearchMemory = async (q) => {
-    setMemorySearchQuery(q);
-    if (!q.trim()) {
-      if (noBackend()) {
-        setMemoryFacts(localChat.loadFacts());
-        return;
-      }
-      try {
-        const res = await fetchWithAuth(`${API_BASE}/api/memory`);
-        if (res.ok) {
-          const data = await res.json();
-          setMemoryFacts(Array.isArray(data) ? data : []);
-        }
-      } catch {}
-      return;
-    }
-    if (noBackend()) {
-      const all = localChat.loadFacts() || [];
-      setMemoryFacts(all.filter(f => (f.fact || f.content || '').toLowerCase().includes(q.toLowerCase())));
-      return;
-    }
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/memory/search?q=${encodeURIComponent(q.trim())}`);
-      if (res.ok) {
-        const data = await res.json();
-        setMemoryFacts(Array.isArray(data) ? data : []);
-      }
-    } catch {}
-  };
-
-  const handleExportMemory = async () => {
-    if (noBackend()) {
-      const data = localChat.loadFacts() || [];
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `smaran_memory_${Date.now()}.json`;
-      a.click();
-      return;
-    }
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/memory/export`);
-      if (res.ok) {
-        const data = await res.json();
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `smaran_memory_${Date.now()}.json`;
-        a.click();
-      }
-    } catch (err) {
-      console.warn('Memory export failed:', err);
-    }
-  };
-
-  const handleUpdateMemoryFact = async (id, newText) => {
-    if (!newText.trim()) return;
-    if (noBackend()) {
-      const all = localChat.loadFacts() || [];
-      const updated = all.map(f => f.id === id ? { ...f, fact: newText.trim() } : f);
-      localChat.saveFacts?.(updated);
-      setMemoryFacts(updated);
-      setEditingMemoryId(null);
-      return;
-    }
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/memory/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fact: newText.trim() }),
-      });
-      if (res.ok) {
-        const updated = await res.json();
-        setMemoryFacts((prev) => prev.map((f) => f.id === id ? { ...f, fact: updated.fact } : f));
-        setEditingMemoryId(null);
-      }
-    } catch (err) {
-      console.warn('Memory edit failed:', err);
-    }
-  };
-
-  const handleAddMemoryFact = async () => {
-    const fact = newFact.trim();
-    if (!fact) return;
-    setMemoryError("");
-    if (noBackend()) {
-      setMemoryFacts(localChat.addFact(fact));
-      setNewFact("");
-      return;
-    }
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/memory`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fact, category: memoryCategory }),
-      });
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      // The saved row, with the id the database gave it - not one made up here.
-      const saved = await res.json();
-      setMemoryFacts((prev) => [saved, ...prev]);
-      setNewFact("");
-    } catch (error) {
-      // The box keeps what was typed, so a failure does not also lose the text.
-      setMemoryError("That memory could not be saved. It has not been stored.");
-      console.warn("memory add failed:", error);
-    }
-  };
-
-  const handleDeleteMemoryFact = async (id) => {
-    setMemoryError("");
-    if (noBackend()) {
-      setMemoryFacts(localChat.removeFact(id));
-      return;
-    }
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/memory/${id}`, { method: "DELETE" });
-      // 404 means it is already gone, which is the state being asked for.
-      if (!res.ok && res.status !== 404) throw new Error(`Server returned ${res.status}`);
-      setMemoryFacts((prev) => prev.filter((f) => f.id !== id));
-    } catch (error) {
-      // Left on screen deliberately. Removing the row here would show it as
-      // deleted while it is still stored, which is the bug being fixed.
-      setMemoryError("That memory could not be deleted. It is still stored.");
-      console.warn("memory delete failed:", error);
-    }
-  };
-
-  const handleClearAllMemory = async () => {
-    if (!window.confirm("Are you sure you want to permanently erase all saved memory facts?")) return;
-    setMemoryError("");
-    if (noBackend()) {
-      localChat.clearFacts();
-      setMemoryFacts([]);
-      return;
-    }
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/memory/clear`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      setMemoryFacts([]);
-    } catch (error) {
-      setMemoryError("Could not clear memory: " + (error?.message || "failed"));
-    }
-  };
-
   const TABS = [
     // Settings Category (Claude Desktop Screenshots 1 & 2)
     { id: "general", label: "General & Theme", category: "Settings", icon: SlidersHorizontal },
@@ -868,11 +728,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                     {[
                       { id: "dark", label: "Dark Mode", icon: Moon, desc: "Sleek obsidian palette" },
                       { id: "light", label: "Light Mode", icon: Sun, desc: "Crisp bright palette" },
-                      /* System Sync is gone. It followed the operating
-                         system, so "light" could arrive without anyone
-                         choosing it and half the app - anything painted with
-                         a fixed dark colour rather than a theme one - stayed
-                         dark against it. Two choices, both of them yours. */
+                      { id: "system", label: "System", icon: Laptop, desc: "Black & White combination" },
                     ].map((mode) => {
                       const Icon = mode.icon;
                       const isCurrent = theme === mode.id;
@@ -1456,30 +1312,111 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
             {/* 6. CONNECTIONS & NETWORK */}
             {activeTab === "connections" && (
               <div className="space-y-5">
-                <div>
-                  <h3 className="text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
-                    <Wifi className="w-5 h-5 text-indigo-500" /> Local Network & Remote Pairing
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    Connect your mobile phone or tablet to this workstation.
-                  </p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                      <Wifi className="w-5 h-5 text-indigo-500" /> Local Network & Remote Pairing
+                    </h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                      Connect your mobile phone or tablet to this workstation.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchPairedDevices}
+                    disabled={loadingDevices}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingDevices ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
                 </div>
 
                 <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-start gap-4">
                   <div className="w-12 h-12 rounded-2xl bg-indigo-500/15 text-indigo-500 flex items-center justify-center shrink-0">
                     <Smartphone className="w-6 h-6" />
                   </div>
-                  <div>
-                    <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white">Live Phone & Tablet QR Sync</h4>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white">Pair New Companion Device</h4>
                     <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
                       Scan the local network QR code to control code generation, review diffs, and chat from your phone.
                     </p>
                     <button
                       onClick={onOpenConnections}
-                      className="mt-3 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-500 shadow-md"
+                      className="mt-3 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-500 shadow-md transition cursor-pointer"
                     >
-                      Open Pairing Modal
+                      Show Pairing QR Code
                     </button>
+                  </div>
+                </div>
+
+                {/* Paired Devices List */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    Paired Devices ({pairedDevices.length})
+                  </h4>
+
+                  {loadingDevices && (
+                    <div className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 text-center">
+                      Loading linked devices...
+                    </div>
+                  )}
+
+                  {!loadingDevices && pairedDevices.length === 0 && (
+                    <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 text-center space-y-1">
+                      <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">No companion devices paired</p>
+                      <p className="text-[11px] text-zinc-500">Click &ldquo;Show Pairing QR Code&rdquo; above to link your phone.</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    {pairedDevices.map((dev) => (
+                      <div
+                        key={dev.id}
+                        className="p-3.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-between gap-3 shadow-xs"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0">
+                            <Smartphone className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-zinc-900 dark:text-white truncate">
+                                {dev.name || 'Mobile Phone'}
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  dev.online
+                                    ? 'bg-emerald-500/15 text-emerald-500'
+                                    : 'bg-zinc-500/15 text-zinc-400'
+                                }`}
+                              >
+                                {dev.online ? 'Online' : 'Offline'}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-mono text-zinc-400 block truncate">
+                              ID: {dev.id} · Kind: {dev.kind || 'phone'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await fetch(`${API_BASE}/api/companion/devices/${dev.id}`, { method: 'DELETE' });
+                              setPairedDevices((prev) => prev.filter((d) => d.id !== dev.id));
+                            } catch (e) {
+                              console.error(e);
+                            }
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 text-xs font-bold transition shrink-0 cursor-pointer"
+                          title="Unlink device"
+                        >
+                          Unlink
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>

@@ -130,23 +130,24 @@ const TerminalPanel = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="flex h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-zinc-800 bg-zinc-950 shadow-2xl sm:h-[70vh] sm:rounded-2xl">
+      <div className="flex h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-2xl sm:h-[70vh] sm:rounded-2xl transition-colors">
 
-        <header className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3">
-          <TerminalSquare className="h-4 w-4 shrink-0 text-emerald-400" />
+        <header className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 px-4 py-3 bg-zinc-50 dark:bg-zinc-950">
+          <TerminalSquare className="h-4 w-4 shrink-0 text-emerald-500 dark:text-emerald-400" />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-black text-white">Terminal</p>
-            <p className="truncate font-mono text-[10px] text-zinc-400">
+            <p className="text-xs font-black text-zinc-900 dark:text-white">Terminal</p>
+            <p className="truncate font-mono text-[10px] text-zinc-500 dark:text-zinc-400">
               {context ? `${context.shell} · ${context.cwd}` : 'Asking where commands will run…'}
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close terminal"
-            className="shrink-0 rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-white">
+            className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white cursor-pointer transition">
             <X className="h-4 w-4" />
           </button>
         </header>
 
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3 font-mono text-[12px] leading-relaxed">
+        {/* Terminal Screen Body */}
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3 font-mono text-[12px] leading-relaxed bg-[#0c0d10] text-zinc-200">
           {lines.length === 0 && (
             <p className="text-zinc-400">
               Type a command. It runs in {context?.shell || 'your shell'}, as you, with no
@@ -186,27 +187,25 @@ const TerminalPanel = ({ isOpen, onClose }) => {
             </p>
             <div className="mt-2 flex gap-2">
               <button type="button" onClick={() => send(pending.command, 'user')}
-                className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-[11px] font-black text-amber-200 hover:bg-amber-500/30">
+                className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-[11px] font-black text-amber-200 hover:bg-amber-500/30 cursor-pointer">
                 Approve and run
               </button>
               <button type="button" onClick={() => setPending(null)}
-                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-[11px] font-bold text-zinc-400 hover:text-white">
+                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-[11px] font-bold text-zinc-400 hover:text-white cursor-pointer">
                 No
               </button>
             </div>
           </div>
         )}
 
-        <form onSubmit={submit} className="flex items-center gap-2 border-t border-zinc-800 px-4 py-3">
-          <span className="shrink-0 font-mono text-sm font-bold text-emerald-400">{shellStyle.prompt}</span>
+        <form onSubmit={submit} className="flex items-center gap-2 border-t border-zinc-200 dark:border-zinc-800 px-4 py-3 bg-zinc-50 dark:bg-zinc-950">
+          <span className="shrink-0 font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">{shellStyle.prompt}</span>
           <input
             ref={inputRef}
             aria-label="Terminal command"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             onKeyDown={(e) => {
-              // Shell history, because retyping a long command is the first
-              // thing anyone misses.
               if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 const next = Math.min(historyAt + 1, history.length - 1);
@@ -222,7 +221,7 @@ const TerminalPanel = ({ isOpen, onClose }) => {
             spellCheck={false}
             autoComplete="off"
             placeholder={running ? 'waiting for the command to finish…' : shellStyle.example}
-            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-zinc-100 outline-none placeholder:text-zinc-400 disabled:opacity-50"
+            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500 disabled:opacity-50"
           />
         </form>
       </div>

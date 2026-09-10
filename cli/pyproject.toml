@@ -26,6 +26,12 @@ smaran = "smaran_cli.main:main"
 
 [tool.setuptools.packages.find]
 include = ["smaran_cli*"]
+# The wheel is tagged py3-none-any and the project claims >=3.9, but builds
+# were picking up __pycache__ from the source tree and shipping six
+# cpython-314 .pyc files inside it - version-specific bytecode in a wheel
+# advertised as working on any Python. Excluded here so a stale working tree
+# cannot put it back.
+exclude = ["*__pycache__*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "smaran_cli.__version__" }

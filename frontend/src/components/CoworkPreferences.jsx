@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Folder, Globe, Shield, Smartphone, ExternalLink, Check, RefreshCw } from 'lucide-react';
+import { Users, Folder, Check } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
 const CoworkPreferences = () => {
@@ -12,7 +12,7 @@ const CoworkPreferences = () => {
     preferred_browser: 'chrome',
     open_links_in_builtin_browser: false,
   });
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [savedNotice, setSavedNotice] = useState(false);
   const [managingFolders, setManagingFolders] = useState(false);
   const [newFolderInput, setNewFolderInput] = useState('');

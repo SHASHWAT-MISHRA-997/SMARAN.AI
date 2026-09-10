@@ -195,18 +195,18 @@ const PinLock = ({ children }) => {
 
   if (state === 'unavailable') {
     return (
-      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-surface text-ink" role="alert">
-        <Lock aria-hidden="true" />
-        <p>Cannot check the app lock. Reconnect to the local engine and retry.</p>
-        <button className="rounded-lg bg-indigo-600 px-5 py-2" onClick={() => setCheckAttempt((value) => value + 1)}>Retry lock check</button>
+      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white" role="alert">
+        <Lock className="h-8 w-8 text-zinc-500" aria-hidden="true" />
+        <p className="text-sm font-semibold">Cannot check the app lock. Reconnect to the local engine and retry.</p>
+        <button className="rounded-xl bg-indigo-600 px-5 py-2 text-white font-bold text-xs hover:bg-indigo-500 cursor-pointer" onClick={() => setCheckAttempt((value) => value + 1)}>Retry lock check</button>
       </div>
     );
   }
 
   if (state === 'checking') {
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-surface">
-        <Lock className="h-6 w-6 animate-pulse text-ink-faint" />
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white dark:bg-zinc-950">
+        <Lock className="h-7 w-7 animate-pulse text-zinc-400 dark:text-zinc-600" />
       </div>
     );
   }
@@ -227,24 +227,24 @@ const PinLock = ({ children }) => {
 
       <div className="relative flex flex-col items-center gap-6">
         <div className="flex flex-col items-center gap-3">
-          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 backdrop-blur-md">
-            <Lock className="h-6 w-6 text-red-300" />
+          <div className="rounded-2xl border-2 border-red-500/30 bg-red-500/10 dark:bg-red-500/20 p-3.5 shadow-md shadow-red-500/10 backdrop-blur-md">
+            <Lock className="h-7 w-7 text-red-600 dark:text-red-400" />
           </div>
           <div className="text-center">
-            <h1 className="text-lg font-black tracking-wide text-ink">SMARAN.AI is locked</h1>
-            <p className="mt-1 text-[11px] text-ink-faint">Enter your PIN to continue.</p>
+            <h1 className="text-xl font-black tracking-tight text-zinc-950 dark:text-white">SMARAN.AI is locked</h1>
+            <p className="mt-1 text-xs font-bold text-zinc-600 dark:text-zinc-400">Enter your PIN to continue</p>
           </div>
         </div>
 
-        {/* Filled dots rather than the digits themselves. */}
-        <div className="flex items-center gap-2.5" aria-label={`${pin.length} digits entered`}>
+        {/* Filled dots with vivid highlight */}
+        <div className="flex items-center gap-3 py-1" aria-label={`${pin.length} digits entered`}>
           {Array.from({ length: Math.max(4, pin.length || 4) }).map((_, index) => (
             <span
               key={index}
-              className={`h-3 w-3 rounded-full border transition-all ${
+              className={`h-4 w-4 rounded-full border-2 transition-all duration-200 ${
                 index < pin.length
-                  ? 'border-red-400 bg-red-400 shadow-[0_0_10px_rgba(248,113,113,.7)]'
-                  : 'border-line-strong bg-transparent'
+                  ? 'border-red-500 bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.9)] scale-110'
+                  : 'border-zinc-400 dark:border-zinc-600 bg-zinc-200/80 dark:bg-zinc-800'
               }`}
             />
           ))}
@@ -258,9 +258,9 @@ const PinLock = ({ children }) => {
                 type="button"
                 onClick={() => press(key)}
                 disabled={Boolean(cooldown)}
-                className="flex h-16 w-16 items-center justify-center rounded-2xl border border-line bg-raised text-lg font-black text-ink backdrop-blur-md transition-all hover:border-red-400/40 hover:bg-red-500/10 active:scale-95 disabled:opacity-30"
+                className="flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white text-2xl font-black shadow-sm transition-all hover:border-red-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:shadow-md hover:shadow-red-500/15 active:scale-95 disabled:opacity-30 cursor-pointer select-none"
               >
-                {key === 'del' ? <Delete className="h-5 w-5 text-ink-muted" /> : key}
+                {key === 'del' ? <Delete className="h-6 w-6 text-zinc-800 dark:text-zinc-200" /> : key}
               </button>
             )
           ))}
@@ -270,25 +270,29 @@ const PinLock = ({ children }) => {
           type="button"
           onClick={() => submit(pin)}
           disabled={pin.length < 4 || busy || Boolean(cooldown)}
-          className="w-full rounded-2xl border border-red-400/35 bg-red-500/15 px-6 py-3 text-xs font-black text-red-100 transition hover:bg-red-500/25 disabled:opacity-35"
+          className={`w-full rounded-2xl border-2 py-3.5 px-6 font-black text-sm transition-all select-none ${
+            pin.length >= 4 && !busy && !cooldown
+              ? 'border-red-600 bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/30 active:scale-[0.98] cursor-pointer'
+              : 'border-zinc-300 dark:border-zinc-700 bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 cursor-not-allowed opacity-90'
+          }`}
         >
           {busy ? 'Checking…' : cooldown ? `Locked for ${cooldown}s` : 'Unlock'}
         </button>
 
         {error && (
-          <p className="max-w-xs text-center text-[11px] leading-5 text-amber-300">{error}</p>
+          <p className="max-w-xs text-center text-xs font-bold leading-5 text-amber-600 dark:text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/20">{error}</p>
         )}
 
         <button
           type="button"
           onClick={() => { setRecovering(true); setRecoverError(''); }}
-          className="text-[11px] font-bold text-ink-faint underline-offset-4 transition hover:text-red-300 hover:underline"
+          className="text-xs font-bold text-zinc-600 dark:text-zinc-400 underline-offset-4 transition hover:text-red-600 dark:hover:text-red-400 hover:underline cursor-pointer"
         >
           Forgotten your PIN?
         </button>
 
-        <p className="flex items-center gap-1.5 text-[10px] text-ink-faint">
-          <ShieldCheck className="h-3 w-3" />
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
           The PIN is stored only as a hash on this machine.
         </p>
       </div>

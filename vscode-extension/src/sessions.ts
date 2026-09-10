@@ -47,6 +47,7 @@ export interface Session {
     revision?: number;
     projectId?: string;
     deleted?: boolean;
+    dirty?: boolean;
 }
 
 export interface SyncConfig {
@@ -58,10 +59,10 @@ export interface SyncConfig {
 export type SyncState = 'idle' | 'syncing' | 'connected' | 'offline' | 'conflict';
 
 const KEY = 'smaran.sessions';
-const MAX_SESSIONS = 60;
 
 export class SessionStore {
     private readonly revisions = new Map<string, number>();
+    private readonly pushes = new Map<string, Promise<boolean>>();
     private syncState: SyncState = 'idle';
 
     constructor(private readonly memento: vscode.Memento) {}
@@ -97,12 +98,11 @@ export class SessionStore {
 
     async save(session: Session, config?: SyncConfig): Promise<void> {
         session.updatedAt = Date.now();
+        session.dirty = true;
         const allStored = (this.memento.get<Session[]>(KEY) || []).filter((s) => s.id !== session.id);
-        // Oldest first out of the door. Unbounded growth in a Memento is a
-        // slow leak nobody would ever notice until the panel got slow.
+        // Never silently discard old conversations or pending tombstones.
         const kept = [session, ...allStored]
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-            .slice(0, MAX_SESSIONS);
+            .sort((a, b) => b.updatedAt - a.updatedAt);
         await this.memento.update(KEY, kept);
 
         if (config?.backendUrl) {
@@ -113,22 +113,18 @@ export class SessionStore {
     async remove(id: string, config?: SyncConfig): Promise<void> {
         const allStored = this.memento.get<Session[]>(KEY) || [];
         const existing = allStored.find((s) => s.id === id);
-        await this.memento.update(KEY, allStored.filter((s) => s.id !== id));
-
-        if (existing && config?.backendUrl) {
+        if (existing) {
             existing.deleted = true;
-            void this.pushToBackend(existing, config);
+            existing.entries = [];
+            existing.history = [];
+            await this.save(existing, config);
         }
     }
 
     async clear(config?: SyncConfig): Promise<void> {
         const allStored = this.memento.get<Session[]>(KEY) || [];
-        await this.memento.update(KEY, []);
-        if (config?.backendUrl) {
-            for (const s of allStored) {
-                s.deleted = true;
-                void this.pushToBackend(s, config);
-            }
+        for (const s of allStored) {
+            await this.remove(s.id, config);
         }
     }
 
@@ -140,6 +136,11 @@ export class SessionStore {
         const backendUrl = config.backendUrl || 'http://127.0.0.1:3003';
         this.syncState = 'syncing';
         try {
+            // Resume failed/offline writes before reconciling remote state.
+            // A conflict remains dirty and is never replaced by the pull.
+            for (const pending of this.memento.get<Session[]>(KEY) || []) {
+                if (pending.dirty) { await this.pushToBackend(pending, config); }
+            }
             const url = new URL('/api/code/tasks', backendUrl);
             if (config.projectId) {
                 url.searchParams.set('project_id', config.projectId);
@@ -155,7 +156,7 @@ export class SessionStore {
                 return false;
             }
 
-            const remoteTasks: Array<{
+            type RemoteTask = {
                 id: string;
                 project_id?: string;
                 title: string;
@@ -165,20 +166,36 @@ export class SessionStore {
                 deleted?: boolean;
                 created_at?: string;
                 updated_at?: string;
-            }> = await res.json();
-
-            if (!Array.isArray(remoteTasks)) {
-                this.syncState = 'connected';
-                return false;
+            };
+            const remoteTasks: RemoteTask[] = [];
+            let page = await res.json();
+            const seenOffsets = new Set<number>();
+            for (;;) {
+                if (!Array.isArray(page.tasks)) { throw new Error('Invalid coding task response'); }
+                remoteTasks.push(...page.tasks);
+                if (page.next_offset == null) { break; }
+                if (!Number.isInteger(page.next_offset) || page.next_offset < 0 || seenOffsets.has(page.next_offset)) {
+                    throw new Error('Invalid coding task pagination');
+                }
+                seenOffsets.add(page.next_offset);
+                url.searchParams.set('offset', String(page.next_offset));
+                const next = await fetch(url.toString(), { headers, signal: AbortSignal.timeout(4000) });
+                if (!next.ok) { throw new Error('Task page unavailable'); }
+                page = await next.json();
             }
 
             const allStored = this.memento.get<Session[]>(KEY) || [];
             const localMap = new Map<string, Session>(allStored.map((s) => [s.id, s]));
             let changed = false;
+            let conflicted = false;
 
             for (const rTask of remoteTasks) {
                 const local = localMap.get(rTask.id);
                 const localRev = this.revisions.get(rTask.id) || local?.revision || 0;
+                if (local?.dirty) {
+                    conflicted ||= rTask.revision > localRev;
+                    continue;
+                }
 
                 if (rTask.deleted) {
                     if (local && !local.deleted) {
@@ -189,6 +206,14 @@ export class SessionStore {
                 }
 
                 if (!local || rTask.revision > localRev) {
+                    const detailUrl = new URL(`/api/code/tasks/${encodeURIComponent(rTask.id)}`, backendUrl);
+                    const detail = await fetch(detailUrl.toString(), { headers, signal: AbortSignal.timeout(4000) });
+                    if (!detail.ok) { throw new Error('Task transcript unavailable'); }
+                    const full = await detail.json();
+                    if (full.id !== rTask.id || !Array.isArray(full.entries) || !Array.isArray(full.history)) {
+                        throw new Error('Invalid task transcript');
+                    }
+                    Object.assign(rTask, full);
                     const merged: Session = {
                         id: rTask.id,
                         title: rTask.title || 'Untitled Coding Task',
@@ -207,11 +232,10 @@ export class SessionStore {
 
             if (changed) {
                 const sorted = Array.from(localMap.values())
-                    .sort((a, b) => b.updatedAt - a.updatedAt)
-                    .slice(0, MAX_SESSIONS);
+                    .sort((a, b) => b.updatedAt - a.updatedAt);
                 await this.memento.update(KEY, sorted);
             }
-            this.syncState = 'connected';
+            this.syncState = conflicted ? 'conflict' : 'connected';
             return true;
         } catch {
             this.syncState = 'offline';
@@ -223,6 +247,20 @@ export class SessionStore {
      * Push a task update to the backend with optimistic locking revision checking.
      */
     async pushToBackend(session: Session, config: SyncConfig): Promise<boolean> {
+        // Streaming entries arrive faster than network writes. Serialize per
+        // task so successive snapshots use the acknowledged server revision.
+        const snapshot = structuredClone(session);
+        const previous = this.pushes.get(session.id) || Promise.resolve(true);
+        const operation = previous.then(() => this.sendSnapshot(snapshot, config));
+        this.pushes.set(session.id, operation);
+        try {
+            return await operation;
+        } finally {
+            if (this.pushes.get(session.id) === operation) { this.pushes.delete(session.id); }
+        }
+    }
+
+    private async sendSnapshot(session: Session, config: SyncConfig): Promise<boolean> {
         const backendUrl = config.backendUrl || 'http://127.0.0.1:3003';
         try {
             const currentRev = this.revisions.get(session.id) || session.revision || 0;
@@ -244,6 +282,11 @@ export class SessionStore {
                 archived: false,
                 deleted: Boolean(session.deleted),
             };
+            const matchesSent = (stored: Session) => JSON.stringify({
+                title: stored.title, entries: stored.entries || [], history: stored.history || [],
+                deleted: Boolean(stored.deleted),
+            }) === JSON.stringify({ title: payload.title, entries: payload.entries,
+                history: payload.history, deleted: payload.deleted });
 
             const res = await fetch(url.toString(), {
                 method: 'PUT',
@@ -254,17 +297,23 @@ export class SessionStore {
 
             if (res.ok) {
                 const data = await res.json();
-                if (data?.revision) {
+                if (Number.isInteger(data?.revision) && data.revision > 0) {
                     this.revisions.set(session.id, data.revision);
                     session.revision = data.revision;
+                    const stored = this.memento.get<Session[]>(KEY) || [];
+                    await this.memento.update(KEY, stored.map(s => s.id === session.id
+                        ? { ...s, revision: data.revision, dirty: !matchesSent(s) } : s));
+                } else {
+                    this.syncState = 'offline';
+                    return false;
                 }
                 this.syncState = 'connected';
                 return true;
             } else if (res.status === 409) {
                 this.syncState = 'conflict';
-                await this.pullFromBackend(config);
                 return false;
             }
+            this.syncState = 'offline';
             return false;
         } catch {
             this.syncState = 'offline';

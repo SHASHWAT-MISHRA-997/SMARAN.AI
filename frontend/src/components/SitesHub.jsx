@@ -243,14 +243,14 @@ const SitesHub = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-zinc-950 text-zinc-100">
+    <div className="h-full overflow-y-auto bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 transition-colors">
       <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-8 sm:py-7">
         <header className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 flex-1">
-            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-              <Globe2 className="w-8 h-8 text-indigo-400" /> Sites
+            <h1 className="text-3xl font-extrabold tracking-tight text-zinc-900 dark:text-white flex items-center gap-3">
+              <Globe2 className="w-8 h-8 text-indigo-500 dark:text-indigo-400" /> Sites
             </h1>
-            <p className="mt-1 text-sm text-zinc-400">
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               Describe a site and your local model writes it as a single
               standalone HTML page, which you can preview, read and export.
             </p>
@@ -258,18 +258,15 @@ const SitesHub = () => {
           <div className="flex items-center gap-2 sm:shrink-0">
             <button
               onClick={() => setCreating(true)}
-              className="flex flex-1 sm:w-auto items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-600/30"
+              className="flex flex-1 sm:w-auto items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-600/30 cursor-pointer"
             >
               <Plus className="h-4 w-4" /> Create New Site
             </button>
-            {/* This screen fills the window and had no close control. On a
-                phone the sidebar that would take you back is behind the menu,
-                so once you opened Sites there was no way out of it. */}
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('smaran:navigate', { detail: { view: 'chat' } }))}
               aria-label="Close Sites"
-              className="flex items-center justify-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-xs font-bold text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs font-bold text-zinc-700 dark:text-zinc-300 transition hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-white cursor-pointer"
             >
               <X className="h-4 w-4" /> <span className="hidden sm:inline">Close</span>
             </button>
@@ -279,17 +276,17 @@ const SitesHub = () => {
         {/* Search Bar */}
         <div className="mt-6 flex gap-2">
           <label className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search websites by name or prompt…"
-              className="w-full rounded-full border border-zinc-700/80 bg-zinc-900/80 py-2.5 pl-11 pr-4 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+              className="w-full rounded-full border border-zinc-200 dark:border-zinc-700/80 bg-white dark:bg-zinc-900/80 py-2.5 pl-11 pr-4 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500 shadow-xs"
             />
           </label>
           <button
             onClick={load}
-            className="rounded-xl border border-zinc-800 p-3 text-zinc-400 hover:text-white hover:bg-zinc-900"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer shadow-xs"
             title="Refresh"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -297,7 +294,7 @@ const SitesHub = () => {
         </div>
 
         {error && (
-          <p className="mt-4 rounded-xl border border-rose-900/60 bg-rose-950/30 px-4 py-3 text-sm text-rose-300">
+          <p className="mt-4 rounded-xl border border-rose-300 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/30 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
             {error}
           </p>
         )}
@@ -305,14 +302,14 @@ const SitesHub = () => {
         {/* Sites Grid */}
         {visible.length === 0 ? (
           <div className="flex min-h-[50vh] flex-col items-center justify-center text-center p-6">
-            <Globe2 className="h-12 w-12 text-zinc-700" />
-            <h2 className="mt-4 text-xl font-bold">{query ? 'No matching sites' : 'No sites created yet'}</h2>
-            <p className="mt-2 max-w-md text-sm text-zinc-400">
+            <Globe2 className="h-12 w-12 text-zinc-400 dark:text-zinc-700" />
+            <h2 className="mt-4 text-xl font-bold text-zinc-900 dark:text-white">{query ? 'No matching sites' : 'No sites created yet'}</h2>
+            <p className="mt-2 max-w-md text-sm text-zinc-600 dark:text-zinc-400">
               Start a site to describe what you want or choose a starter template.
             </p>
             <button
               onClick={() => setCreating(true)}
-              className="mt-5 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 shadow-md"
+              className="mt-5 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 shadow-md cursor-pointer"
             >
               Build your first site
             </button>
@@ -324,18 +321,18 @@ const SitesHub = () => {
               return (
                 <article
                   key={site.id}
-                  className="group overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/50 transition-all hover:border-zinc-700 hover:shadow-2xl flex flex-col"
+                  className="group overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/50 transition-all hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-xl flex flex-col shadow-xs"
                 >
                   {/* Sandboxed Live Miniature Preview */}
                   <button
                     onClick={() => setSelected({ ...site, html: htmlContent })}
-                    className="block aspect-video w-full overflow-hidden bg-zinc-950 relative border-b border-zinc-800/80 cursor-pointer group-hover:opacity-95"
+                    className="block aspect-video w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950 relative border-b border-zinc-200 dark:border-zinc-800/80 cursor-pointer group-hover:opacity-95"
                   >
                     <iframe
                       title={`${site.name} preview`}
                       srcDoc={htmlContent}
                       sandbox="allow-scripts allow-same-origin"
-                      className="pointer-events-none h-[700px] w-[400%] origin-top-left scale-25 border-0 bg-zinc-950"
+                      className="pointer-events-none h-[700px] w-[400%] origin-top-left scale-25 border-0 bg-white dark:bg-zinc-950"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
                       <span className="text-xs font-bold text-white bg-indigo-600 px-2.5 py-1 rounded-lg shadow">
@@ -350,25 +347,25 @@ const SitesHub = () => {
                         onClick={() => setSelected({ ...site, html: htmlContent })}
                         className="min-w-0 flex-1 text-left cursor-pointer"
                       >
-                        <h2 className="truncate font-extrabold text-white text-base group-hover:text-indigo-400 transition">
+                        <h2 className="truncate font-extrabold text-zinc-900 dark:text-white text-base group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
                           {site.name}
                         </h2>
-                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-400">
+                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
                           {site.prompt}
                         </p>
                       </button>
                       <button
                         disabled={busy === site.id}
                         onClick={() => remove(site)}
-                        className="rounded-lg p-1.5 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-400"
+                        className="rounded-lg p-1.5 text-zinc-400 hover:bg-rose-500/10 hover:text-rose-500 dark:hover:text-rose-400 cursor-pointer transition"
                         title="Delete site"
                       >
                         {busy === site.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       </button>
                     </div>
 
-                    <div className="mt-4 flex items-center justify-between text-[11px] text-zinc-500 border-t border-zinc-800/60 pt-3">
-                      <span className="font-mono text-indigo-400 font-bold">Version {site.version || 1}</span>
+                    <div className="mt-4 flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400 border-t border-zinc-100 dark:border-zinc-800/60 pt-3">
+                      <span className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">Version {site.version || 1}</span>
                       <span>{new Date(site.updated_at || Date.now()).toLocaleDateString()}</span>
                     </div>
                   </div>
@@ -455,31 +452,31 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/80 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/60 dark:bg-black/80 p-4 backdrop-blur-sm" onMouseDown={onClose}>
       <form
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl rounded-2xl border border-zinc-700 bg-zinc-950 p-6 shadow-2xl space-y-4"
+        className="w-full max-w-2xl rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-6 shadow-2xl space-y-4"
       >
-        <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
           <div>
-            <h2 className="text-xl font-black text-white flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-indigo-400" /> Create a Website
+            <h2 className="text-xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-indigo-500 dark:text-indigo-400" /> Create a Website
             </h2>
-            <p className="mt-0.5 text-xs text-zinc-400">
+            <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
               Your local model writes a standalone HTML page from this brief.
               It needs a model installed and takes a minute or two - it is not
               instant, and there is no Tailwind in the output.
             </p>
           </div>
-          <button type="button" aria-label="Close site creation" onClick={onClose} className="p-1.5 text-zinc-400 hover:text-white">
+          <button type="button" aria-label="Close site creation" onClick={onClose} className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Quick Templates */}
         <div>
-          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block mb-2">
+          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-400 block mb-2">
             Quick Starter Templates
           </label>
           <div className="grid grid-cols-2 gap-2">
@@ -488,10 +485,10 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
                 key={t.id}
                 type="button"
                 onClick={() => applyTemplate(t)}
-                className="text-left p-2.5 rounded-xl border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800 hover:border-indigo-500/50 transition group"
+                className="text-left p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-indigo-500/50 transition group cursor-pointer"
               >
-                <span className="text-[10px] font-bold text-indigo-400 block">{t.category}</span>
-                <span className="text-xs font-semibold text-zinc-200 group-hover:text-white line-clamp-1">
+                <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 block">{t.category}</span>
+                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 group-hover:text-indigo-600 dark:group-hover:text-white line-clamp-1">
                   {t.title}
                 </span>
               </button>
@@ -500,7 +497,7 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
         </div>
 
         <div>
-          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block mb-1.5">
+          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-400 block mb-1.5">
             Website Name
           </label>
           <input
@@ -510,12 +507,12 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Apex Cyber Platform"
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+            className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-4 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500"
           />
         </div>
 
         <div>
-          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 block mb-1.5">
+          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-400 block mb-1.5">
             Detailed Description & Features
           </label>
           <textarea
@@ -526,14 +523,14 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="Describe the pages, structure, color palette, features, and vibe you want to build…"
             rows={5}
-            className="w-full resize-none rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100 leading-relaxed outline-none focus:border-indigo-500"
+            className="w-full resize-none rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-4 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed outline-none focus:border-indigo-500"
           />
         </div>
 
         <button
           type="submit"
           disabled={busy || !name.trim() || prompt.trim().length < 3}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-xs font-black text-white hover:bg-indigo-500 disabled:opacity-40 transition shadow-lg shadow-indigo-600/30"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-xs font-black text-white hover:bg-indigo-500 disabled:opacity-40 transition shadow-lg shadow-indigo-600/30 cursor-pointer"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Build & Preview Website
         </button>
@@ -548,6 +545,7 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
   const [busy, setBusy] = useState(false);
   const [viewMode, setViewMode] = useState('desktop'); // 'desktop' | 'mobile'
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
 
   const currentHTML = site.html || generateSiteHTML(site.name, site.prompt, site.version || 1);
 
@@ -555,13 +553,6 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
     if (!prompt.trim() || prompt.trim().length < 3) return;
     setBusy(true);
 
-    /* Wait for the new version and show it.
-     *
-     * This fired the request with .catch(() => {}) and never read the reply,
-     * then displayed a template built here instead. So "Apply as Version 3"
-     * always produced the same page whatever was asked for, with the prompt
-     * pasted into the body as text. The generation was happening; nothing
-     * was ever looking at it. */
     try {
       const response = await fetch(`${API_BASE}/api/sites/${site.id}/refine`, {
         method: 'POST',
@@ -574,7 +565,6 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
       onChanged({ ...site, ...next, html: next.html || site.html });
       setError('');
     } catch (err) {
-      // Said out loud rather than replaced with a page nobody asked for.
       setError('That version could not be generated: '
         + String(err.message || err).slice(0, 200));
     } finally {
@@ -599,17 +589,17 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-zinc-950">
+    <div className="fixed inset-0 z-[100] flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 transition-colors">
       {/* Top Bar */}
-      <header className="flex items-center justify-between gap-2 border-b border-zinc-800 px-2 sm:px-4 py-3 bg-zinc-950">
+      <header className="flex items-center justify-between gap-2 border-b border-zinc-200 dark:border-zinc-800 px-2 sm:px-4 py-3 bg-white dark:bg-zinc-950">
         <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
-          <button aria-label="Close site workspace" onClick={onClose} className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-900 hover:text-white">
+          <button aria-label="Close site workspace" onClick={onClose} className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-white cursor-pointer">
             <X className="h-4 w-4" />
           </button>
           <div>
-            <h2 className="truncate font-extrabold text-white text-sm sm:text-base flex items-center gap-2">
+            <h2 className="truncate font-extrabold text-zinc-900 dark:text-white text-sm sm:text-base flex items-center gap-2">
               <span>{site.name}</span>
-              <span className="text-[10px] font-mono font-bold bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 px-2 py-0.5 rounded-md">
+              <span className="text-[10px] font-mono font-bold bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-200 dark:border-indigo-500/40 text-indigo-600 dark:text-indigo-300 px-2 py-0.5 rounded-md">
                 v{site.version || 1}
               </span>
             </h2>
@@ -617,19 +607,19 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
         </div>
 
         {/* Center Mode Controls */}
-        <div className="hidden sm:flex items-center gap-1 bg-zinc-900 p-1 rounded-xl border border-zinc-800">
+        <div className="hidden sm:flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900 p-1 rounded-xl border border-zinc-200 dark:border-zinc-800">
           <button
             onClick={() => setActiveTab('preview')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition ${
-              activeTab === 'preview' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+              activeTab === 'preview' ? 'bg-indigo-600 text-white shadow-xs' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
             }`}
           >
             <Eye className="w-3.5 h-3.5" /> Preview
           </button>
           <button
             onClick={() => setActiveTab('code')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition ${
-              activeTab === 'code' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+              activeTab === 'code' ? 'bg-indigo-600 text-white shadow-xs' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
             }`}
           >
             <Code2 className="w-3.5 h-3.5" /> HTML Code
@@ -639,17 +629,17 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
         {/* Right Actions */}
         <div className="flex items-center gap-2">
           {activeTab === 'preview' && (
-            <div className="hidden md:flex items-center gap-1 border border-zinc-800 rounded-lg p-0.5">
+            <div className="hidden md:flex items-center gap-1 border border-zinc-200 dark:border-zinc-800 rounded-lg p-0.5 bg-zinc-50 dark:bg-zinc-900">
               <button
                 onClick={() => setViewMode('desktop')}
-                className={`p-1.5 rounded ${viewMode === 'desktop' ? 'bg-zinc-800 text-white' : 'text-zinc-500'}`}
+                className={`p-1.5 rounded cursor-pointer ${viewMode === 'desktop' ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs' : 'text-zinc-500'}`}
                 title="Desktop View"
               >
                 <Laptop className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setViewMode('mobile')}
-                className={`p-1.5 rounded ${viewMode === 'mobile' ? 'bg-zinc-800 text-white' : 'text-zinc-500'}`}
+                className={`p-1.5 rounded cursor-pointer ${viewMode === 'mobile' ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs' : 'text-zinc-500'}`}
                 title="Mobile View"
               >
                 <Smartphone className="w-3.5 h-3.5" />
@@ -659,9 +649,9 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
 
           <button
             onClick={downloadHTML}
-            className="flex shrink-0 items-center gap-1 rounded-xl border border-zinc-700 bg-zinc-900 px-2 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold text-zinc-200 hover:bg-zinc-800 transition"
+            className="flex shrink-0 items-center gap-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5 text-indigo-400" /> <span className="hidden min-[360px]:inline">Export .html</span><span className="min-[360px]:hidden">Export</span>
+            <Download className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" /> <span className="hidden min-[360px]:inline">Export .html</span><span className="min-[360px]:hidden">Export</span>
           </button>
         </div>
       </header>
@@ -669,12 +659,12 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
       {/* Main Workspace */}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Left Refinement Sidebar */}
-        <aside className="w-full max-h-[42dvh] overflow-y-auto border-b border-zinc-800 p-4 lg:max-h-none lg:w-80 lg:border-b-0 lg:border-r flex flex-col justify-between bg-zinc-950/80">
+        <aside className="w-full max-h-[42dvh] overflow-y-auto border-b border-zinc-200 dark:border-zinc-800 p-4 lg:max-h-none lg:w-80 lg:border-b-0 lg:border-r flex flex-col justify-between bg-white dark:bg-zinc-950/80">
           <div>
-            <label className="text-[11px] font-black uppercase tracking-wider text-indigo-400 block mb-1">
+            <label className="text-[11px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block mb-1">
               Refine & Iterate Website
             </label>
-            <p className="text-xs text-zinc-400 mb-3">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
               Describe what changes, sections, or styles to add for version {(site.version || 1) + 1}.
             </p>
             <textarea
@@ -682,23 +672,22 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
               onChange={(e) => setPrompt(e.target.value)}
               rows={8}
               placeholder="e.g. Add an interactive pricing calculator, make the navbar sticky, and add testimonials…"
-              className="w-full resize-none rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs leading-relaxed text-zinc-100 outline-none focus:border-indigo-500"
+              className="w-full resize-none rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 p-3 text-xs leading-relaxed text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500"
             />
           </div>
 
-          {/* Which model built this, and what could not be used.
-            *
-            * The record has carried this all along and the screen never
-            * showed it, so a page that came out as the stock placeholder
-            * looked like the feature simply being poor. It is usually a
-            * key that has expired or a free tier that has run out, and
-            * that is a thing somebody can go and fix. */}
+          {error && (
+            <p className="mt-3 text-xs text-rose-500 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-lg border border-rose-200 dark:border-rose-900/60">
+              {error}
+            </p>
+          )}
+
           {site.generated_by && (
-            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <div className="mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 p-3">
               <div className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
                 How this was built
               </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-400 break-words">
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400 break-words">
                 {site.generated_by}
               </p>
             </div>
@@ -708,7 +697,7 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
             <button
               onClick={refine}
               disabled={busy || prompt.trim().length < 3}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-40 shadow-lg shadow-indigo-600/30 transition"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-40 shadow-lg shadow-indigo-600/30 transition cursor-pointer"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Apply as Version {(site.version || 1) + 1}
@@ -717,10 +706,10 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
         </aside>
 
         {/* Center Canvas / Code Inspector */}
-        <div className="flex-1 min-h-0 overflow-hidden bg-zinc-900/40 flex items-center justify-center p-2 sm:p-4">
+        <div className="flex-1 min-h-0 overflow-hidden bg-zinc-100 dark:bg-zinc-900/40 flex items-center justify-center p-2 sm:p-4">
           {activeTab === 'preview' ? (
             <div
-              className={`h-full bg-zinc-950 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl transition-all duration-300 ${
+              className={`h-full bg-white dark:bg-zinc-950 rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-2xl transition-all duration-300 ${
                 viewMode === 'mobile' ? 'w-[375px] max-w-full' : 'w-full'
               }`}
             >
@@ -728,19 +717,19 @@ const SiteWorkspaceModal = ({ site, onClose, onChanged }) => {
                 title={site.name}
                 srcDoc={currentHTML}
                 sandbox="allow-scripts allow-same-origin allow-modals allow-popups"
-                className="w-full h-full border-0 bg-zinc-950"
+                className="w-full h-full border-0 bg-white dark:bg-zinc-950"
               />
             </div>
           ) : (
-            <div className="w-full h-full bg-zinc-950 rounded-2xl overflow-hidden border border-zinc-800 flex flex-col">
-              <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900/60 text-xs text-zinc-400">
+            <div className="w-full h-full bg-white dark:bg-zinc-950 rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 flex flex-col shadow-xl">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 text-xs text-zinc-500 dark:text-zinc-400">
                 <span>index.html</span>
-                <button onClick={copyCode} className="flex items-center gap-1 text-xs font-bold text-indigo-400 hover:text-indigo-300">
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Code2 className="w-3.5 h-3.5" />}
+                <button onClick={copyCode} className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 cursor-pointer">
+                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Code2 className="w-3.5 h-3.5" />}
                   {copied ? 'Copied!' : 'Copy Code'}
                 </button>
               </div>
-              <pre className="flex-1 p-4 overflow-auto font-mono text-xs text-zinc-300 leading-relaxed select-all">
+              <pre className="flex-1 p-4 overflow-auto font-mono text-xs text-zinc-800 dark:text-zinc-300 leading-relaxed select-all">
                 {currentHTML}
               </pre>
             </div>

@@ -9,6 +9,12 @@ if it had tried.
 
 These cover the server half: that a fact is stored, comes back, is deleted for
 real, and that one user cannot reach another's memories.
+
+They target `create_user_memory` deliberately. The endpoint was written twice,
+by two hands, both registering `POST /api/memory`; Starlette serves the first
+and ignores the second, so these tests once passed against a function that no
+request could reach. The handlers are merged now, and
+`tests/test_route_registration.py` fails if a second one ever appears.
 """
 
 import sys
@@ -89,7 +95,7 @@ def _run(coro):
 
 def test_a_typed_memory_is_written_to_the_database():
     db = _Session()
-    result = _run(app_main.add_memory_fact({"fact": "I prefer metric units"},
+    result = _run(app_main.create_user_memory({"fact": "I prefer metric units"},
                                            db=db, current_user=_User(7)))
     assert db.committed == 1, "the fact must be committed, not held in memory"
     assert len(db.rows) == 1
@@ -101,7 +107,7 @@ def test_the_saved_row_is_returned_with_a_real_id():
     # The front end used to invent `mem_<timestamp>`, which could never match a
     # row and so could never be deleted. It now inserts what the server returns.
     db = _Session()
-    result = _run(app_main.add_memory_fact({"fact": "Calls me Shashwat"},
+    result = _run(app_main.create_user_memory({"fact": "Calls me Shashwat"},
                                            db=db, current_user=_User(1)))
     assert isinstance(result["id"], int)
     assert result["fact"] == "Calls me Shashwat"
@@ -112,7 +118,7 @@ def test_the_saved_row_is_returned_with_a_real_id():
 def test_an_empty_memory_is_refused():
     db = _Session()
     with pytest.raises(app_main.HTTPException) as raised:
-        _run(app_main.add_memory_fact({"fact": "   "}, db=db, current_user=_User(1)))
+        _run(app_main.create_user_memory({"fact": "   "}, db=db, current_user=_User(1)))
     assert raised.value.status_code == 400
     assert db.committed == 0
 
@@ -122,29 +128,29 @@ def test_an_enormous_memory_is_refused():
     # prompt there.
     db = _Session()
     with pytest.raises(app_main.HTTPException) as raised:
-        _run(app_main.add_memory_fact({"fact": "x" * 2001}, db=db, current_user=_User(1)))
+        _run(app_main.create_user_memory({"fact": "x" * 2001}, db=db, current_user=_User(1)))
     assert raised.value.status_code == 400
 
 
 def test_an_unknown_category_falls_back_rather_than_being_stored():
     db = _Session()
-    result = _run(app_main.add_memory_fact({"fact": "a fact", "category": "../../evil"},
+    result = _run(app_main.create_user_memory({"fact": "a fact", "category": "../../evil"},
                                            db=db, current_user=_User(1)))
     assert result["category"] == "durable_record"
 
 
 def test_deleting_a_memory_removes_the_row():
     db = _Session()
-    _run(app_main.add_memory_fact({"fact": "temporary"}, db=db, current_user=_User(5)))
+    _run(app_main.create_user_memory({"fact": "temporary"}, db=db, current_user=_User(5)))
     row = db.rows[0]
-    _run(app_main.delete_single_memory(row.id, db=db, current_user=_User(5)))
+    _run(app_main.delete_user_memory(row.id, db=db, current_user=_User(5)))
     assert db.deleted == [row]
     assert db.rows == []
 
 
 def test_deleting_a_memory_that_is_not_yours_is_refused():
     db = _Session()
-    _run(app_main.add_memory_fact({"fact": "mine"}, db=db, current_user=_User(5)))
+    _run(app_main.create_user_memory({"fact": "mine"}, db=db, current_user=_User(5)))
     # The handler filters on user_id; the stand-in returns the row regardless,
     # so this asserts the filter is applied rather than trusting it.
     conditions = []
@@ -162,5 +168,5 @@ def test_deleting_a_memory_that_is_not_yours_is_refused():
         return query
 
     db.query = spy
-    _run(app_main.delete_single_memory(1, db=db, current_user=_User(5)))
+    _run(app_main.delete_user_memory(1, db=db, current_user=_User(5)))
     assert len(conditions) >= 2, "delete must filter on the owner as well as the id"

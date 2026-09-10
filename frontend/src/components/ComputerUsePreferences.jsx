@@ -13,8 +13,9 @@ export default function ComputerUsePreferences() {
     fetch(`${API_BASE}/api/control/session`)
       .then(res => { if (!res.ok) throw new Error('Control status unavailable'); return res.json(); })
       .then(data => {
-        if (data && typeof data.active === 'number') {
-          setActiveSessions(data.active);
+        if (data) {
+          const count = Array.isArray(data.active) ? data.active.length : (typeof data.active === 'number' ? data.active : 0);
+          setActiveSessions(count);
         }
       })
       .catch(() => {});
@@ -41,8 +42,9 @@ export default function ComputerUsePreferences() {
       });
       if (!res.ok) throw new Error(`Control stop failed (${res.status})`);
       const data = await res.json();
-      setActiveSessions(data.active || 0);
-      setStopNotice(`Stopped. Active sessions: ${data.active || 0}.`);
+      const count = Array.isArray(data?.active) ? data.active.length : (typeof data?.active === 'number' ? data.active : 0);
+      setActiveSessions(count);
+      setStopNotice(`Stopped. Active sessions: ${count}.`);
     } catch {
       setStopNotice('Could not reach control session endpoint.');
     } finally {

@@ -2459,7 +2459,75 @@ html.light .theme-toggle .moon { display: none; }
 .install-steps,
 .install-steps > li { min-width: 0; }
 
-.code { max-width: 100%; }
+.code { max-width: 100%; position: relative; }
+
+/* ------------------------------------ code copy button */
+.code-wrap {
+  position: relative;
+  max-width: 100%;
+}
+
+.code-wrap .code {
+  padding-right: 76px;
+}
+
+.code-copy-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--muted, #9ca3af);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 10;
+  user-select: none;
+}
+
+.code-copy-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+.code-copy-btn.copied {
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.6);
+  background: rgba(16, 185, 129, 0.15);
+}
+
+.code-copy-btn svg {
+  flex-shrink: 0;
+}
+
+html.light .code-copy-btn {
+  color: #4b5563;
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.14);
+}
+
+html.light .code-copy-btn:hover {
+  color: #111827;
+  background: rgba(0, 0, 0, 0.1);
+  border-color: rgba(0, 0, 0, 0.28);
+}
+
+html.light .code-copy-btn.copied {
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.5);
+  background: rgba(5, 150, 105, 0.12);
+}
 
 @media (max-width: 720px) {
   /* The comments are the first thing worth losing: they explain what the four

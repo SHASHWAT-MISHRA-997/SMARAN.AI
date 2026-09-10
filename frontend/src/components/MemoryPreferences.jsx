@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Brain, ArrowUp, Copy, Check, Trash2, Pencil, ExternalLink, X, Sparkles } from 'lucide-react';
+import { Brain, ArrowUp, Copy, Check, Trash2, Pencil, X, Sparkles } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import * as localChat from '../utils/localChat';
 import { isNativeApp, loadLink } from '../utils/hostLink';
@@ -21,7 +21,11 @@ const MemoryPreferences = () => {
   const [newFact, setNewFact] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState('');
-  const [loading, setLoading] = useState(false);
+  // A rejected add used to be swallowed whole: `if (res.ok)` with no else, and
+  // a catch whose entire body was the word "Fallback". Typing a memory the
+  // server refused - too long, not signed in - left the text sitting in the box
+  // looking like nothing had been pressed.
+  const [factError, setFactError] = useState('');
 
   // Import Modal State
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -84,19 +88,27 @@ const MemoryPreferences = () => {
       setNewFact('');
       return;
     }
+    setFactError('');
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/memory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fact: text, category: 'manual' }),
+        // "manual" is not one of the five categories the server knows, so the
+        // row was stored under a name that `GET /api/memory` then had to label
+        // "Durable Record" regardless - the value at rest and the value on
+        // screen disagreed. Send the category it will actually be filed under.
+        body: JSON.stringify({ fact: text, category: 'durable_record' }),
       });
-      if (res.ok) {
-        const added = await res.json();
-        setFacts((prev) => [added, ...prev]);
-        setNewFact('');
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        setFactError(detail.detail || `Could not save that memory (${res.status}).`);
+        return;
       }
+      const added = await res.json();
+      setFacts((prev) => [added, ...prev]);
+      setNewFact('');
     } catch {
-      // Fallback
+      setFactError('Could not reach the local engine, so that memory was not saved.');
     }
   };
 
@@ -362,22 +374,32 @@ const MemoryPreferences = () => {
       </div>
 
       {/* Bottom quick-entry input bar matching Screenshot 4 */}
-      <form onSubmit={handleAddFact} className="relative mt-auto pt-2">
+      <form onSubmit={handleAddFact} className="mt-auto pt-2">
+        {/* The arrow centres on this wrapper, not on the form. The form grows
+            when the error line appears, and anchoring to it dragged the button
+            down with it. */}
+        <div className="relative">
         <input
           type="text"
           value={newFact}
-          onChange={(e) => setNewFact(e.target.value)}
-          placeholder="Don't ask about my former baseball career"
-          className="w-full pl-4 pr-11 py-3 rounded-2xl border border-zinc-300 dark:border-zinc-700/80 bg-zinc-50 dark:bg-zinc-900 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-500 outline-none focus:border-indigo-500 shadow-inner"
+          onChange={(e) => { setNewFact(e.target.value); if (factError) setFactError(''); }}
+          placeholder="Prefer short answers, no preamble"
+          className="w-full pl-4 pr-12 py-3 rounded-2xl border border-zinc-300 dark:border-zinc-700/80 bg-zinc-50 dark:bg-zinc-900 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-500 outline-none focus:border-indigo-500 shadow-inner"
         />
         <button
           type="submit"
           disabled={!newFact.trim()}
-          className="absolute right-2 top-4 p-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-white transition cursor-pointer disabled:cursor-not-allowed"
+          className="sm-field-btn absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 flex items-center justify-center rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-white transition cursor-pointer disabled:cursor-not-allowed"
           title="Add memory rule"
         >
           <ArrowUp className="w-4 h-4" />
         </button>
+        </div>
+        {factError && (
+          <p role="alert" className="mt-2 px-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-300">
+            {factError}
+          </p>
+        )}
       </form>
 
       {/* Import Modal */}
@@ -447,7 +469,10 @@ const MemoryPreferences = () => {
                 onChange={(e) => setImportJsonText(e.target.value)}
                 placeholder='{ "facts": [ { "fact": "..." } ] }'
                 rows={5}
-                className="w-full text-[11px] font-mono p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-100 outline-none focus:border-indigo-500"
+                /* The background flipped with the theme and the text did not:
+             `bg-white` with a fixed `text-zinc-100` is near-white on white, so
+             pasting JSON in here showed an empty box in light mode. */
+          className="w-full text-[11px] font-mono p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500"
               />
             </div>
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Box, Shield, Terminal } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
@@ -894,7 +894,7 @@ const extractBackendMeasurements = (payload = {}) => {
 };
 
 // Per-message row with Gemini-style copy / re-use / delete actions 
-const MessageRow = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopSpeaking, speakText, onConfirmDesktopAction, onCancelDesktopAction, audioEnabled, selectedLanguage }) => {
+const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopSpeaking, speakText, onConfirmDesktopAction, onCancelDesktopAction, audioEnabled, selectedLanguage }) => {
   const [copied, setCopied] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [editText, setEditText] = React.useState(msg.content);
@@ -1212,6 +1212,16 @@ const MessageRow = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopSpeak
 };
 
 /**
+ * Memoised because the conversation re-renders on every streamed token, and
+ * without this each row re-parses its markdown and re-highlights its code
+ * every time. A shallow compare is enough: `msg` keeps its identity for rows
+ * the stream did not touch (the reducers return `msg` unchanged rather than
+ * copying), and the callbacks are frozen by `rowHandlers` in ChatArea, so the
+ * only rows that re-render are the ones whose data actually moved.
+ */
+const MessageRow = React.memo(MessageRowImpl);
+
+/**
  * Best-effort gender of a system speech voice, taken from its name.
  *
  * Platforms do not expose a gender field, so the shipped voice names are
@@ -1228,7 +1238,6 @@ const voiceGender = (name = '') => {
 
 const ChatArea = ({
   token,
-  currentUser,
   activeSessionId,
   activeCollections,
   setActiveCollections,
@@ -1240,22 +1249,38 @@ const ChatArea = ({
   onEnsureSession,
   performancePosition,
   activeSection = 'code',
-  onSectionChange,
 }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [coworkMode, setCoworkMode] = useState(false);
   const [askForApproval, setAskForApproval] = useState(true);
   useEffect(() => {
     const applySkill = () => {
       const instructions = localStorage.getItem('sm_pending_skill_prompt');
-      if (!instructions) return;
-      localStorage.removeItem('sm_pending_skill_prompt');
-      setInput((current) => [current, instructions].filter(Boolean).join('\n\n'));
+      if (instructions) {
+        localStorage.removeItem('sm_pending_skill_prompt');
+        setInput((current) => [current, instructions].filter(Boolean).join('\n\n'));
+      }
+      const pendingPrompt = localStorage.getItem('sm_pending_prompt');
+      if (pendingPrompt) {
+        localStorage.removeItem('sm_pending_prompt');
+        setInput(pendingPrompt);
+      }
     };
     applySkill();
+
+    const handlePromptEvent = (e) => {
+      const p = e.detail?.prompt;
+      if (p) {
+        setInput(p);
+      }
+    };
+
     window.addEventListener('smaran:use-skill', applySkill);
-    return () => window.removeEventListener('smaran:use-skill', applySkill);
+    window.addEventListener('smaran:send-prompt', handlePromptEvent);
+    return () => {
+      window.removeEventListener('smaran:use-skill', applySkill);
+      window.removeEventListener('smaran:send-prompt', handlePromptEvent);
+    };
   }, []);
   const inputValueRef = useRef('');
   useEffect(() => { inputValueRef.current = input; }, [input]);
@@ -3368,6 +3393,51 @@ const ChatArea = ({
   };
 
   /**
+   * Stable callbacks for the message rows.
+   *
+   * Every streamed token calls `setMessages`, which re-renders this component,
+   * which used to re-render every `MessageRow` in the conversation - each one
+   * re-parsing its markdown and re-highlighting its code. On a long chat that
+   * is the lag you feel while an answer is arriving.
+   *
+   * `React.memo` on the row is what stops it, but only if the props hold still.
+   * They did not: `onReuse` and `onRefClick` were arrow functions written
+   * inline at the call site, and the six handlers are plain functions rebuilt
+   * on every render, so a shallow compare failed on identity every time and
+   * memo would have been pure overhead.
+   *
+   * The obvious shortcut - a custom comparator that ignores function props -
+   * is a trap. A row that skips re-rendering keeps the callbacks it was given,
+   * and those close over the state of the render that made them. Skip enough
+   * renders and Delete acts on a stale `messages`. So the identities are
+   * frozen instead, and the ref they read through is repointed after each
+   * commit: one function that never changes, always calling the current
+   * implementation.
+   */
+  const rowHandlersRef = useRef(null);
+  rowHandlersRef.current = {
+    setInput,
+    setSelectedRef,
+    handleEditMessage,
+    handleDeleteMessage,
+    handleConfirmDesktopAction,
+    handleCancelDesktopAction,
+    speakText,
+    stopSpeaking,
+  };
+
+  const rowHandlers = useMemo(() => ({
+    onReuse: (text) => rowHandlersRef.current.setInput(text),
+    onRefClick: (ref) => rowHandlersRef.current.setSelectedRef(ref),
+    onEdit: (...args) => rowHandlersRef.current.handleEditMessage(...args),
+    onDelete: (...args) => rowHandlersRef.current.handleDeleteMessage(...args),
+    onConfirmDesktopAction: (...args) => rowHandlersRef.current.handleConfirmDesktopAction(...args),
+    onCancelDesktopAction: (...args) => rowHandlersRef.current.handleCancelDesktopAction(...args),
+    speakText: (...args) => rowHandlersRef.current.speakText(...args),
+    stopSpeaking: (...args) => rowHandlersRef.current.stopSpeaking(...args),
+  }), []);
+
+  /**
    * The whole conversation, in the shape a provider expects.
    *
    * Trimmed to the last twenty turns: a long chat sent in full is slow, costs
@@ -4488,57 +4558,20 @@ const ChatArea = ({
               <HeroLogo3D />
             </div>
           ) : activeSection === 'code' ? (
-            <div className="min-h-full flex flex-col items-center justify-center text-center max-w-2xl mx-auto w-full space-y-5 px-3 py-8 select-none animate-in fade-in duration-300">
+            <div className="min-h-full flex flex-col items-center justify-center text-center max-w-2xl mx-auto w-full space-y-4 px-3 py-8 select-none animate-in fade-in duration-300">
               {/* Terminal Cloud Icon */}
-              <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 shadow-xl shadow-black/40">
-                <Terminal className="w-7 h-7 text-emerald-400" />
+              <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 shadow-xl shadow-black/30">
+                <Terminal className="w-8 h-8 text-emerald-400" />
               </div>
 
-              {/* Main Codex Prompt Heading */}
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-100">
+              {/* Main Codex Prompt Heading - visible in all themes */}
+              <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-zinc-100">
                 What should we build in {workspaceStatus?.open ? String(workspaceStatus.root).split(/[\\/]/).filter(Boolean).pop() : 'SMARAN.AI'}?
               </h1>
 
-              {/* Quick action chips from git / active repository */}
-              <div className="flex flex-col gap-2 w-full max-w-xl text-left">
-                {[
-                  {
-                    id: 'release',
-                    text: "Rebuild release artifacts with today's persistent voice and reply-voice fixes",
-                  },
-                  {
-                    id: 'voice',
-                    text: 'Prove the phone voice screen handles long replies without covering Smaru',
-                  },
-                  {
-                    id: 'audit',
-                    text: 'Audit and sync workspace code with VS Code extension',
-                  },
-                ].map((chip) => (
-                  <button
-                    key={chip.id}
-                    type="button"
-                    onClick={() => {
-                      setInput(chip.text);
-                      composerRef.current?.focus();
-                    }}
-                    className="flex items-center gap-3 p-3 rounded-xl border border-zinc-800/80 bg-zinc-900/60 hover:bg-zinc-850 hover:border-zinc-700 text-xs text-zinc-300 transition text-left cursor-pointer group"
-                  >
-                    <GitBranch className="w-4 h-4 text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
-                    <span className="flex-1 truncate">{chip.text}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* VS Code Extension Live Sync Status Card */}
-              <div className="w-full max-w-xl rounded-xl border border-emerald-500/25 bg-emerald-950/20 p-3 flex items-center justify-between text-xs text-emerald-300 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="font-semibold">VS Code Extension Synced</span>
-                  <span className="text-emerald-500/80 font-mono text-[11px]">(smaran-ai-codex-2.20.1)</span>
-                </div>
-                <span className="text-[11px] text-zinc-400 font-mono">Local Engine Active</span>
-              </div>
+              <p className="text-sm font-medium text-zinc-600 dark:text-zinc-400 max-w-md leading-relaxed">
+                Autonomous AI Coding Assistant ready for your project commands, code generation, and automated workflows.
+              </p>
             </div>
           ) : (
             <div className="min-h-full flex flex-col items-center justify-start sm:justify-center text-center max-w-2xl mx-auto w-full space-y-4 sm:space-y-6 px-2 py-6 sm:py-8 select-none animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -4553,15 +4586,15 @@ const ChatArea = ({
                 <MessageRow
                   key={msg.id}
                   msg={msg}
-                  onReuse={(text) => setInput(text)}
-                  onRefClick={(ref) => setSelectedRef(ref)}
-                  onEdit={handleEditMessage}
-                  onDelete={handleDeleteMessage}
+                  onReuse={rowHandlers.onReuse}
+                  onRefClick={rowHandlers.onRefClick}
+                  onEdit={rowHandlers.onEdit}
+                  onDelete={rowHandlers.onDelete}
                   isSpeakingAudio={isSpeakingAudio}
-                  stopSpeaking={stopSpeaking}
-                  speakText={speakText}
-                  onConfirmDesktopAction={handleConfirmDesktopAction}
-                  onCancelDesktopAction={handleCancelDesktopAction}
+                  stopSpeaking={rowHandlers.stopSpeaking}
+                  speakText={rowHandlers.speakText}
+                  onConfirmDesktopAction={rowHandlers.onConfirmDesktopAction}
+                  onCancelDesktopAction={rowHandlers.onCancelDesktopAction}
                   audioEnabled={audioEnabled}
                   autoSpeakEnabled={autoSpeakEnabled}
                   selectedLanguage={selectedLanguage}
@@ -4665,28 +4698,7 @@ const ChatArea = ({
               <GitBranch className="h-3.5 w-3.5 text-emerald-400" /> {workspaceStatus.git.branch}
             </span>
           )}
-          {activeSection === 'chat' && (
-            <div className="inline-flex h-8 items-center p-0.5 rounded-lg bg-zinc-900 border border-zinc-700/80 text-[11px]">
-              <button
-                type="button"
-                onClick={() => setCoworkMode(false)}
-                className={`h-full px-2.5 rounded-md font-semibold transition cursor-pointer flex items-center ${
-                  !coworkMode ? 'bg-zinc-800 text-white shadow-xs' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                onClick={() => setCoworkMode(true)}
-                className={`h-full px-2.5 rounded-md font-semibold transition cursor-pointer flex items-center ${
-                  coworkMode ? 'bg-indigo-600 text-white shadow-xs' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                Cowork
-              </button>
-            </div>
-          )}
+
           {activeSection === 'code' && (
             <button
               type="button"

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Laptop, RefreshCw, Check, X, Shield, Terminal, Command } from 'lucide-react';
+import { Laptop, RefreshCw, Check, X } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
 const DesktopGeneralPreferences = () => {

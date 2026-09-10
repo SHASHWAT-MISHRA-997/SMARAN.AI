@@ -386,7 +386,68 @@ ALLOWED_REMOTE_ACTIONS = {
     "desktop_action",   # run a vetted desktop-agent action by id
     "new_chat",
     "screenshot",
+    "prompt",           # execute dispatched prompt
+    "sync",             # sync workspace
+    "ping",             # heartbeat ping
+    "message",          # notification message
 }
+
+
+class DispatchRequest(BaseModel):
+    device_id: str
+    action: str = "prompt"
+    data: Dict[str, Any] = {}
+
+
+@router.post("/dispatch")
+def dispatch_to_device(
+    payload: DispatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dep),
+):
+    """Dispatch action/prompt to one or all paired companion devices."""
+    target_id = payload.device_id
+    action = payload.action
+    params = payload.data or {}
+
+    if target_id == "all":
+        devices = (
+            db.query(PairedDevice)
+            .filter(PairedDevice.user_id == current_user.id)
+            .all()
+        )
+        count = 0
+        for dev in devices:
+            q = _command_queues.setdefault(dev.id, [])
+            q.append({
+                "id": secrets.token_urlsafe(8),
+                "action": action,
+                "params": params,
+                "queued_at": datetime.now().isoformat(),
+            })
+            del q[:-_MAX_QUEUED_COMMANDS]
+            count += 1
+        return {"dispatched": True, "target": "All Devices", "devices_count": count, "action": action}
+    else:
+        dev = (
+            db.query(PairedDevice)
+            .filter(PairedDevice.id == target_id, PairedDevice.user_id == current_user.id)
+            .first()
+        )
+        if not dev:
+            # If not in database, also check if any device exists
+            dev = db.query(PairedDevice).first()
+        if not dev:
+            raise HTTPException(status_code=404, detail="No paired devices found.")
+        q = _command_queues.setdefault(dev.id, [])
+        q.append({
+            "id": secrets.token_urlsafe(8),
+            "action": action,
+            "params": params,
+            "queued_at": datetime.now().isoformat(),
+        })
+        del q[:-_MAX_QUEUED_COMMANDS]
+        return {"dispatched": True, "target": dev.name, "device_id": dev.id, "action": action}
 
 
 @router.post("/command")

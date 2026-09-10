@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Globe, Shield, Check, Laptop } from 'lucide-react';
+import { Globe, Check } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
 const ChromeExtensionPreferences = () => {
   const [enabled, setEnabled] = useState(true);
   const [defaultPolicy, setDefaultPolicy] = useState('ask');
-  const [status, setStatus] = useState(null);
+  const [, setStatus] = useState(null);
   const [savedNotice, setSavedNotice] = useState(false);
 
   const fetchStatus = async () => {

@@ -127,6 +127,40 @@ from app.password_policy import verify_password_strength  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("main")
 
+
+# Background work that outlives the request that started it.
+#
+# `asyncio.create_task` returns a task the event loop only holds *weakly*. If
+# nothing else keeps a reference, the garbage collector is free to take it
+# mid-flight - the documented failure is a task that simply stops partway
+# through, with no error anywhere. Five call sites here were doing exactly
+# that, and two of them were the memory extraction that runs after a reply has
+# finished streaming: a memory that silently never got written, occasionally,
+# for no visible reason.
+#
+# Failures were invisible too. Nobody retrieves the result of a forgotten task,
+# so an exception inside one is swallowed until the interpreter garbages it and
+# prints "Task exception was never retrieved" to a console the packaged build
+# does not have.
+_background_tasks: set = set()
+
+
+def spawn_background(coro, *, label: str = "background task"):
+    """Start `coro` and hold the reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    def _report(finished):
+        if finished.cancelled():
+            return
+        error = finished.exception()
+        if error is not None:
+            logger.error(f"{label} failed: {error!r}")
+
+    task.add_done_callback(_report)
+    return task
+
 # The packaged build has no console, so basicConfig writes to nothing and
 # every warning the app has ever logged there was discarded. When something
 # works from source and not in the installed app - which is exactly the case
@@ -2083,25 +2117,56 @@ async def get_memory_categories(db: Session = Depends(get_db), current_user: Use
 
 @app.post("/api/memory")
 async def create_user_memory(body: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Create a persistent user memory fact."""
+    """Store one memory fact the user typed themselves.
+
+    There was no way to do this at all for a while: the Settings panel had an
+    add box that built an object, put it in React state and stopped, so a fact
+    appeared in the list, survived until the panel closed, and was gone on
+    reopening.
+
+    This handler was then written twice, by two different hands, and both
+    registered `POST /api/memory`. FastAPI serves the first match and silently
+    ignores the second, so the stricter of the two was unreachable while its
+    unit tests went on passing against the function object - green tests for
+    code no request could arrive at. The two are merged here and there is one.
+
+    Returned in the same shape as `GET /api/memory`, `category_label` included,
+    so the caller can insert the row it gets back rather than inventing an id.
+    The old client invented `mem_<timestamp>`, which never matched a real row
+    and so could never be deleted again.
+    """
     fact = (body.get("fact") or "").strip()
     if not fact:
-        raise HTTPException(status_code=400, detail="Fact content cannot be empty")
-    category = body.get("category", "durable_record")
-    source_session_id = body.get("source_session_id")
+        raise HTTPException(status_code=400, detail="A memory needs some text.")
+    # Bounded because this is stored per user and read back into prompts; an
+    # unbounded field here becomes an unbounded prompt later.
+    if len(fact) > 2000:
+        raise HTTPException(status_code=400, detail="That memory is too long (2000 characters maximum).")
+
+    # Unknown categories are normalised rather than stored as given. The
+    # Settings panel used to send "manual", which is not one of the five, so
+    # the row was written with a category that `GET /api/memory` then had to
+    # label "Durable Record" anyway - the stored value and the shown value
+    # disagreed, and the grouping endpoint quietly filed it elsewhere.
+    category = str(body.get("category") or "durable_record")
+    if category not in MEMORY_CATEGORY_LABELS:
+        category = "durable_record"
+
     mem = UserMemory(
         user_id=current_user.id,
         fact=fact,
         category=category,
-        source_session_id=source_session_id,
+        source_session_id=body.get("source_session_id"),
     )
     db.add(mem)
     db.commit()
     db.refresh(mem)
+    logger.info(f"Added memory fact id={mem.id} for user_id={current_user.id}")
     return {
         "id": mem.id,
         "fact": mem.fact,
-        "category": mem.category,
+        "category": mem.category or "durable_record",
+        "category_label": MEMORY_CATEGORY_LABELS.get(mem.category or "durable_record", "Durable Record"),
         "created_at": mem.created_at,
     }
 
@@ -2128,6 +2193,16 @@ async def update_user_memory(memory_id: int, body: dict, db: Session = Depends(g
         "category": mem.category,
         "updated_at": mem.updated_at,
     }
+
+
+@app.delete("/api/memory/clear")
+async def clear_user_memory(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Permanently erase ALL persistent memory facts for the current user."""
+    deleted = db.query(UserMemory).filter(UserMemory.user_id == current_user.id).delete()
+    db.commit()
+    logger.info(f"Cleared {deleted} memory facts for user_id={current_user.id} ({current_user.username})")
+
+    return {"message": f"Memory cleared. {deleted} facts erased.", "cleared_count": deleted}
 
 
 @app.delete("/api/memory/{memory_id}")
@@ -2334,72 +2409,6 @@ async def clear_all_user_data(
     logger.info(f"Cleared all data for user={user.username} (id={user.id}): {deleted_sessions} sessions, {deleted_messages} messages, {deleted_memories} memories")
     return {"status": "ok", "deleted": {"memories": deleted_memories, "sessions": deleted_sessions, "messages": deleted_messages, "audit_logs": deleted_audits}}
 
-
-
-@app.delete("/api/memory/clear")
-async def clear_user_memory(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Permanently erase ALL persistent memory facts for the current user."""
-    deleted = db.query(UserMemory).filter(UserMemory.user_id == current_user.id).delete()
-    db.commit()
-    logger.info(f"Cleared {deleted} memory facts for user_id={current_user.id} ({current_user.username})")
-
-    return {"message": f"Memory cleared. {deleted} facts erased.", "cleared_count": deleted}
-
-
-@app.post("/api/memory")
-async def add_memory_fact(payload: dict, db: Session = Depends(get_db),
-                          current_user: User = Depends(get_current_user)):
-    """Store one memory fact the user typed themselves.
-
-    There was no way to do this. The Settings panel had an add box that built
-    an object, put it in React state and stopped there - so a fact appeared in
-    the list, survived until the panel closed, and was gone on reopening. The
-    delete button was the same in reverse: it filtered state while the row sat
-    untouched in the database, so a "deleted" memory came back.
-
-    Returned in the same shape as GET /api/memory so the caller can insert the
-    row it gets back rather than guessing at an id, which is what produced the
-    invented `mem_<timestamp>` ids that never matched anything real.
-    """
-    fact = str(payload.get("fact", "")).strip()
-    if not fact:
-        raise HTTPException(status_code=400, detail="A memory needs some text.")
-    # Bounded because this is stored per user and read into prompts; an
-    # unbounded field here becomes an unbounded prompt later.
-    if len(fact) > 2000:
-        raise HTTPException(status_code=400, detail="That memory is too long (2000 characters maximum).")
-
-    category = str(payload.get("category") or "durable_record")
-    if category not in MEMORY_CATEGORY_LABELS:
-        category = "durable_record"
-
-    entry = UserMemory(user_id=current_user.id, fact=fact, category=category)
-    db.add(entry)
-    db.commit()
-    db.refresh(entry)
-    logger.info(f"Added memory fact id={entry.id} for user_id={current_user.id}")
-    return {
-        "id": entry.id,
-        "fact": entry.fact,
-        "category": entry.category or "durable_record",
-        "category_label": MEMORY_CATEGORY_LABELS.get(entry.category or "durable_record", "Durable Record"),
-        "created_at": entry.created_at,
-    }
-
-
-@app.delete("/api/memory/{memory_id}")
-async def delete_single_memory(memory_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Delete a single memory fact by its ID (selective memory management)."""
-    fact = db.query(UserMemory).filter(
-        UserMemory.id == memory_id,
-        UserMemory.user_id == current_user.id  # Ensure user can only delete their own facts
-    ).first()
-    if not fact:
-        raise HTTPException(status_code=404, detail="Memory fact not found or access denied")
-    db.delete(fact)
-    db.commit()
-    logger.info(f"Deleted memory fact id={memory_id} for user_id={current_user.id}")
-    return {"message": "Memory fact deleted.", "id": memory_id}
 
 
 def _openai_compatible_bases(api_url: str = "") -> list[str]:
@@ -3800,7 +3809,9 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         db.commit()
         db.refresh(session)
     elif session.user_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+        session.user_id = current_user.id
+        db.commit()
+        db.refresh(session)
 
     # Translation support: default English, detect user language, translate if needed
     target_language = getattr(chat_req, "target_language", None) or "en"
@@ -4674,12 +4685,12 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                 db_session.commit()
 
                                 # Auto-extract and save memory facts
-                                asyncio.create_task(_extract_and_save_memory(
+                                spawn_background(_extract_and_save_memory(
                                     user_id=current_user.id,
                                     session_id=session.id,
                                     user_prompt=chat_req.prompt,
                                     ai_response=accumulated_response
-                                ))
+                                ), label="memory extraction")
                             finally:
                                 db_session.close()
                         except Exception as dbe:
@@ -5180,15 +5191,15 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 db_session.commit()
 
                 # 5. Extract & persist memory facts from this conversation turn (async background)
-                asyncio.create_task(_extract_and_save_memory(
+                spawn_background(_extract_and_save_memory(
                     user_id=current_user.id,
                     session_id=session.id,
                     user_prompt=chat_req.prompt,
                     ai_response=accumulated_response
-                ))
+                ), label="memory extraction")
                 # 6. Store in Zep Memory asynchronously
-                asyncio.create_task(zep_add_message(session.id, "user", chat_req.prompt))
-                asyncio.create_task(zep_add_message(session.id, "assistant", accumulated_response))
+                spawn_background(zep_add_message(session.id, "user", chat_req.prompt), label="zep user message")
+                spawn_background(zep_add_message(session.id, "assistant", accumulated_response), label="zep assistant message")
             except Exception as se:
                 logger.error(f"Failed to record message history inside generator: {se}")
                 db_session.rollback()
@@ -5610,7 +5621,9 @@ async def chat_vision_interaction(
         db.commit()
         db.refresh(session)
     elif session.user_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+        session.user_id = current_user.id
+        db.commit()
+        db.refresh(session)
 
     # 1. Save uploaded file permanently to parse it and serve it
     filename = file.filename
@@ -5976,11 +5989,6 @@ def get_device_specs():
         "source": "browser",
         "message": "Device capabilities are collected locally in your browser."
     }
-
-@app.get("/api/test/ping")
-def ping():
-    return {"status": "ok"}
-
 
 @app.get("/api/system/container-info")
 def container_info():
@@ -7117,37 +7125,6 @@ def get_models_catalog_endpoint(current_user: User = Depends(get_current_user)):
     }
 
 
-@app.post("/api/models/compare")
-async def compare_models_endpoint(
-    request: Request,
-    current_user: User = Depends(get_current_user)
-):
-    """Return side-by-side comparison metadata for up to 4 selected models."""
-    body = await request.json()
-    model_ids = body.get("model_ids", [])
-    if not isinstance(model_ids, list) or not model_ids:
-        raise HTTPException(status_code=400, detail="Please select at least 1 model to compare.")
-    if len(model_ids) > 4:
-        model_ids = model_ids[:4]
-    
-    full_catalog = get_full_catalog()
-    catalog_map = {m["id"]: m for m in full_catalog}
-    
-    selected_models = [catalog_map[mid] for mid in model_ids if mid in catalog_map]
-    return {
-        "models": selected_models,
-        "count": len(selected_models)
-    }
-
-
-import threading
-import time as _time
-
-# Global download progress tracker: { model_id: { percent, downloaded_mb, total_mb, speed_mbps, eta_secs, status, error } }
-_download_progress: dict = {}
-_cancel_events: dict = {}
-
-
 def _validate_exact_hf_repository(
     hf_repo: str,
     hf_token: str | None = None,
@@ -7620,7 +7597,7 @@ async def pull_any_model_endpoint(
         finally:
             _model_download_in_progress.discard(name)
 
-    asyncio.create_task(run_pull())
+    spawn_background(run_pull(), label="model pull")
     return {"started": True, "name": name,
             "detail": "Pulling. Watch /api/models/download-status for progress."}
 

@@ -363,6 +363,8 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
     let pollingTimer = null;
     let fallbackTimer = null;
     let receivedTelemetry = Boolean(lastKnownTelemetryStats);
+    let socketLive = false;
+    let reconnectDelay = 1000;
 
     const applyTelemetry = (payload) => {
       if (disposed || !payload || typeof payload !== "object") return;
@@ -415,6 +417,10 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
       if (disposed) return;
       try {
         socket = new WebSocket(wsUrl());
+        socket.onopen = () => {
+          socketLive = true;
+          reconnectDelay = 1000;
+        };
         socket.onmessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
@@ -422,9 +428,15 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
           } catch {}
         };
         socket.onclose = () => {
+          socketLive = false;
           if (disposed) return;
           if (!receivedTelemetry) fetchDirectTelemetry();
-          reconnectTimer = window.setTimeout(connectWebSocket, 4000);
+          /* Backing off rather than retrying flat every four seconds. With a
+             backend that is down - closed app, restarting engine - the old
+             pair of timers put roughly forty-five requests a minute into a
+             socket that was never going to answer, indefinitely. */
+          reconnectTimer = window.setTimeout(connectWebSocket, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 2, 30000);
         };
         socket.onerror = () => {
           socket?.close();
@@ -436,7 +448,14 @@ const RightPanel = ({ selectedModel, showPanel, onClose, position = "right" }) =
 
     fetchDirectTelemetry();
     connectWebSocket();
-    pollingTimer = window.setInterval(fetchDirectTelemetry, 2000);
+    /* The socket pushes exactly what this endpoint returns, so polling while it
+       is connected asked the machine for the same numbers twice. Reading them
+       is not free either - it walks psutil and the GPU - and it was running
+       thirty times a minute on top of the stream, on a machine that may well be
+       busy running a model. Polling is the fallback now, not a second source. */
+    pollingTimer = window.setInterval(() => {
+      if (!socketLive) fetchDirectTelemetry();
+    }, 2000);
 
     return () => {
       disposed = true;

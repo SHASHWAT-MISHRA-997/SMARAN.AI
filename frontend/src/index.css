@@ -33,9 +33,11 @@
    `inline` substitutes the literal value into the utility at build time, which
    freezes the light value and leaves the theme toggle painting nothing. The
    plain form emits `var(--color-*)`, which resolves per element and so follows
-   the class on <html>. Muted and faint inks are chosen to clear 4.5:1 against
-   their own surface in *both* themes; `frontend/tests/visual/theme-contrast`
-   measures it rather than trusting the swatches. */
+   the class on <html>. Muted and faint inks clear WCAG AA against their own
+   surface in all four variants - light, dark, and both system ones - with the
+   worst pairing at 5.79:1. `tests/theme-tokens.test.mjs` guards the other half
+   of it: that a token overridden below is never left without a default here,
+   which is how `--color-surface` came to exist in dark and not in light. */
 @theme {
   --color-surface: #f5f5f8;
   --color-raised: #ffffff;
@@ -60,6 +62,267 @@
   --color-line: #2b2b34;
   --color-line-strong: #45454f;
   --color-veil: rgba(0, 0, 0, 0.85);
+}
+
+.dark.theme-system {
+  --color-surface: #000000;
+  --color-raised: #09090b;
+  --color-sunken: #121215;
+  --color-ink: #ffffff;
+  --color-ink-muted: #e4e4e7;
+  --color-ink-faint: #a1a1aa;
+  --color-line: #27272a;
+  --color-line-strong: #ffffff;
+  --color-veil: rgba(0, 0, 0, 0.95);
+}
+
+.light.theme-system {
+  --color-surface: #ffffff;
+  --color-raised: #f8f9fa;
+  --color-sunken: #f1f3f5;
+  --color-ink: #000000;
+  --color-ink-muted: #18181b;
+  --color-ink-faint: #3f3f46;
+  --color-line: #e4e4e7;
+  --color-line-strong: #18181b;
+  --color-veil: rgba(0, 0, 0, 0.6);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ── System Theme: Black & White Duo-Tone + Full Cyberpunk Treatment ──
+   Dark obsidian sidebar rail + crisp white workspace canvas
+   With glassmorphism, neon glow, RGB animations, transitions & hover effects
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Sidebar base: dark obsidian glass ── */
+html.theme-system aside.sidebar-desktop,
+html.theme-system .sidebar-desktop {
+  background: linear-gradient(180deg, rgba(12, 12, 14, 0.95) 0%, rgba(6, 6, 8, 0.98) 100%) !important;
+  backdrop-filter: blur(20px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+  color: #f4f4f5 !important;
+  border-color: rgba(99, 102, 241, 0.18) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset -1px 0 0 rgba(99, 102, 241, 0.08),
+    0 0 30px rgba(99, 102, 241, 0.06) !important;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.4s ease,
+              box-shadow 0.4s ease !important;
+}
+
+/* Sidebar hover: activate the neon border glow */
+html.theme-system aside.sidebar-desktop:hover,
+html.theme-system .sidebar-desktop:hover {
+  border-color: rgba(99, 102, 241, 0.45) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset -1px 0 12px rgba(99, 102, 241, 0.12),
+    0 0 40px rgba(99, 102, 241, 0.1),
+    0 0 80px rgba(168, 85, 247, 0.05) !important;
+  animation: sidebar-glow-pulse 3s ease-in-out infinite !important;
+}
+
+/* ── Font visibility: high-contrast headings ── */
+html.theme-system aside.sidebar-desktop .text-zinc-900,
+html.theme-system aside.sidebar-desktop .text-zinc-950,
+html.theme-system aside.sidebar-desktop h1,
+html.theme-system aside.sidebar-desktop h2,
+html.theme-system aside.sidebar-desktop h3 {
+  color: #ffffff !important;
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.15) !important;
+}
+
+/* ── Font visibility: muted text still legible ── */
+html.theme-system aside.sidebar-desktop .text-zinc-600,
+html.theme-system aside.sidebar-desktop .text-zinc-500,
+html.theme-system aside.sidebar-desktop .text-zinc-400 {
+  color: #d4d4d8 !important;
+}
+
+/* ── Font visibility: primary nav labels ──
+   These two scales were the gap, and they are the nav labels themselves:
+   "New chat", "Sites", "Plugins", "Terminal", "Scheduled", "Dispatch" are
+   written `text-zinc-700 dark:text-zinc-300`.
+
+   The rules above force this sidebar dark in *both* system variants, but the
+   `dark:` half of that pair only applies when `.dark` is on <html>. On a light
+   desktop in system theme it is not, so the label stayed zinc-700 - #3f3f46 on
+   a near-black rail, about 1.6:1. The text was there and could not be read.
+
+   Anything painted on this rail needs a light colour regardless of which way
+   the OS is leaning, because the rail does not follow the OS. */
+html.theme-system aside.sidebar-desktop .text-zinc-700,
+html.theme-system aside.sidebar-desktop .text-zinc-800 {
+  color: #e4e4e7 !important;
+}
+
+/* The same trap one state along. The rows are `hover:text-zinc-950
+   dark:hover:text-white`, and on a light desktop the first half wins, so
+   hovering a nav item painted it #09090b on a near-black rail - the label
+   disappeared under the cursor.
+
+   These need their own selectors: the rules above match `.text-zinc-950`,
+   which is a different class from `hover:text-zinc-950`, so they never
+   applied to the hovered state. */
+html.theme-system aside.sidebar-desktop .hover\:text-zinc-950:hover,
+html.theme-system aside.sidebar-desktop .hover\:text-zinc-900:hover,
+html.theme-system aside.sidebar-desktop .hover\:text-zinc-600:hover {
+  color: #ffffff !important;
+}
+
+/* ── Panels on the rail: keep them dark too ──
+   The utility menu is `bg-white dark:bg-zinc-950` and the profile row is
+   `bg-white dark:bg-zinc-900/80`. Same trap as the labels: on a light desktop
+   the `dark:` half never applies, so both painted solid white and sat on the
+   obsidian rail as two bright slabs - the Settings/Clear popover and the
+   "Pro Workspace" row. The rail does not follow the OS, so nothing drawn on
+   it may either. */
+html.theme-system aside.sidebar-desktop .bg-white,
+html.theme-system aside.sidebar-desktop .bg-white\/95,
+html.theme-system aside.sidebar-desktop .bg-zinc-50 {
+  background-color: rgba(16, 16, 20, 0.96) !important;
+  border-color: rgba(99, 102, 241, 0.18) !important;
+}
+
+html.theme-system aside.sidebar-desktop .bg-zinc-100 {
+  background-color: rgba(30, 30, 36, 0.9) !important;
+}
+
+/* ── Active/highlighted items: vibrant + glowing ── */
+html.theme-system aside.sidebar-desktop .bg-zinc-200,
+html.theme-system aside.sidebar-desktop .bg-zinc-200\/80,
+html.theme-system aside.sidebar-desktop .bg-zinc-200\/90,
+html.theme-system aside.sidebar-desktop .bg-zinc-300 {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(24, 24, 27, 0.8)) !important;
+  border-color: rgba(99, 102, 241, 0.3) !important;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.08) !important;
+}
+
+/* ── Borders: subtle neon tint ── */
+html.theme-system aside.sidebar-desktop .border-zinc-300,
+html.theme-system aside.sidebar-desktop .border-zinc-300\/70,
+html.theme-system aside.sidebar-desktop .border-zinc-200 {
+  border-color: rgba(99, 102, 241, 0.2) !important;
+}
+
+/* ── Button hover: RGB glow lift effect ── */
+html.theme-system aside.sidebar-desktop button:hover {
+  background-color: rgba(99, 102, 241, 0.1) !important;
+  color: #ffffff !important;
+  transform: translateX(2px);
+  box-shadow: 0 0 14px rgba(99, 102, 241, 0.2);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* ── Nav items in system theme: neon left-rail + sheen ── */
+html.theme-system .nav-neon:hover {
+  background-color: rgba(99, 102, 241, 0.08) !important;
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.15) !important;
+}
+
+html.theme-system .nav-neon::before {
+  background: linear-gradient(180deg, #22d3ee, #6366f1, #a855f7) !important;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.7) !important;
+}
+
+/* ── RailBtn items in system theme: RGB hover glow ── */
+html.theme-system aside.sidebar-desktop button.rounded-xl {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border-color: rgba(63, 63, 70, 0.5) !important;
+}
+html.theme-system aside.sidebar-desktop button.rounded-xl:hover {
+  background: rgba(99, 102, 241, 0.12) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 18px rgba(99, 102, 241, 0.25), 0 0 8px rgba(168, 85, 247, 0.15) !important;
+  animation: system-item-glow 2s ease-in-out !important;
+  transform: translateX(2px) !important;
+}
+
+/* ── Active items in system theme: strong neon indicator ── */
+html.theme-system aside.sidebar-desktop button.bg-indigo-600,
+aside.sidebar-desktop button.bg-indigo-600 {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.95), rgba(124, 58, 237, 0.9)) !important;
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.35), 0 0 30px rgba(139, 92, 246, 0.2) !important;
+  border-color: rgba(129, 140, 248, 0.7) !important;
+  color: #ffffff !important;
+}
+
+aside.sidebar-desktop button.bg-indigo-600 span,
+html.theme-system aside.sidebar-desktop button.bg-indigo-600 span {
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* ── Section switcher container ── */
+aside.sidebar-desktop .bg-zinc-900\/90,
+html.theme-system aside.sidebar-desktop .bg-zinc-900\/90,
+html.theme-system aside.sidebar-desktop .bg-zinc-800\/90 {
+  background: rgba(18, 18, 22, 0.95) !important;
+  border-color: rgba(99, 102, 241, 0.25) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5) !important;
+}
+
+html.theme-system aside.sidebar-desktop .bg-zinc-900 {
+  background: rgba(20, 20, 24, 0.95) !important;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.1) !important;
+}
+
+/* ── Profile card in system theme ── */
+html.theme-system aside.sidebar-desktop .bg-zinc-900\/80 {
+  background: linear-gradient(135deg, rgba(12, 12, 14, 0.9), rgba(20, 20, 24, 0.85)) !important;
+  border-color: rgba(99, 102, 241, 0.2) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 20px rgba(99, 102, 241, 0.06) !important;
+}
+
+/* ── Utility popover in system theme ── */
+html.theme-system aside.sidebar-desktop .bg-zinc-950 {
+  background: rgba(6, 6, 8, 0.98) !important;
+  border-color: rgba(99, 102, 241, 0.25) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 30px rgba(99, 102, 241, 0.08) !important;
+}
+
+/* ── Scrollbar in system theme sidebar ── */
+html.theme-system aside.sidebar-desktop::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.4), rgba(168, 85, 247, 0.4)) !important;
+}
+
+/* ── System theme RGB item glow keyframes ── */
+@keyframes system-item-glow {
+  0%   { box-shadow: 0 0 0 transparent; }
+  25%  { box-shadow: 0 0 14px rgba(34, 211, 238, 0.25); }
+  50%  { box-shadow: 0 0 14px rgba(139, 92, 246, 0.25); }
+  75%  { box-shadow: 0 0 14px rgba(236, 72, 153, 0.25); }
+  100% { box-shadow: 0 0 0 transparent; }
+}
+
+/* ── System theme: scanline overlay on sidebar ── */
+html.theme-system aside.sidebar-desktop::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.015) 0px,
+    rgba(255, 255, 255, 0.015) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
+/* ── System theme workspace: crisp white with subtle glass ── */
+html.theme-system.light main,
+html.theme-system.light .chat-workspace {
+  background-color: #ffffff !important;
+}
+html.theme-system.dark main,
+html.theme-system.dark .chat-workspace {
+  background-color: #000000 !important;
 }
 
 @layer base {
@@ -347,6 +610,27 @@ pre {
   [role="button"]:not(:has(span)) {
     min-width: 44px;
   }
+  /* Toggle switches are the exception, and they are the reason this comment
+     exists. Every one of them is `w-11 h-6 rounded-full` - a 44x24 pill with
+     an absolutely positioned knob. The 44px minimum above stretched them to
+     44x44, and on a fully rounded element that is a circle, with the knob
+     stranded at the top: what the enable/disable controls looked like on the
+     phone. Their width already meets the touch target, so only the height
+     needs excusing. Specificity here beats the bare `button` rules, including
+     the one in the mobile breakpoint further down. */
+  button.w-11.h-6 {
+    min-height: 1.5rem;
+  }
+
+  /* Same problem one step along: a control that sits *inside* a field cannot
+     grow to 44px without bursting out of it. The memory composer's send arrow
+     was a grey slab hanging below its own input. Sized deliberately, and
+     centred on the field rather than pinned to a fixed offset. */
+  button.sm-field-btn {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+  }
+
   /* Give the composer chips room to grow into that height. */
   .composer-desktop-left button,
   .composer-desktop-right button,

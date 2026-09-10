@@ -931,6 +931,85 @@
     }
   }
 
+  /* -------------------------------------------------------------------------
+     Code snippet copy button
+     Adds a dedicated copy button to every command line snippet in the
+     install section (Linux, CLI, etc.).
+  ------------------------------------------------------------------------- */
+  (() => {
+    const codeBlocks = document.querySelectorAll('pre.code');
+    codeBlocks.forEach((pre) => {
+      if (pre.closest('.code-wrap')) return;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'code-wrap';
+      pre.parentNode.insertBefore(wrap, pre);
+      wrap.appendChild(pre);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'code-copy-btn';
+      btn.setAttribute('aria-label', 'Copy command to clipboard');
+      btn.innerHTML =
+        '<svg class="copy-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>' +
+        '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>' +
+        '</svg>' +
+        '<svg class="check-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none" aria-hidden="true">' +
+        '<polyline points="20 6 9 17 4 12"></polyline>' +
+        '</svg>' +
+        '<span class="copy-text">Copy</span>';
+
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const codeEl = pre.querySelector('code') || pre;
+        const text = codeEl.innerText.trim();
+        if (!text) return;
+
+        const performCopy = () => {
+          btn.classList.add('copied');
+          const copyIcon = btn.querySelector('.copy-icon');
+          const checkIcon = btn.querySelector('.check-icon');
+          const textSpan = btn.querySelector('.copy-text');
+          if (copyIcon) copyIcon.style.display = 'none';
+          if (checkIcon) checkIcon.style.display = 'inline-block';
+          if (textSpan) textSpan.textContent = 'Copied!';
+
+          setTimeout(() => {
+            btn.classList.remove('copied');
+            if (copyIcon) copyIcon.style.display = 'inline-block';
+            if (checkIcon) checkIcon.style.display = 'none';
+            if (textSpan) textSpan.textContent = 'Copy';
+          }, 2000);
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(performCopy).catch(() => {
+            fallbackCopy(text);
+            performCopy();
+          });
+        } else {
+          fallbackCopy(text);
+          performCopy();
+        }
+      });
+
+      function fallbackCopy(str) {
+        const ta = document.createElement('textarea');
+        ta.value = str;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        try { document.execCommand('copy'); } catch (err) {}
+        document.body.removeChild(ta);
+      }
+
+      wrap.appendChild(btn);
+    });
+  })();
+
 })();
 
 /* ---------------------------------------------------------------------------
