@@ -14,6 +14,27 @@ moves it. "Implemented" is not "verified"; "verified locally" is not "released".
 
 ---
 
+## Distribution — 2026-09-11, aligned and published
+
+Owner authorised the Netlify deploy and the APK publish for this release.
+
+| Channel | State | Evidence |
+| --- | --- | --- |
+| VS Code extension | **Released** | Owner published **2.20.1**; confirmed through the Marketplace gallery API (`2026-09-10T20:22:04Z`), not the HTML page, which was serving a cached 2.20.0. |
+| Extension artifact | **Fixed** | Two different files were both named `2.20.1`. Inside: `dist-release` carried `sessions.js` at **2,009 bytes**, `vscode-extension/` at **11,182 bytes** matching the current compile byte-for-byte. The stale one was missing the whole session-sync feature. Replaced, verified by content. |
+| Website | **Released** | Deployed to `smaran-ai` (`dc3a6e25…`). Netlify requested **0 files** - everything was already live - and the live `main.js` is byte-identical to local (43,369 bytes, md5 prefix matching its own cache-bust hash), copy button present. The earlier assumption that it was undeployed was wrong. |
+| Android APK | **Released** | Release and website had drifted onto **two different 2.10.36 builds** (`B2VLBXb8` vs `Beu4Xo_p`). Signing certificates checked first and found identical (`11:19:8A:E2…`), so the newer build can update over the older with no signature mismatch. Newer build uploaded; both channels now serve byte-identical 33,666,052. |
+| `dist-release/SMARAN.AI.apk` | **Fixed** | Was carrying a **2.10.34** bundle. Replaced with the published build. |
+
+**The APK still predates this session's frontend work.** It carries bundle
+`index-v2.10.36-Beu4Xo_p.js`; the current source builds
+`index-v2.10.36-CQC5_rtL.js`. The sidebar legibility, layout, toggle and
+contrast fixes are **not** in any Android build. Rebuilding needs Android SDK
+platform-tools and build-tools, and this machine's SDK has only
+`cmdline-tools`.
+
+---
+
 ## Evidence run — 2026-09-11c (background tasks, dead code, light-mode contrast)
 
 | Suite | Result |
