@@ -505,7 +505,7 @@ const App = () => {
 
   // The views that actually have a branch in the render below. Kept next to
   // handleNavigate so the two cannot drift apart again.
-  const RENDERABLE_VIEWS = new Set(['chat', 'collections', 'sites', 'plugins']);
+  const RENDERABLE_VIEWS = new Set(['chat', 'collections', 'sites', 'plugins', 'design', 'scheduled', 'dispatch']);
 
   const handleNavigate = (view) => {
     if (view === 'settings') {
@@ -612,7 +612,9 @@ const App = () => {
               {activeView === 'sites' ? 'Sites'
                 : activeView === 'plugins' ? 'Plugins & Skills'
                 : activeView === 'collections' ? 'Collections'
-                : activeView === 'design' ? 'SMARAN Design' : ''}
+                : activeView === 'design' ? 'SMARAN Design'
+                : activeView === 'scheduled' ? 'Scheduled Tasks'
+                : activeView === 'dispatch' ? 'Dispatch' : ''}
             </span>
           </div>
         )}
@@ -648,6 +650,26 @@ const App = () => {
         )}
         {activeView === 'sites' && <SitesHub />}
         {activeView === 'plugins' && <ExtensionsHub embedded />}
+        {activeView === 'scheduled' && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 select-none animate-in fade-in duration-300">
+            <div className="w-14 h-14 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center mb-4 shadow-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">Scheduled Tasks</h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-md">Schedule recurring AI tasks, cron-style automations, and timed workflows. Tasks you schedule will appear here.</p>
+            <button type="button" onClick={() => setActiveView('chat')} className="mt-6 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition cursor-pointer">Back to Chat</button>
+          </div>
+        )}
+        {activeView === 'dispatch' && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 select-none animate-in fade-in duration-300">
+            <div className="w-14 h-14 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center mb-4 shadow-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+            </div>
+            <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">Dispatch <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 ml-1">Beta</span></h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-md">Send tasks to your connected mobile device for autonomous execution. Pair your phone first to get started.</p>
+            <button type="button" onClick={() => setIsPairingOpen(true)} className="mt-6 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition cursor-pointer">Pair a Device</button>
+          </div>
+        )}
       </main>
 
       {/* Right side Task Manager / Brand panel — desktop only */}
