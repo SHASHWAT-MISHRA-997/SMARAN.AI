@@ -109,6 +109,10 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
       const session = await onEnsureSession?.();
       const promptText = `[Scheduled Task Triggered: ${task.name}]\nModel: ${task.model}\n\n${task.prompt}`;
       localStorage.setItem('sm_pending_prompt', promptText);
+      // Same reason as Design Studio: ChatArea is unmounted while this
+      // view is open, so the event below has no listener. Running a task
+      // should run it, not leave it typed out for you.
+      localStorage.setItem('sm_pending_autosend', '1');
       window.dispatchEvent(new CustomEvent('smaran:send-prompt', { detail: { prompt: promptText, sessionId: session?.id } }));
       
       // Update last run time

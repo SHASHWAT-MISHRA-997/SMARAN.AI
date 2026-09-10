@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { Sparkles, Plus, Code2, ArrowUp, FileText, Smartphone, Presentation, LayoutGrid, Film, Monitor, User, Box, Search, Mail, Palette, BookOpen, ChevronDown, X, Check, RefreshCw, ArrowRight } from 'lucide-react';
 
 export const DESIGN_SYSTEMS = [
@@ -156,7 +157,9 @@ const AVAILABLE_MODELS = [
   { id: 'Director AI', name: 'Director AI', desc: 'Autonomous multi-agent layout planner' }
 ];
 
-export default function SmaranDesignView({ onEnsureSession, onNavigate, onClose, onOpenTerminal }) {
+// `onNavigate` and `onClose` are still passed by App but no longer read:
+// generating keeps you on this screen instead of sending you to chat.
+export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
   const [prompt, setPrompt] = useState('');
   const [selectedSystem, setSelectedSystem] = useState(DESIGN_SYSTEMS[0]);
   const [isSystemOpen, setIsSystemOpen] = useState(false);
@@ -167,8 +170,15 @@ export default function SmaranDesignView({ onEnsureSession, onNavigate, onClose,
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [showTutorial, setShowTutorial] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [activeCategory, setActiveCategory] = useState('All');
+  /* The result is shown here rather than in the chat.
+     Generating used to build a prompt, hand it to ChatArea and navigate away,
+     so the one screen built for designing was the one screen that never showed
+     a design. Everything below keeps it in place. */
+  const [result, setResult] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState('');
+  const abortRef = useRef(null);
 
   const systemDropdownRef = useRef(null);
   const modelDropdownRef = useRef(null);
@@ -192,39 +202,84 @@ export default function SmaranDesignView({ onEnsureSession, onNavigate, onClose,
     setPrompt(tpl.prompt);
   };
 
+  /* Pull the first fenced block out of a reply, so a preview can be rendered
+     from what the model actually wrote rather than from the prose around it. */
+  const firstCodeBlock = (text) => {
+    const fenced = /```([a-zA-Z0-9+-]*)\n([\s\S]*?)```/.exec(text || '');
+    return fenced ? { lang: (fenced[1] || '').toLowerCase(), code: fenced[2] } : null;
+  };
+
   const handleCreate = async () => {
-    if (!prompt.trim() || submitting) return;
-    setSubmitting(true);
+    if (!prompt.trim() || generating) return;
+    setGenerating(true);
+    setGenError('');
+    setResult('');
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const session = await onEnsureSession?.();
-      const finalPrompt = `[SMARAN Design: Model=${selectedModel}, System=${selectedSystem.name}, Mode=${codeMode ? 'Code' : 'Design'}]\n\n${prompt.trim()}`;
-      
-      // Save pending prompt to localStorage so ChatArea receives it
-      localStorage.setItem('sm_pending_prompt', finalPrompt);
+      const finalPrompt =
+        `[SMARAN Design: System=${selectedSystem.name}, Mode=${codeMode ? 'Code' : 'Visual'}]
 
-      // Dispatch event
-      window.dispatchEvent(new CustomEvent('smaran:send-prompt', {
-        detail: {
+`
+        + `${prompt.trim()}
+
+`
+        + 'Return one complete, self-contained HTML document in a single ```html fenced block. '
+        + 'Inline all CSS and JavaScript so it renders on its own with no build step and no external files. '
+        + 'Do not split it across several blocks.';
+
+      const res = await fetchWithAuth(`${API_BASE}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: session?.id,
           prompt: finalPrompt,
-          sessionId: session?.id,
-          model: selectedModel,
-          system: selectedSystem.name
-        }
-      }));
-
-      // Switch back to chat with the design task loaded
-      if (onNavigate) {
-        onNavigate('chat');
-      } else if (onClose) {
-        onClose();
+          model: selectedModel === 'Auto' ? 'auto' : selectedModel,
+          collections: [],
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        setGenError(`The engine returned ${res.status}. Check the model in Settings and try again.`);
+        return;
       }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let text = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.error) { setGenError(String(parsed.error)); continue; }
+            if (parsed.token) { text += parsed.token; setResult(text); }
+            if (parsed.translated_response) { text = parsed.translated_response; setResult(text); }
+          } catch {
+            /* A partial line arrives whenever a chunk splits mid-JSON; the
+               remainder is already held in `buffer` for the next pass. */
+          }
+        }
+      }
+      if (!text.trim()) setGenError('The engine returned nothing. Try again, or pick a different model.');
     } catch (err) {
-      console.error('Failed to create design task:', err);
+      if (err?.name !== 'AbortError') {
+        setGenError(err?.message || 'Could not reach the local engine.');
+      }
     } finally {
-      setSubmitting(false);
+      setGenerating(false);
+      abortRef.current = null;
     }
   };
 
+  const stopGenerating = () => abortRef.current?.abort();
   const categories = ['All', 'Web', 'Mobile', 'Presentation', 'Docs', 'Design', 'Visuals'];
 
   const filteredTemplates = DESIGN_TEMPLATES.filter((t) => {
@@ -420,15 +475,80 @@ export default function SmaranDesignView({ onEnsureSession, onNavigate, onClose,
               <button
                 type="button"
                 onClick={handleCreate}
-                disabled={!prompt.trim() || submitting}
+                disabled={!prompt.trim() || generating}
                 className="w-8 h-8 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 disabled:opacity-40 text-white flex items-center justify-center transition cursor-pointer shadow-md shadow-orange-600/30"
                 title="Generate Design (Ctrl+Enter)"
               >
-                {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
+                {generating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
               </button>
             </div>
           </div>
         </div>
+
+        {/* ================= RESULT, SHOWN HERE =================
+            The design is rendered on this screen. It used to be handed to the
+            chat and this view navigated away, so the one screen built for
+            designing never showed a design. */}
+        {(generating || result || genError) && (
+          <div className="mb-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/70">
+              <span className="text-[11px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
+                {generating ? 'Generating…' : 'Result'}
+              </span>
+              <div className="flex items-center gap-2">
+                {generating && (
+                  <button
+                    type="button"
+                    onClick={stopGenerating}
+                    className="px-2.5 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 text-[11px] font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                  >
+                    Stop
+                  </button>
+                )}
+                {!!result && !generating && (
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard.writeText(firstCodeBlock(result)?.code || result)}
+                    className="px-2.5 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 text-[11px] font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                  >
+                    Copy
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setResult(''); setGenError(''); }}
+                  aria-label="Close result"
+                  className="p-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {genError && (
+              <p role="alert" className="px-4 py-3 text-[12px] leading-relaxed text-amber-700 dark:text-amber-300">
+                {genError}
+              </p>
+            )}
+
+            {/* Visual mode previews the HTML the model wrote; Code mode, and
+                anything that is not a self-contained document, shows the text. */}
+            {!genError && result && !codeMode && firstCodeBlock(result)?.code ? (
+              <iframe
+                title="Design preview"
+                sandbox="allow-scripts"
+                srcDoc={firstCodeBlock(result).code}
+                className="w-full h-[520px] bg-white"
+              />
+            ) : (
+              !genError && (
+                <pre className="max-h-[520px] overflow-auto px-4 py-3 text-[11px] leading-relaxed font-mono whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+                  {result || (generating ? 'Waiting for the first tokens…' : '')}
+                </pre>
+              )
+            )}
+          </div>
+        )}
 
         {/* ================= DYNAMIC TAB CONTENT ================= */}
 

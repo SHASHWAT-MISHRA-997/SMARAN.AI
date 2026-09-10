@@ -1229,6 +1229,7 @@ const ChatArea = ({
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [askForApproval, setAskForApproval] = useState(true);
+  const handleSendRef = useRef(null);
   useEffect(() => {
     const applySkill = () => {
       const instructions = localStorage.getItem('sm_pending_skill_prompt');
@@ -1240,15 +1241,48 @@ const ChatArea = ({
       if (pendingPrompt) {
         localStorage.removeItem('sm_pending_prompt');
         setInput(pendingPrompt);
+        /* Design Studio and Scheduled tasks hand their prompt over and expect
+           it to run. They cannot do it with an event: this component is only
+           mounted for `activeView === 'chat'`, so while their own screen is
+           open there is no listener at all and the event goes nowhere. The
+           prompt survived in localStorage, which is why the composer ended up
+           filled - and stopped there, on a screen still showing the empty
+           welcome state, with nothing saying you had to press send. "Generate
+           Design" looked like a button that did nothing.
+
+           The flag says the caller meant send, not merely prefill, so using a
+           skill still just fills the box the way it always has. */
+        if (localStorage.getItem('sm_pending_autosend') === '1') {
+          localStorage.removeItem('sm_pending_autosend');
+          window.setTimeout(() => {
+            handleSendRef.current?.(null, pendingPrompt);
+          }, 320);
+        }
       }
     };
     applySkill();
 
+    /* The event is called send-prompt and used to do everything except send.
+       Design Studio's "Generate Design" built a prompt, dispatched this, and
+       navigated to chat - where the text sat in the composer, on a screen that
+       still showed the empty welcome state, with nothing saying you had to
+       press send yourself. It read as a button that did nothing. Scheduled
+       tasks dispatch the same event and had the same problem.
+
+       Filling the composer first is deliberate: if the send cannot go through,
+       the prompt is still there to send by hand rather than lost.
+
+       `handleSendRef` because this listener is registered once, with an empty
+       dependency list, so calling `handleSend` directly would pin the version
+       from the first render and its state along with it. The timeout lets the
+       session the caller just created land in state before we send into it. */
     const handlePromptEvent = (e) => {
       const p = e.detail?.prompt;
-      if (p) {
-        setInput(p);
-      }
+      if (!p) return;
+      setInput(p);
+      window.setTimeout(() => {
+        handleSendRef.current?.(null, p);
+      }, 260);
     };
 
     window.addEventListener('smaran:use-skill', applySkill);
@@ -3571,6 +3605,10 @@ const ChatArea = ({
       setTimeout(scrollToBottom, 60);
     }
   };
+
+  // Repointed after every render so the send-prompt listener above,
+  // which is registered once, always calls the current implementation.
+  useEffect(() => { handleSendRef.current = handleSend; });
 
   const handleSend = async (e, directPrompt = null, isVoicePrompt = false) => {
     const voiceSession = voiceSessionRef.current;
