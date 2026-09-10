@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, Download, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Box, Shield, Terminal } from 'lucide-react';
+import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Shield, Terminal } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
 import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening } from '../utils/deviceControl';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
 import { voicePersonaRule } from '../utils/voicePersona';
+import { languageRule, CODE_OUTPUT_RULE } from '../utils/replyRules';
 import ShareConversation from './ShareConversation';
 import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 import { useBackClose } from '../utils/backStack';
@@ -28,7 +29,6 @@ import { speakableText } from '../utils/speakableText';
    HTML page. Module scope, because the message rows are their own components
    and need to know too. */
 const noBackend = () => isNativeApp() && !loadLink()?.url;
-import { downloadProjectZip } from '../utils/zip';
 import ArtifactRenderer from './ArtifactRenderer';
 import ModelCompareModal from './ModelCompareModal';
 import HackerVoiceAssistant from './HackerVoiceAssistant';
@@ -475,24 +475,6 @@ const CodeBlock = ({ code, language }) => {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  const handleDownloadZip = () => {
-    if (isHtmlOrWeb) {
-      downloadProjectZip("smaran_web_project", [
-        { name: "index.html", content: code },
-        { name: "README.md", content: "# SMARAN.AI Generated Web Application\n\nDouble click `index.html` to run this web application in any browser!" }
-      ]);
-    } else {
-      const ext = langLower === 'python' || langLower === 'py' || isMayaOr3D ? 'py' : langLower === 'javascript' || langLower === 'js' ? 'js' : langLower === 'json' ? 'json' : langLower === 'css' ? 'css' : (langLower || 'txt');
-      downloadProjectZip(`smaran_${langLower || 'app'}_project`, [
-        { name: `app.${ext}`, content: code },
-        { name: "README.md", content: `# SMARAN.AI Generated Project\n\nRun with your environment:\n\n\`\`\`bash\n# Example execution\n${ext === 'py' ? 'python app.py' : ext === 'js' ? 'node app.js' : ''}\n\`\`\`` }
-      ]);
-    }
-  };
-
-
-
   const handleOpenNewTab = () => {
     const blob = new Blob([code], { type: 'text/html;charset=utf-8' });
     const blobUrl = URL.createObjectURL(blob);
@@ -504,12 +486,15 @@ const CodeBlock = ({ code, language }) => {
       {/* Code / Preview / 3D Simulation Header Toolbar */}
       <div className="flex flex-wrap items-center justify-between px-3.5 py-2 border-b border-zinc-850 bg-zinc-900/90 text-[11px] font-mono text-zinc-300 gap-2">
         <div className="flex items-center gap-2">
-          <span className="font-extrabold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
-            {isMayaOr3D ? <Box className="w-3.5 h-3.5 text-cyan-400 animate-pulse" /> : <Code2 className="w-3.5 h-3.5 text-indigo-400" />}
-            {isMayaOr3D ? 'MAYA 3D PYTHON' : (language || (isHtmlOrWeb ? 'HTML5 APP' : 'CODE'))}
-          </span>
+          {/* The language badge and the mode switcher are gone for ordinary code
+              blocks. On a Python answer the header carried "</> PYTHON" and a
+              "Source Code" tab that only ever selected the view already on
+              screen - chrome around a listing whose one useful action is Copy.
 
-          {/* Mode Switchers */}
+              The switcher survives where there is genuinely another view to
+              reach: an HTML block that can render, or a Maya/3D script. Without
+              it, opening Live Preview would leave no way back to the source. */}
+          {(isHtmlOrWeb || isMayaOr3D) && (
           <div className="flex items-center bg-zinc-800/90 rounded-lg p-0.5 border border-zinc-700/80">
             {isMayaOr3D && (
               <button
@@ -545,6 +530,7 @@ const CodeBlock = ({ code, language }) => {
               <span>Source Code</span>
             </button>
           </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -570,16 +556,6 @@ const CodeBlock = ({ code, language }) => {
               <span className="hidden sm:inline">New Tab</span>
             </button>
           )}
-
-          {/* Download Project ZIP */}
-          <button
-            onClick={handleDownloadZip}
-            title="Download complete project files as ZIP"
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 hover:text-emerald-300 border border-emerald-500/40 text-[10px] font-bold transition-all cursor-pointer shadow-xs hover:scale-105"
-          >
-            <Download className="w-3 h-3" />
-            <span>📦 Download ZIP</span>
-          </button>
 
           {/* Copy Code */}
           <button
@@ -3462,6 +3438,15 @@ const ChatArea = ({
           + "person's own device. Answer directly and plainly. If you do not "
           + 'know something, say so rather than inventing it.'
           + '\n' + voicePersonaRule(assistantGender())
+          /* This path talks to the provider straight from the app - the phone
+             with no desktop paired never reaches /api/chat, so none of the
+             backend's rules apply to it. They have to be repeated here or the
+             phone is running with no language rule and no code rule at all,
+             which is exactly what it was doing: an English question about a
+             Python function came back with Hindi prose and a Hindi comment
+             inside the code. */
+          + '\n\n' + languageRule(selectedLanguage)
+          + '\n\n' + CODE_OUTPUT_RULE
           + (facts.length
             ? ['', '', 'Things this person has asked you to remember:', ...facts].join('\n')
             : ''),

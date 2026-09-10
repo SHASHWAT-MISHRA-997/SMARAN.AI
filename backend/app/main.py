@@ -4070,6 +4070,32 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         "Keep conversational voice responses clear, natural, intelligent, and concise like an advanced AI companion (J.A.R.V.I.S. / Gemini Live)."
     )
 
+    # Code is not prose and must not be treated as prose.
+    #
+    # The language rule above applies to the explanation. Applied to the code
+    # as well, it produces a listing with translated keywords and renamed
+    # identifiers, which is not a program - it looks right and will not run.
+    # The translator is kept off code blocks in translator.py; this keeps the
+    # model from writing them in another language in the first place.
+    #
+    # "Complete" is spelled out because the common failure is a snippet with
+    # the imports missing or a body elided to "...", which is unusable to
+    # somebody who copies it into an editor and presses run.
+    system_prompt += (
+        "\n\nCODE OUTPUT RULE:\n"
+        "The language rule above governs your explanation, never the code. "
+        "Inside a code block, always write identifiers, keywords, comments and "
+        "string literals in English, whatever language you are answering in. "
+        "Never translate code.\n"
+        "Write code that runs as pasted, in any editor or IDE: include every "
+        "import the snippet needs, keep it syntactically complete, and never "
+        "elide a body with '...' or a placeholder comment. If something must "
+        "be supplied by the reader - a key, a path, a URL - make it an obvious "
+        "named constant at the top rather than hiding it mid-file. "
+        "Tag every fenced block with its language, and say outside the block "
+        "which runtime version and which third-party packages it needs."
+    )
+
     # Spoken turns are heard, not read: keep them short, warm, and moving the
     # conversation forward the way a live assistant does.
     if getattr(chat_req, "voice_mode", False):
@@ -4202,6 +4228,22 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             f"\n\nLANGUAGE INSTRUCTION: Respond entirely in {language_name} using its native script. "
             "Keep code, commands, URLs, product names, and quoted source text unchanged. "
             "This is not a translation request: answer the question itself, in that language."
+        )
+    else:
+        # English used to be the one case that said nothing at all. Every other
+        # language got a named instruction; English got silence and the general
+        # "match the user" line, and the model drifted - an English question
+        # about a Python function came back with Hindi prose and a Hindi
+        # comment inside the code. Nothing was set to Hindi; English simply was
+        # not anchored, and on an India-context prompt the model filled the gap.
+        #
+        # English is the default and now says so. A different language still
+        # wins the moment the user picks one or writes in one, which is what
+        # sets `reply_language` above.
+        user_content += (
+            "\n\nLANGUAGE INSTRUCTION: Respond entirely in English. "
+            "Do not switch to Hindi, Hinglish or any other language, and do not "
+            "mix languages, unless the user writes to you in that language."
         )
     
     # Use processing_prompt for all internal logic

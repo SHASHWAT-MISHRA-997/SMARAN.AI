@@ -1,6 +1,7 @@
 from deep_translator import GoogleTranslator
 from typing import Optional
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +107,48 @@ def detect_language(text: str) -> Optional[str]:
     return "en" if latin_count else None
 
 
+# A fenced block, or a span of inline code. Kept in one pattern so the split
+# below alternates prose, code, prose, code - the fence is matched first so a
+# backtick *inside* a fenced block cannot start an inline span.
+_CODE_SPAN = re.compile(r"(```.*?```|~~~.*?~~~|`[^`\n]+`)", re.DOTALL)
+
+
+def _translate_segment(translator, segment: str) -> str:
+    """Translate one prose run, leaving it alone if the service returns nothing."""
+    if not segment.strip():
+        return segment
+    translated = translator.translate(segment)
+    return translated if translated else segment
+
+
 def translate_text(text: str, target_lang: str, source_lang: Optional[str] = None) -> str:
+    """Translate prose while leaving code exactly as it was written.
+
+    The whole reply used to go to the translator in one piece, code and all.
+    A reply is translated whenever the language picker disagrees with the
+    language the model answered in, so asking for a Python function with the
+    picker on Hindi sent the source through Google Translate: identifiers
+    renamed, keywords translated, string contents rewritten. What came back
+    was no longer a program, and pasting it into an editor could not work.
+
+    Code is split out and put back verbatim. Only the prose between the fences
+    is translated, which is the part a reader actually wants in their own
+    language. Indentation, blank lines and the fences themselves survive
+    because the segments are rejoined exactly as they were cut.
+    """
     if not text or not target_lang or target_lang == "auto":
         return text
     try:
         translator = GoogleTranslator(source=source_lang or "auto", target=target_lang)
-        return translator.translate(text)
+        parts = _CODE_SPAN.split(text)
+        if len(parts) == 1:
+            return _translate_segment(translator, text)
+        # split() with one capturing group yields prose at even indices and the
+        # code spans it captured at odd ones.
+        return "".join(
+            part if index % 2 else _translate_segment(translator, part)
+            for index, part in enumerate(parts)
+        )
     except Exception as e:
         logger.error(f"Translation failed: {e}")
         return text
