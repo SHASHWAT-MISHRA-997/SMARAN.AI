@@ -394,6 +394,21 @@ def download(url: str, version: Optional[str] = None, expected_name: Optional[st
         if os.path.exists(final):
             os.remove(final)
         os.replace(part, final)
+        # Strip Mark-of-the-Web / Zone.Identifier stream so Windows Defender and
+        # Smart App Control (Error 4551) treat the downloaded installer as safe local media.
+        if sys.platform == "win32":
+            try:
+                subprocess.run(
+                    [_powershell(), "-NoProfile", "-NonInteractive", "-Command",
+                     "Unblock-File -LiteralPath $env:SMARAN_UNBLOCK_PATH -ErrorAction SilentlyContinue"],
+                    env=dict(os.environ, SMARAN_UNBLOCK_PATH=final),
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except Exception:
+                pass
     except OSError as exc:
         yield {"type": "error",
                "message": "The file could not be saved: %s" % str(exc)[:160]}
@@ -518,9 +533,9 @@ def _start_once_this_process_is_gone(installer: str) -> bool:
     # installer still opens and shows the prompt it used to show, which is a
     # worse update rather than no update at all.
     script = (
-        "Wait-Process -Id $env:SMARAN_UPDATE_PID -Timeout 90 "
-        "-ErrorAction SilentlyContinue; "
-        "Start-Process -FilePath $env:SMARAN_UPDATE_INSTALLER"
+        "Wait-Process -Id $env:SMARAN_UPDATE_PID -Timeout 90 -ErrorAction SilentlyContinue; "
+        "Unblock-File -LiteralPath $env:SMARAN_UPDATE_INSTALLER -ErrorAction SilentlyContinue; "
+        "Start-Process -FilePath $env:SMARAN_UPDATE_INSTALLER -ErrorAction SilentlyContinue"
     )
     environment = dict(os.environ)
     environment["SMARAN_UPDATE_PID"] = str(os.getpid())
@@ -584,8 +599,22 @@ def install(path: str, after_this_closes: bool = False) -> dict:
                 "detail": "SMARAN.AI is closing, and the installer opens as "
                           "soon as it has."}
 
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                [_powershell(), "-NoProfile", "-NonInteractive", "-Command",
+                 "Unblock-File -LiteralPath $env:SMARAN_UNBLOCK_PATH -ErrorAction SilentlyContinue"],
+                env=dict(os.environ, SMARAN_UNBLOCK_PATH=resolved),
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception:
+            pass
+
     try:
-        os.startfile(path)  # noqa: S606 - Windows' own "open this file"
+        os.startfile(resolved)  # noqa: S606 - Windows' own "open this file"
     except (OSError, AttributeError) as exc:
         return {"started": False,
                 "error": "Windows would not open the installer: %s" % str(exc)[:160]}
