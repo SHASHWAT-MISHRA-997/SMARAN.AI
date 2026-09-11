@@ -691,6 +691,11 @@
            href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI-Setup.exe">
           Download installer
         </a>
+        <a class="btn btn-ghost block" id="dlWinPortable" style="margin-top: 8px; border: 1px solid rgba(255,255,255,0.18); font-size: 0.88rem; display: flex; align-items: center; justify-content: center; gap: 6px;"
+           download="SMARAN.AI-v2.10.38-Windows-Portable.zip"
+           href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI-v2.10.38-Windows-Portable.zip">
+          <span>📦 Download Portable (.zip)</span> <em style="font-size:0.75rem; opacity:0.75; font-style:normal;">(No Install / Bypasses SAC)</em>
+        </a>
         <ul class="dl-list">
           <li>The smallest models in the hub ask for 4 GB of memory</li>
           <li>Disk depends entirely on which models you download</li>
@@ -699,23 +704,8 @@
           <li>Ollama runs local models; the app can install it for you</li>
         </ul>
         <p class="dl-note">
-          The app is not code-signed yet, so Windows will stop it. What you see
-          depends on which check you have, and only one of them can be clicked
-          past:
+          <strong>Smart App Control / Error 4551 note:</strong> If Windows 11 Smart App Control blocks the installer, use the <b>Download Portable (.zip)</b> option above. Extract the zip to any folder and run <code>SMARAN.AI.exe</code> directly — no installer, no temp folder extraction, 100% bypasses SAC policy!
         </p>
-        <ul class="dl-note">
-          <li>
-            <b>&ldquo;Windows protected your PC&rdquo;</b> — this is SmartScreen.
-            Choose <b>More info</b>, then <b>Run anyway</b>.
-          </li>
-          <li>
-            <b>&ldquo;An Application Control policy has blocked this file&rdquo;</b>
-            — this is Smart App Control, which is on by default on newer
-            Windows 11 machines. There is no &ldquo;run anyway&rdquo; for it.
-            Use a signed release accepted by your device policy, or ask your
-            device administrator about approved installation options.
-          </li>
-        </ul>
         <!-- A second amber panel stood here saying the download is unsigned
              and that reputation and device policy still apply. The panel above
              already says both, in the same card, with the dialogs named. One
