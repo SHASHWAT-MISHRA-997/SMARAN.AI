@@ -854,9 +854,30 @@
         if (!el) return;
         // A missing figure keeps the dash. Only a real number replaces it.
         if (typeof value !== 'number') return;
-        var dot = el.querySelector('.live-dot');
-        el.textContent = value.toLocaleString('en-IN');
-        if (dot) el.insertBefore(dot, el.firstChild);
+        var formatted = value.toLocaleString('en-IN');
+        if (el.dataset.current === formatted) return;
+        el.dataset.current = formatted;
+
+        var hasDot = id === 'liveViewing';
+        el.classList.add('typing');
+        var chars = formatted.split('');
+        var idx = 0;
+
+        el.innerHTML = hasDot ? '<span class="live-dot"></span>' : '';
+        var textNode = document.createTextNode('');
+        el.appendChild(textNode);
+
+        var typer = setInterval(function () {
+          if (idx < chars.length) {
+            textNode.textContent += chars[idx];
+            idx++;
+          } else {
+            clearInterval(typer);
+            setTimeout(function () {
+              el.classList.remove('typing');
+            }, 800);
+          }
+        }, 120);
       };
 
       var refresh = function () {
@@ -1068,9 +1089,23 @@
       return response.json();
     })
     .then(function (release) {
+      var ver = release.tag_name || release.name;
+      if (ver) {
+        var cleanVer = String(ver).trim();
+        if (!cleanVer.startsWith('v') && /^\d/.test(cleanVer)) cleanVer = 'v' + cleanVer;
+        var bannerVer = document.getElementById('liveReleaseVersion');
+        if (bannerVer) bannerVer.textContent = cleanVer;
+        var tags = document.querySelectorAll('.dl-ver-tag');
+        Array.prototype.forEach.call(tags, function (tag) {
+          tag.textContent = cleanVer;
+        });
+      }
+
       var sizes = {};
       (release.assets || []).forEach(function (asset) {
         sizes[asset.name] = asset.size;
+        if (asset.name === 'SMARAN-AI.apk') sizes['SMARAN.AI.apk'] = asset.size;
+        if (asset.name === 'SMARAN.AI.apk') sizes['SMARAN-AI.apk'] = asset.size;
       });
       Array.prototype.forEach.call(marked, function (node) {
         var bytes = sizes[node.getAttribute('data-size')];

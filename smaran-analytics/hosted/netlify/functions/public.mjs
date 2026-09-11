@@ -126,10 +126,12 @@ const githubDownloads = async () => {
     if (!res.ok) return last ? last.total : null;
 
     const releases = await res.json();
-    let total = 0;
-    for (const rel of releases) {
-      for (const asset of rel.assets || []) total += asset.download_count;
-    }
+    let rawTotal = 0;
+    const latest = releases[0];
+    for (const asset of (latest?.assets || [])) rawTotal += asset.download_count;
+    // Baseline internal verification downloads (6) so client downloads start fresh from 0
+    const INTERNAL_TEST_BASELINE = 6;
+    const total = Math.max(0, rawTotal - INTERNAL_TEST_BASELINE);
     try {
       await cache.setJSON('github-downloads', { total, at: Date.now() });
     } catch { /* serving the number matters more than remembering it */ }

@@ -31,7 +31,7 @@ from typing import Optional
 
 logger = logging.getLogger("updates")
 
-APP_VERSION = os.getenv("SMARAN_APP_VERSION", "2.10.37")
+APP_VERSION = os.getenv("SMARAN_APP_VERSION", "2.10.38")
 
 # The repository that holds the released builds. Separate from the source
 # repository - which is public, MIT, and carries no binaries - because a

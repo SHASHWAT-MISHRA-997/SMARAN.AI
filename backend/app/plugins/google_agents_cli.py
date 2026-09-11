@@ -50,32 +50,73 @@ class GoogleAgentsCLIPlugin(ToolPlugin):
         """
         import shutil
         from pathlib import Path
+        import sys
+        import site
 
-        found = shutil.which("agents-cli")
-        if found:
-            yield found
+        # 1. System PATH
+        for binary in ("agents-cli", "agents-cli.exe", "agents-cli.cmd"):
+            found = shutil.which(binary)
+            if found:
+                yield found
 
+        # 2. Python environment Scripts/bin
+        py_scripts = [
+            Path(sys.prefix) / "Scripts" / "agents-cli.exe",
+            Path(sys.prefix) / "bin" / "agents-cli",
+            Path(sys.base_prefix) / "Scripts" / "agents-cli.exe",
+            Path(sys.base_prefix) / "bin" / "agents-cli",
+            Path(sys.executable).parent / "Scripts" / "agents-cli.exe",
+            Path(sys.executable).parent / "agents-cli.exe",
+        ]
+        try:
+            if getattr(site, "USER_BASE", None):
+                py_scripts.append(Path(site.USER_BASE) / "Scripts" / "agents-cli.exe")
+                py_scripts.append(Path(site.USER_BASE) / "bin" / "agents-cli")
+        except Exception:
+            pass
+
+        for p in py_scripts:
+            if p.is_file():
+                yield str(p)
+
+        # 3. Known user locations (.local, uv, pipx, cargo)
         home = Path.home()
         for path in (
             home / ".local" / "bin" / "agents-cli.exe",
             home / ".local" / "bin" / "agents-cli",
             home / ".local" / "bin" / "agents-cli.cmd",
+            home / ".cargo" / "bin" / "agents-cli.exe",
         ):
             if path.is_file():
                 yield str(path)
 
+        # 4. Windows Python installation directories
+        for base in (home / "AppData" / "Local" / "Programs" / "Python", home / "AppData" / "Roaming" / "Python"):
+            if base.is_dir():
+                try:
+                    for found_exe in base.glob("**/Scripts/agents-cli.exe"):
+                        if found_exe.is_file():
+                            yield str(found_exe)
+                except Exception:
+                    pass
+
     def _check_installation(self):
         """Whether agents-cli is here, asked of the machine."""
+        seen = set()
         for candidate in self._candidates():
+            cand_str = str(candidate)
+            if cand_str in seen:
+                continue
+            seen.add(cand_str)
             try:
                 # 5 seconds was tight: a uv-installed tool resolves its
                 # environment on first run and can take longer than that.
-                result = subprocess.run([candidate, "--version"],
+                result = subprocess.run([cand_str, "--version"],
                                         capture_output=True, text=True, timeout=30)
                 if result.returncode == 0:
-                    self.agents_cli_path = candidate
+                    self.agents_cli_path = cand_str
                     logger.info("Google Agents CLI found at %s (%s)",
-                                candidate, (result.stdout or "").strip()[:40])
+                                cand_str, (result.stdout or "").strip()[:40])
                     return
             except Exception:
                 continue
@@ -88,6 +129,9 @@ class GoogleAgentsCLIPlugin(ToolPlugin):
         which left the interface showing a plugin that was running and could
         do nothing.
         """
+        if not self.agents_cli_path:
+            self._check_installation()
+
         if self.agents_cli_path:
             logger.info("Google Agents CLI found at %s", self.agents_cli_path)
             return True

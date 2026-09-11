@@ -319,6 +319,38 @@ main, .nav, .foot { position: relative; z-index: 3; }
 
 .btn:active { transform: translateY(0) scale(.985); }
 
+/* Linux button — vibrant Light Blue as requested */
+.btn-linux {
+  background: linear-gradient(135deg, #0284c7, #38bdf8 45%, #7dd3fc);
+  color: #031525;
+  font-weight: 800;
+  border: 1px solid rgba(186, 230, 253, 0.5);
+  box-shadow: 0 6px 26px rgba(56, 189, 248, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.btn-linux:hover {
+  transform: translateY(-2px);
+  background: linear-gradient(135deg, #0369a1, #0ea5e9 45%, #38bdf8);
+  color: #ffffff;
+  box-shadow: 0 12px 44px rgba(56, 189, 248, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  border-color: rgba(224, 242, 254, 0.8);
+}
+
+/* Gap between stacked download buttons inside one card */
+.dl-card .btn.block + .btn.block {
+  margin-top: 12px;
+}
+
+/* Typewriter effect for live counter numbers */
+.live-stat b.typing::after {
+  content: '|';
+  display: inline-block;
+  color: #ef4444;
+  font-weight: 300;
+  margin-left: 2px;
+  animation: stat-caret 0.6s steps(2) infinite;
+}
+@keyframes stat-caret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
 /* ---------------------------------------------------------------------
    Hero
    --------------------------------------------------------------------- */
