@@ -1,0 +1,31 @@
+# SMARAN.AI
+
+> The private, offline-first AI desktop assistant running on your own machine. 
+> Free and open for Windows, Android, and Command Line.
+
+## Overview
+SMARAN.AI is an offline-capable, local-first artificial intelligence assistant. It executes local large language models (LLMs) directly on your personal computer hardware without requiring mandatory internet access, subscription fees, or account creation.
+
+## Key Capabilities
+- **Local-First Architecture**: Run 63+ open models (Llama 3, DeepSeek, Mistral, Gemma, Phi) entirely offline on your GPU/CPU via llama.cpp or Ollama.
+- **Voice & Live Conversation**: Real-time voice interaction with both fully offline local speech-to-text / text-to-speech models and low-latency cloud engines (Google Gemini Multimodal Live).
+- **Vision & Multimodal Screen Analysis**: Analyze documents, screenshots, webcam feeds, and on-screen code without uploading private data to remote servers.
+- **Computer Use & Autonomous Agents**: Integrated with Google Agents CLI and operating system automation to manage files, terminal tasks, and workspaces safely.
+- **Phone Pairing**: Synchronized Android companion app that works standalone or paired with your PC over local WiFi for shared memory and remote control.
+- **100% Privacy by Default**: Chat history, memory embeddings, personal documents, and audio recordings remain strictly on your local disk (`%LOCALAPPDATA%\SMARAN.AI`).
+
+## Installation & System Requirements
+- **Platforms Supported**:
+  - Windows 10/11 (64-bit x86_64) via `SMARAN.AI-Setup.exe`
+  - Android (APK)
+  - Linux / WSL (Headless & CLI via curl)
+- **Minimum Requirements**:
+  - RAM: 4 GB (Small models: Qwen 0.5B, Phi-3 Mini) to 16 GB+ (Llama 3 8B, DeepSeek 7B)
+  - Storage: ~1 GB for base application, 2–10 GB for model weights
+  - GPU: Optional (NVIDIA CUDA, AMD ROCm, or CPU execution supported)
+
+## Links & Official Resources
+- Website: https://smaran-ai.netlify.app/
+- Downloads: https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest
+- Latest Windows Installer: https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/download/v2.10.38/SMARAN.AI-Setup.exe
+- Source Repository: https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI

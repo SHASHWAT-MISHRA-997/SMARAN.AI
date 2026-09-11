@@ -1,2 +1,9 @@
 User-agent: *
 Allow: /
+
+# Sitemaps
+Sitemap: https://smaran-ai.netlify.app/sitemap.xml
+
+# AI Engine Guidance
+# Clean Markdown representation for LLMs
+# https://smaran-ai.netlify.app/llms.txt
