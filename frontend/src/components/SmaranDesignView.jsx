@@ -179,6 +179,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState('');
   const abortRef = useRef(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const systemDropdownRef = useRef(null);
   const modelDropdownRef = useRef(null);
@@ -210,14 +211,17 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
   };
 
   const handleCreate = async () => {
-    if (!prompt.trim() || generating) return;
+    if (!prompt.trim() || abortRef.current) return;
     setGenerating(true);
     setGenError('');
     setResult('');
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const session = await onEnsureSession?.();
+      // Stay on this screen: the result renders here, so asking for a
+      // session must not drag the view to the chat.
+      const session = await onEnsureSession?.({ switchView: false });
+      controller.signal.throwIfAborted();
       const finalPrompt =
         `[SMARAN Design: System=${selectedSystem.name}, Mode=${codeMode ? 'Code' : 'Visual'}]
 
@@ -249,33 +253,42 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let text = '';
+      let engineError = false;
+      const consumeLine = (line) => {
+        if (!line.trim()) return;
+        const parsed = JSON.parse(line);
+        if (parsed.error) {
+          engineError = true;
+          setGenError(String(parsed.error));
+        }
+        if (parsed.token) { text += parsed.token; setResult(text); }
+        if (parsed.translated_response) { text = parsed.translated_response; setResult(text); }
+      };
       for (;;) {
         const { done, value } = await reader.read();
-        if (done) break;
+        controller.signal.throwIfAborted();
+        if (done) {
+          buffer += decoder.decode();
+          consumeLine(buffer);
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
         for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const parsed = JSON.parse(line);
-            if (parsed.error) { setGenError(String(parsed.error)); continue; }
-            if (parsed.token) { text += parsed.token; setResult(text); }
-            if (parsed.translated_response) { text = parsed.translated_response; setResult(text); }
-          } catch {
-            /* A partial line arrives whenever a chunk splits mid-JSON; the
-               remainder is already held in `buffer` for the next pass. */
-          }
+          consumeLine(line);
         }
       }
-      if (!text.trim()) setGenError('The engine returned nothing. Try again, or pick a different model.');
+      if (!text.trim() && !engineError) setGenError('The engine returned nothing. Try again, or pick a different model.');
     } catch (err) {
       if (err?.name !== 'AbortError') {
         setGenError(err?.message || 'Could not reach the local engine.');
       }
     } finally {
-      setGenerating(false);
-      abortRef.current = null;
+      if (abortRef.current === controller) {
+        setGenerating(false);
+        abortRef.current = null;
+      }
     }
   };
 
@@ -490,7 +503,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
             chat and this view navigated away, so the one screen built for
             designing never showed a design. */}
         {(generating || result || genError) && (
-          <div className="mb-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden">
+          <div className="w-full mb-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden">
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/70">
               <span className="text-[11px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
                 {generating ? 'Generating…' : 'Result'}
@@ -516,7 +529,13 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                 )}
                 <button
                   type="button"
-                  onClick={() => { setResult(''); setGenError(''); }}
+                  onClick={() => {
+                    abortRef.current?.abort();
+                    abortRef.current = null;
+                    setGenerating(false);
+                    setResult('');
+                    setGenError('');
+                  }}
                   aria-label="Close result"
                   className="p-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer"
                 >
@@ -685,7 +704,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
           <div className="w-full mb-6 animate-in fade-in duration-200">
             <div className="flex items-center justify-between mb-3 px-1">
               <span className="text-[11px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-                Design Projects & Prototypes
+                Example Projects & Prototypes
               </span>
               <button
                 onClick={() => {
@@ -705,7 +724,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                   name: 'Neon Fintech Mobile App',
                   system: 'Cyberpunk Neon',
                   mode: 'Visual',
-                  time: '2 hours ago',
+                  time: 'Example template',
                   prompt: 'Mobile crypto wallet and real-time transaction graphs with neon theme.',
                 },
                 {
@@ -713,7 +732,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                   name: 'SaaS Metrics Dashboard',
                   system: 'Nordic SaaS',
                   mode: 'Code',
-                  time: 'Yesterday',
+                  time: 'Example template',
                   prompt: 'Multi-tenant analytics overview with responsive charts and dark mode.',
                 },
                 {
@@ -721,7 +740,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                   name: 'Executive Portfolio',
                   system: 'Minimal Clean',
                   mode: 'Visual',
-                  time: '3 days ago',
+                  time: 'Example template',
                   prompt: 'Architectural portfolio featuring masonry grid and typography tokens.',
                 },
               ].map((proj) => (
@@ -750,11 +769,12 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                         setPrompt(proj.prompt);
                         const sys = DESIGN_SYSTEMS.find((s) => s.name === proj.system) || DESIGN_SYSTEMS[0];
                         setSelectedSystem(sys);
-                        handleCreate();
+                        setCodeMode(proj.mode === 'Code');
+                        setActiveTab('templates');
                       }}
                       className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                     >
-                      Open in Studio <ArrowRight className="w-3 h-3" />
+                      Use example <ArrowRight className="w-3 h-3" />
                     </button>
                   </div>
                 </div>

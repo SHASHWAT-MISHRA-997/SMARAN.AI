@@ -302,7 +302,13 @@ const App = () => {
     usage.reportStartup({ platform: 'android', appVersion: APP_VERSION });
   }, []);
 
-  async function handleCreateSession() {
+  /* `switchView` exists because Design Studio needs a session without being
+     sent to the chat. It generates in place now, but asking for a session
+     dragged the whole view along: every caller got setActiveView('chat'), so
+     pressing Generate still jumped to the chat screen even though Design
+     Studio itself no longer navigates. Chat callers keep the old behaviour by
+     default. */
+  async function handleCreateSession({ switchView = true } = {}) {
     if (noBackendHere()) {
       const created = {
         id: `local-${Date.now()}`,
@@ -314,7 +320,7 @@ const App = () => {
       localChat.saveSessions(all);
       setSessions(all.filter(s => !s.section || s.section === activeSection));
       setActiveSessionId(created.id);
-      setActiveView('chat');
+      if (switchView) setActiveView('chat');
       return created;
     }
     try {
@@ -330,7 +336,7 @@ const App = () => {
         const data = await res.json();
         setSessions((prev) => [data, ...(Array.isArray(prev) ? prev : [])]);
         setActiveSessionId(data.id);
-        setActiveView('chat');
+        if (switchView) setActiveView('chat');
         return data;
       }
     } catch (err) {
