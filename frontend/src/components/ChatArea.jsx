@@ -2788,6 +2788,11 @@ const ChatArea = ({
   }, [token, selectedModel]);
 
   useEffect(() => {
+    // A send in flight owns the conversation; the id only just changed because
+    // that send created the session. Loading its (empty) history here is what
+    // erased the first message. The guard inside fetchMessages covers the
+    // request already in the air; this avoids making a pointless one at all.
+    if (streamingRef.current) return;
     if (activeSessionId) {
       fetchMessages();
     } else {
@@ -2815,6 +2820,17 @@ const ChatArea = ({
         // this came back as the app's own HTML page, and putting it into
         // state took the whole interface down before it drew anything.
         const data = await parseJsonResponse(res);
+        /* Do not overwrite a reply that is arriving right now.
+           The very first message of a fresh chat was disappearing: sending
+           with no session asks the parent for one, the new id lands as a prop,
+           and the effect below fetched that session's history. The server does
+           not store the message until the stream finishes, so the fetch
+           answered with an empty list - and resolved *after* the optimistic
+           user message and the streaming bubble had been put on screen,
+           wiping both. The composer cleared, the welcome screen stayed up, and
+           nothing else happened: a new user's first ever message, silently
+           swallowed. */
+        if (streamingRef.current) return;
         setMessages(asList(data));
         setTimeout(scrollToBottom, 50);
       }
@@ -3679,6 +3695,16 @@ const ChatArea = ({
     // send. It also invented a session id the server had never heard of.
     // Ask the parent for a real one instead, and only fall back to a local id
     // if that fails too.
+    /* Claim the conversation before anything can yield.
+       `await onEnsureSession()` below hands control back to React: the parent
+       stores the new session id, this component re-renders with it, and the
+       effect keyed on `activeSessionId` runs - all before the assignment that
+       used to sit further down. Setting the flag there left a window where a
+       history fetch could start, come back empty, and erase the message being
+       sent. `setStreaming` stays where it was; it drives the UI, and only this
+       ref is read by the guards. */
+    streamingRef.current = true;
+
     let targetSessionId = activeSessionId;
     if (!targetSessionId) {
       const created = await onEnsureSession?.();
