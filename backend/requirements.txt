@@ -58,3 +58,10 @@ pywebview>=6.2.1
 # failure being fixed in 2.9.5. Declared so that cannot happen again.
 onnxruntime>=1.28.0
 g2p-en>=2.1.0
+
+# Offline voice needs cmudict and the perceptron tagger. It is imported at
+# runtime by app/speech_resources.py and required outright by build_exe.py,
+# which refuses to package without it - but it was declared in neither file,
+# so a clean machine failed the build and a source install silently lost the
+# offline voice.
+nltk>=3.8.1
