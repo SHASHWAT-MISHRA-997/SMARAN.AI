@@ -106,7 +106,7 @@ async def hardware():
 
 
 def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
-    from .ltx_engine import VideoError, generate
+    from .ltx_engine import VideoError, generate, release
 
     def note(message: str) -> None:
         with _jobs_lock:
@@ -141,6 +141,12 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
             _jobs[job_id].update(
                 status="failed", error="Unexpected failure: %s" % exc, updated=time.time()
             )
+    finally:
+        # Hand the card back. Held on to, a finished job left 5.6 GB of a 6 GB
+        # card occupied indefinitely, and everything after it - another video,
+        # an image, a local model - was refused for want of memory the app
+        # itself was sitting on.
+        release()
 
 
 @router.post("/generate")

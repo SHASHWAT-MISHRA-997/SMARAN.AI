@@ -47,6 +47,41 @@ _pipes: dict = {}
 _pipe_lock = threading.Lock()
 
 
+def release() -> None:
+    """Drop the loaded pipelines and hand the VRAM back.
+
+    Keeping a pipeline resident makes a second generation much faster, and on
+    a large card that is the right trade. On a small one it is not: a finished
+    LTX-Video job was still holding 5.6 GB of a 6 GB card twenty minutes
+    later, because nothing ever unloaded it. The next request - another video,
+    an image, a local model - was then refused with "0.0 GB free", and the
+    message blamed the hardware. Only restarting the app cleared it.
+
+    Called when a job ends, whichever way it ends. Reloading costs about a
+    minute against a generation measured in tens of minutes, so the trade is
+    not close.
+    """
+    with _pipe_lock:
+        if not _pipes:
+            return
+        _pipes.clear()
+    try:
+        import gc
+
+        # torch is imported lazily everywhere in this module - it is a heavy
+        # optional dependency and importing it at module scope would make the
+        # whole app pay for it whether or not video is ever used.
+        import torch
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:  # noqa: BLE001
+        # Reclaiming memory must never be the thing that fails a finished job.
+        pass
+
+
 class VideoError(RuntimeError):
     """A failure worth showing the user verbatim."""
 
@@ -113,8 +148,14 @@ def load(for_image: bool = False, progress: Optional[Callable[[str], None]] = No
             if other is not None:
                 pipe = cls(**other.components)
             else:
-                pipe = cls.from_pretrained(model.hf_repo, torch_dtype=dtype)
+                try:
+                    pipe = cls.from_pretrained(model.hf_repo, dtype=dtype)
+                except TypeError:
+                    pipe = cls.from_pretrained(model.hf_repo, torch_dtype=dtype)
         except Exception as exc:
+            msg = str(exc)
+            if "unauthenticated" in msg.lower() or "401" in msg or "403" in msg or "rate limit" in msg.lower():
+                raise VideoError("Hugging Face download paused/limited: %s. Set HF_TOKEN environment variable for higher rate limits." % msg) from exc
             raise VideoError("Could not load %s: %s" % (model.hf_repo, exc)) from exc
 
         if hw.vram_free_gb >= RESIDENT_VRAM_GB:

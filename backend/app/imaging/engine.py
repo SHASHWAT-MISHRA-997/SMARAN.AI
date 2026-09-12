@@ -35,6 +35,37 @@ _pipes: dict = {}
 _lock = threading.Lock()
 
 
+def release() -> None:
+    """Drop the loaded pipelines and hand the VRAM back.
+
+    Same reasoning as the video engine, and the same bug: a finished job left
+    its pipeline resident, so the card stayed occupied and the next request -
+    another image, a video, a local model - was refused for want of memory
+    this process was itself holding. Restarting the app was the only cure.
+
+    Called when a job ends, whichever way it ends.
+    """
+    with _lock:
+        if not _pipes:
+            return
+        _pipes.clear()
+    try:
+        import gc
+
+        # torch is imported lazily throughout this module; it is a heavy
+        # optional dependency and must not be paid for by installs that never
+        # generate an image.
+        import torch
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:  # noqa: BLE001
+        # Reclaiming memory must never be what fails a finished job.
+        pass
+
+
 class ImageError(RuntimeError):
     """A failure worth showing the user in the words it happened in."""
 

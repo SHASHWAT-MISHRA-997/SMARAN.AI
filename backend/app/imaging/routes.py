@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.video.hardware import probe
 
-from .engine import ImageError, evaluate, generate
+from .engine import ImageError, evaluate, generate, release
 from .registry import MODELS, by_id
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,9 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
             _jobs[job_id].update(
                 status="failed", error="Unexpected failure: %s" % exc, updated=time.time()
             )
+    finally:
+        # Hand the card back; see engine.release().
+        release()
 
 
 @router.post("/generate")
