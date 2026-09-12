@@ -109,16 +109,38 @@ const PinLock = ({ children }) => {
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel'];
     events.forEach((name) => window.addEventListener(name, restart, { passive: true }));
 
-    // Hiding the window is a stronger signal than silence: a phone locks when
-    // it goes in a pocket rather than waiting out the timer.
-    const onHidden = () => { if (document.hidden) lockNow(); };
-    document.addEventListener('visibilitychange', onHidden);
+    /* Hiding the window is a stronger signal than silence: a phone locks when
+       it goes in a pocket rather than waiting out the timer.
+
+       On a desktop that reasoning does not hold. `visibilitychange` fires on
+       every alt-tab, every click into another window, every time the window is
+       minimised - and locking on the first of those meant coming back three
+       seconds later to the PIN pad. It fired often enough during testing to
+       interrupt the session twice.
+
+       So: the phone still locks the moment it is put away, and the desktop
+       gets a short grace period that any return cancels. Walking away still
+       locks it, because the idle timer above is running the whole time and is
+       not reset by a hidden window - nothing is being typed into one. */
+    const HIDDEN_GRACE_MS = 45_000;
+    let hiddenTimer;
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (isNativeApp()) { lockNow(); return; }
+        window.clearTimeout(hiddenTimer);
+        hiddenTimer = window.setTimeout(lockNow, HIDDEN_GRACE_MS);
+      } else {
+        window.clearTimeout(hiddenTimer);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
 
     restart();
     return () => {
       window.clearTimeout(timer);
+      window.clearTimeout(hiddenTimer);
       events.forEach((name) => window.removeEventListener(name, restart));
-      document.removeEventListener('visibilitychange', onHidden);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [state, lockEnabled, autoLockMinutes]);
 
