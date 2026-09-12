@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { isNativeApp } from '../utils/hostLink';
 
 export default function VoicePreferences() {
   const [microphones, setMicrophones] = useState([]);
@@ -58,22 +59,62 @@ export default function VoicePreferences() {
     localStorage.setItem('sm_continuous_dictation', String(val));
   };
 
+  /* Named once because both the warning under the dropdown and the
+     Test Voice guard say it. */
+  const noVoicesHelp = isNativeApp()
+    ? 'No speech voices are installed. Open Android Settings → System → '
+      + 'Languages & input → Text-to-speech output, pick an engine such as '
+      + 'Google Speech Services, and install the voice data for your language.'
+    : 'No speech voices are installed on this system. Add a text-to-speech '
+      + 'voice in your operating system settings, then reopen this panel.';
+
   const testVoicePlayback = () => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       setTestNotice('Speech synthesis is not supported on this browser.');
       return;
     }
+    /* With no voices installed, speak() accepts the utterance and does
+       nothing: no sound, and neither onend nor onerror ever fires. The notice
+       below used to sit on "Playing test voice sample…" for ever, which reads
+       as a button that half worked. Observed on a phone that had Google TTS
+       installed but no default engine selected - `tts_default_synth` was unset,
+       so getVoices() returned an empty list. */
+    if (!voices.length) {
+      setTestNotice(noVoicesHelp);
+      return;
+    }
     window.speechSynthesis.cancel();
-    const sampleText = personaGender === 'female'
-      ? 'Namaste! Main SMARAN hoon, aapki AI saathi. Main aapki kya madad kar sakti hoon?'
-      : 'Namaste! Main SMARAN Energy Core hoon. Main aapke system aur desktop ko control kar sakta hoon.';
+    // English unless a different language was chosen. The sample used to be
+    // Hinglish for everybody, including people who had never picked it.
+    const speakingHindi = /^(hi|mr|ne|sa)$/.test(
+      (localStorage.getItem('sm_response_language') || 'en').toLowerCase(),
+    );
+    const sampleText = speakingHindi
+      ? (personaGender === 'female'
+        ? 'Namaste! Main SMARAN hoon, aapki AI saathi. Main aapki kya madad kar sakti hoon?'
+        : 'Namaste! Main SMARAN Energy Core hoon. Main aapke system aur desktop ko control kar sakta hoon.')
+      : (personaGender === 'female'
+        ? 'Hello, I am SMARAN, your AI companion. How can I help you today?'
+        : 'Hello, I am the SMARAN Energy Core. I can control your system and desktop.');
     const utterance = new SpeechSynthesisUtterance(sampleText);
     const chosen = voices.find(v => v.name === selectedVoice);
     if (chosen) utterance.voice = chosen;
     utterance.rate = 1.0;
     utterance.pitch = personaGender === 'female' ? 1.05 : 0.95;
-    utterance.onend = () => setTestNotice('Playback finished.');
-    utterance.onerror = () => setTestNotice('Playback error.');
+    // Nothing guarantees a callback, so the notice is not left hanging on one.
+    let settled = false;
+    const finish = (message) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(watchdog);
+      setTestNotice(message);
+    };
+    const watchdog = window.setTimeout(
+      () => finish('No sound came back from the speech engine. Check the device volume and the TTS engine in system settings.'),
+      8000,
+    );
+    utterance.onend = () => finish('Playback finished.');
+    utterance.onerror = () => finish('Playback error.');
     setTestNotice('Playing test voice sample…');
     window.speechSynthesis.speak(utterance);
   };
@@ -147,24 +188,36 @@ export default function VoicePreferences() {
         <div className="flex gap-2">
           <select
             id="sm-tts-select"
-            className="flex-1 rounded-xl border border-line bg-sunken p-2.5 text-xs text-ink outline-none"
+            className="flex-1 rounded-xl border border-line bg-sunken p-2.5 text-xs text-ink outline-none disabled:opacity-50"
             value={selectedVoice}
             onChange={e => handleVoiceChange(e.target.value)}
+            disabled={!voices.length}
           >
-            {voices.map(v => (
-              <option key={v.name} value={v.name}>
-                {v.name} ({v.lang})
-              </option>
-            ))}
+            {voices.length
+              ? voices.map(v => (
+                <option key={v.name} value={v.name}>
+                  {v.name} ({v.lang})
+                </option>
+              ))
+              : <option value="">No voices installed</option>}
           </select>
           <button
             type="button"
             onClick={testVoicePlayback}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shrink-0 transition"
+            disabled={!voices.length}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold shrink-0 transition"
           >
             Test Voice
           </button>
         </div>
+        {/* "0 voices available" on its own tells you nothing you can act on.
+            The usual cause is a device with a TTS engine installed but none
+            selected as the default, which leaves getVoices() empty. */}
+        {!voices.length && (
+          <p role="alert" className="text-xs leading-relaxed text-amber-600 dark:text-amber-300">
+            {noVoicesHelp}
+          </p>
+        )}
         {testNotice && <p className="text-xs text-indigo-400 mt-1">{testNotice}</p>}
       </div>
 

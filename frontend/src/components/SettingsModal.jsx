@@ -591,8 +591,8 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
   ];
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-3 sm:p-5 backdrop-blur-md animate-fadeIn">
-      <div className="w-full max-w-4xl h-[88vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col text-left transition-colors duration-200">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-3 sm:p-5 backdrop-blur-md animate-fadeIn" data-settings-modal>
+      <div className="settings-modal-panel w-full max-w-4xl h-[88vh] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col text-left transition-colors duration-200">
 
         {/* Modal Top Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-zinc-900/60 shrink-0">
@@ -728,7 +728,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                     {[
                       { id: "dark", label: "Dark Mode", icon: Moon, desc: "Sleek obsidian palette" },
                       { id: "light", label: "Light Mode", icon: Sun, desc: "Crisp bright palette" },
-                      { id: "system", label: "System", icon: Laptop, desc: "Black & White combination" },
+                      { id: "system", label: "System", icon: Laptop, desc: "Follows your device theme" },
                     ].map((mode) => {
                       const Icon = mode.icon;
                       const isCurrent = theme === mode.id;
@@ -1692,7 +1692,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                         </div>
                         <div>
                           <p className="text-xs font-black text-zinc-900 dark:text-white">Windows Desktop App</p>
-                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Windows 10 / 11 · 64-bit · 260 MB</p>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Windows 10 / 11 · 64-bit · 267 MB</p>
                         </div>
                       </div>
                       <a
@@ -1713,7 +1713,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                         </div>
                         <div>
                           <p className="text-xs font-black text-zinc-900 dark:text-white">Android Mobile App</p>
-                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Android 7.0+ · Official APK · 33.8 MB</p>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Android 7.0+ · Official APK · 33.7 MB</p>
                         </div>
                       </div>
                       <a
@@ -1733,7 +1733,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                         </div>
                         <div>
                           <p className="text-xs font-black text-zinc-900 dark:text-white">Command Line (CLI)</p>
-                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Standalone Binary · 9.5 MB</p>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Standalone Binary · 9.7 MB</p>
                         </div>
                       </div>
                       <a
