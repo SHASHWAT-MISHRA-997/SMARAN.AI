@@ -83,3 +83,6 @@ website/downloads/
 
 # Local runtime database. Created on first run; never a source artefact.
 backend/smaran.db
+
+# Linux build output (first genuine Linux build, 2.10.38). Artifacts only.
+build-linux/
