@@ -247,6 +247,20 @@ def test_a_job_started_with_only_a_prompt_still_gets_real_settings():
     assert _jobs["testjob"]["messages"], "the job said nothing before working"
     del _jobs["testjob"]
 
+    # The settings this code picked must survive the check this code applies.
+    # They did not: suggest() sized the frame for its own 24 fps while the
+    # request defaulted to 30, so a size chosen to hold 41 frames was handed
+    # 57, and the job was refused for not fitting defaults it had chosen
+    # itself. The user saw an out-of-memory message about a request they
+    # never made.
+    from app.video.hardware import probe
+    from app.video.planner import _round_frames, decode_will_fit
+
+    frames = _round_frames(seen["seconds"], seen["fps"])
+    assert decode_will_fit(seen["width"], seen["height"], frames, probe()) is None, (
+        "the defaults chosen for this machine are refused by it"
+    )
+
 
 def test_settings_never_exceed_what_the_request_model_accepts():
     """suggest() feeds GenerateRequest, whose bounds would reject bad values."""

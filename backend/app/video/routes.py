@@ -42,7 +42,13 @@ class GenerateRequest(BaseModel):
     # weak one. An explicit value from the caller always wins.
     width: Optional[int] = Field(None, ge=128, le=1280)
     height: Optional[int] = Field(None, ge=128, le=1280)
-    fps: int = Field(30, ge=8, le=30)
+    # fps is chosen from the machine too, and for a reason beyond taste: it
+    # sets the frame count, and the frame count is most of what the final
+    # decode has to hold at once. Left at a fixed 30 while the resolution was
+    # picked for 24, the pair disagreed - a size chosen to fit 41 frames was
+    # handed 57 - and the job was refused for not fitting settings this code
+    # had selected itself.
+    fps: Optional[int] = Field(None, ge=8, le=30)
     steps: Optional[int] = Field(None, ge=1, le=100)
     guidance_scale: float = Field(3.0, ge=0, le=20)
     seed: Optional[int] = None
@@ -136,15 +142,31 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
     # steps became optional, filling them only in the route left the chat path
     # handing None to the engine, which failed on the first arithmetic it did
     # with them - so asking for a video in chat crashed the job outright.
-    from .planner import suggest
+    from .planner import _round_frames, _shrink_to_decode, suggest
+    from .hardware import probe as probe_hw
 
     tuned = suggest()
+    chose_size = req.width is None and req.height is None
     if req.width is None:
         req.width = tuned["width"]
     if req.height is None:
         req.height = tuned["height"]
     if req.steps is None:
         req.steps = tuned["steps"]
+    if req.fps is None:
+        req.fps = tuned["fps"]
+
+    # suggest() sizes its answer against a two second clip at its own frame
+    # rate. This request may be neither, and a size chosen for 41 frames does
+    # not necessarily hold 57. Re-fit against what was actually asked for -
+    # but only when the size is ours to choose. A caller who named a
+    # resolution gets that resolution, and the check in the engine tells them
+    # plainly if it cannot be decoded, rather than quietly substituting
+    # something else and returning a video they did not ask for.
+    if chose_size:
+        req.width, req.height = _shrink_to_decode(
+            req.width, req.height, _round_frames(req.seconds, req.fps), probe_hw(),
+        )
 
     # Said before the first slow step, not after it. The whole point is to
     # reach the user while they are deciding whether the app has hung.
