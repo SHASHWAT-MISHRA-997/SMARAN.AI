@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Shield, Terminal } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
+import GenerationProgress from './GenerationProgress';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
 import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening } from '../utils/deviceControl';
@@ -602,125 +603,30 @@ const CodeBlock = ({ code, language }) => {
 };
 
 // Live pipeline step indicator shown while AI is processing
-const THINKING_STEPS = [
-  {
-    icon: '🔍',
-    title: 'Scanning Input & URL Detection',
-    desc: 'Extracting video IDs, web links, and file metadata...',
-    color: 'indigo',
-  },
-  {
-    icon: '⚡',
-    title: 'Fetching Live Web & Video Evidence',
-    desc: 'Retrieving YouTube transcripts, subtitles, and website pages...',
-    color: 'amber',
-  },
-  {
-    icon: '🧠',
-    title: 'Neural Model Inference Routing',
-    desc: 'Querying vLLM / Ollama local neural weights in VRAM...',
-    color: 'violet',
-  },
-  {
-    icon: '✍️',
-    title: 'Synthesizing Factual Response',
-    desc: 'Generating accurate, grounded response token-by-token...',
-    color: 'emerald',
-  },
-  {
-    icon: '🛡️',
-    title: 'Fact Grounding & Citation Audit',
-    desc: 'Verifying evidence sources & formatting visual preview cards...',
-    color: 'blue',
-  },
-];
-
-const ThinkingIndicator = () => {
-  const [step, setStep] = React.useState(0);
-  const [elapsed, setElapsed] = React.useState(0);
-
-  React.useEffect(() => {
-    const stepTimer = setInterval(() => {
-      setStep((prev) => (prev < THINKING_STEPS.length - 1 ? prev + 1 : prev));
-    }, 1500);
-    const ticker = setInterval(() => setElapsed((e) => e + 0.1), 100);
-    return () => {
-      clearInterval(stepTimer);
-      clearInterval(ticker);
-    };
-  }, []);
-
-  const current = THINKING_STEPS[step];
-    const progress = safeToFixed(((step + 1) / THINKING_STEPS.length) * 100, 0) || "0";
+/* What the model is doing, as far as anything here actually knows.
+ *
+ * This was a five-stage display driven by setInterval: every 1500ms it moved
+ * to the next entry in a fixed list and reported (step + 1) / 5 as a
+ * percentage. The stages claimed specific work - "Fetching Live Web & Video
+ * Evidence", "Retrieving YouTube transcripts", "Querying vLLM / Ollama local
+ * neural weights in VRAM" - none of which it had any way to observe, and all
+ * of which were shown for a plain question answered by a cloud provider with
+ * no URL in it. The percentage measured nothing but the clock, and reached
+ * 100% while the answer was still being written.
+ *
+ * What is left is what can be known: the elapsed time, how much has arrived,
+ * and - once the stream says so - the model that is answering and where it is
+ * running. Before the first token there is genuinely nothing to report beyond
+ * having asked, and it says that instead of inventing a stage.
+ */
+const ThinkingIndicator = ({ model, source, received = 0 }) => {
+  const label = model ? `${model} is answering` : 'Waiting for the model';
+  const detail = [source, received > 0 ? null : 'no output yet']
+    .filter(Boolean).join(' · ');
 
   return (
-    <div className="space-y-3 w-full max-w-[560px] my-4 text-left" aria-live="polite" aria-label="AI is processing">
-      {/* Main status card with glowing border & glassmorphism */}
-      <div className="flex items-start gap-3 rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-50 via-white to-violet-50 dark:from-indigo-950/30 dark:via-zinc-900/60 dark:to-indigo-950/30 p-4 shadow-[0_0_30px_rgba(99,102,241,0.2)] backdrop-blur-md">
-        {/* Glowing pulsing orb */}
-        <span className="relative flex h-5 w-5 mt-0.5 shrink-0">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75" />
-          <span className="relative inline-flex h-5 w-5 rounded-full bg-gradient-to-tr from-amber-500 via-indigo-500 to-purple-500 shadow-sm" />
-        </span>
-
-        <div className="flex-1 min-w-0">
-          {/* Step title */}
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-black text-indigo-700 dark:text-indigo-200 leading-tight uppercase tracking-wider flex items-center gap-1.5">
-              <span>{current.icon}</span>
-              <span>{current.title}...</span>
-            </p>
-            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-700 dark:text-indigo-300 shrink-0">
-              Step {step + 1}/{THINKING_STEPS.length}
-            </span>
-          </div>
-
-          {/* Step description */}
-          <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-400 mt-1 leading-snug">
-            {current.desc}
-          </p>
-
-          {/* Animated Gradient Progress bar */}
-          <div className="mt-3 h-2 w-full rounded-full bg-zinc-200 dark:bg-zinc-800/80 overflow-hidden p-0.5 border border-zinc-300 dark:border-zinc-700/50">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-purple-500 to-amber-500 transition-all duration-[1500ms] ease-out shadow-[0_0_10px_rgba(139,92,246,0.6)]"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-
-          {/* Step count + live timer */}
-          <div className="flex items-center justify-between mt-2">
-            <div className="flex gap-1.5 items-center">
-              {THINKING_STEPS.map((_, i) => (
-                <span
-                  key={i}
-                  className={`h-2 w-2 rounded-full transition-all duration-300 ${
-                    i < step
-                      ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
-                      : i === step
-                      ? 'bg-amber-400 animate-pulse ring-2 ring-amber-400/40'
-                      : 'bg-zinc-300 dark:bg-zinc-700/50'
-                  }`}
-                />
-              ))}
-            </div>
-            <span className="text-[10px] font-mono font-black text-amber-400/90 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
-                          {safeToFixed(elapsed, 1) || "0"}s elapsed
-                        </span>
-          </div>
-        </div>
-
-        {/* Live bouncing dots */}
-        <span className="flex gap-1 mt-1 shrink-0" aria-hidden="true">
-          <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-400 [animation-delay:-0.3s]" />
-          <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:-0.15s]" />
-          <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-purple-400" />
-        </span>
-      </div>
-
-      {/* Shimmer skeleton lines */}
-      <div className="h-3 w-full rounded-full bg-gradient-to-r from-zinc-200 via-indigo-300/60 to-zinc-200 dark:from-zinc-800 dark:via-indigo-900/40 dark:to-zinc-800 animate-pulse" />
-      <div className="h-3 w-[88%] rounded-full bg-gradient-to-r from-zinc-200 via-purple-300/60 to-zinc-200 dark:from-zinc-800 dark:via-purple-900/40 dark:to-zinc-800 animate-pulse" />
+    <div className="w-full max-w-md">
+      <GenerationProgress label={label} detail={detail} received={received} />
     </div>
   );
 };
@@ -1103,7 +1009,13 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
                 </div>
               )}
 
-              {msg.isLoading && <ThinkingIndicator />}
+              {msg.isLoading && (
+                <ThinkingIndicator
+                  model={msg.backendModel}
+                  source={msg.execution_source}
+                  received={(msg.content || '').length}
+                />
+              )}
 
             </>
           )}

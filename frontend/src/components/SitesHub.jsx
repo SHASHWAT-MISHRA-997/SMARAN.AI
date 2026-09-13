@@ -251,9 +251,15 @@ const SitesHub = () => {
             <h1 className="text-3xl font-extrabold tracking-tight text-zinc-900 dark:text-white flex items-center gap-3">
               <Globe2 className="w-8 h-8 text-indigo-500 dark:text-indigo-400" /> Sites
             </h1>
+            {/* Says which of the two screens this is. Design Studio generates
+                a page from a brief as well, and looked identical for it; the
+                difference is that these are kept, can be refined and can be
+                published, and neither screen mentioned that. */}
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
               Describe a site and your local model writes it as a single
               standalone HTML page, which you can preview, read and export.
+              Sites are saved as projects — come back to refine or publish them.
+              For a quick one-off you do not need to keep, use Design Studio.
             </p>
           </div>
           <div className="flex items-center gap-2 sm:shrink-0">

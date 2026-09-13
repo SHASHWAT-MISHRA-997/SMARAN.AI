@@ -479,6 +479,17 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
           What should we create?
         </h2>
 
+        {/* Which of the two this is.
+            Sites and Design Studio both turn a brief into a page and both open
+            with a gallery of templates, so on screen they read as the same
+            feature twice - the difference is only what happens afterwards, and
+            nothing said it. This is a scratchpad: the result lives here until
+            you leave. Sites keeps projects, and can refine and publish them. */}
+        <p className="-mt-3 mb-6 max-w-xl text-center text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+          A scratchpad for trying a design out — copy the result or preview it, but nothing is kept
+          once you leave. For a page you want to save, refine later and publish, use Sites.
+        </p>
+
         {/* Main Floating Prompt Card */}
         <div className="w-full bg-white dark:bg-[#1e2024] border border-zinc-200 dark:border-zinc-800/90 rounded-3xl p-4 shadow-xl mb-6 focus-within:border-indigo-500 dark:focus-within:border-zinc-600 transition-all">
           <textarea
