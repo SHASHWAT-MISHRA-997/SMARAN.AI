@@ -86,3 +86,25 @@ backend/smaran.db
 
 # Linux build output (first genuine Linux build, 2.10.38). Artifacts only.
 build-linux/
+
+# Installer output. Same class as dist-release/ and build-linux/ above, which
+# are already ignored - it was simply missed. It also cannot be committed even
+# if someone wanted to: SMARAN.AI-Setup.exe and the portable zip are 290 MB and
+# 396 MB, and GitHub refuses any file over 100 MB, so a commit containing them
+# produces a local history that can never be pushed.
+installer/output/
+
+# Screenshots and UI dumps from manual testing sessions. Kept on disk, out of
+# history - the same thing .cache/audit/ holds, and that is ignored too. The
+# only debug PNGs ever committed at the root, exe_final.png and exe_shot.png,
+# look like accidents rather than a convention worth following.
+/phone_*.png
+/t_*.png
+/voice_*.png
+/rebuild_*.png
+/boat_frames.png
+/lantern_frames.png
+/taxi_frame.png
+/video_frame.png
+/mobile_chat_history_verified.png
+/*_dump.xml
