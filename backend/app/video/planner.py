@@ -35,20 +35,33 @@ RESIDENT_VRAM_GB = 12.0
 #
 # Timed on an RTX 2060 (6 GB, sequential offload): 960x576, 57 frames, 30
 # steps, which is 945.6 million pixel-frame-steps. It reached the decode after
-# 222 minutes. That is roughly 71 thousand per second.
+# 222 minutes. That is just under 71 thousand per second.
 #
 # The first figure here was 130 thousand, taken from a shorter run, and it
 # quoted two hours for a job that had not finished at three and a half. An
 # estimate that optimistic is worse than none: it tells a user who is waiting
 # correctly that something has gone wrong.
 #
-# Work really does scale with the product of those four numbers - halving the
-# steps halves the diffusion loop, halving the area halves the work per step -
-# so extrapolating along them is sound. Extrapolating to a *different class of
-# card* is not, which is why a machine fast enough to run resident is given
-# this figure as an upper bound rather than a prediction: it will beat it,
-# by an amount this code does not pretend to know.
-_OFFLOAD_UNITS_PER_SEC = 71_000.0
+# A second run on the same card settles what that figure is worth. 704x448,
+# 41 frames, 20 steps - 258.6 million - finished in 20.3 minutes, which is
+# 212 thousand per second, three times the rate of the larger run.
+#
+# So the work does not scale with the product of those four numbers, even on
+# one card: the bigger job is disproportionately slower, because the larger
+# the tensors the more the offload thrashes moving them. Two points cannot
+# tell us the shape of that, and fitting a curve to two points would dress a
+# guess up as a model.
+#
+# The slower of the two is used deliberately, which makes every estimate an
+# upper bound rather than a prediction, and the wording says so. Finishing
+# early is a good surprise; being told twenty minutes at minute forty is how
+# a user concludes the app is broken - which is the failure this exists to
+# prevent. The same reasoning covers a card large enough to run resident: it
+# beats the figure by an amount this code does not pretend to know.
+# Rounded down from the measured 70,987: at the exact figure the estimate came
+# in two seconds under the run it was taken from, and a ceiling that the
+# calibration run itself breaches is not a ceiling.
+_OFFLOAD_UNITS_PER_SEC = 70_000.0
 
 
 @dataclass
@@ -365,11 +378,12 @@ def estimate_seconds(
 
     return {
         "seconds": round(predicted),
-        "bound": "about",
+        "bound": "at most",
         "text": (
-            "Expect roughly %s. The model does not fit in %.1f GB, so layers "
-            "are streamed onto the card as they run, which is what makes it "
-            "slow. It is working even while nothing appears to change."
+            "Should finish within about %s, and often sooner. The model does "
+            "not fit in %.1f GB, so layers are streamed onto the card as they "
+            "run, which is what makes it slow. It is working even while "
+            "nothing appears to change."
             % (_human(predicted), hw.vram_total_gb)
         ),
     }

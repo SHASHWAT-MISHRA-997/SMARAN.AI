@@ -123,8 +123,33 @@ def test_a_card_that_holds_the_model_is_promised_no_more_than_the_slow_one():
     large = estimate_seconds(width=960, height=576, steps=30, seconds=2, fps=30,
                              hw=gpu(RESIDENT_VRAM_GB + 1))
     assert large["bound"] == "at most"
-    assert small["bound"] == "about"
+    # Both are upper bounds: the constant comes from the slower of two runs
+    # that differed threefold on the same card, so neither is a prediction.
+    assert small["bound"] == "at most"
     assert large["seconds"] <= small["seconds"]
+
+
+def test_neither_timed_run_is_promised_less_time_than_it_took():
+    """Two clips were timed end to end on the same 6 GB card. An estimate that
+    undershoots either one puts a user past the quoted time on a job that is
+    still working correctly, which is exactly when they give up on it.
+
+    They disagree threefold - 960x576 managed 71 thousand pixel-frame-steps a
+    second, 704x448 managed 212 thousand - so this is only satisfiable by
+    quoting the slower. That is the point: these are ceilings, not forecasts.
+    """
+    timed = (
+        # width, height, steps, seconds, fps, measured seconds
+        (960, 576, 30, 2, 30, 222 * 60),
+        (704, 448, 20, 2, 24, int(20.3 * 60)),
+    )
+    for width, height, steps, secs, fps, took in timed:
+        out = estimate_seconds(width=width, height=height, steps=steps,
+                               seconds=secs, fps=fps, hw=gpu(6.0))
+        assert out["seconds"] >= took, (
+            "%dx%d quoted %d s for a run that took %d s"
+            % (width, height, out["seconds"], took)
+        )
 
 
 def test_an_untimed_machine_is_told_so_rather_than_given_a_number():
