@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
+import GenerationProgress, { htmlProgress } from './GenerationProgress';
 import { Sparkles, Plus, Code2, ArrowUp, FileText, Smartphone, Presentation, LayoutGrid, Film, Monitor, User, Box, Search, Mail, Palette, BookOpen, ChevronDown, X, Check, RefreshCw, ArrowRight } from 'lucide-react';
 
 export const DESIGN_SYSTEMS = [
@@ -177,6 +178,8 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
      a design. Everything below keeps it in place. */
   const [result, setResult] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [liveModel, setLiveModel] = useState('');
+  const [liveSource, setLiveSource] = useState('');
   const [genError, setGenError] = useState('');
   const abortRef = useRef(null);
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -203,11 +206,32 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
     setPrompt(tpl.prompt);
   };
 
-  /* Pull the first fenced block out of a reply, so a preview can be rendered
-     from what the model actually wrote rather than from the prose around it. */
+  /* Pull the first code block out of a reply, so a preview can be rendered
+     from what the model actually wrote rather than from the prose around it.
+
+     The closing fence is optional, which it was not before. The old pattern
+     required ``` at both ends, so it matched nothing until the very last
+     token arrived: for the whole of a generation the panel showed raw source
+     with a literal ```html sitting at the top of it, and if the model ended
+     without closing the fence - which they do - the preview never appeared at
+     all. The result read as "Design Studio only shows code".
+
+     Taking the rest of the text when there is no closing fence means the
+     preview builds up as the HTML streams in, and a reply that never closes
+     its fence still renders. */
   const firstCodeBlock = (text) => {
-    const fenced = /```([a-zA-Z0-9+-]*)\n([\s\S]*?)```/.exec(text || '');
-    return fenced ? { lang: (fenced[1] || '').toLowerCase(), code: fenced[2] } : null;
+    const source = text || '';
+
+    const fenced = /```([a-zA-Z0-9+-]*)[ \t]*\r?\n([\s\S]*?)(?:```|$)/.exec(source);
+    if (fenced && fenced[2].trim()) {
+      return { lang: (fenced[1] || '').toLowerCase(), code: fenced[2] };
+    }
+
+    /* No fence at all. A model asked for a page sometimes just writes one,
+       and refusing to preview it because it lacks decoration would be a
+       strange thing to explain to whoever is looking at the screen. */
+    const bare = /^\s*(?:<!DOCTYPE html|<html[\s>])/i.test(source);
+    return bare ? { lang: 'html', code: source } : null;
   };
 
   const handleCreate = async () => {
@@ -215,6 +239,8 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
     setGenerating(true);
     setGenError('');
     setResult('');
+    setLiveModel('');
+    setLiveSource('');
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -261,6 +287,15 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
           engineError = true;
           setGenError(String(parsed.error));
         }
+        /* What is actually running, taken from the stream rather than
+           guessed. The backend names the model it routed to and where it is
+           executing - "gemini-3.5-flash", "Cloud API - Gemini" - and that is
+           the honest answer to "what is it doing right now". A fixed caption
+           would read the same whether the work went to the local GPU or to a
+           provider, which is exactly the kind of thing that looks informative
+           and tells you nothing. */
+        if (parsed.model_routed) setLiveModel(parsed.model_routed);
+        if (parsed.execution_source) setLiveSource(parsed.execution_source);
         if (parsed.token) { text += parsed.token; setResult(text); }
         if (parsed.translated_response) { text = parsed.translated_response; setResult(text); }
       };
@@ -502,6 +537,28 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
             The design is rendered on this screen. It used to be handed to the
             chat and this view navigated away, so the one screen built for
             designing never showed a design. */}
+        {/* What it is doing, while it does it. This screen showed a spinning
+            icon and the words "Generating…" for the whole of a generation
+            that can run a long time, so there was no way to tell a slow job
+            from a stalled one, or to see that anything was arriving at all.
+            The percentage comes from how much of the HTML document has been
+            written - the model's own closing tags - and not from a timer
+            dressed up as progress. */}
+        {generating && (
+          <GenerationProgress
+            className="w-full mb-3"
+            label={
+              result ? 'Writing the page'
+                : liveModel ? `${liveModel} is thinking`
+                  : 'Contacting the engine'
+            }
+            percent={htmlProgress(result)}
+            received={result.length}
+            detail={[liveSource, liveModel && !result ? '' : liveModel]
+              .filter(Boolean).join(' · ')}
+          />
+        )}
+
         {(generating || result || genError) && (
           <div className="w-full mb-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden">
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/70">

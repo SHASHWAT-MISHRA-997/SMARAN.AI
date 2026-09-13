@@ -259,6 +259,15 @@ const PhonePairing = ({ onPaired }) => {
       });
       streamRef.current = stream;
       const video = videoRef.current;
+      if (!video) {
+        // Hand the camera back before reporting. getUserMedia has already
+        // succeeded at this point, so bailing out without stopping the tracks
+        // leaves the camera running - and its indicator light on - for a scan
+        // that is not happening.
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        throw new Error('the preview surface was not ready');
+      }
       video.srcObject = stream;
       await video.play();
       setScanning(true);
@@ -334,7 +343,20 @@ const PhonePairing = ({ onPaired }) => {
     <div className="space-y-4">
       <div className="rounded-2xl border border-cyan-400/20 bg-black/30 p-4">
         <div className="relative overflow-hidden rounded-xl bg-zinc-950" style={{ aspectRatio: '1 / 1' }}>
-          {scanning && <video ref={videoRef} muted playsInline className="absolute inset-0 h-full w-full object-cover" />}
+          {/* Always mounted, hidden until it has a picture.
+              This was `{scanning && <video .../>}`, so the element did not
+              exist until scanning was already true - and startScan sets
+              srcObject before flipping that flag. videoRef.current was
+              therefore null every single time, and the scanner failed on
+              every device with "Cannot set properties of null (setting
+              'srcObject')". Keeping it mounted means the ref exists when the
+              stream arrives. */}
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            className={`absolute inset-0 h-full w-full object-cover ${scanning ? '' : 'hidden'}`}
+          />
           {!scanning && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
               <QrCode className="h-8 w-8 text-cyan-300/70" />

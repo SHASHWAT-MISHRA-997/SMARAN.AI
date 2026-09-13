@@ -4,6 +4,7 @@ import {
   Code2, Eye, Download, Sparkles, Laptop, Smartphone, Check
 } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
+import GenerationProgress from './GenerationProgress';
 
 const PRESET_TEMPLATES = [
   {
@@ -353,6 +354,18 @@ const SitesHub = () => {
                         <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
                           {site.prompt}
                         </p>
+                        {/* Said out loud, because this page was not written by
+                            a model. When the request does not get through, the
+                            code falls back to a local template with the name
+                            and prompt printed into it and calls onCreated with
+                            generatedLocally: true - a flag that was set and
+                            then read nowhere, so the placeholder sat in the
+                            list looking exactly like a generated site. */}
+                        {site.generatedLocally && (
+                          <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                            Placeholder — the model could not be reached, so this is a local template
+                          </p>
+                        )}
                       </button>
                       <button
                         disabled={busy === site.id}
@@ -526,6 +539,21 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
             className="w-full resize-none rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-4 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 leading-relaxed outline-none focus:border-indigo-500"
           />
         </div>
+
+        {/* The page is written by a local model and the modal itself says
+            this takes a minute or two - but all that appeared during those
+            minutes was a spinner inside the button, which cannot distinguish
+            a model that is working from one that is not running at all.
+            No percentage is shown because none exists: this is a single POST
+            with no progress reporting, so the honest thing is the clock and
+            the fact that it is still going. */}
+        {busy && (
+          <GenerationProgress
+            className="mb-3"
+            label="Your local model is writing the page"
+            detail="no progress is reported for this step, so only the elapsed time is real"
+          />
+        )}
 
         <button
           type="submit"

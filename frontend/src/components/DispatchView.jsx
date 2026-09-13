@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Smartphone, QrCode, RefreshCw, Send, CheckCircle2, Trash2, ArrowLeft, Plus } from 'lucide-react';
+import { Smartphone, Send, CheckCircle2, ArrowLeft, Plus } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 
 export default function DispatchView({ onNavigate, onOpenPairing }) {
@@ -50,16 +50,6 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
     return () => clearInterval(interval);
   }, [loadDevices]);
 
-  const handleUnpair = async (id) => {
-    try {
-      await fetch(`${API_BASE}/api/companion/devices/${id}`, { method: 'DELETE' });
-      setDevices((prev) => prev.filter((d) => d.id !== id));
-      showToast('Device removed from dispatch');
-    } catch {
-      setDevices((prev) => prev.filter((d) => d.id !== id));
-      showToast('Device removed');
-    }
-  };
 
   const handleDispatch = async (e) => {
     e.preventDefault();
@@ -188,70 +178,28 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
           </form>
         </div>
 
-        {/* Devices Grid */}
-        <div>
-          <div className="flex items-center justify-between mb-3 px-1">
-            <h3 className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-              Linked Devices ({devices.length})
-            </h3>
+        {/* The paired-device list and its unpair button stood here. Settings ->
+            Connectors & Devices already lists the same devices and unpairs
+            them, against the same GET /api/companion/devices and
+            DELETE /api/companion/devices/{id}, so pairings were managed in two
+            screens at once and neither said which one was authoritative.
+            Dispatch keeps the one thing only it does - sending work to a
+            device - and the Target selector above still names them. */}
+        {devices.length === 0 && (
+          <div className="p-8 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 bg-white dark:bg-zinc-900/40">
+            <Smartphone className="w-10 h-10 text-zinc-400 mx-auto mb-2 opacity-60" />
+            <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200">No paired devices found</p>
+            <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
+              Pair a phone or a second computer to dispatch work to it.
+            </p>
             <button
-              onClick={loadDevices}
-              className="text-xs text-indigo-500 hover:underline flex items-center gap-1 cursor-pointer"
+              onClick={onOpenPairing}
+              className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-500/20 cursor-pointer"
             >
-              <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
+              Pair a device
             </button>
           </div>
-
-          {devices.length === 0 ? (
-            <div className="p-8 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/40">
-              <Smartphone className="w-10 h-10 text-zinc-400 mx-auto mb-2 opacity-60" />
-              <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200">No paired devices found</p>
-              <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
-                Pair your smartphone or remote laptop via QR code to dispatch coding sessions and control SMARAN remotely.
-              </p>
-              <button
-                onClick={onOpenPairing}
-                className="mt-4 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md cursor-pointer inline-flex items-center gap-2"
-              >
-                <QrCode className="w-4 h-4" /> Pair Companion Now
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {devices.map((device) => (
-                <div
-                  key={device.id}
-                  className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/90 flex items-center justify-between gap-3 shadow-xs"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                      <Smartphone className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-zinc-900 dark:text-white truncate">
-                          {device.name || device.device_name || 'Companion Device'}
-                        </span>
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" title="Online" />
-                      </div>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                        {device.ip || 'Local Network'} • Paired {device.paired_at || 'Recently'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => handleUnpair(device.id)}
-                    className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 transition cursor-pointer shrink-0"
-                    title="Unpair device"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
 
         {/* Dispatch Activity Logs */}
         <div className="p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm">

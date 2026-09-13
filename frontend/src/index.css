@@ -2723,3 +2723,11 @@ html[data-reduce-motion="on"] *::after {
     scroll-behavior: auto !important;
   }
 }
+
+/* The indeterminate bar in GenerationProgress. It slides rather than fills,
+   because a job whose total is unknowable must not draw a fraction it cannot
+   justify - but it still has to show it is alive, which a static bar does not. */
+@keyframes progress-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
