@@ -18,27 +18,36 @@ try:
 except ImportError:
     pass
 
-# google.protobuf.message is imported here, before chromadb, on purpose.
+# protobuf is steered onto its pure-Python backend before chromadb is imported.
 #
 # chromadb reaches protobuf through opentelemetry's OTLP exporter. protobuf
 # then probes for its compiled backend with
 # importlib.import_module('google._upb._message'), and in the frozen app that
-# probe raised AttributeError: module 'google.protobuf.message' has no
-# attribute 'FrozenInstanceError'. protobuf's _CanImport only catches
-# ImportError, so the AttributeError escaped and took the whole chromadb
-# import with it - and the RAG pipeline then ran with no vector store at all.
+# probe raises AttributeError: module 'google.protobuf.message' has no
+# attribute 'FrozenInstanceError'. protobuf's own _CanImport catches only
+# ImportError, so the AttributeError escapes and takes the entire chromadb
+# import with it. The RAG pipeline then runs with no vector store: uploads
+# return 200 and index nothing, and the only symptom is an assistant that
+# never cites a file it was given.
 #
-# It is an ordering problem, not a missing or mismatched file: the bundled
-# _upb binary is byte-identical to the installed one, neither mentions that
-# attribute, and the same import works from source. Under PyInstaller's
-# importer google.protobuf.message was still part-executed when the probe
-# reached back into it. Importing it to completion first removes the window.
-try:  # noqa: SIM105
-    import google.protobuf.message  # noqa: F401
-except Exception:  # noqa: BLE001
-    # Never the thing that stops the app: if protobuf is genuinely absent,
-    # chromadb below fails with its own, clearer message.
-    pass
+# Nothing is missing or mismatched. The bundled _upb binary is byte-identical
+# to the installed one, `google/_upb` holds exactly the same single file in
+# both, and the identical import succeeds from source. It fails only under
+# PyInstaller's importer, and neither collecting google.protobuf nor importing
+# google.protobuf.message to completion beforehand changed it.
+#
+# So the extension is not used here. protobuf documents a pure-Python
+# implementation and reaches it whenever the compiled one cannot be imported;
+# _CanImport treats a None in sys.modules as unimportable on purpose, for the
+# "classic bootstrap .par import hook" its own comment describes - a frozen
+# importer misreporting a C extension, which is precisely this. Claiming that
+# path is a supported fallback, not a trick.
+#
+# The cost is speed, and only protobuf's, which here serves opentelemetry
+# spans that are never exported. The alternative is no document search at all.
+import sys as _sys
+
+_sys.modules.setdefault("google._upb._message", None)
 
 import chromadb
 from app.config import settings
