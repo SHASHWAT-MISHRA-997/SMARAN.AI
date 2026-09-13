@@ -324,16 +324,27 @@ def build(onefile: bool = False, output_root: str = ROOT, incremental: bool = Fa
         # Into the place the installer and everything else expect.
         produced = os.path.join(scratch, APP_NAME)
         final = os.path.join(output, "dist", APP_NAME)
-        os.makedirs(final, exist_ok=True)
+        os.makedirs(os.path.dirname(final), exist_ok=True)
         if os.path.isdir(produced):
-            for entry in os.listdir(produced):
-                source = os.path.join(produced, entry)
-                target = os.path.join(final, entry)
-                if os.path.isdir(source):
-                    shutil.copytree(source, target, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(source, target)
+            # Replace, rather than merge into what was already there.
+            #
+            # This copied entry by entry with dirs_exist_ok=True, which adds
+            # and overwrites but never removes, so anything the new build no
+            # longer produces survived from the last one. Vite names frontend
+            # bundles by content hash, so every release leaves a complete set
+            # behind: the 2.10.39 payload carried 183 dead asset files from
+            # 2.10.37 and 2.10.38, 14 MB of a folder the installer wraps
+            # whole, and it would have kept growing with each release.
+            #
+            # The delete still happens only after PyInstaller has returned
+            # zero, so a failed build leaves the previous one intact - which
+            # was the reason the merge was written this way to begin with.
+            shutil.rmtree(final, ignore_errors=True)
+            shutil.copytree(produced, final)
         else:
+            # --onefile produces a single executable, not a folder, so there
+            # is no directory to create here - only dist/ itself, which the
+            # makedirs above already ensured.
             tail = ".exe" if os.name == "nt" else ""
             if os.path.isfile(produced + tail):
                 shutil.copy2(produced + tail,
