@@ -33,9 +33,14 @@ RESIDENT_VRAM_GB = 12.0
 
 # How much work this gets through per second, measured rather than assumed.
 #
-# One clip was timed end to end on an RTX 2060 (6 GB, sequential offload):
-# 960x576, 57 frames, 30 steps. That is 945.6 million pixel-frame-steps, and
-# it took over two hours, which is roughly 130 thousand per second.
+# Timed on an RTX 2060 (6 GB, sequential offload): 960x576, 57 frames, 30
+# steps, which is 945.6 million pixel-frame-steps. It reached the decode after
+# 222 minutes. That is roughly 71 thousand per second.
+#
+# The first figure here was 130 thousand, taken from a shorter run, and it
+# quoted two hours for a job that had not finished at three and a half. An
+# estimate that optimistic is worse than none: it tells a user who is waiting
+# correctly that something has gone wrong.
 #
 # Work really does scale with the product of those four numbers - halving the
 # steps halves the diffusion loop, halving the area halves the work per step -
@@ -43,7 +48,7 @@ RESIDENT_VRAM_GB = 12.0
 # card* is not, which is why a machine fast enough to run resident is given
 # this figure as an upper bound rather than a prediction: it will beat it,
 # by an amount this code does not pretend to know.
-_OFFLOAD_UNITS_PER_SEC = 130_000.0
+_OFFLOAD_UNITS_PER_SEC = 71_000.0
 
 
 @dataclass
@@ -156,14 +161,40 @@ def plan(capability: str = "text-to-video", hw: Optional[Hardware] = None) -> di
 # The boundaries are chosen here, not published by any model author, and are
 # deliberately conservative: the cost of aiming slightly low is a faster video,
 # and the cost of aiming high is a job that crawls or dies.
+# The 6 to 10 GB row is the only one measured. It read 960x576 at 30 steps,
+# which was not a conservative guess but an unrunnable one: on a 6 GB card that
+# ran for three hours and forty-two minutes and then died in the VAE decode with
+# out of memory. Both clips this card has ever finished were 704x448 at 20
+# steps, so that is what the row now says - the settings that are known to
+# produce a file here, rather than settings that are known not to.
+#
+# The other rows remain untested and are extrapolated from that one. They are
+# ordered so that a larger card is never asked for less, but none of them
+# carries the authority the measured row does.
 _TIERS = (
     # (minimum total VRAM GB, width, height, steps, label)
-    (16.0, 1280, 768, 50, "16 GB or more"),
-    (10.0, 1152, 640, 40, "10 to 16 GB"),
-    (6.0,   960, 576, 30, "6 to 10 GB"),
-    (4.0,   704, 448, 25, "4 to 6 GB"),
+    (16.0, 1280, 768, 40, "16 GB or more"),
+    (10.0,  960, 576, 30, "10 to 16 GB"),
+    (6.0,   704, 448, 20, "6 to 10 GB"),      # measured
+    (4.0,   576, 384, 20, "4 to 6 GB"),
     (0.0,   512, 320, 20, "under 4 GB"),
 )
+
+# Peak memory in the decode is set by how many pixels must be held at once -
+# every frame, at full resolution - not by the step count, which is all spent
+# before the decode begins. That is why a job can survive thousands of steps
+# and then die on the last thing it does.
+#
+# Two runs on the same 6 GB card bracket it. 704x448 for 41 frames, 12.9
+# million pixel-frames, decoded and produced a file. 960x576 for 57 frames,
+# 31.5 million, ran for three hours and forty-two minutes and then ran out of
+# memory in the decode.
+#
+# The line is drawn between those two points and scaled by card size. This is
+# one success and one failure on one card, not a model of the allocator, so it
+# sits deliberately close to the success: refusing a job that might have worked
+# costs a user seconds, and accepting one that cannot costs them an afternoon.
+_DECODE_PIXEL_FRAMES_PER_GB = 2_200_000
 
 
 def suggest(hw: Optional[Hardware] = None) -> dict:
@@ -184,18 +215,91 @@ def suggest(hw: Optional[Hardware] = None) -> dict:
 
     for minimum, width, height, steps, label in _TIERS:
         if hw.vram_total_gb >= minimum:
+            fps = 24
+            reason = (
+                "%s reports %.1f GB of VRAM, which is the %s tier."
+                % (hw.gpu_name or "This GPU", hw.vram_total_gb, label)
+            )
+            # The tier is a starting point; the decode budget is a constraint,
+            # and settings this function hands out must survive the check the
+            # engine will apply to them. Offering a card something it will then
+            # refuse is how a user ends up arguing with the app about its own
+            # defaults. Measured against a two second clip, which is the
+            # default length and the common case.
+            shrunk = _shrink_to_decode(width, height, _round_frames(2, fps), hw)
+            if shrunk != (width, height):
+                width, height = shrunk
+                reason += (
+                    " Reduced to %dx%d so the final decode, which holds every "
+                    "frame at once, fits in that." % (width, height)
+                )
             return {
-                "width": width, "height": height, "steps": steps, "fps": 24,
+                "width": width, "height": height, "steps": steps, "fps": fps,
                 "tier": label,
-                "reason": (
-                    "%s reports %.1f GB of VRAM, which is the %s tier."
-                    % (hw.gpu_name or "This GPU", hw.vram_total_gb, label)
-                ),
+                "reason": reason,
             }
 
     # _TIERS ends at 0.0 so this is unreachable; kept so a future edit that
     # removes that row fails loudly here instead of returning None.
     raise RuntimeError("no tier matched %.1f GB" % hw.vram_total_gb)
+
+
+def decode_will_fit(
+    width: int, height: int, frames: int, hw: Optional[Hardware] = None,
+) -> Optional[str]:
+    """None if the decode should fit, otherwise why it will not.
+
+    Checked before the work starts rather than discovered by it. The decode is
+    the last thing a generation does, so without this a job that cannot
+    possibly finish still runs every diffusion step first: the case this was
+    written for burned three hours and forty-two minutes before failing, and
+    everything needed to predict that was known at the outset.
+
+    Returns a string rather than raising so the caller decides whether an
+    unrunnable request is an error or a reason to choose smaller settings.
+    """
+    hw = hw or probe()
+    if not hw.has_cuda or hw.vram_total_gb <= 0:
+        # CPU decode spills into system RAM instead of failing outright, so
+        # there is no equivalent limit to enforce and inventing one would
+        # refuse work that would have completed.
+        return None
+
+    budget = hw.vram_total_gb * _DECODE_PIXEL_FRAMES_PER_GB
+    needed = float(width) * float(height) * float(frames)
+    if needed <= budget:
+        return None
+
+    # Say what would fit, at the resolution asked for, so the number is one the
+    # user can act on rather than one they have to solve for.
+    fits = int(budget // (float(width) * float(height)))
+    return (
+        "%dx%d for %d frames cannot be decoded in %.1f GB. The final step has "
+        "to hold every frame at full resolution at once, and this card ran out "
+        "of memory doing that. At %dx%d it can hold about %d frames; a smaller "
+        "resolution would allow more. This is a limit of the card, not a "
+        "setting that can be forced."
+        % (width, height, frames, hw.vram_total_gb, width, height, max(1, fits))
+    )
+
+
+def _shrink_to_decode(width: int, height: int, frames: int, hw: Hardware):
+    """The largest version of this shape whose decode fits, aspect preserved.
+
+    Stepping down through 32-pixel multiples rather than solving directly
+    because the engine snaps to those anyway, so anything else would be
+    rounded back up and could overshoot the budget it was chosen to respect.
+    """
+    aspect = float(height) / float(width)
+    while decode_will_fit(width, height, frames, hw) is not None:
+        if width <= 128 or height <= 64:
+            # Nothing sensible is left to give back. The engine's own check
+            # refuses this with the full explanation rather than this function
+            # silently returning something unusable.
+            break
+        width -= 32
+        height = max(64, int(round(width * aspect / 32.0)) * 32)
+    return width, height
 
 
 def _round_frames(seconds: float, fps: int) -> int:

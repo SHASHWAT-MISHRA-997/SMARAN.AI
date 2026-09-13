@@ -223,8 +223,6 @@ def generate(
     import torch
     from diffusers.utils import export_to_video
 
-    pipe = load(for_image=bool(image_path), progress=progress)
-
     # The architecture is patch-based: dimensions must be multiples of 32, and
     # frame count must be 8n+1. Passing an arbitrary number either errors or is
     # silently corrected, and a silent correction is how a caller ends up
@@ -233,6 +231,18 @@ def generate(
     height = _round_to(height, 32)
     frames = max(9, int(seconds * fps))
     frames = ((frames - 1) // 8) * 8 + 1
+
+    # Before the weights are loaded and before a single step runs, because the
+    # decode that cannot fit is the last thing this function does. Checked here
+    # rather than after load() so an impossible request costs a second, not the
+    # minutes it takes to bring several gigabytes of weights in.
+    from .planner import decode_will_fit
+
+    impossible = decode_will_fit(width, height, frames, probe())
+    if impossible:
+        raise VideoError(impossible)
+
+    pipe = load(for_image=bool(image_path), progress=progress)
 
     generator = None
     if seed is not None:

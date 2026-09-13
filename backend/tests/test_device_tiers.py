@@ -92,14 +92,18 @@ def cpu_only():
 
 
 def test_the_estimate_reproduces_the_run_it_was_measured_from():
-    """The calibration run: 960x576, 57 frames, 30 steps on a 6 GB card took
-    just over two hours. If a change makes that come out as twenty minutes,
-    the constant has been broken and users will be told a comforting lie."""
+    """The calibration run: 960x576, 57 frames, 30 steps on a 6 GB card ran
+    222 minutes before the decode. If a change makes that come out as twenty
+    minutes, the constant is broken and users are being told a comforting lie.
+
+    An earlier constant quoted two hours for this and was wrong by ninety
+    minutes, which is why the window below is not generous at the low end.
+    """
     out = estimate_seconds(width=960, height=576, steps=30, seconds=2, fps=30,
                            hw=gpu(6.0))
     assert out["seconds"] is not None
-    hours = out["seconds"] / 3600.0
-    assert 1.5 <= hours <= 3.0, "estimated %.2f h for the timed run" % hours
+    minutes = out["seconds"] / 60.0
+    assert 190 <= minutes <= 260, "estimated %.0f min for a 222 min run" % minutes
 
 
 def test_a_longer_or_larger_job_is_never_estimated_as_quicker():
@@ -152,6 +156,51 @@ def test_the_offload_threshold_is_shared_with_the_engine():
     from app.video import ltx_engine
 
     assert ltx_engine.RESIDENT_VRAM_GB is RESIDENT_VRAM_GB
+
+
+def test_the_suggested_settings_can_actually_be_decoded_on_that_card():
+    """The point of the whole tier table.
+
+    It once handed a 6 GB card 960x576, which spent three hours and forty-two
+    minutes reaching a decode that could not fit. Settings this code chooses
+    for a machine must survive the check that machine will apply to them.
+    """
+    from app.video.planner import _round_frames, decode_will_fit
+
+    for total in (1.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 80.0):
+        card = gpu(total)
+        picked = suggest(card)
+        frames = _round_frames(2, picked["fps"])
+        refusal = decode_will_fit(picked["width"], picked["height"], frames, card)
+        assert refusal is None, "%.0f GB is offered settings it will refuse: %s" % (
+            total, refusal,
+        )
+
+
+def test_the_configuration_that_really_worked_is_still_allowed():
+    """704x448 for 41 frames produced a file on this 6 GB card, twice. A
+    tightened limit that rejects it has been tightened past the evidence."""
+    from app.video.planner import decode_will_fit
+
+    assert decode_will_fit(704, 448, 41, gpu(6.0)) is None
+
+
+def test_the_configuration_that_ran_out_of_memory_is_now_refused():
+    """960x576 for 57 frames is the run that failed after 222 minutes."""
+    from app.video.planner import decode_will_fit
+
+    refusal = decode_will_fit(960, 576, 57, gpu(6.0))
+    assert refusal is not None
+    # The message has to leave the user somewhere to go, not just say no.
+    assert "frames" in refusal and "6.0 GB" in refusal
+
+
+def test_a_card_with_no_cuda_is_not_given_a_vram_limit():
+    """CPU decode spills into system RAM rather than failing, so enforcing a
+    VRAM budget there would refuse work that would have completed."""
+    from app.video.planner import decode_will_fit
+
+    assert decode_will_fit(1280, 768, 121, cpu_only()) is None
 
 
 def test_a_job_started_with_only_a_prompt_still_gets_real_settings():
