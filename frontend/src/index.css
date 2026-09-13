@@ -882,6 +882,14 @@ body {
   .composer-desktop-left, .composer-desktop-right { display:none !important; }
   .composer-compact-tools { display:flex !important; }
   .composer-compact-send { display:flex !important; }
+  /* The button that opens what the two rules above just hid. It carries
+     sm:hidden, which measures the viewport, while this block measures the
+     workspace - so at any size where the workspace is narrower than the
+     window, a docked panel or a half-width window, the desktop groups went
+     away and their replacement stayed hidden with them. Speak, Web ON,
+     Compare, Attach and the language picker were then unreachable, with
+     nothing on screen to suggest where they had gone. */
+  .composer-compact-more { display:flex !important; }
   .composer-input { order:-1 !important; }
 }
 

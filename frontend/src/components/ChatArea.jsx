@@ -4823,7 +4823,15 @@ const ChatArea = ({
             <button
               type="button"
               onClick={() => setMobileToolsOpen((open) => !open)}
-              className={`sm:hidden h-8 w-8 rounded-xl shrink-0 flex items-center justify-center border transition-all cursor-pointer ${
+              /* composer-compact-more so the container query can bring it back.
+                 sm:hidden alone measures the viewport, while the rule that
+                 hides the desktop tool groups measures the workspace, and the
+                 two disagree whenever a sidebar or a split view makes the
+                 workspace narrower than the window. In that gap the desktop
+                 groups were hidden and this button - the only way to reach
+                 what they held - was hidden too, so Speak, Web, Compare,
+                 Attach and the language picker simply left the screen. */
+              className={`composer-compact-more sm:hidden h-8 w-8 rounded-xl shrink-0 flex items-center justify-center border transition-all cursor-pointer ${
                 mobileToolsOpen
                   ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-500 rotate-45'
                   : 'bg-zinc-200 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300'

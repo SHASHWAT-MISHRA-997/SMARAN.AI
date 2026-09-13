@@ -33,7 +33,21 @@ class RAGPipeline:
             self.chroma_manager = ChromaManager()
             logger.info("RAGPipeline initialized with Chroma vector engine fallback.")
         except Exception as e:
-            logger.error(f"Failed to initialize ChromaManager: {e}")
+            # The traceback, not just the message. This logged one line -
+            # "module 'google.protobuf.message' has no attribute
+            # 'FrozenInstanceError'" - which names a module that is not where
+            # the problem is: FrozenInstanceError belongs to attrs. Without the
+            # stack there is no way to tell which import actually failed, and
+            # the failure only happens inside the frozen app, where a debugger
+            # is not an option. Diagnosing it cost a full rebuild per guess.
+            logger.error("Failed to initialize ChromaManager: %s", e, exc_info=True)
+            # Say plainly what stops working, because nothing downstream will:
+            # add_chunks is guarded on this being set, so uploads keep
+            # returning 200 while indexing silently does nothing.
+            logger.error(
+                "Document indexing and retrieval are disabled for this run. "
+                "Uploads will appear to succeed and will not be searchable."
+            )
             self.chroma_manager = None
 
     def add_chunks(self, collection_id: int, document_id: int, chunk_ids: list[str], texts: list[str], embeddings: list[list[float]]):
