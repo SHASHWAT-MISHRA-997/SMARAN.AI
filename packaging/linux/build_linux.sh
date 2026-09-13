@@ -50,8 +50,31 @@ PY
 echo "[linux] packaging $APP_NAME $VERSION"
 
 # ── the frozen application ────────────────────────────────────────────────
-if [ ! -x "$FROZEN_DIR/$APP_NAME" ]; then
-    echo "[linux] building the application first"
+#
+# Rebuilt when it is missing *or* when what is there was frozen from a
+# different release. It used to be only the first, so a frozen app left by the
+# previous build was reused whole: 2.10.39's four packages were assembled
+# around 2.10.38's application, every one of them correctly labelled 2.10.39
+# and none of them containing a single fix from it. Nothing failed, and the
+# version stamped on the package is the one thing that cannot reveal it,
+# because that comes from the source tree rather than from the payload.
+#
+# Vite names its bundles with the version in them, so the payload states which
+# release it came from and can be asked directly.
+frozen_is_current() {
+    [ -x "$FROZEN_DIR/$APP_NAME" ] || return 1
+    ls "$FROZEN_DIR/_internal/frontend_dist/assets/" 2>/dev/null \
+        | grep -q -- "-v$VERSION-" || return 1
+}
+
+if ! frozen_is_current; then
+    if [ -x "$FROZEN_DIR/$APP_NAME" ]; then
+        stale="$(ls "$FROZEN_DIR/_internal/frontend_dist/assets/" 2>/dev/null \
+            | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -u | tr '\n' ' ')"
+        echo "[linux] frozen app holds ${stale:-an unreadable version}, need $VERSION - rebuilding"
+    else
+        echo "[linux] building the application first"
+    fi
     python3 build_exe.py --output-root "$BUILD_ROOT"
 fi
 test -x "$FROZEN_DIR/$APP_NAME" || {

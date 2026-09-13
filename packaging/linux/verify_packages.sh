@@ -42,4 +42,32 @@ dww=$(awk '{ if (substr($1,9,1) == "w") c++ } END { print c+0 }' /tmp/deblist.tx
 echo "entries: $dtotal, world-writable: $dww"
 
 echo "=== frontend bundle shipped inside the deb ==="
-grep -oE 'assets/index-v[0-9.]+-[A-Za-z0-9_-]+\.js' /tmp/deblist.txt | head -2
+BUNDLE="$(grep -oE 'assets/index-v[0-9.]+-[A-Za-z0-9_-]+\.js' /tmp/deblist.txt | head -1)"
+echo "${BUNDLE:-(none found)}"
+
+# This printed the bundle name and stopped, leaving a person to notice that it
+# disagreed with the package version. Nobody reliably does: 2.10.39's deb went
+# out declaring 2.10.39 around a 2.10.38 payload and the mismatch was two lines
+# apart in this very output. The check the header promises is now made here.
+failures=0
+note_failure() { echo "FAIL: $*"; failures=$((failures + 1)); }
+
+DEB_VERSION="$(dpkg-deb -f "$DEB_FILE" Version 2>/dev/null)"
+if [ -z "$BUNDLE" ]; then
+    note_failure "no frontend bundle found inside $DEB_FILE"
+elif ! printf '%s' "$BUNDLE" | grep -q -- "-v$DEB_VERSION-"; then
+    note_failure "$DEB_FILE declares $DEB_VERSION but ships $BUNDLE"
+fi
+
+# The permission counts were printed for a human too, and zero is the only
+# acceptable answer for either.
+[ "$ww" -eq 0 ]  || note_failure "$RPM_FILE has $ww world-writable entries"
+[ "$dww" -eq 0 ] || note_failure "$DEB_FILE has $dww world-writable entries"
+
+echo "=== result ==="
+if [ "$failures" -eq 0 ]; then
+    echo "OK: payload matches $DEB_VERSION, no world-writable entries"
+else
+    echo "$failures check(s) failed"
+fi
+exit "$failures"
