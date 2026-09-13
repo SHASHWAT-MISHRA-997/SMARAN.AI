@@ -34,15 +34,22 @@ def main() -> None:
     # stopped matching anything at all. This script then ran, printed the two
     # hashes it had computed, wrote the file back unchanged and exited zero.
     # Cache busting had been off for releases, and the output said it was on.
-    css_was, js_was = raw, raw
-    raw = re.sub(r'href="styles\.css(?:\?v=[^"]*)?"', f'href="styles.css?v={css}"', raw)
-    js_was = raw
-    raw = re.sub(r'src="main\.js(?:\?v=[^"]*)?"', f'src="main.js?v={js}"', raw)
+    # Counted, not compared.
+    #
+    # The check below first asked whether the text had changed, which is a
+    # different question and gets it wrong in the ordinary case: when the file
+    # has not been edited since the last stamp, the hash is the same, the
+    # substitution is a no-op, and an unchanged document was read as "matched
+    # nothing". It failed a release for a stylesheet that was perfectly fine.
+    raw, css_hits = re.subn(
+        r'href="styles\.css(?:\?v=[^"]*)?"', f'href="styles.css?v={css}"', raw)
+    raw, js_hits = re.subn(
+        r'src="main\.js(?:\?v=[^"]*)?"', f'src="main.js?v={js}"', raw)
 
     # And it says so rather than reporting success it cannot vouch for.
-    if css_was == js_was:
+    if not css_hits:
         raise SystemExit("stamp.py matched no stylesheet link in index.html")
-    if js_was == raw:
+    if not js_hits:
         raise SystemExit("stamp.py matched no main.js script tag in index.html")
 
     io.open(ROOT / "index.html", "w", encoding="utf-8", newline="").write(raw)
