@@ -149,14 +149,68 @@ export const DESIGN_TEMPLATES = [
   },
 ];
 
-const AVAILABLE_MODELS = [
-  { id: 'Auto', name: 'Auto (Smart Route)', desc: 'Automatically picks best design engine' },
-  { id: 'SMARAN Core', name: 'SMARAN Core (Llama 3.1)', desc: 'Fast local code and UI generation' },
-  { id: 'Claude 3.5 Sonnet', name: 'Claude 3.5 Sonnet', desc: 'Superior design aesthetics and code' },
-  { id: 'GPT-4o', name: 'GPT-4o (Omni)', desc: 'High-speed multimodal rendering' },
-  { id: 'Gemini 1.5 Pro', name: 'Gemini 1.5 Pro', desc: 'Huge context for full web apps' },
-  { id: 'Director AI', name: 'Director AI', desc: 'Autonomous multi-agent layout planner' }
-];
+/* The models this machine can really reach, discovered at runtime.
+ *
+ * This list used to be six fixed entries - SMARAN Core (Llama 3.1), Claude 3.5
+ * Sonnet, GPT-4o, Omni, Gemini 1.5 Pro, Director AI - and none of them was a
+ * model id anything would recognise. `model` is matched only against installed
+ * local models, so every one of those fell through to automatic routing:
+ * picking Claude and picking GPT-4o produced the same request and the same
+ * engine answered both. The picker changed nothing it claimed to change.
+ *
+ * Cloud models are not selected through `model` at all; they need
+ * cloud_provider, cloud_model and the key, which is why naming one there could
+ * never have worked. Local models come from the Ollama engine, cloud models
+ * from the providers that actually have a key saved.
+ */
+const AUTO_MODEL = { id: 'auto', name: 'Auto (Smart Route)', desc: 'Let SMARAN pick from what is available' };
+
+/* Embedding models answer nothing; offering one as a design engine would give
+   a picker entry that always fails. */
+const EMBEDDING_HINTS = ['embed', 'bge-', 'gte-'];
+
+/* The saved key for a provider, read at send time rather than held in state,
+   so a key added in Settings mid-session is picked up without a reload. */
+function cloudKeyFor(provider) {
+  try {
+    return (JSON.parse(localStorage.getItem('sm_cloud_api_keys') || '{}'))[provider] || '';
+  } catch {
+    return '';
+  }
+}
+
+async function discoverModels() {
+  const models = [AUTO_MODEL];
+
+  try {
+    const res = await fetchWithAuth(`${API_BASE}/api/models/engine`);
+    if (res.ok) {
+      const engine = await res.json();
+      (engine.models || [])
+        .filter((id) => !EMBEDDING_HINTS.some((hint) => id.toLowerCase().includes(hint)))
+        .forEach((id) => models.push({
+          id, name: id, desc: 'Installed locally, runs on this machine', local: true,
+        }));
+    }
+  } catch { /* no local engine; the cloud entries below may still apply */ }
+
+  try {
+    const keys = JSON.parse(localStorage.getItem('sm_cloud_api_keys') || '{}');
+    const byProvider = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}');
+    Object.entries(byProvider).forEach(([provider, list]) => {
+      if (!keys[provider]) return; // no key saved, so it cannot be used
+      (Array.isArray(list) ? list : []).slice(0, 8).forEach((model) => models.push({
+        id: `cloud:${provider}:${model}`,
+        name: model,
+        desc: `${provider} · uses your saved key`,
+        provider,
+        model,
+      }));
+    });
+  } catch { /* nothing cached yet */ }
+
+  return models;
+}
 
 // `onNavigate` and `onClose` are still passed by App but no longer read:
 // generating keeps you on this screen instead of sending you to chat.
@@ -164,7 +218,8 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
   const [prompt, setPrompt] = useState('');
   const [selectedSystem, setSelectedSystem] = useState(DESIGN_SYSTEMS[0]);
   const [isSystemOpen, setIsSystemOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('Auto');
+  const [selectedModel, setSelectedModel] = useState('auto');
+  const [models, setModels] = useState([AUTO_MODEL]);
   const [isModelOpen, setIsModelOpen] = useState(false);
   const [codeMode, setCodeMode] = useState(false);
   const [activeTab, setActiveTab] = useState('templates'); // 'templates' | 'systems' | 'projects'
@@ -183,6 +238,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
   const [genError, setGenError] = useState('');
   const abortRef = useRef(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => { discoverModels().then(setModels).catch(() => {}); }, []);
 
   const systemDropdownRef = useRef(null);
   const modelDropdownRef = useRef(null);
@@ -253,6 +309,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
          the sentence describing the system all sat unused in the object - so
          choosing Cyberpunk Neon over Minimal Clean changed one word of the
          prompt and the results looked much the same whichever was picked. */
+      const chosenModel = models.find((m) => m.id === selectedModel);
       const system = selectedSystem;
       const systemBrief =
         `Design system: ${system.name} - ${system.description}. `
@@ -289,11 +346,23 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
       const res = await fetchWithAuth(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        /* A cloud model is routed by provider, key and model name. Sending it
+           as `model` does nothing at all: the backend matches that field
+           against installed local models only, so anything it does not
+           recognise falls through to automatic routing - which is how this
+           picker came to change the label and nothing else. */
         body: JSON.stringify({
           session_id: session?.id,
           prompt: finalPrompt,
-          model: selectedModel === 'Auto' ? 'auto' : selectedModel,
           collections: [],
+          ...(chosenModel?.provider
+            ? {
+              model: 'auto',
+              cloud_provider: chosenModel.provider,
+              cloud_model: chosenModel.model,
+              cloud_api_key: cloudKeyFor(chosenModel.provider),
+            }
+            : { model: selectedModel || 'auto' }),
         }),
         signal: controller.signal,
       });
@@ -511,7 +580,12 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700/80 bg-zinc-50 dark:bg-zinc-800/60 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs text-zinc-700 dark:text-zinc-300 transition cursor-pointer"
                 >
                   <span className="text-[10px] text-zinc-400">Model:</span>
-                  <span className="font-semibold text-zinc-900 dark:text-white">{selectedModel}</span>
+                  {/* The entry's name, not its id: a cloud id reads
+                      "cloud:gemini:gemini-3.5-flash", which is routing detail
+                      rather than something to show on a button. */}
+                  <span className="font-semibold text-zinc-900 dark:text-white">
+                    {models.find((m) => m.id === selectedModel)?.name || selectedModel}
+                  </span>
                   <ChevronDown className="w-3 h-3 text-zinc-400" />
                 </button>
 
@@ -520,7 +594,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                     <div className="px-2 py-1 text-[10px] font-black uppercase text-zinc-400">
                       Select Generation Model
                     </div>
-                    {AVAILABLE_MODELS.map((m) => (
+                    {models.map((m) => (
                       <button
                         key={m.id}
                         onClick={() => {
