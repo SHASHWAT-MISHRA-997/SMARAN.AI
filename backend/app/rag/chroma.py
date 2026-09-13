@@ -18,6 +18,28 @@ try:
 except ImportError:
     pass
 
+# google.protobuf.message is imported here, before chromadb, on purpose.
+#
+# chromadb reaches protobuf through opentelemetry's OTLP exporter. protobuf
+# then probes for its compiled backend with
+# importlib.import_module('google._upb._message'), and in the frozen app that
+# probe raised AttributeError: module 'google.protobuf.message' has no
+# attribute 'FrozenInstanceError'. protobuf's _CanImport only catches
+# ImportError, so the AttributeError escaped and took the whole chromadb
+# import with it - and the RAG pipeline then ran with no vector store at all.
+#
+# It is an ordering problem, not a missing or mismatched file: the bundled
+# _upb binary is byte-identical to the installed one, neither mentions that
+# attribute, and the same import works from source. Under PyInstaller's
+# importer google.protobuf.message was still part-executed when the probe
+# reached back into it. Importing it to completion first removes the window.
+try:  # noqa: SIM105
+    import google.protobuf.message  # noqa: F401
+except Exception:  # noqa: BLE001
+    # Never the thing that stops the app: if protobuf is genuinely absent,
+    # chromadb below fails with its own, clearer message.
+    pass
+
 import chromadb
 from app.config import settings
 
