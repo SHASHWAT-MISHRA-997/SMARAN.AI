@@ -34,12 +34,16 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     image_path: Optional[str] = None
     seconds: float = Field(1.0, gt=0, le=60)
-    # Defaults match what was measured to produce usable output rather than
-    # the smallest thing that runs; below roughly 960x576 this model washes out.
-    width: int = Field(960, ge=128, le=1280)
-    height: int = Field(576, ge=128, le=1280)
+    # Left unset, these are chosen from the machine's own VRAM by
+    # planner.suggest(). They were once fixed at 960x576 and 40 steps for
+    # everybody, so a 6 GB card was asked for exactly what a 24 GB card was
+    # asked for: it still finished, by offloading, but took far longer than
+    # that card needed to - and a strong machine was never offered more than a
+    # weak one. An explicit value from the caller always wins.
+    width: Optional[int] = Field(None, ge=128, le=1280)
+    height: Optional[int] = Field(None, ge=128, le=1280)
     fps: int = Field(30, ge=8, le=30)
-    steps: int = Field(40, ge=1, le=100)
+    steps: Optional[int] = Field(None, ge=1, le=100)
     guidance_scale: float = Field(3.0, ge=0, le=20)
     seed: Optional[int] = None
 
@@ -100,6 +104,18 @@ def install_cancel():
     return cancel()
 
 
+@router.get("/suggested")
+async def suggested():
+    """What this machine will be asked for when the caller does not say.
+
+    Exposed so the interface can show it rather than leaving the user to guess
+    why their render is 704x448 on one computer and 1280x768 on another.
+    """
+    from .planner import suggest
+
+    return suggest()
+
+
 @router.get("/hardware")
 async def hardware():
     return probe().as_dict()
@@ -158,6 +174,17 @@ async def start(req: GenerateRequest):
     if not ready["recommended"]:
         blocked = [c["reason"] for c in ready["candidates"]] or ["No model available."]
         raise HTTPException(status_code=409, detail=blocked[0])
+
+    # Fill in anything the caller left to us, from this machine's hardware.
+    from .planner import suggest
+
+    tuned = suggest()
+    if req.width is None:
+        req.width = tuned["width"]
+    if req.height is None:
+        req.height = tuned["height"]
+    if req.steps is None:
+        req.steps = tuned["steps"]
 
     job_id = uuid.uuid4().hex[:12]
     out_dir = os.path.join(settings.DATA_DIR, "video")

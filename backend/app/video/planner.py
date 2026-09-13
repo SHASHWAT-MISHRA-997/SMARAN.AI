@@ -113,3 +113,61 @@ def plan(capability: str = "text-to-video", hw: Optional[Hardware] = None) -> di
             "this machine."
         ),
     }
+
+
+# Output size and step count scaled to the machine it will run on.
+#
+# These were fixed at 960x576 and 40 steps for everyone, so a 6 GB card was
+# asked for exactly what a 24 GB card was asked for. It still produced a video
+# - offloading makes it fit - but it took far longer than that card needed to,
+# and a strong machine was never offered anything better than a weak one.
+#
+# Keyed on total VRAM rather than free VRAM: total is what the device *is*,
+# free is whatever happens to be open this second and would make the same
+# machine give different answers on different days. The runtime offload
+# decision in ltx_engine still uses free VRAM, which is the right measure for
+# that question.
+#
+# The boundaries are chosen here, not published by any model author, and are
+# deliberately conservative: the cost of aiming slightly low is a faster video,
+# and the cost of aiming high is a job that crawls or dies.
+_TIERS = (
+    # (minimum total VRAM GB, width, height, steps, label)
+    (16.0, 1280, 768, 50, "16 GB or more"),
+    (10.0, 1152, 640, 40, "10 to 16 GB"),
+    (6.0,   960, 576, 30, "6 to 10 GB"),
+    (4.0,   704, 448, 25, "4 to 6 GB"),
+    (0.0,   512, 320, 20, "under 4 GB"),
+)
+
+
+def suggest(hw: Optional[Hardware] = None) -> dict:
+    """Defaults suited to this machine, with the reason stated."""
+    hw = hw or probe()
+
+    if not hw.has_cuda:
+        # No usable GPU: the smallest thing that could finish, and honest that
+        # it will be slow rather than quietly attempting a large render.
+        return {
+            "width": 512, "height": 320, "steps": 20, "fps": 24,
+            "tier": "no GPU",
+            "reason": (
+                "No CUDA GPU was detected, so this runs on the processor. "
+                "The smallest settings are used; expect it to be slow."
+            ),
+        }
+
+    for minimum, width, height, steps, label in _TIERS:
+        if hw.vram_total_gb >= minimum:
+            return {
+                "width": width, "height": height, "steps": steps, "fps": 24,
+                "tier": label,
+                "reason": (
+                    "%s reports %.1f GB of VRAM, which is the %s tier."
+                    % (hw.gpu_name or "This GPU", hw.vram_total_gb, label)
+                ),
+            }
+
+    # _TIERS ends at 0.0 so this is unreachable; kept so a future edit that
+    # removes that row fails loudly here instead of returning None.
+    raise RuntimeError("no tier matched %.1f GB" % hw.vram_total_gb)
