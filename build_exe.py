@@ -204,6 +204,19 @@ COLLECT_ALL = [
     # only --collect-all brings along.
     "onnxruntime",
     "g2p_en",
+    # ChromaDB imports google.protobuf, and collecting chromadb does not bring
+    # it: protobuf is a separate distribution living under the `google`
+    # namespace package, and PyInstaller took only its compiled `_upb`
+    # extension. `google.protobuf.message` then existed but was empty, so
+    # ChromaManager raised "no attribute 'FrozenInstanceError'" on startup and
+    # the pipeline set itself to None.
+    #
+    # Nothing failed after that. add_chunks is guarded by `and
+    # self.chroma_manager`, so uploading a document returned a normal 200 with
+    # a document record while indexing silently did nothing, and the assistant
+    # simply never cited a file the user had given it. Only visible in the
+    # frozen app - from source, protobuf is on the path and this works.
+    "google.protobuf",
 ]
 
 # Optional heavy dependencies that ChromaDB advertises but SMARAN.AI never uses:
@@ -336,11 +349,39 @@ def build(onefile: bool = False, output_root: str = ROOT, incremental: bool = Fa
             # 2.10.37 and 2.10.38, 14 MB of a folder the installer wraps
             # whole, and it would have kept growing with each release.
             #
-            # The delete still happens only after PyInstaller has returned
-            # zero, so a failed build leaves the previous one intact - which
-            # was the reason the merge was written this way to begin with.
-            shutil.rmtree(final, ignore_errors=True)
-            shutil.copytree(produced, final)
+            # Moved aside, not deleted in place.
+            #
+            # This first did rmtree(final, ignore_errors=True) followed by
+            # copytree. With the app running, Windows holds its files open:
+            # rmtree deleted what it could, swallowed the failures because of
+            # ignore_errors, and left a partial directory behind. copytree then
+            # died on it with FileExistsError - after the previous build had
+            # already been gutted. The running app started answering "SPA entry
+            # index.html not found in frontend_dist", because its own frontend
+            # had been deleted underneath it.
+            #
+            # os.rename is atomic and fails immediately if anything in the tree
+            # is locked, before a single file is lost. Only once the new build
+            # is safely in place is the old one removed.
+            previous = final + ".previous"
+            shutil.rmtree(previous, ignore_errors=True)
+            if os.path.isdir(final):
+                try:
+                    os.rename(final, previous)
+                except OSError as exc:
+                    raise SystemExit(
+                        "Cannot replace %s: %s\n"
+                        "SMARAN.AI is most likely still running - close it and "
+                        "build again. Nothing has been changed." % (final, exc)
+                    ) from exc
+            try:
+                shutil.copytree(produced, final)
+            except Exception:
+                # Put back what was there rather than leaving nothing.
+                if os.path.isdir(previous) and not os.path.isdir(final):
+                    os.rename(previous, final)
+                raise
+            shutil.rmtree(previous, ignore_errors=True)
         else:
             # --onefile produces a single executable, not a folder, so there
             # is no directory to create here - only dist/ itself, which the
