@@ -4491,7 +4491,18 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                  "result": None, "error": None,
                                  "started": time.time(), "updated": time.time()}
             _threading.Thread(target=_run,
-                              args=(job_id, GenerateRequest(prompt=clean_prompt), out_path),
+                              # seconds is named rather than left to default.
+                              # The default is 1.0, which snaps to 17 frames
+                              # and produced a 0.7 second clip - not what
+                              # anybody asking for "a video" means, and short
+                              # enough to read as a failed render rather than
+                              # a finished one. Two seconds costs roughly two
+                              # and a half times the work, which the estimate
+                              # now tells the user about up front. The size is
+                              # refitted around this frame count, so it stays
+                              # inside what the card can decode.
+                              args=(job_id, GenerateRequest(prompt=clean_prompt,
+                                                            seconds=2.0), out_path),
                               daemon=True).start()
 
             # This used to promise "a few minutes". On a 6 GB card a two second
