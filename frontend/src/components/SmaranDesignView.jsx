@@ -248,13 +248,40 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
       // session must not drag the view to the chat.
       const session = await onEnsureSession?.({ switchView: false });
       controller.signal.throwIfAborted();
+      /* The design system is described, not just named.
+         Only `System=<name>` used to be sent, while the palette, the fonts and
+         the sentence describing the system all sat unused in the object - so
+         choosing Cyberpunk Neon over Minimal Clean changed one word of the
+         prompt and the results looked much the same whichever was picked. */
+      const system = selectedSystem;
+      const systemBrief =
+        `Design system: ${system.name} - ${system.description}. `
+        + `Build the palette from ${system.colors.join(', ')}. `
+        + `Typography in the spirit of ${system.font}.`;
+
+      /* A seed, so the same brief twice does not return the same page twice.
+         Nothing here tells the model what to draw; it exists only to break the
+         tie toward whichever layout it would otherwise always reach for. */
+      const variantSeed = Math.random().toString(36).slice(2, 8);
+
       const finalPrompt =
-        `[SMARAN Design: System=${selectedSystem.name}, Mode=${codeMode ? 'Code' : 'Visual'}]
+        `[SMARAN Design: System=${system.name}, Mode=${codeMode ? 'Code' : 'Visual'}, Variant=${variantSeed}]
 
 `
         + `${prompt.trim()}
 
 `
+        + `${systemBrief}
+
+`
+        + 'Follow the brief above closely - its subject, its wording and anything it asks for '
+        + 'specifically should be visible in the result, not replaced by a generic equivalent.\n\n'
+        + 'Production grade, not a demo: real content rather than lorem ipsum, a considered '
+        + 'type scale and spacing rhythm, states for anything interactive, and a layout that '
+        + 'works from 360px to widescreen.\n\n'
+        + 'Compose a distinct layout for this brief rather than the usual centred hero over '
+        + 'three feature cards. Vary the structure, the focal point and the rhythm from what '
+        + 'you would produce by default.\n\n'
         + 'Return one complete, self-contained HTML document in a single ```html fenced block. '
         + 'Inline all CSS and JavaScript so it renders on its own with no build step and no external files. '
         + 'Do not split it across several blocks.';
