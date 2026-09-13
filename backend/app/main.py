@@ -4494,8 +4494,15 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                               args=(job_id, GenerateRequest(prompt=clean_prompt), out_path),
                               daemon=True).start()
 
+            # This used to promise "a few minutes". On a 6 GB card a two second
+            # clip measured just over two hours, so that was not an
+            # approximation, it was wrong by two orders of magnitude - and a
+            # user told minutes abandons it, or restarts the app, long before
+            # there is anything to see. The job itself now states a figure
+            # calibrated on a timed run, and it is streamed from `messages`
+            # just below, so nothing is claimed here that the job cannot back.
             yield json.dumps({"token": "Making this with " + str(ready["recommended"])
-                                       + " on your own GPU. It takes a few minutes.\n\n"}) + "\n"
+                                       + " on your own GPU.\n\n"}) + "\n"
 
             seen = 0
             while True:

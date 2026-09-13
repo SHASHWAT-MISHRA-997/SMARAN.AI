@@ -130,6 +130,22 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
             _jobs[job_id]["updated"] = time.time()
         logger.info("video job %s: %s", job_id, message)
 
+    # Filled in here, not in the route, because two different callers start
+    # jobs: POST /api/video/generate, and the chat path in main.py, which
+    # builds a GenerateRequest from the prompt alone. Once width, height and
+    # steps became optional, filling them only in the route left the chat path
+    # handing None to the engine, which failed on the first arithmetic it did
+    # with them - so asking for a video in chat crashed the job outright.
+    from .planner import suggest
+
+    tuned = suggest()
+    if req.width is None:
+        req.width = tuned["width"]
+    if req.height is None:
+        req.height = tuned["height"]
+    if req.steps is None:
+        req.steps = tuned["steps"]
+
     # Said before the first slow step, not after it. The whole point is to
     # reach the user while they are deciding whether the app has hung.
     try:
@@ -189,17 +205,8 @@ async def start(req: GenerateRequest):
         blocked = [c["reason"] for c in ready["candidates"]] or ["No model available."]
         raise HTTPException(status_code=409, detail=blocked[0])
 
-    # Fill in anything the caller left to us, from this machine's hardware.
-    from .planner import suggest
-
-    tuned = suggest()
-    if req.width is None:
-        req.width = tuned["width"]
-    if req.height is None:
-        req.height = tuned["height"]
-    if req.steps is None:
-        req.steps = tuned["steps"]
-
+    # Anything the caller left to us is filled from this machine's hardware in
+    # _run, which is the one path every job goes through.
     job_id = uuid.uuid4().hex[:12]
     out_dir = os.path.join(settings.DATA_DIR, "video")
     os.makedirs(out_dir, exist_ok=True)

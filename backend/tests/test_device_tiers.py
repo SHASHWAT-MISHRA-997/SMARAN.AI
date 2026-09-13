@@ -154,6 +154,51 @@ def test_the_offload_threshold_is_shared_with_the_engine():
     assert ltx_engine.RESIDENT_VRAM_GB is RESIDENT_VRAM_GB
 
 
+def test_a_job_started_with_only_a_prompt_still_gets_real_settings():
+    """The chat path builds GenerateRequest(prompt=...) and nothing else.
+
+    When width, height and steps became optional, only the HTTP route filled
+    them in, so that caller handed None to the engine and every video asked
+    for in chat died on the first arithmetic done with them. The defaults must
+    be applied on the path every job shares, not on one of the two entrances.
+    """
+    import time
+
+    from app.video.routes import GenerateRequest, _jobs, _run
+
+    req = GenerateRequest(prompt="a paper boat in the rain")
+    assert req.width is None and req.height is None and req.steps is None
+
+    # Both real callers register the record before starting the thread.
+    _jobs["testjob"] = {
+        "id": "testjob", "status": "running", "messages": [], "result": None,
+        "error": None, "started": time.time(), "updated": time.time(),
+    }
+
+    seen = {}
+
+    def fake_generate(**kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop here; the engine itself is not under test")
+
+    import app.video.ltx_engine as engine
+
+    original, engine.generate = engine.generate, fake_generate
+    try:
+        _run("testjob", req, "unused.mp4")
+    finally:
+        engine.generate = original
+
+    for key in ("width", "height", "steps"):
+        assert isinstance(seen.get(key), int) and seen[key] > 0, (
+            "%s reached the engine as %r" % (key, seen.get(key))
+        )
+
+    # And the user is told how long it will take before the slow part starts.
+    assert _jobs["testjob"]["messages"], "the job said nothing before working"
+    del _jobs["testjob"]
+
+
 def test_settings_never_exceed_what_the_request_model_accepts():
     """suggest() feeds GenerateRequest, whose bounds would reject bad values."""
     from app.video.routes import GenerateRequest
