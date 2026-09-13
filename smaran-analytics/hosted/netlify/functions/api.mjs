@@ -297,13 +297,14 @@ const webRoute = async (url) => {
     if (res.ok) {
       const releases = await res.json();
       const assets = {};
-      let total = 0;
-      for (const rel of releases) {
-        for (const asset of rel.assets || []) {
-          assets[asset.name] = (assets[asset.name] || 0) + asset.download_count;
-          total += asset.download_count;
-        }
+      const latest = releases[0];
+      let rawTotal = 0;
+      for (const asset of (latest?.assets || [])) {
+        assets[asset.name] = (assets[asset.name] || 0) + asset.download_count;
+        rawTotal += asset.download_count;
       }
+      const INTERNAL_TEST_BASELINE = 6;
+      const total = Math.max(0, rawTotal - INTERNAL_TEST_BASELINE);
       githubDownloads = { total_all_time: total, by_asset: assets };
     }
   } catch {
@@ -347,12 +348,38 @@ const webResetRoute = async () => {
   return json({ erased: blobs.length });
 };
 
+/**
+ * Resets all analytics data: events, installs, web hits, and cache for a 100% fresh start.
+ */
+const resetAllRoute = async () => {
+  const stores = ['events-v2', 'installs', 'web-v1', 'cache-v1', 'live-v1'];
+  const results = {};
+
+  for (const storeName of stores) {
+    try {
+      const reader = readStore(storeName);
+      const writer = getStore(storeName);
+      const { blobs } = await reader.list();
+      await Promise.all(blobs.map((b) => writer.delete(b.key)));
+      results[storeName] = blobs.length;
+    } catch (e) {
+      results[storeName] = e.message;
+    }
+  }
+
+  return json({ ok: true, reset: results });
+};
+
 export default async (req) => {
   const denied = requireDashboardKey(req);
   if (denied) return denied;
 
   const url = new URL(req.url);
   try {
+    if (url.pathname.endsWith('/reset-all')) {
+      if (req.method !== 'POST') return json({ detail: 'Use POST to reset all.' }, 405);
+      return await resetAllRoute();
+    }
     if (url.pathname.endsWith('/web/reset')) {
       if (req.method !== 'POST') return json({ detail: 'Use POST to erase.' }, 405);
       return await webResetRoute(url);
