@@ -507,6 +507,8 @@ Build what the brief asks for, in full:
 - Responsive down to 360px wide, with the navigation and any grid actually reflowing.
 - Working interaction where the brief implies it: a mobile menu that opens, tabs that switch, a form that validates, written in plain JavaScript.
 
+Compose this one for its own brief. Do not reach for the arrangement you would produce by default - vary the structure, where the eye lands first, and the rhythm between sections, so two different briefs do not come back as the same page with the words swapped.
+
 The <title> and the main heading must be the site name you are given, exactly. Never put your own name, or the name of the model you are, anywhere in the page."""
 
 POLISH_INSTRUCTIONS = """You are a design director reviewing a finished web page before it ships.

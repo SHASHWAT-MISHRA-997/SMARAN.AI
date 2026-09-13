@@ -400,19 +400,50 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
   useEffect(() => {
     if (!isOpen) return;
 
-    // Detect live client hardware specs
+    /* The machine's own figures, from the backend that can actually see them.
+       This panel asked detectClientDevice() alone, which runs in the page: a
+       browser cannot read VRAM, installed RAM or a CPU model, so GPU VRAM,
+       System RAM, GPU Device and CPU Architecture all read "Not reported" -
+       while the performance strip above the chat, fed by /api/telemetry, was
+       showing "RTX 2060" and "10.8/15.4GB" on the same screen at the same
+       moment. The endpoint returns these under the very names used here. */
+    fetch(`${API_BASE}/api/telemetry`, { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((t) => {
+        if (!t) return;
+        setDeviceSpecs((prev) => ({
+          ...prev,
+          gpu_name: t.gpu_name || prev.gpu_name,
+          gpu_vram_total: t.gpu_vram_total ?? prev.gpu_vram_total,
+          gpu_vram_used: t.gpu_vram_used ?? prev.gpu_vram_used,
+          memory_total_gb: t.memory_total_gb ?? prev.memory_total_gb,
+          memory_used_gb: t.memory_used_gb ?? prev.memory_used_gb,
+          cpu_name: t.cpu_name || prev.cpu_name,
+          cpu_threads: t.cpu_threads || prev.cpu_threads,
+        }));
+      })
+      .catch(() => {});
+
+    // Client-side detection still supplies the things only the page knows,
+    // such as which OS is rendering it and whether this is a laptop.
     detectClientDevice().then((info) => {
       if (info) {
         setDeviceSpecs((prev) => ({
           ...prev,
-          client_os: info.os ? `${info.os} (${info.deviceType || 'Laptop'})` : "Not reported",
-          gpu_name: info.gpu?.name || "Not reported",
-          gpu_vram_total: info.gpu?.vram_total ?? null,
-          gpu_vram_used: info.gpu?.vram_used ?? null,
-          memory_total_gb: info.memory?.total_gb ?? null,
-          memory_used_gb: info.memory?.used_gb ?? null,
-          cpu_name: info.cpu?.name || "Not reported",
-          cpu_threads: info.cpu?.threads || (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : null) || null,
+          /* Falls back to what is already there rather than to null.
+             These two requests race, and this one used to assign "Not
+             reported" and null unconditionally - so whenever the page won,
+             it erased the real figures the backend had just supplied. Each
+             field now yields to a value it cannot better. */
+          client_os: info.os ? `${info.os} (${info.deviceType || 'Laptop'})` : prev.client_os,
+          gpu_name: info.gpu?.name || prev.gpu_name,
+          gpu_vram_total: info.gpu?.vram_total ?? prev.gpu_vram_total,
+          gpu_vram_used: info.gpu?.vram_used ?? prev.gpu_vram_used,
+          memory_total_gb: info.memory?.total_gb ?? prev.memory_total_gb,
+          memory_used_gb: info.memory?.used_gb ?? prev.memory_used_gb,
+          cpu_name: info.cpu?.name || prev.cpu_name,
+          cpu_threads: info.cpu?.threads || prev.cpu_threads
+            || (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : null) || null
         }));
       }
     }).catch(() => {});
