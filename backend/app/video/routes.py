@@ -130,6 +130,20 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
             _jobs[job_id]["updated"] = time.time()
         logger.info("video job %s: %s", job_id, message)
 
+    # Said before the first slow step, not after it. The whole point is to
+    # reach the user while they are deciding whether the app has hung.
+    try:
+        from .planner import estimate_seconds
+
+        note(estimate_seconds(
+            width=req.width, height=req.height, steps=req.steps,
+            seconds=req.seconds, fps=req.fps,
+        )["text"])
+    except Exception:  # noqa: BLE001
+        # An estimate is a courtesy; failing to produce one must never stop the
+        # generation the user actually asked for.
+        logger.warning("video job %s: could not estimate duration", job_id, exc_info=True)
+
     try:
         result = generate(
             prompt=req.prompt,

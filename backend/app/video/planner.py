@@ -20,6 +20,31 @@ from .registry import MODELS, VideoModel, by_id
 # one wherever it reaches the user.
 VRAM_HEADROOM_GB = 1.5
 
+# Above this much VRAM the whole pipeline is kept on the card, which is far
+# faster. Below it, layers are streamed on as they execute.
+#
+# It lives here rather than in ltx_engine because two different questions need
+# it and they need different measures of "how much". ltx_engine asks "can I
+# keep this resident right now?" and so uses *free* VRAM. estimate_seconds()
+# asks "will this machine ever run resident?", which is a property of the card
+# and so uses *total* - otherwise the same machine would quote wildly
+# different times depending on what else happened to be open.
+RESIDENT_VRAM_GB = 12.0
+
+# How much work this gets through per second, measured rather than assumed.
+#
+# One clip was timed end to end on an RTX 2060 (6 GB, sequential offload):
+# 960x576, 57 frames, 30 steps. That is 945.6 million pixel-frame-steps, and
+# it took over two hours, which is roughly 130 thousand per second.
+#
+# Work really does scale with the product of those four numbers - halving the
+# steps halves the diffusion loop, halving the area halves the work per step -
+# so extrapolating along them is sound. Extrapolating to a *different class of
+# card* is not, which is why a machine fast enough to run resident is given
+# this figure as an upper bound rather than a prediction: it will beat it,
+# by an amount this code does not pretend to know.
+_OFFLOAD_UNITS_PER_SEC = 130_000.0
+
 
 @dataclass
 class Verdict:
@@ -171,3 +196,89 @@ def suggest(hw: Optional[Hardware] = None) -> dict:
     # _TIERS ends at 0.0 so this is unreachable; kept so a future edit that
     # removes that row fails loudly here instead of returning None.
     raise RuntimeError("no tier matched %.1f GB" % hw.vram_total_gb)
+
+
+def _round_frames(seconds: float, fps: int) -> int:
+    """The frame count the engine will actually use.
+
+    Estimating against the requested length rather than the real one would
+    quote a time for a clip nobody is making: the architecture needs 8n+1
+    frames, so 2 seconds at 30 fps is 57 frames, not 60.
+    """
+    frames = max(9, int(seconds * fps))
+    return ((frames - 1) // 8) * 8 + 1
+
+
+def estimate_seconds(
+    width: int,
+    height: int,
+    steps: int,
+    seconds: float,
+    fps: int,
+    hw: Optional[Hardware] = None,
+) -> dict:
+    """Roughly how long a generation will take, and how much to trust it.
+
+    A job that reports only "running" is indistinguishable from a job that has
+    hung. This one takes over two hours on a 6 GB card for under two seconds
+    of video, and with nothing else on screen the only rational conclusion a
+    user can draw is that the app is broken. It is not - but being right is no
+    use if nothing says so.
+
+    Deliberately coarse. It is derived from one timed run on one card, and the
+    caller is told which kind of number it is getting rather than being handed
+    a precise-looking figure that is not.
+    """
+    hw = hw or probe()
+    frames = _round_frames(seconds, fps)
+    units = float(width) * float(height) * float(frames) * float(steps)
+    predicted = units / _OFFLOAD_UNITS_PER_SEC
+
+    if not hw.has_cuda:
+        # No measurement exists for CPU-only, and a made-up one would be worse
+        # than none: it would be wrong by an unknown factor in an unknown
+        # direction. Say so instead.
+        return {
+            "seconds": None,
+            "bound": "unknown",
+            "text": (
+                "This runs on the processor, which has not been timed here. "
+                "Expect hours rather than minutes."
+            ),
+        }
+
+    if hw.vram_total_gb >= RESIDENT_VRAM_GB:
+        return {
+            "seconds": round(predicted),
+            "bound": "at most",
+            "text": (
+                "Should take under %s. This card is large enough to hold the "
+                "model in VRAM, which is considerably faster than the machine "
+                "this estimate was measured on, so it should beat that "
+                "comfortably." % _human(predicted)
+            ),
+        }
+
+    return {
+        "seconds": round(predicted),
+        "bound": "about",
+        "text": (
+            "Expect roughly %s. The model does not fit in %.1f GB, so layers "
+            "are streamed onto the card as they run, which is what makes it "
+            "slow. It is working even while nothing appears to change."
+            % (_human(predicted), hw.vram_total_gb)
+        ),
+    }
+
+
+def _human(secs: float) -> str:
+    """A duration a person can act on: whether to wait, or come back later."""
+    if secs < 90:
+        return "%d seconds" % round(secs)
+    minutes = secs / 60.0
+    if minutes < 90:
+        return "%d minutes" % round(minutes)
+    hours = minutes / 60.0
+    # "1.5 hours" reads better than "90 minutes" at this end of the scale, and
+    # rounding to whole hours would turn 2.4 hours into "2 hours".
+    return "%.1f hours" % hours

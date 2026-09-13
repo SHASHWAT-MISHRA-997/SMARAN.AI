@@ -21,7 +21,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.video.hardware import Hardware  # noqa: E402
-from app.video.planner import suggest  # noqa: E402
+from app.video.planner import RESIDENT_VRAM_GB, estimate_seconds, suggest  # noqa: E402
 
 
 def gpu(total_gb, name="Test GPU"):
@@ -81,6 +81,77 @@ def test_the_reason_names_the_card_so_a_user_can_tell_why():
     out = suggest(gpu(6.0, name="NVIDIA GeForce RTX 2060"))
     assert "RTX 2060" in out["reason"]
     assert "6.0" in out["reason"]
+
+
+def cpu_only():
+    return Hardware(
+        has_cuda=False, gpu_name="", vram_total_gb=0.0, vram_free_gb=0.0,
+        compute_capability=None, supports_bfloat16=False,
+        torch_version="2.14.0+cpu", torch_is_cuda_build=False, disk_free_gb=50.0,
+    )
+
+
+def test_the_estimate_reproduces_the_run_it_was_measured_from():
+    """The calibration run: 960x576, 57 frames, 30 steps on a 6 GB card took
+    just over two hours. If a change makes that come out as twenty minutes,
+    the constant has been broken and users will be told a comforting lie."""
+    out = estimate_seconds(width=960, height=576, steps=30, seconds=2, fps=30,
+                           hw=gpu(6.0))
+    assert out["seconds"] is not None
+    hours = out["seconds"] / 3600.0
+    assert 1.5 <= hours <= 3.0, "estimated %.2f h for the timed run" % hours
+
+
+def test_a_longer_or_larger_job_is_never_estimated_as_quicker():
+    base = dict(width=704, height=448, steps=20, seconds=2, fps=30, hw=gpu(6.0))
+    baseline = estimate_seconds(**base)["seconds"]
+    for bigger in ("width", "height", "steps", "seconds"):
+        harder = dict(base)
+        harder[bigger] = base[bigger] * 2
+        assert estimate_seconds(**harder)["seconds"] > baseline, bigger
+
+
+def test_a_card_that_holds_the_model_is_promised_no_more_than_the_slow_one():
+    """A large card is given the measured figure as a ceiling, not a forecast.
+    Quoting it a faster time would mean inventing a speedup nobody measured."""
+    small = estimate_seconds(width=960, height=576, steps=30, seconds=2, fps=30,
+                             hw=gpu(RESIDENT_VRAM_GB - 1))
+    large = estimate_seconds(width=960, height=576, steps=30, seconds=2, fps=30,
+                             hw=gpu(RESIDENT_VRAM_GB + 1))
+    assert large["bound"] == "at most"
+    assert small["bound"] == "about"
+    assert large["seconds"] <= small["seconds"]
+
+
+def test_an_untimed_machine_is_told_so_rather_than_given_a_number():
+    out = estimate_seconds(width=512, height=320, steps=20, seconds=2, fps=24,
+                           hw=cpu_only())
+    assert out["seconds"] is None
+    assert out["bound"] == "unknown"
+
+
+def test_the_estimate_says_something_a_person_can_act_on():
+    for total in (6.0, 24.0):
+        text = estimate_seconds(width=960, height=576, steps=30, seconds=2,
+                                fps=30, hw=gpu(total))["text"]
+        assert any(unit in text for unit in ("second", "minute", "hour")), text
+
+
+def test_the_estimate_counts_the_frames_the_engine_will_really_make():
+    """Frame count is snapped to 8n+1, so 2 s at 30 fps is 57 frames, not 60.
+    Estimating against 60 would quote a time for a clip nobody is making."""
+    from app.video.planner import _round_frames
+
+    assert _round_frames(2, 30) == 57
+    assert (_round_frames(2, 30) - 1) % 8 == 0
+
+
+def test_the_offload_threshold_is_shared_with_the_engine():
+    """The user is told 'this is slow because it does not fit'. That claim is
+    only true if the same threshold decided to offload."""
+    from app.video import ltx_engine
+
+    assert ltx_engine.RESIDENT_VRAM_GB is RESIDENT_VRAM_GB
 
 
 def test_settings_never_exceed_what_the_request_model_accepts():

@@ -31,17 +31,21 @@ import threading
 from typing import Callable, Optional
 
 from .hardware import Hardware, probe
-from .planner import evaluate
+from .planner import RESIDENT_VRAM_GB, evaluate
 from .registry import by_id
 
 logger = logging.getLogger(__name__)
 
 MODEL_ID = "ltx-video"
 
-# Above this much free VRAM the pipeline is kept resident, which is faster.
-# Below it, layers are moved in as needed. The number is a threshold this code
-# chooses, not a figure from the model card, and it is described that way.
-RESIDENT_VRAM_GB = 12.0
+# RESIDENT_VRAM_GB is defined in planner so that the runtime decision made here
+# and the time estimate quoted to the user cannot drift apart: a user told "this
+# will be slow because it does not fit" must be told that by the same threshold
+# that actually decides to offload. The number is a threshold this code chooses,
+# not a figure from the model card, and it is described that way.
+#
+# Note the measure differs by design: here it is *free* VRAM, because the
+# question is whether it fits right now. The estimate uses total. See planner.
 
 _pipes: dict = {}
 _pipe_lock = threading.Lock()
