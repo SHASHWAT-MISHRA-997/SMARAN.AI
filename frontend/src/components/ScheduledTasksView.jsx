@@ -8,7 +8,6 @@ const DEFAULT_SCHEDULED_TASKS = [
     prompt: 'Analyze modified files from the past 24 hours, identify code smells, performance bottlenecks, and potential security vulnerabilities. Generate a clean markdown report.',
     schedule: 'Daily at 09:00 AM',
     cron: '0 9 * * *',
-    model: 'SMARAN Core',
     active: true,
     lastRun: 'Today, 09:00 AM',
     nextRun: 'Tomorrow, 09:00 AM',
@@ -20,7 +19,6 @@ const DEFAULT_SCHEDULED_TASKS = [
     prompt: 'Check package.json and requirements.txt for outdated packages or known security advisories. Summarize recommended upgrades.',
     schedule: 'Every 6 hours',
     cron: '0 */6 * * *',
-    model: 'Claude 3.5 Sonnet',
     active: true,
     lastRun: '2 hours ago',
     nextRun: 'in 4 hours',
@@ -32,7 +30,6 @@ const DEFAULT_SCHEDULED_TASKS = [
     prompt: 'Summarize system architectural changes, outstanding PR notes, and roadmap priorities into actionable morning brief items.',
     schedule: 'Weekdays at 08:30 AM',
     cron: '30 8 * * 1-5',
-    model: 'Auto',
     active: false,
     lastRun: 'Yesterday, 08:30 AM',
     nextRun: 'Paused',
@@ -44,7 +41,6 @@ const DEFAULT_SCHEDULED_TASKS = [
     prompt: 'Inspect temp test logs, expired cache objects, and build output directories. Recommend safe cleanups.',
     schedule: 'Weekly on Sundays',
     cron: '0 0 * * 0',
-    model: 'Llama 3.1 8B',
     active: true,
     lastRun: '3 days ago',
     nextRun: 'Sunday at 12:00 AM',
@@ -73,7 +69,6 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
   const [taskName, setTaskName] = useState('');
   const [taskPrompt, setTaskPrompt] = useState('');
   const [taskSchedule, setTaskSchedule] = useState('Daily at 09:00 AM');
-  const [taskModel, setTaskModel] = useState('Auto');
 
   useEffect(() => {
     try {
@@ -107,7 +102,10 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
     showToast(`Executing "${task.name}" now...`);
     try {
       const session = await onEnsureSession?.();
-      const promptText = `[Scheduled Task Triggered: ${task.name}]\nModel: ${task.model}\n\n${task.prompt}`;
+      // No model name in the prompt. It named a model nothing routed to, so
+      // all it did was put a misleading line in front of the instruction the
+      // model actually reads.
+      const promptText = `[Scheduled Task Triggered: ${task.name}]\n\n${task.prompt}`;
       localStorage.setItem('sm_pending_prompt', promptText);
       // Same reason as Design Studio: ChatArea is unmounted while this
       // view is open, so the event below has no listener. Running a task
@@ -136,7 +134,6 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
     setTaskName('');
     setTaskPrompt('');
     setTaskSchedule('Daily at 09:00 AM');
-    setTaskModel('Auto');
     setShowModal(true);
   };
 
@@ -145,7 +142,6 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
     setTaskName(task.name);
     setTaskPrompt(task.prompt);
     setTaskSchedule(task.schedule);
-    setTaskModel(task.model);
     setShowModal(true);
   };
 
@@ -162,7 +158,6 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
                 name: taskName.trim(),
                 prompt: taskPrompt.trim(),
                 schedule: taskSchedule,
-                model: taskModel,
               }
             : t
         )
@@ -175,7 +170,6 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
         prompt: taskPrompt.trim(),
         schedule: taskSchedule,
         cron: '0 9 * * *',
-        model: taskModel,
         active: true,
         lastRun: 'Never',
         nextRun: 'Upcoming',
@@ -316,9 +310,6 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
                       >
                         {task.active ? 'Active' : 'Paused'}
                       </span>
-                      <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-md">
-                        {task.model}
-                      </span>
                     </div>
 
                     <p className="text-xs text-zinc-600 dark:text-zinc-400 line-clamp-2 leading-relaxed mb-3">
@@ -437,21 +428,20 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
                 </select>
               </div>
 
+              {/* The model dropdown that stood here could not choose a model.
+                  A task hands its prompt to the chat view and that decides
+                  what answers, so all the selection ever did was write
+                  "Model: Claude 3.5 Sonnet" into the prompt text - four of
+                  its five options were not model names anything recognised
+                  anyway. Offering a choice that cannot be honoured is worse
+                  than not offering one, so it says what really happens. */}
               <div>
                 <label className="block font-bold text-zinc-700 dark:text-zinc-300 mb-1">
                   AI Model
                 </label>
-                <select
-                  value={taskModel}
-                  onChange={(e) => setTaskModel(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 outline-none focus:border-indigo-500"
-                >
-                  <option value="Auto">Auto (Smart Routing)</option>
-                  <option value="SMARAN Core">SMARAN Core (Llama 3.1 8B)</option>
-                  <option value="Claude 3.5 Sonnet">Claude 3.5 Sonnet</option>
-                  <option value="GPT-4o">GPT-4o</option>
-                  <option value="Gemini 1.5 Pro">Gemini 1.5 Pro</option>
-                </select>
+                <p className="px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400">
+                  Runs with whichever model Chat is set to when the task fires.
+                </p>
               </div>
 
               <div>

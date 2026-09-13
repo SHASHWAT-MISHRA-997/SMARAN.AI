@@ -1012,7 +1012,11 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                 <strong>2. Pick a Design System:</strong> Apply tokens from Modernist, Cyberpunk, Nordic SaaS, or Minimal Clean to style your layout automatically.
               </p>
               <p>
-                <strong>3. Select AI Model:</strong> Pick Auto, Claude 3.5 Sonnet, GPT-4o, or SMARAN Core depending on your project needs.
+                {/* Named four models that were never in the picker and are
+                    not there now. Instructions that name specific options
+                    have to be rewritten whenever the options change, so this
+                    describes what the list contains instead. */}
+                <strong>3. Select AI Model:</strong> Leave it on Auto, or choose one of the models this machine can actually reach — whatever is installed locally, plus any cloud provider whose key you have saved.
               </p>
               <p>
                 <strong>4. Full Artifact Generation:</strong> SMARAN compiles interactive HTML/CSS/JS web applications, wireframes, and live previews ready to export.
