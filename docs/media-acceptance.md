@@ -1,4 +1,4 @@
-# Video generation — acceptance evidence
+# Video and image generation — acceptance evidence
 
 Measured on the machine this was built for: **RTX 2060, 6 GB VRAM, 16.6 GB
 system RAM, Windows 11**. Every number below was produced by running the
@@ -162,9 +162,58 @@ Each would have been silent:
 5. A huge request started its frame search at 2.4 million frames and stepped
    down by 8 — about 180 million iterations. 322 s → 0.104 s.
 
+## 11. Images
+
+Measured on the same machine, Stable Diffusion 1.5 at 20 steps:
+
+| Size | Time | Peak VRAM |
+|---|---|---|
+| 512 | 7.1 s | 2.08 GB |
+| 640 | 9.8 s | 2.50 GB |
+| 768 | 15.3 s | 3.25 GB |
+| 896 | 52.3 s | 4.46 GB |
+| 1024 | **339.2 s** | 6.30 GB — past the card, so it thrashes |
+
+The default was **384×384 with a hard ceiling of 512**. It is now 768, chosen
+from free VRAM against those peaks. SD 1.5 is capped at 768 whatever the card
+holds: past roughly its training resolution it draws a second head rather than
+more detail, so more pixels would be a worse picture, not a sharper one.
+
+**The shipped defaults returned a black image.** Same prompt, same card, same
+model, both measured from the files on disk:
+
+| | Before | After |
+|---|---|---|
+| Size | 384×384 | 768×768 |
+| Bytes | **509** | 1,222,980 |
+| Mean pixel value | **0.00** | 112.61 |
+| Every pixel identical | **yes** | no |
+| Time | 44 s | 18 s |
+
+Two steps through SD 1.5 produces noise, the safety checker reads noise as a
+false positive and substitutes a black frame, and that was saved and reported
+as the finished picture. Steps and guidance now follow the model family — a
+turbo model wants 4 steps at guidance 0, SD 1.5 wants 25 at 7.5 — and a blank
+frame is refused rather than saved.
+
+Shape: 1:1, 16:9, 9:16, 4:3, 3:4, every size a multiple of 8.
+QHD/4K/8K are Lanczos enlargement, and the result says so in the same breath
+as the size.
+
+Read correctly from a prompt: `"4K"`, `"QHD"`, `"8K"`, `"HD"`, `"UHD"`,
+`"portrait photo"`, `"landscape image"`, `"square picture"`.
+Correctly **not** read, with the prompt left byte-identical:
+`"a portrait of a woman"`, `"a photo of a mountain landscape"`,
+`"a painting of a wide valley"`, `"a square table in a sunlit room"`.
+
+The model is whichever is already on disk, so asking for a picture never
+starts an unannounced download.
+
 ## Not done
 
-* Native QHD/4K/8K rendering — impossible on this card, see §5.
+* Native QHD/4K/8K rendering, for video or for images — this card cannot do
+  either, see §5 and §11. Both are offered as enlargement, labelled as such.
 * A five minute clip has not been *run*, only planned. At ~175 h it has not
   been started, and the estimate is labelled "at most".
-* Image generation from a prompt is not covered by this document.
+* Image detail beyond 768 would need a different model (SDXL) or a tiled
+  refine pass. Neither is installed, and neither is fetched without asking.
