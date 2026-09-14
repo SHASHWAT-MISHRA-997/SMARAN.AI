@@ -2699,40 +2699,6 @@ def _is_vision_model(model_id: str) -> bool:
     return any(ind in mid for ind in vision_indicators)
 
 
-def generate_fallback_image(prompt: str) -> str:
-    import uuid
-    from PIL import Image, ImageDraw
-    img = Image.new("RGB", (512, 512), "#1e1e2f")
-    draw = ImageDraw.Draw(img)
-    for i in range(0, 512, 32):
-        draw.line([(i, 0), (i, 512)], fill="#2d2d44")
-        draw.line([(0, i), (512, i)], fill="#2d2d44")
-    
-    draw.text((20, 20), "SMARAN.AI GRAPHICS ENGINE", fill="#8ab4f8")
-    wrapped_text = prompt[:60] + ("..." if len(prompt) > 60 else "")
-    draw.text((20, 240), f"Prompt: {wrapped_text}", fill="#ffffff")
-    draw.text((20, 470), "Mode: Offline Fallback Active", fill="#a8a8af")
-    
-    filename = f"gen_{uuid.uuid4().hex[:8]}.png"
-    filepath = os.path.join(os.getenv("DATA_DIR", "./data"), "uploads", filename)
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    img.save(filepath, format="PNG")
-    return f"![Generated Image](/api/static/{filename})"
-
-
-# generate_fallback_video lived here. It drew eight frames of a blue circle
-# sliding across a dark rectangle, captioned with the prompt, and returned
-# it as a generated video. Deleted; app/video does the real thing.
-# How long a video job chat will start without asking first. Three hours is
-# already a long time to hold a GPU; a five minute clip on a 6 GB card is closer
-# to a week, and nobody types "5 minute video" meaning that.
-CHAT_VIDEO_AUTOSTART_LIMIT_SECONDS = 3 * 3600
-
-VIDEO_TAG_TEMPLATE = (
-    "\n" + '<video controls style="max-width:100%" '
-    'src="/api/video/file/{job_id}"></video>'
-)
-
 def call_sd_txt2img_bridge(prompt: str, aspect: str = None,
                            target: str = None) -> str:
     service_url = os.getenv("LOCAL_IMAGE_SERVICE_URL", "http://media-generator:8002")
@@ -2748,9 +2714,14 @@ def call_sd_txt2img_bridge(prompt: str, aspect: str = None,
             raise RuntimeError(response.json().get("detail", "Local image generation failed"))
     except requests.RequestException as exc:
         logger.warning("Local media service request failed: %s", exc)
-        output_dir = os.path.join(os.getenv("DATA_DIR", "./data"), "uploads")
-        filename = generate_local_image(prompt, output_dir, aspect=aspect,
-                                        target=target)
+        # settings.UPLOAD_DIR, because that is the directory /api/static is
+        # mounted on. This built its own path from DATA_DIR with a relative
+        # "./data" fallback, so it resolved against whatever the working
+        # directory happened to be: images were written to
+        # backend/data/uploads while /api/static served data/uploads. The
+        # generation succeeded, the link came back, and the picture 404'd.
+        filename = generate_local_image(prompt, settings.UPLOAD_DIR,
+                                        aspect=aspect, target=target)
         return f"![Generated Image](/api/static/{filename})"
 
 
@@ -4316,7 +4287,19 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         selected_model = chat_req.cloud_model
 
     vision_keywords = ["image", "photo", "picture", "screenshot", "analyze this image", "what's in this", "describe the image", "read this image", "look at this"]
-    if not chat_req.cloud_provider and not _is_vision_model(selected_model) and any(kw in processing_prompt.lower() for kw in vision_keywords):
+    # Asking for a picture to be *made* is not asking for one to be read.
+    #
+    # These keywords are the same words a generation request is built from, so
+    # "generate a 4K photo of a snow leopard" matched "photo" and was refused
+    # with "No live vision-capable model is available" - a message about a
+    # feature the request never wanted, on a machine perfectly able to draw it.
+    # Image and video generation were unreachable through chat for anyone
+    # without a vision model configured, which is most people.
+    wants_generation = (is_image_generation_request(chat_req.prompt)
+                        or is_video_generation_request(chat_req.prompt))
+    if (not wants_generation and not chat_req.cloud_provider
+            and not _is_vision_model(selected_model)
+            and any(kw in processing_prompt.lower() for kw in vision_keywords)):
         raise HTTPException(
             status_code=409,
             detail="No live vision-capable model is available for this request. Install or configure one, then select it in Model Hub.",
