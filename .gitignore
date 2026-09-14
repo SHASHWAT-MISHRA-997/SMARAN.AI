@@ -108,4 +108,5 @@ installer/output/
 /video_frame.png
 /mobile_chat_history_verified.png
 /m[0-9]*.png
+/n[0-9]*.png
 /*_dump.xml
