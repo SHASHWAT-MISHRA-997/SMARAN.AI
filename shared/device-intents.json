@@ -17,6 +17,15 @@
     "taking a screenshot of someone else's computer from an Android webview -",
     "and the phone is expected to say so plainly rather than pretend."
   ],
+  "_expected_query_note": [
+    "What each phrase must actually search for, not merely that it searches.",
+    "",
+    "The first version of this contract only asserted the query was non-empty",
+    "and did not contain 'youtube'. One of the three matchers captured the",
+    "postposition and searched YouTube for 'par' - which passed both of those",
+    "assertions. The request looked like it worked and returned the wrong",
+    "thing, which is harder to spot than an outright failure."
+  ],
   "play_on_youtube": [
     "ganpati bappa song youtube par play karo",
     "play ganpati bappa on youtube",
@@ -26,6 +35,15 @@
     "tum hi ho youtube par lagao",
     "play lofi beats on youtube"
   ],
+  "expected_query": {
+    "ganpati bappa song youtube par play karo": "ganpati bappa song",
+    "play ganpati bappa on youtube": "ganpati bappa",
+    "ganpati bappa gaana youtube pe chalao": "ganpati bappa gaana",
+    "youtube par ganpati bappa song play karo": "ganpati bappa song",
+    "arijit singh song youtube pe bajao": "arijit singh song",
+    "tum hi ho youtube par lagao": "tum hi ho",
+    "play lofi beats on youtube": "lofi beats"
+  },
   "open_youtube_plain": [
     "open youtube",
     "youtube kholo"

@@ -47,9 +47,23 @@ _SEARCH_PATTERNS = (
     re.compile(r"\b(?:search|google|look up|dhundo|search karo)\s+(?:for\s+)?(?P<query>.+)$", re.IGNORECASE),
     re.compile(r"^(?P<query>.+?)\s+(?:search karo|dhundo)$", re.IGNORECASE),
 )
+# Hinglish puts what you want first and the verb last, and that shape was
+# missing here, with a consequence worse than not matching at all.
+#
+# "ganpati bappa song youtube par play karo" did match the second rule, by
+# letting the optional "par" go unmatched and capturing it as the query - so
+# YouTube opened and searched for "par", a postposition. The request appeared
+# to work and returned the wrong thing, which is harder to notice than a plain
+# failure and exactly what "YouTube opens but nothing plays" felt like.
+#
+# The locative is required rather than optional in the second rule now, so it
+# is consumed instead of being mistaken for the song.
+_PLAY_LAST = r"(?:chalao|chala\s+do|bajao|baja\s+do|lagao|laga\s+do|sunao|suna\s+do|play\s+karo|play\s+kar\s+do|dikhao)"
 _YOUTUBE_PATTERNS = (
-    re.compile(r"\b(?:play|chalao)\s+(?P<query>.+?)\s+(?:on|par|pe)\s+youtube\b", re.IGNORECASE),
-    re.compile(r"\byoutube\s+(?:par|pe|on)?\s*(?P<query>.+?)\s+(?:chalao|play karo)$", re.IGNORECASE),
+    re.compile(r"\b(?:play|chalao|bajao|lagao|sunao)\s+(?P<query>.+?)\s+(?:on|par|pe)\s+youtube\b", re.IGNORECASE),
+    re.compile(r"\byoutube\s+(?:par|pe|on|mein|me)\s+(?P<query>.+?)\s+" + _PLAY_LAST + r"$", re.IGNORECASE),
+    # What to play, then where, then the verb.
+    re.compile(r"^(?P<query>.+?)\s+youtube\s+(?:par|pe|on|mein|me)\s+" + _PLAY_LAST + r"$", re.IGNORECASE),
 )
 
 _TRAILING_NOISE = re.compile(r"\b(?:please|karo|kar do|kardo|jaldi|now|abhi)\b\.?$", re.IGNORECASE)

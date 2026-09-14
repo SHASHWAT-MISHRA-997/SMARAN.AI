@@ -52,6 +52,28 @@ test('every phrasing the desktop plays, the phone plays too', () => {
   }
 });
 
+test('the phone searches for exactly what the backend searches for', () => {
+  // Not just "a query" - the right one. Checking only that it was non-empty
+  // is what let a third matcher search YouTube for "par", the postposition,
+  // and report success. Two matchers that disagree mean the result depends on
+  // which screen you happened to be on.
+  for (const [phrase, expected] of Object.entries(shared.expected_query)) {
+    const command = detectDeviceCommand(phrase);
+    assert.ok(command, `reached nothing: ${phrase}`);
+    assert.equal(command.query.trim(), expected, phrase);
+  }
+});
+
+test('the search is never a grammatical particle', () => {
+  for (const phrase of shared.play_on_youtube) {
+    const query = detectDeviceCommand(phrase).query.trim().toLowerCase();
+    assert.ok(
+      !['par', 'pe', 'on', 'mein', 'me', 'youtube'].includes(query),
+      `searched for the particle instead of the song: ${phrase} -> ${query}`,
+    );
+  }
+});
+
 test('what is being played survives, whichever order it is said in', () => {
   // Both orders carry the same song. If the subject is lost the phone opens
   // YouTube and searches for nothing, which looks like it half worked.
