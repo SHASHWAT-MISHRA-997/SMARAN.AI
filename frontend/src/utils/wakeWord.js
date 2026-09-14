@@ -47,6 +47,33 @@ export const playWakeChime = () => {
   } catch  {}
 };
 
+/**
+ * "Stop listening", in the words people use for it.
+ *
+ * There were wake phrases and no sleep phrase at all - "suno smaran" and
+ * "start listening" turned listening on, and nothing turned it off. The
+ * microphone stayed open, so anything coming out of the speakers was heard as
+ * though it had been said to the assistant, which is where answers to things
+ * nobody asked came from.
+ *
+ * Matched separately from the wake phrases, because a sleep command has to be
+ * recognised without a wake word in front of it: by the time someone says
+ * "mat suno" the assistant is already listening.
+ */
+const SLEEP_PHRASES = [
+  'mat suno', 'suno mat', 'stop listening', 'stop listen', 'stop hearing',
+  'sunna band karo', 'sunna band', 'band karo sunna',
+  'chup ho ja', 'chup ho jao', 'chup raho',
+  'so ja', 'so jao', 'go to sleep',
+];
+
+export const matchesSleepPhrase = (heard) => {
+  if (!heard || typeof heard !== 'string') return false;
+  const text = heard.toLowerCase().replace(/[^a-z0-9\s]/gi, ' ').replace(/\s+/g, ' ').trim();
+  if (!text) return false;
+  return SLEEP_PHRASES.some((phrase) => text.includes(phrase));
+};
+
 /** Loose & robust phrase matcher with extensive Hindi / Hinglish / English aliases */
 const buildMatcher = (phrase) => {
   const customWords = phrase ? phrase.toLowerCase().trim().split(/\s+/).filter(Boolean) : [];
@@ -78,9 +105,10 @@ const buildMatcher = (phrase) => {
 };
 
 export class WakeWordListener {
-  constructor({ phrase = DEFAULT_PHRASE, onWake, onError, apiBase = '' } = {}) {
+  constructor({ phrase = DEFAULT_PHRASE, onWake, onSleep, onError, apiBase = '' } = {}) {
     this.phrase = phrase;
     this.onWake = onWake;
+    this.onSleep = onSleep;
     this.onError = onError;
     this.apiBase = apiBase;
     this.recognition = null;
@@ -126,6 +154,13 @@ export class WakeWordListener {
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
           for (let j = 0; j < event.results[i].length; j += 1) {
             const transcript = event.results[i][j]?.transcript || '';
+            /* Sleep is tested first. "mat suno" carries no wake word, and if
+               it happened to contain one the wake branch would claim it and
+               the assistant would start listening harder instead of stopping. */
+            if (matchesSleepPhrase(transcript)) {
+              this.onSleep?.(transcript.trim());
+              return;
+            }
             if (this.matches(transcript)) {
               playWakeChime();
               this.onWake?.(transcript.trim());
@@ -269,7 +304,9 @@ export class WakeWordListener {
             method: 'POST', credentials: 'include', body: form,
           });
           const heard = res.ok ? ((await res.json())?.text || '') : '';
-          if (heard && this.matches(heard)) {
+          if (heard && matchesSleepPhrase(heard)) {
+            this.onSleep?.(heard.trim());
+          } else if (heard && this.matches(heard)) {
             playWakeChime();
             this.onWake?.(heard.trim());
           }

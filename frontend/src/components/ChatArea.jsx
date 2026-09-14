@@ -2496,6 +2496,17 @@ const ChatArea = ({
         listener.stop();
         openVoiceMode();
       },
+      /* "mat suno" turns the microphone off and leaves it off.
+         Nothing did this before: wake phrases started listening and no phrase
+         stopped it, so the only way to be left alone was to find the toggle in
+         settings. Switching wakeWordEnabled off is what the effect above reads,
+         so this tears the listener down and keeps it down across re-renders -
+         a plain listener.stop() would be undone the next time it ran. */
+      onSleep: () => {
+        listener.stop();
+        wakeListenerRef.current = null;
+        setWakeWordEnabled(false);
+      },
       onError: (message) => console.warn('Wake phrase:', message),
     });
     listener.start();
