@@ -6,7 +6,7 @@
       "uuid": "^11.1.1"
     }
   },
-  "version": "2.10.42",
+  "version": "2.10.43",
   "type": "module",
   "scripts": {
     "dev": "vite",
