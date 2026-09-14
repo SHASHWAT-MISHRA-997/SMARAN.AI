@@ -2723,6 +2723,11 @@ def generate_fallback_image(prompt: str) -> str:
 # generate_fallback_video lived here. It drew eight frames of a blue circle
 # sliding across a dark rectangle, captioned with the prompt, and returned
 # it as a generated video. Deleted; app/video does the real thing.
+# How long a video job chat will start without asking first. Three hours is
+# already a long time to hold a GPU; a five minute clip on a 6 GB card is closer
+# to a week, and nobody types "5 minute video" meaning that.
+CHAT_VIDEO_AUTOSTART_LIMIT_SECONDS = 3 * 3600
+
 VIDEO_TAG_TEMPLATE = (
     "\n" + '<video controls style="max-width:100%" '
     'src="/api/video/file/{job_id}"></video>'
@@ -4395,6 +4400,12 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             from app.video.routes import GenerateRequest, _jobs, _jobs_lock, _run
 
             clean_prompt = clean_video_prompt(chat_req.prompt)
+            # "a 5 second vertical video of a lantern" says what it wants. Read
+            # it, rather than making the same two second landscape clip whatever
+            # was asked for and never mentioning the difference.
+            from app.local_image import read_video_options
+
+            clean_prompt, want_seconds, want_aspect = read_video_options(clean_prompt)
             ready = plan_video("text-to-video")
             if not ready.get("recommended"):
                 reason = (ready.get("candidates") or [{}])[0].get(
@@ -4450,6 +4461,39 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                             {"token": "\n\n" + install["blocker"]}) + "\n"
                 return
 
+            # Asked and answered before a single frame is rendered. A duration
+            # box that accepts five minutes, runs for hours and then fails is
+            # the fault this is here to prevent - and so is quietly returning
+            # two seconds and calling it done. The card's real limit is the
+            # final decode, which has to hold every frame at full size at once,
+            # and that is arithmetic, so the answer is immediate.
+            from app.video.continuity import plan_sequence
+            from app.video.planner import DEFAULT_ASPECT
+
+            seconds = want_seconds if want_seconds else 2.0
+            aspect = want_aspect or DEFAULT_ASPECT
+            shape = plan_sequence(seconds, aspect=aspect)
+            if not shape["possible"]:
+                yield json.dumps({"token":
+                    "I can't make that one here, and I'd rather say so now "
+                    "than after an hour of rendering.\n\n"
+                    + str(shape["reason"])}) + "\n"
+                return
+
+            # A long clip is possible as a chain of continuations, but the
+            # chain costs one full render per link and this card measures that
+            # in hours. Starting a multi-day job because the sentence contained
+            # "5 minute" would be the worst version of doing what was asked, so
+            # past a few hours it is quoted and left to the user.
+            if shape["estimate_seconds"] > CHAT_VIDEO_AUTOSTART_LIMIT_SECONDS:
+                yield json.dumps({"token":
+                    "That works out at %d clips joined end to end - %s\n\n"
+                    "I haven't started it, because that is a long time to "
+                    "commit your GPU to without asking. Say the word and I "
+                    "will, or ask for something shorter and it starts now.\n"
+                    % (shape["chunks"], shape["estimate_text"].lower())}) + "\n"
+                return
+
             job_id = _uuid.uuid4().hex[:12]
             out_dir = os.path.join(settings.DATA_DIR, "video")
             os.makedirs(out_dir, exist_ok=True)
@@ -4470,7 +4514,8 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                               # refitted around this frame count, so it stays
                               # inside what the card can decode.
                               args=(job_id, GenerateRequest(prompt=clean_prompt,
-                                                            seconds=2.0), out_path),
+                                                            seconds=seconds,
+                                                            aspect=aspect), out_path),
                               daemon=True).start()
 
             # This used to promise "a few minutes". On a 6 GB card a two second
@@ -4480,8 +4525,17 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             # there is anything to see. The job itself now states a figure
             # calibrated on a timed run, and it is streamed from `messages`
             # just below, so nothing is claimed here that the job cannot back.
-            yield json.dumps({"token": "Making this with " + str(ready["recommended"])
-                                       + " on your own GPU.\n\n"}) + "\n"
+            # The settings are stated, not left to be discovered afterwards.
+            # A clip comes back at 1.7 seconds when 2 was asked for, because
+            # frames land on the model's 8n+1 grid; saying so up front is the
+            # difference between a known constraint and a broken feature.
+            yield json.dumps({"token": "Making this with %s on your own GPU: "
+                                       "%s, %dx%d, %.1f seconds at %d fps.\n\n"
+                                       % (ready["recommended"], aspect,
+                                          shape["width"], shape["height"],
+                                          shape["total_seconds"], shape["fps"])}) + "\n"
+            if shape.get("caveat"):
+                yield json.dumps({"token": shape["caveat"] + "\n\n"}) + "\n"
 
             seen = 0
             while True:

@@ -210,6 +210,85 @@ _TIERS = (
 _DECODE_PIXEL_FRAMES_PER_GB = 2_200_000
 
 
+# The shapes people ask for, as ratios rather than fixed sizes.
+#
+# A fixed 16:9 size would be wrong on every card but the one it was written
+# for. The tier decides how many pixels this machine can afford; the ratio
+# only decides how they are arranged.
+ASPECTS = {
+    "16:9": 16 / 9,    # landscape, the usual video shape
+    "9:16": 9 / 16,    # portrait, for phones
+    "1:1": 1.0,        # square
+    "4:3": 4 / 3,
+}
+DEFAULT_ASPECT = "16:9"
+
+
+def _fit_aspect(width: int, height: int, ratio: float) -> tuple:
+    """Re-shape a tier's size to a ratio, keeping roughly its pixel count.
+
+    Keeping the area rather than the width matters: widening 704x448 to 16:9
+    by holding the width would drop 48 rows and quietly make the picture
+    smaller, while holding the height would add pixels the card has not been
+    checked for.
+    """
+    area = width * height
+    new_w = (area * ratio) ** 0.5
+    new_h = new_w / ratio
+    # The architecture needs multiples of 32; anything else is snapped anyway.
+    return max(256, int(round(new_w / 32)) * 32), max(256, int(round(new_h / 32)) * 32)
+
+
+def plan_clip(seconds: float, aspect: str = DEFAULT_ASPECT,
+              hw: Optional[Hardware] = None) -> dict:
+    """What this machine can really produce for a requested length and shape.
+
+    Written because a duration control that accepts any number and then fails,
+    or silently returns something else, is the kind of thing this codebase has
+    been caught doing before. This answers honestly: the settings if it fits,
+    and if it does not, what the limit is and the longest clip that would.
+    """
+    hw = hw or probe()
+    base = suggest(hw)
+    ratio = ASPECTS.get(aspect, ASPECTS[DEFAULT_ASPECT])
+    width, height = _fit_aspect(base["width"], base["height"], ratio)
+    fps = base["fps"]
+
+    frames = _round_frames(seconds, fps)
+
+    # Shrink to fit, but not past the point of being worth watching.
+    #
+    # Shrinking alone would chase any requested length down to 128x64 and then
+    # refuse anyway - trading the picture away for a duration nobody can have.
+    # Below this floor the answer is that the length is too long, not that the
+    # video should be a postage stamp.
+    FLOOR = 320
+    shrunk_w, shrunk_h = _shrink_to_decode(width, height, frames, hw)
+    if min(shrunk_w, shrunk_h) >= FLOOR:
+        width, height = shrunk_w, shrunk_h
+
+    refusal = decode_will_fit(width, height, frames, hw)
+
+    longest = None
+    if refusal and hw.has_cuda and hw.vram_total_gb > 0:
+        # The longest clip that fits at the size actually being offered, which
+        # is the number a person can act on.
+        budget = hw.vram_total_gb * _DECODE_PIXEL_FRAMES_PER_GB
+        max_frames = max(9, int(budget // (width * height)))
+        longest = round(((max_frames - 1) // 8 * 8 + 1) / fps, 1)
+
+    estimate = estimate_seconds(width, height, base["steps"], seconds, fps, hw)
+    return {
+        "possible": refusal is None,
+        "width": width, "height": height, "steps": base["steps"], "fps": fps,
+        "aspect": aspect if aspect in ASPECTS else DEFAULT_ASPECT,
+        "seconds": round(frames / fps, 2),
+        "longest_possible_seconds": longest,
+        "reason": refusal or base["reason"],
+        "estimate": estimate,
+    }
+
+
 def suggest(hw: Optional[Hardware] = None) -> dict:
     """Defaults suited to this machine, with the reason stated."""
     hw = hw or probe()

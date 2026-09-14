@@ -1,6 +1,7 @@
 """Free, on-device text-to-image generation using Diffusers."""
 import logging
 import os
+import re
 import threading
 import difflib
 import uuid
@@ -220,6 +221,104 @@ def clean_video_prompt(prompt: str) -> str:
     if text.lower().startswith("/video"):
         return text.split(" ", 1)[1].strip() if " " in text else ""
     return text
+
+
+# The shape and the length, taken from the sentence the user already typed.
+#
+# A dropdown neither of them can find is not a choice. People ask for "a 5
+# second vertical video of a lantern" in one breath, so that is what gets read.
+# Whatever is recognised is also removed from the prompt: left in, "9:16" and
+# "5 seconds" become part of the scene the model is asked to draw.
+def _shape_words(*words):
+    """A shape word only counts when it is being used as a shape.
+
+    Matching these bare would be worse than not matching them at all. "A video
+    of a mountain landscape" is a subject, not an orientation, and reading it
+    as one would both rotate the video and delete the word from the prompt, so
+    the model would never hear what to draw. "Portrait" has the same problem -
+    a portrait of someone - and "short video" is a length, not a shape.
+
+    So the word has to be qualified: "portrait mode", "in portrait",
+    "landscape format", "vertical video".
+    """
+    joined = "|".join(words)
+    # "portrait mode" leaves nothing worth keeping, so both words go. But in
+    # "vertical video" the qualifier *is* the sentence - taking it left "make a
+    # of a lantern", a prompt with its subject removed - so it is matched by
+    # lookahead and stays where it is.
+    debris = r"(?:mode|format|orientation|aspect|ratio|size)"
+    kept = r"(?:video|clip|screen|shot|film|reel)"
+    return (
+        r"\b(?:in\s+(?:the\s+)?)?(?:%s)\s+%s\b"      # portrait mode
+        r"|\b%s\s+(?:%s)\b"                          # format: portrait
+        r"|\b(?:in\s+(?:the\s+)?)?(?:%s)(?=\s+%s\b)"  # vertical video
+        r"|\bin\s+(?:the\s+)?(?:%s)\b"               # in portrait
+    ) % (joined, debris, debris, joined, joined, kept, joined)
+
+
+_ASPECT_WORDS = (
+    # Written as a ratio. Unambiguous, so these need no qualifier.
+    (r"\b16\s*[:x/]\s*9\b", "16:9"),
+    (r"\b9\s*[:x/]\s*16\b", "9:16"),
+    (r"\b4\s*[:x/]\s*3\b", "4:3"),
+    (r"\b1\s*[:x/]\s*1\b", "1:1"),
+    # Named formats that are vertical by definition, and are not ordinary
+    # nouns in the plural. "Shorts" alone is left out: it is clothing at least
+    # as often as it is a video format.
+    (r"\b(?:instagram\s+reels?|youtube\s+shorts?|reels)\b", "9:16"),
+    (_shape_words("portrait", "vertical"), "9:16"),
+    (_shape_words("landscape", "horizontal", "widescreen"), "16:9"),
+    (_shape_words("square"), "1:1"),
+)
+
+# "5 second", "5 sec", "5s", "5 seconds ka", "5 sekand" - and minutes, which
+# are usually far beyond what a card can decode but must still be *read*, so
+# the refusal can name the number the user actually asked for instead of
+# silently making two seconds.
+_SECONDS_RE = re.compile(
+    r"\b(\d+(?:\.\d+)?)\s*(?:-|\s)?\s*"
+    r"(seconds?|secs?|sekand|second\s*ka|s)\b(?:\s*ka\b|\s*(?:ki|ka|of)\b)?",
+    re.IGNORECASE,
+)
+_MINUTES_RE = re.compile(
+    r"\b(\d+(?:\.\d+)?)\s*(?:-|\s)?\s*(minutes?|mins?|minut|min)\b(?:\s*ka\b)?",
+    re.IGNORECASE,
+)
+
+
+def read_video_options(prompt: str):
+    """Pull the requested length and shape out of a prompt.
+
+    Returns (prompt without those words, seconds or None, aspect or None).
+    None means the user did not say, and the machine's own default is used -
+    not a number invented here.
+    """
+    text = prompt or ""
+    seconds = None
+    aspect = None
+
+    match = _MINUTES_RE.search(text)
+    if match:
+        seconds = float(match.group(1)) * 60.0
+        text = text[: match.start()] + " " + text[match.end():]
+    else:
+        match = _SECONDS_RE.search(text)
+        if match:
+            seconds = float(match.group(1))
+            text = text[: match.start()] + " " + text[match.end():]
+
+    for pattern, value in _ASPECT_WORDS:
+        found = re.search(pattern, text, re.IGNORECASE)
+        if found:
+            aspect = value
+            text = text[: found.start()] + " " + text[found.end():]
+            break
+
+    # Tidy what the removals left behind: doubled spaces, and a dangling
+    # connective like "a video of  in a forest".
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    text = re.sub(r"\b(?:ka|ki|of|in|wala|wali)\s*$", "", text, flags=re.IGNORECASE)
+    return text.strip(" ,.-"), seconds, aspect
 
 
 def clean_image_prompt(prompt: str) -> str:

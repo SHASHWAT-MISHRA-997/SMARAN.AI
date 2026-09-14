@@ -48,6 +48,21 @@ class GenerateRequest(BaseModel):
     # picked for 24, the pair disagreed - a size chosen to fit 41 frames was
     # handed 57 - and the job was refused for not fitting settings this code
     # had selected itself.
+    # The shape, chosen rather than assumed. A fixed landscape size is
+    # wrong for anyone making something for a phone.
+    aspect: Optional[str] = Field(None, description="16:9, 9:16, 1:1 or 4:3")
+    # A clip longer than one pass is rendered as a chain of continuations and
+    # joined. Nothing about that makes the card faster, so the cost is reported
+    # before it starts rather than discovered during it.
+    soundtrack: bool = Field(False, description=(
+        "Generate music from the same prompt and lay it under the clip. The "
+        "video model itself is silent; this is a separate model and it does "
+        "not watch the video."
+    ))
+    upscale: Optional[str] = Field(None, description=(
+        "HD, QHD, 4K or 8K. Enlarges the finished clip - it does not render "
+        "at that size and does not add detail."
+    ))
     fps: Optional[int] = Field(None, ge=8, le=30)
     steps: Optional[int] = Field(None, ge=1, le=100)
     guidance_scale: float = Field(3.0, ge=0, le=20)
@@ -110,6 +125,57 @@ def install_cancel():
     return cancel()
 
 
+@router.get("/plan")
+async def plan_for(seconds: float = 2.0, aspect: str = "16:9"):
+    """Whether this machine can make that clip, before anything is started.
+
+    A duration control that accepts any number and then fails - or quietly
+    returns something shorter - is precisely the behaviour this project has
+    been caught with before. This answers first: the settings if it fits, and
+    if it does not, the longest clip that would at the same size.
+    """
+    from .planner import plan_clip
+
+    return plan_clip(seconds=seconds, aspect=aspect)
+
+
+@router.get("/sequence/plan")
+async def sequence_plan(seconds: float = 5.0, aspect: str = "16:9"):
+    """What a clip longer than one pass would take, before it is started.
+
+    A single pass is capped by the decode, not by time - under two seconds on
+    a 6 GB card. Past that the clip is a chain of continuations, and the chain
+    costs one full render per link. This returns the number of links and the
+    hours, so that is a decision rather than a discovery.
+    """
+    from .continuity import plan_sequence
+
+    return plan_sequence(seconds, aspect=aspect)
+
+
+@router.get("/soundtrack")
+async def soundtrack_status():
+    """Whether a soundtrack can be made, and what it honestly would be."""
+    from .soundtrack import status
+
+    return status()
+
+
+@router.get("/sizes")
+async def sizes():
+    """The enlargement targets, described as enlargement rather than render."""
+    from .continuity import TARGET_HEIGHTS
+
+    return {
+        "targets": TARGET_HEIGHTS,
+        "note": (
+            "These enlarge a finished clip. This machine renders well below "
+            "them and interpolating up does not add detail, so a clip marked "
+            "4K holds exactly as much detail as the size it was rendered at."
+        ),
+    }
+
+
 @router.get("/suggested")
 async def suggested():
     """What this machine will be asked for when the caller does not say.
@@ -125,6 +191,62 @@ async def suggested():
 @router.get("/hardware")
 async def hardware():
     return probe().as_dict()
+
+
+def _add_sound_and_size(req: GenerateRequest, out_path: str, result: dict,
+                        note) -> dict:
+    """Optional soundtrack and enlargement, after the picture exists.
+
+    Both are deliberately non-fatal. A clip that rendered for an hour must not
+    be thrown away because the music model is missing or ffmpeg refused to
+    scale it; the video is the thing that was asked for, and the rest is said
+    plainly in the job's messages instead.
+    """
+    import os as _os
+    import tempfile as _tempfile
+
+    if req.soundtrack:
+        from .soundtrack import SoundtrackError, generate_track, has_audio, mux
+
+        try:
+            wav = _os.path.join(_tempfile.gettempdir(),
+                                "smaran-%s.wav" % _os.path.basename(out_path))
+            generate_track(req.prompt, result.get("seconds") or req.seconds, wav,
+                           progress=note)
+            merged = out_path + ".snd.mp4"
+            mux(out_path, wav, merged)
+            _os.replace(merged, out_path)
+            # Verified from the file, not assumed from the fact that ffmpeg
+            # was asked. Reporting sound that is not there is the failure mode
+            # this whole area keeps being caught by.
+            result["has_audio"] = has_audio(out_path)
+            note("Soundtrack added." if result["has_audio"] else
+                 "The soundtrack step ran but the file still has no audio track.")
+        except SoundtrackError as exc:
+            result["has_audio"] = False
+            note("No soundtrack: %s" % exc)
+        finally:
+            try:
+                _os.unlink(wav)
+            except OSError:
+                pass
+    else:
+        result["has_audio"] = False
+
+    if req.upscale:
+        from .continuity import ContinuityError, upscale
+
+        try:
+            bigger = out_path + ".big.mp4"
+            detail = upscale(out_path, bigger, req.upscale)
+            _os.replace(bigger, out_path)
+            result["width"], result["height"] = detail["to"]
+            result["upscaled"] = detail["detail"]
+            note(detail["detail"])
+        except ContinuityError as exc:
+            note("Could not enlarge the clip: %s" % exc)
+
+    return result
 
 
 def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
@@ -147,6 +269,18 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
 
     tuned = suggest()
     chose_size = req.width is None and req.height is None
+    # A named shape reshapes the tier's size, keeping the same pixel count so
+    # it still decodes. Only when the size was ours to choose: naming both a
+    # resolution and an aspect is a contradiction, and the resolution is the
+    # more specific of the two.
+    if chose_size and req.aspect:
+        from .planner import ASPECTS, _fit_aspect
+
+        if req.aspect in ASPECTS:
+            tuned = dict(tuned)
+            tuned["width"], tuned["height"] = _fit_aspect(
+                tuned["width"], tuned["height"], ASPECTS[req.aspect],
+            )
     if req.width is None:
         req.width = tuned["width"]
     if req.height is None:
@@ -183,19 +317,44 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
         logger.warning("video job %s: could not estimate duration", job_id, exc_info=True)
 
     try:
-        result = generate(
-            prompt=req.prompt,
-            output_path=out_path,
-            image_path=req.image_path,
-            seconds=req.seconds,
-            width=req.width,
-            height=req.height,
-            fps=req.fps,
-            steps=req.steps,
-            guidance_scale=req.guidance_scale,
-            seed=req.seed,
-            progress=note,
-        )
+        from .continuity import plan_sequence
+
+        # More than one pass is needed whenever the clip is longer than the
+        # decode allows. Routed here rather than at the caller so every entry
+        # point - the HTTP route and the chat path - behaves the same way.
+        chain = None
+        if not req.image_path:
+            chain = plan_sequence(req.seconds, aspect=req.aspect or "16:9")
+
+        if chain and chain.get("possible") and chain["chunks"] > 1:
+            from .continuity import generate_sequence
+
+            result = generate_sequence(
+                prompt=req.prompt,
+                output_path=out_path,
+                total_seconds=req.seconds,
+                aspect=req.aspect or "16:9",
+                seed=req.seed,
+                guidance_scale=req.guidance_scale,
+                progress=note,
+            )
+        else:
+            result = generate(
+                prompt=req.prompt,
+                output_path=out_path,
+                image_path=req.image_path,
+                seconds=req.seconds,
+                width=req.width,
+                height=req.height,
+                fps=req.fps,
+                steps=req.steps,
+                guidance_scale=req.guidance_scale,
+                seed=req.seed,
+                progress=note,
+            )
+
+        result = _add_sound_and_size(req, out_path, result, note)
+
         with _jobs_lock:
             _jobs[job_id].update(status="completed", result=result, updated=time.time())
     except VideoError as exc:
