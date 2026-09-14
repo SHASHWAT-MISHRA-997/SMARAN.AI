@@ -722,12 +722,29 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
             {/* Visual mode previews the HTML the model wrote; Code mode, and
                 anything that is not a self-contained document, shows the text. */}
             {!genError && result && !codeMode && firstCodeBlock(result)?.code ? (
-              <iframe
-                title="Design preview"
-                sandbox="allow-scripts"
-                srcDoc={firstCodeBlock(result).code}
-                className="w-full h-[520px] bg-white"
-              />
+              <>
+                {/* A document that never reached its <body> cannot draw
+                    anything, and an empty white rectangle looks like a
+                    finished page that happens to be blank. A local model
+                    stopping early is ordinary - it ran out of room part way
+                    through the stylesheet - so the panel says that rather
+                    than leaving the frame to imply success. Checked only once
+                    generating has stopped, because mid-stream the body
+                    legitimately has not arrived yet. */}
+                {!generating && !/<body[\s>]/i.test(firstCodeBlock(result).code) && (
+                  <p className="px-4 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400 border-b border-amber-500/20 bg-amber-500/5">
+                    The model stopped before it wrote the page body, so there is nothing to show
+                    below. The part it did write is on the Code tab. Generating again, or picking
+                    a larger model, usually finishes it.
+                  </p>
+                )}
+                <iframe
+                  title="Design preview"
+                  sandbox="allow-scripts"
+                  srcDoc={firstCodeBlock(result).code}
+                  className="w-full h-[520px] bg-white"
+                />
+              </>
             ) : (
               !genError && (
                 <pre className="max-h-[520px] overflow-auto px-4 py-3 text-[11px] leading-relaxed font-mono whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
