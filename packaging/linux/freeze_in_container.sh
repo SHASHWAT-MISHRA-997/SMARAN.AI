@@ -57,8 +57,34 @@ docker run --rm \
     -e SMARAN_ANALYTICS_KEY="${SMARAN_ANALYTICS_KEY:-}" \
     "$IMAGE" bash packaging/linux/container_build.sh
 
+# The container runs as root, so everything it just wrote into the mounted
+# tree is owned by root on the host. The packaging that follows runs as the
+# ordinary user and cannot so much as create a directory inside it.
+#
+# This is not hypothetical: it is why the 2.10.35 and 2.10.36 releases failed.
+# Both froze successfully, then died at "mkdir: cannot create directory
+# '.../dist/linux': Permission denied" - after twenty minutes of work, on a
+# line that has nothing to do with the build.
+#
+# The chown is done by another container rather than with sudo, because this
+# script also runs on developer machines where sudo may prompt or not exist.
+if [ "$(id -u)" -ne 0 ]; then
+    SUBDIR="${BUILD_ROOT#"$ROOT"}"
+    docker run --rm -v "$ROOT:/src" -w /src "$IMAGE" \
+        chown -R "$(id -u):$(id -g)" \
+        "/src${SUBDIR}/dist" "/src${SUBDIR}/build" 2>/dev/null || true
+fi
+
 test -x "$FROZEN_DIR/SMARAN.AI" || {
     echo "[freeze] the container produced no binary" >&2
     exit 1
 }
+
+# Checked rather than assumed: a chown that silently did nothing would leave
+# the same failure twenty minutes further on, which is the whole problem.
+if [ ! -w "$FROZEN_DIR" ]; then
+    echo "[freeze] $FROZEN_DIR is not writable by $(id -un) - the packaging" \
+         "steps after this one will fail" >&2
+    exit 1
+fi
 echo "[freeze] done -> $FROZEN_DIR/SMARAN.AI"
