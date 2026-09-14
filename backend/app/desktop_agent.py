@@ -386,6 +386,12 @@ DESKTOP_ACTION_CATALOG: Dict[str, Dict[str, Any]] = {
         "risk": "low", "changes_system": False, "requires_confirmation": False,
         "parameters": {}, "category": "media",
     },
+    "media_stop": {
+        "title": "Stop media",
+        "description": "Send the stop key to whatever is playing.",
+        "risk": "low", "changes_system": False, "requires_confirmation": False,
+        "parameters": {}, "category": "media",
+    },
     "media_next": {
         "title": "Next track",
         "description": "Skip to the next track.",
@@ -935,10 +941,61 @@ class DesktopAgent:
             return {"success": False, "error": "No search query provided."}
         if re.search(r"\b(channel|चैनल)\b", query, re.I):
             return DesktopAgent._action_open_youtube_channel({"channel": query})
-        url = "https://www.youtube.com/results?" + urlencode({"search_query": query})
-        if not webbrowser.open(url):
-            return {"success": False, "error": "No browser accepted the YouTube search.", "url": url}
-        return {"success": True, "message": f"Searching YouTube for: {query}", "url": url}
+        search_url = "https://www.youtube.com/results?" + urlencode({"search_query": query})
+
+        # Open the video, not the list of videos.
+        #
+        # "play X on youtube" opened the results page and stopped there, so
+        # nothing ever played and the user had to find and click the video
+        # themselves - which is the one part they asked not to do.
+        #
+        # The first result's id is read out of the results HTML. No API key is
+        # involved, and if anything about that fails - offline, markup changed,
+        # request refused - the results page still opens, which is exactly the
+        # old behaviour. Playing is an improvement on it, never a replacement
+        # that can fail shut.
+        video_id = DesktopAgent._first_youtube_video_id(search_url)
+        if video_id:
+            watch_url = "https://www.youtube.com/watch?v=" + video_id
+            if webbrowser.open(watch_url):
+                return {"success": True, "message": f"Playing on YouTube: {query}", "url": watch_url}
+
+        if not webbrowser.open(search_url):
+            return {"success": False, "error": "No browser accepted the YouTube search.", "url": search_url}
+        return {"success": True, "message": f"Searching YouTube for: {query}", "url": search_url}
+
+    @staticmethod
+    def _first_youtube_video_id(search_url: str) -> Optional[str]:
+        """The id of the first video on a results page, or None.
+
+        Kept deliberately small and failure-tolerant: every problem here has
+        the same answer, which is to fall back to opening the search page.
+        """
+        try:
+            import re as _re
+            import urllib.request
+
+            request = urllib.request.Request(
+                search_url,
+                # Without a normal user agent YouTube returns a consent
+                # interstitial with no results in it.
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                         "Accept-Language": "en-US,en;q=0.9"},
+            )
+            with urllib.request.urlopen(request, timeout=8) as response:
+                # 2 MB, because the results are further down than they look.
+                # At 400 KB this read stopped short every time: the page is
+                # about 1.5 MB and the first "videoId" sits around byte
+                # 752,000, after the inline scripts and styles. The cap was
+                # never reaching the results, so this silently fell back to
+                # opening the search page - the exact behaviour it was written
+                # to replace.
+                body = response.read(2_000_000).decode("utf-8", "ignore")
+            # The first occurrence is the top result; ids are exactly 11 chars.
+            found = _re.search(r'"videoId":"([A-Za-z0-9_-]{11})"', body)
+            return found.group(1) if found else None
+        except Exception:  # noqa: BLE001
+            return None
 
     @staticmethod
     def _action_open_application(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1584,6 +1641,16 @@ class DesktopAgent:
         return DesktopAgent._tap_media_key(0xB3, "Toggled playback.")
 
     @staticmethod
+    def _action_media_stop(params: Dict[str, Any]) -> Dict[str, Any]:
+        """Stop, not toggle.
+
+        Only play/pause existed, so "band karo" on a paused track started it
+        playing again - the opposite of what was asked. 0xB2 is
+        VK_MEDIA_STOP, which stops and stays stopped.
+        """
+        return DesktopAgent._tap_media_key(0xB2, "Stopped playback.")
+
+    @staticmethod
     def _action_media_next(params: Dict[str, Any]) -> Dict[str, Any]:
         return DesktopAgent._tap_media_key(0xB0, "Skipped to the next track.")
 
@@ -2200,6 +2267,26 @@ INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
     (re.compile(r"(?:open|kholo|chalu\s+karo)\s+(?:the\s+)?(?:youtube\s+)?(?:channel|चैनल)\s+(?:of\s+|named?\s+)?(.+)", re.I), "open_youtube_channel", {"channel": "$1"}),
     (re.compile(r"(?:open|kholo)\s+(.+?)\s+youtube\s+channel", re.I), "open_youtube_channel", {"channel": "$1"}),
     # YouTube Search & Videos
+    # Both orders, because people use both.
+    #
+    # These two required "youtube" before the thing to play: "play on youtube
+    # X", or "youtube par X chalao". Hinglish normally puts the subject first -
+    # "ganpati bappa song youtube par play karo" - and English often puts the
+    # site last - "play ganpati bappa on youtube". Neither matched, so the
+    # request fell through to the plain open-youtube rule below and the user
+    # got the home page with nothing searched and nothing playing.
+    #
+    # Ordered longest-intent-first: the subject-first form has to be tried
+    # before the bare "open youtube" rule can claim the sentence.
+    (re.compile(
+        r"^(?:hey\s+\w+[,\s]+)?(.+?)\s+(?:ko\s+)?(?:youtube|यूट्यूब)\s*(?:pe|par|pr|mein|mai|me|on)?\s*"
+        r"(?:pe|par|me)?\s*(?:play|chalao|chala\s*do|bajao|baja\s*do|lagao|laga\s*do|search|dhundo|dikhao|kholo)"
+        r"(?:\s+(?:karo|kar\s*do|do|dijiye|de))?\s*$",
+        re.I), "search_youtube", {"query": "$1"}),
+    (re.compile(
+        r"(?:play|chalao|bajao|lagao|search|find|dhundo|dikhao|open|kholo)\s+(?:the\s+|koi\s+)?(.+?)"
+        r"\s+(?:on|pe|par|mein)\s+(?:youtube|यूट्यूब)\s*(?:karo|kar\s*do|do)?\s*$",
+        re.I), "search_youtube", {"query": "$1"}),
     (re.compile(r"(?:open|play|search|chalao|kholo|dikhao)\s+(?:on\s+)?youtube\s+(.+)", re.I), "search_youtube", {"query": "$1"}),
     (re.compile(r"youtube\s+(?:pe|par|par|mein|mai)\s+(.+?)(?:\s+(?:chalao|play|search|kholo|dikhao))", re.I), "search_youtube", {"query": "$1"}),
     (re.compile(r"(?:open|kholo|start)\s+youtube", re.I), "open_website", {"name": "youtube"}),
@@ -2276,7 +2363,30 @@ INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
     (re.compile(r"(?:open|kholo|go\s+to)\s+(\S+\.(?:com|org|net|io|dev|in|co|ai)(?:/\S*)?)", re.I), "open_url", {"url": "$1"}),
 
     # Media playback
-    (re.compile(r"\b(?:pause|resume|play)\s+(?:the\s+)?(?:music|song|video|media)\b|\b(?:gaana|gana|video)\s*(?:rok|chalao|band karo)\b|\bplay\s*pause\b", re.I), "media_play_pause", {}),
+    # Stopping, said the way people say it.
+    #
+    # "stop" was not among the verbs at all, and the noun had to sit directly
+    # in front of it, so "band karo", "stop karo", "rok do", "pause karo" and
+    # even "stop the music" all missed - eight of ten ordinary phrasings. The
+    # noun is optional now, because when something is playing and the user says
+    # "band karo" there is nothing else they could mean.
+    #
+    # Anchored to the start of the sentence, which matters more than it looks:
+    # unanchored, "band karo" matched inside "awaz band karo" - turn the sound
+    # off - and stopped the track instead of muting, because this rule sits
+    # above the mute rules and the first match wins. The noun, when there is
+    # one, has to be a media noun.
+    (re.compile(
+        r"^(?:please\s+)?(?:stop|band|bandh|rok|ruk)\s*(?:karo|kar\s*do|do|dijiye|jao|ja)?[.!?]*$"
+        r"|^(?:please\s+)?(?:the\s+)?(?:music|song|gaana|gana|video|media|audio|track)\s+"
+        r"(?:ko\s+)?(?:stop|band|bandh|rok)\s*(?:karo|kar\s*do|do)?[.!?]*$"
+        r"|^(?:please\s+)?stop\s+(?:the\s+)?(?:music|song|gaana|gana|video|media|audio|track|playback)[.!?]*$",
+        re.I), "media_stop", {}),
+    (re.compile(
+        r"\b(?:pause|resume)\s*(?:karo|kar\s*do|do)?\b(?:\s+(?:the\s+)?(?:music|song|gaana|gana|video|media|audio|track))?"
+        r"|\b(?:gaana|gana|video|music)\s*(?:pause|rok)\b|\bplay\s*pause\b",
+        re.I), "media_play_pause", {}),
+    (re.compile(r"\b(?:pause|resume|play)\s+(?:the\s+)?(?:music|song|video|media)\b|\b(?:gaana|gana|video)\s*(?:rok|chalao|band karo)\b", re.I), "media_play_pause", {}),
     (re.compile(r"\b(?:next|skip)\s+(?:the\s+)?(?:track|song|gaana|gana)\b|\bagla\s+(?:gaana|gana|track)\b", re.I), "media_next", {}),
     (re.compile(r"\b(?:previous|last|pichla)\s+(?:track|song|gaana|gana)\b|\bgo\s+back\s+a\s+track\b", re.I), "media_previous", {}),
     (re.compile(r"^(?:please\s+)?mute(?:\s+(?:the\s+)?(?:system|speakers?|sound|audio|volume))?(?:\s+please)?[.!?]*$", re.I), "toggle_mute", {"muted": "true"}),

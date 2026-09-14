@@ -17,10 +17,48 @@ def test_browser_rejection_is_not_success(monkeypatch):
 
 
 def test_youtube_query_preserves_special_characters(monkeypatch):
+    """Encoding of the search URL, which is the fallback path.
+
+    The resolver is stubbed off rather than left to run. Searching now tries
+    to find the first result and open the video itself, and that is a live
+    request - left unstubbed this test reached out to YouTube, got a real
+    video id back and asserted against a watch?v= URL that has no
+    search_query in it at all. A unit test should not depend on the network,
+    or on what YouTube happens to return today.
+    """
     urls = []
     monkeypatch.setattr(desktop.webbrowser, 'open', lambda url: urls.append(url) or True)
+    monkeypatch.setattr(desktop.DesktopAgent, '_first_youtube_video_id',
+                        staticmethod(lambda url: None))
     desktop.DesktopAgent._action_search_youtube({'query': 'हिंदी & music #1'})
     assert parse_qs(urlparse(urls[0]).query)['search_query'] == ['हिंदी & music #1']
+
+
+def test_a_resolved_video_is_opened_instead_of_the_results_page(monkeypatch):
+    """The point of the change: "play X" should play X.
+
+    It used to open the results list and stop there, leaving the user to find
+    and click the video - the one part they had asked not to do.
+    """
+    urls = []
+    monkeypatch.setattr(desktop.webbrowser, 'open', lambda url: urls.append(url) or True)
+    monkeypatch.setattr(desktop.DesktopAgent, '_first_youtube_video_id',
+                        staticmethod(lambda url: 'dQw4w9WgXcQ'))
+    result = desktop.DesktopAgent._action_search_youtube({'query': 'ganpati bappa song'})
+    assert result['success']
+    assert urls == ['https://www.youtube.com/watch?v=dQw4w9WgXcQ']
+
+
+def test_an_unresolvable_search_still_opens_the_results_page(monkeypatch):
+    """Playing is an improvement on searching, never a replacement that can
+    fail shut: offline, or with the markup changed, the old behaviour stands."""
+    urls = []
+    monkeypatch.setattr(desktop.webbrowser, 'open', lambda url: urls.append(url) or True)
+    monkeypatch.setattr(desktop.DesktopAgent, '_first_youtube_video_id',
+                        staticmethod(lambda url: None))
+    result = desktop.DesktopAgent._action_search_youtube({'query': 'whatever'})
+    assert result['success']
+    assert 'results?' in urls[0]
 
 
 def test_linux_launch_uses_installed_executable_without_shell(monkeypatch):
