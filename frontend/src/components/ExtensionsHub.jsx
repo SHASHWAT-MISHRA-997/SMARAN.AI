@@ -21,8 +21,8 @@ async function fetch(url, options) {
 const MANAGE_FILTERS = [
   { id: 'plugin', label: 'Plugins', icon: Blocks },
   { id: 'skill', label: 'Skills', icon: Sparkles },
-  { id: 'mcp', label: 'MCP Servers', icon: Wrench },
-  { id: 'connector', label: 'Connectors', icon: Plug },
+  { id: 'mcp', label: 'Integrations', icon: Plug },
+  { id: 'connector', label: 'Built-in', icon: Wrench },
 ];
 
 
@@ -370,8 +370,13 @@ const ExtensionsHub = ({ isOpen = true, onClose, embedded = false }) => {
   const SECTION_LABEL = {
     plugin: ['Plugins', 'Extensions running inside SMARAN.AI itself.'],
     skill: ['Skills', 'Task-specific instructions and workflows.'],
-    mcp: ['MCP Servers', 'Separate programs SMARAN.AI starts and talks to over the Model Context Protocol.'],
-    connector: ['Connectors', 'Bridges to services outside this machine.'],
+    /* "MCP Servers" named the protocol rather than the thing it does, and
+       "Bridges to services outside this machine" described both tabs equally
+       well - so two entries appeared to do one job and neither said which to
+       use. They hold different things: one is what you connect yourself, the
+       other is what a plugin brings with it. */
+    mcp: ['Integrations', 'Connect SMARAN.AI to a service - Notion, a hosted MCP server, or a tool on this machine.'],
+    connector: ['Built-in connectors', 'Integrations that arrive with a plugin, rather than ones you add.'],
   };
   const [title, subtitle] = SECTION_LABEL[section] || SECTION_LABEL.plugin;
   return (

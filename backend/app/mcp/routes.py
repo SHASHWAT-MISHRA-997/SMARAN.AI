@@ -91,6 +91,42 @@ CATALOGUE = [
         "needs": "uv installed (pip install uv)",
         "verified": None,
     },
+    # Services, not just local tools.
+    #
+    # Everything above works on this machine - files, git, a URL. Nothing
+    # connected SMARAN to an account somewhere, which is what an integration
+    # usually means and what was being asked for.
+    #
+    # Both of these were started here before being listed, which is the rule
+    # the note at the top of this list sets. GitHub's own npm server was tried
+    # first and left out: it starts, but npm reports it deprecated and no
+    # longer supported, and a name that is about to stop working is worse than
+    # no name. GitHub's hosted server is reachable through the remote entry
+    # below instead.
+    {
+        "name": "notion",
+        "title": "Notion",
+        "description": "Search, read and write pages and databases in a Notion workspace.",
+        "target": "npx -y @notionhq/notion-mcp-server",
+        "publisher": "Notion",
+        "needs": "A Notion integration token, and the pages shared with that integration.",
+        "verified": "Started here: notion-mcp-server 2.5.1.",
+    },
+    {
+        "name": "remote",
+        "title": "Any hosted MCP server",
+        "description": (
+            "Connect a service that hosts its own MCP server - GitHub, Linear, "
+            "Sentry, Atlassian and others publish one. Replace the URL with theirs."
+        ),
+        "target": "npx -y mcp-remote https://example.com/mcp",
+        "publisher": "Model Context Protocol",
+        "needs": (
+            "The server's URL from the service you are connecting. Most open a "
+            "browser the first time so you can sign in to that account."
+        ),
+        "verified": "Started here: mcp-remote 0.14.2.",
+    },
 ]
 
 
