@@ -28,6 +28,21 @@ class Hardware:
     torch_is_cuda_build: bool
     disk_free_gb: float
     reason: str = ""
+    # The processor and system memory, which nothing used to look at.
+    #
+    # That was not a cosmetic gap. The text encoder needs about 9.5 GB of
+    # system RAM at bfloat16, and on a 16 GB machine with a browser open it
+    # killed the process with a segmentation fault - no exception, no log line.
+    # Every decision was made from VRAM alone, so the one resource that
+    # actually ran out was the one nothing measured.
+    #
+    # Defaulted so that a Hardware built positionally by older code, or by a
+    # test, still constructs.
+    cpu_cores: int = 0
+    cpu_threads: int = 0
+    cpu_name: str = ""
+    ram_total_gb: float = 0.0
+    ram_free_gb: float = 0.0
 
     def as_dict(self) -> dict:
         d = asdict(self)
@@ -37,6 +52,38 @@ class Hardware:
         return d
 
 
+def _cpu_and_ram() -> dict:
+    """Processor and system memory. Zeroes rather than an exception if unknown."""
+    found = {"cpu_cores": 0, "cpu_threads": 0, "cpu_name": "",
+             "ram_total_gb": 0.0, "ram_free_gb": 0.0}
+    try:
+        import os as _os
+
+        found["cpu_threads"] = _os.cpu_count() or 0
+    except Exception:  # noqa: BLE001
+        logger.debug("could not read the cpu count", exc_info=True)
+
+    try:
+        import psutil
+
+        found["cpu_cores"] = psutil.cpu_count(logical=False) or found["cpu_threads"]
+        memory = psutil.virtual_memory()
+        found["ram_total_gb"] = round(memory.total / 1024 ** 3, 1)
+        # available, not free: cache that the system will hand back on demand
+        # is usable, and "free" understates it enough to refuse work that fits.
+        found["ram_free_gb"] = round(memory.available / 1024 ** 3, 1)
+    except Exception:  # noqa: BLE001
+        logger.debug("psutil is unavailable, so RAM is unknown", exc_info=True)
+
+    try:
+        import platform
+
+        found["cpu_name"] = platform.processor() or platform.machine() or ""
+    except Exception:  # noqa: BLE001
+        logger.debug("could not read the cpu name", exc_info=True)
+    return found
+
+
 def probe(model_dir: str = ".") -> Hardware:
     """Look at the machine. Never raises: an unknown answer is still an answer."""
     try:
@@ -44,6 +91,7 @@ def probe(model_dir: str = ".") -> Hardware:
     except OSError:
         free_bytes = 0
     disk_free = round(free_bytes / 1024 ** 3, 1)
+    system = _cpu_and_ram()
 
     try:
         import torch
@@ -51,7 +99,7 @@ def probe(model_dir: str = ".") -> Hardware:
         return Hardware(
             has_cuda=False, gpu_name="", vram_total_gb=0.0, vram_free_gb=0.0,
             compute_capability=None, supports_bfloat16=False,
-            torch_version="", torch_is_cuda_build=False, disk_free_gb=disk_free,
+            torch_version="", torch_is_cuda_build=False, disk_free_gb=disk_free, **system,
             reason=(
                 "The video packages are not installed yet. They are about 3 GB "
                 "and are fetched on request rather than shipped to everyone, "
@@ -70,7 +118,7 @@ def probe(model_dir: str = ".") -> Hardware:
             has_cuda=False, gpu_name="", vram_total_gb=0.0, vram_free_gb=0.0,
             compute_capability=None, supports_bfloat16=False,
             torch_version=version, torch_is_cuda_build=is_cuda_build,
-            disk_free_gb=disk_free,
+            disk_free_gb=disk_free, **system,
             reason=(
                 "PyTorch is installed without CUDA support, so the graphics card "
                 "cannot be used. Reinstall the CUDA build to enable it."
@@ -114,5 +162,5 @@ def probe(model_dir: str = ".") -> Hardware:
         supports_bfloat16=bf16,
         torch_version=version,
         torch_is_cuda_build=True,
-        disk_free_gb=disk_free,
+        disk_free_gb=disk_free, **system,
     )

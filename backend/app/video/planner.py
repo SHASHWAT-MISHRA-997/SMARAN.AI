@@ -7,11 +7,14 @@ nobody published a requirement. An unknown is never quietly treated as a yes.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
 from .hardware import Hardware, probe
 from .registry import MODELS, VideoModel, by_id
+
+logger = logging.getLogger(__name__)
 
 
 # Weights are not the whole cost. Activations, the text encoder and the VAE all
@@ -428,7 +431,42 @@ def estimate_seconds(
     hw = hw or probe()
     frames = _round_frames(seconds, fps)
     units = float(width) * float(height) * float(frames) * float(steps)
-    predicted = units / _OFFLOAD_UNITS_PER_SEC
+
+    # A rate this machine produced itself, if it has ever finished a render.
+    #
+    # The shipped constant was timed on a 6 GB card streaming layers from
+    # system memory - the slowest path there is - and applying it to hardware
+    # that holds the model in VRAM quoted an RTX 4090 "under 6.4 hours" for
+    # two seconds of video. Wrong by orders of magnitude, in the direction that
+    # makes people close the app.
+    resident = hw.vram_total_gb >= RESIDENT_VRAM_GB
+    measured = None
+    try:
+        from . import calibration
+
+        # The size is passed, not just the machine. A rate timed on a short
+        # clip does not describe a long one: on the card this was built
+        # against, four and a half times the frames cost twenty-four times the
+        # time, so an unqualified rate under-predicted a 25 minute job as 4.
+        measured = calibration.units_per_sec(
+            hw.gpu_name, resident,
+            units_per_step=float(width) * float(height) * float(frames),
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("no calibration available", exc_info=True)
+
+    predicted = units / (measured or _OFFLOAD_UNITS_PER_SEC)
+
+    if measured:
+        # Measured here, so it is quoted as a figure rather than a ceiling.
+        return {
+            "seconds": round(predicted),
+            "bound": "measured",
+            "text": (
+                "About %s, measured on this machine rather than estimated from "
+                "another one." % _human(predicted)
+            ),
+        }
 
     if not hw.has_cuda:
         # No measurement exists for CPU-only, and a made-up one would be worse
@@ -443,15 +481,23 @@ def estimate_seconds(
             ),
         }
 
-    if hw.vram_total_gb >= RESIDENT_VRAM_GB:
+    if resident:
+        # Deliberately not a number. The only timing that exists is from a card
+        # streaming layers off the host, and this card does not do that, so
+        # scaling that figure here produced "under 6.4 hours" for a job an RTX
+        # 4090 finishes in minutes. A wrong number is worse than none: it reads
+        # as a broken app. The first render measures this machine and every
+        # estimate after it is real.
         return {
-            "seconds": round(predicted),
-            "bound": "at most",
+            "seconds": None,
+            "bound": "unmeasured",
             "text": (
-                "Should take under %s. This card is large enough to hold the "
-                "model in VRAM, which is considerably faster than the machine "
-                "this estimate was measured on, so it should beat that "
-                "comfortably." % _human(predicted)
+                "This card holds the whole model in VRAM, which is much faster "
+                "than the machine the shipped figure was timed on - quoting it "
+                "here would be wrong by hours. This run is being timed instead: "
+                "a real estimate in seconds or minutes appears after the first "
+                "few steps, and from the next run onwards it is known before "
+                "you start."
             ),
         }
 

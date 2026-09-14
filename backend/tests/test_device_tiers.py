@@ -115,18 +115,29 @@ def test_a_longer_or_larger_job_is_never_estimated_as_quicker():
         assert estimate_seconds(**harder)["seconds"] > baseline, bigger
 
 
-def test_a_card_that_holds_the_model_is_promised_no_more_than_the_slow_one():
-    """A large card is given the measured figure as a ceiling, not a forecast.
-    Quoting it a faster time would mean inventing a speedup nobody measured."""
+def test_a_card_that_holds_the_model_is_not_quoted_the_slow_cards_number():
+    """A card on a path nobody has timed is told so, not given a figure.
+
+    This test used to assert the opposite: that a large card received the slow
+    card's measurement as a ceiling, on the reasoning that quoting anything
+    faster would invent a speedup nobody measured. The reasoning was right and
+    the result was still unusable - the constant was timed on a 6 GB card
+    streaming layers off the host, so an RTX 4090 was told a two second clip
+    would take "under 6.4 hours" when it takes minutes. A ceiling that far out
+    is not cautious, it is wrong, and it reads as a broken app.
+
+    The run is timed instead, and the figure that replaces this comes from the
+    machine it describes.
+    """
     small = estimate_seconds(width=960, height=576, steps=30, seconds=2, fps=30,
                              hw=gpu(RESIDENT_VRAM_GB - 1))
     large = estimate_seconds(width=960, height=576, steps=30, seconds=2, fps=30,
                              hw=gpu(RESIDENT_VRAM_GB + 1))
-    assert large["bound"] == "at most"
-    # Both are upper bounds: the constant comes from the slower of two runs
-    # that differed threefold on the same card, so neither is a prediction.
+    assert large["bound"] == "unmeasured"
+    assert large["seconds"] is None
+    # The card the constant was actually measured on still gets it.
     assert small["bound"] == "at most"
-    assert large["seconds"] <= small["seconds"]
+    assert small["seconds"] > 0
 
 
 def test_neither_timed_run_is_promised_less_time_than_it_took():
@@ -160,10 +171,19 @@ def test_an_untimed_machine_is_told_so_rather_than_given_a_number():
 
 
 def test_the_estimate_says_something_a_person_can_act_on():
+    """Either a duration, or plainly when a real one will arrive.
+
+    "Unmeasured" on its own would be honest and useless - somebody staring at a
+    progress bar still needs to know whether to wait or come back later. Where
+    there is no trustworthy figure yet, the text has to say that one is coming
+    and roughly when, which the live timer then delivers a few steps in.
+    """
     for total in (6.0, 24.0):
         text = estimate_seconds(width=960, height=576, steps=30, seconds=2,
                                 fps=30, hw=gpu(total))["text"]
-        assert any(unit in text for unit in ("second", "minute", "hour")), text
+        names_a_duration = any(u in text for u in ("second", "minute", "hour"))
+        assert names_a_duration, text
+        assert text.strip()
 
 
 def test_the_estimate_counts_the_frames_the_engine_will_really_make():

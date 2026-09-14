@@ -4372,6 +4372,19 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                     "It will be enlarged to %s afterwards. This card renders "
                     "at %dx%d - enlarging adds pixels, not detail.\n\n"
                     % (want_target, shape["width"], shape["height"])}) + "\n"
+
+            # A strong card should not quietly get the same picture as a weak
+            # one. If better weights would run here and are not installed, say
+            # so once - and do not fetch several gigabytes without being asked.
+            try:
+                from app.image_plan import better_model_available
+
+                upgrade = better_model_available()
+                if upgrade:
+                    yield json.dumps({"token": upgrade["reason"] + "\n\n"}) + "\n"
+            except Exception:  # noqa: BLE001
+                logger.debug("could not check for a better image model",
+                             exc_info=True)
             try:
                 loop = asyncio.get_running_loop()
                 img_tag = await loop.run_in_executor(

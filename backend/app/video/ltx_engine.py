@@ -199,6 +199,14 @@ def _round_to(value: int, base: int) -> int:
     return max(base, int(round(value / base)) * base)
 
 
+def _human_short(secs: float) -> str:
+    if secs < 90:
+        return "%d seconds" % round(secs)
+    if secs < 5400:
+        return "%d minutes" % round(secs / 60.0)
+    return "%.1f hours" % (secs / 3600.0)
+
+
 def generate(
     prompt: str,
     output_path: str,
@@ -296,6 +304,39 @@ def generate(
             % (frames, width, height, frames / fps, fps, steps)
         )
 
+    # Time the run as it happens, so this machine stops being described by a
+    # constant measured on someone else's. The first honest number the user
+    # sees arrives a few steps in, from their own hardware.
+    from . import calibration
+
+    hw_now = probe()
+    resident = hw_now.vram_total_gb >= RESIDENT_VRAM_GB
+    timer = calibration.StepTimer(
+        units_per_step=float(width) * float(height) * float(frames),
+        total_steps=steps,
+        on_estimate=(lambda remaining, per_step: progress(
+            "Measured on this machine: %.1f s per step, about %s left."
+            % (per_step, _human_short(remaining))
+        )) if progress else None,
+    )
+
+    def _on_step(pipeline, step_index, timestep, callback_kwargs):
+        timer.step()
+        return callback_kwargs
+
+    # Older pipelines take callback/callback_steps instead, and some take
+    # neither. A missing progress callback must never stop the generation, so
+    # the supported form is discovered rather than assumed.
+    import inspect as _inspect
+
+    accepted = _inspect.signature(pipe.__call__).parameters
+    if "callback_on_step_end" in accepted:
+        kwargs["callback_on_step_end"] = _on_step
+    elif "callback" in accepted:
+        kwargs["callback"] = lambda step, timestep, latents: timer.step()
+        if "callback_steps" in accepted:
+            kwargs["callback_steps"] = 1
+
     try:
         result = pipe(**kwargs)
     except torch.cuda.OutOfMemoryError as exc:
@@ -307,6 +348,16 @@ def generate(
         ) from exc
     except Exception as exc:
         raise VideoError("Generation failed: %s" % exc) from exc
+
+    # Written down before the file is, so the next run quotes this machine.
+    measured = timer.rate()
+    if measured:
+        calibration.record(hw_now.gpu_name, resident, measured, timer.samples(),
+                           units_per_step=timer.units_per_step)
+        if progress:
+            progress("This machine runs at about %s units/sec; future estimates "
+                     "use that instead of the shipped figure."
+                     % format(int(measured), ","))
 
     video = result.frames[0]
     os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)

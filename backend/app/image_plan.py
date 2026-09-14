@@ -118,9 +118,15 @@ def plan(model_id: str, aspect: str = DEFAULT_ASPECT,
             break
 
     # A model is only as large as it was trained to be, whatever the card has.
-    name = (model_id or "").lower()
-    if "xl" not in name and "sd-3" not in name and "flux" not in name:
-        longest = min(longest, _SD15_CEILING)
+    # Taken from the ladder where the model is known, because that is where the
+    # native size is recorded, and from the name only as a last resort.
+    known = next((e for e in LADDER if e["repo"] == model_id), None)
+    if known:
+        longest = min(longest, known["native"])
+    else:
+        name = (model_id or "").lower()
+        if "xl" not in name and "sd-3" not in name and "flux" not in name:
+            longest = min(longest, _SD15_CEILING)
 
     ratio = ASPECTS.get(aspect, ASPECTS[DEFAULT_ASPECT])
     if ratio >= 1:
@@ -178,28 +184,76 @@ def enlarge(image, target: str):
     )
 
 
-def available_model() -> str:
-    """The image model to use: whichever is already on disk, else SD 1.5.
+# Models worth using, largest first, with the free VRAM each needs and the
+# download it costs. SDXL renders at 1024 natively and is a genuinely better
+# picture than SD 1.5 upscaled - but it is a 7 GB download and needs roughly
+# 10 GB free to run comfortably, so it is offered to machines that can use it
+# rather than forced on machines that cannot.
+LADDER = (
+    {"repo": "stabilityai/stable-diffusion-xl-base-1.0", "vram_gb": 9.5,
+     "download_gb": 6.9, "native": 1024, "label": "SDXL"},
+    {"repo": "stable-diffusion-v1-5/stable-diffusion-v1-5", "vram_gb": 2.5,
+     "download_gb": 2.0, "native": 768, "label": "Stable Diffusion 1.5"},
+    {"repo": "stabilityai/sd-turbo", "vram_gb": 2.0,
+     "download_gb": 2.5, "native": 512, "label": "SD-Turbo"},
+)
 
-    The default used to be a model that was not downloaded, while a perfectly
-    good one sat in the cache unused - so the first image anyone asked for
-    began with a multi-gigabyte download they had not agreed to, on a machine
-    that did not need it.
+
+def _is_downloaded(repo: str) -> bool:
+    hub = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+    folder = os.path.join(hub, "models--" + repo.replace("/", "--"))
+    if not os.path.isdir(folder):
+        return False
+    return any(name.endswith((".safetensors", ".bin"))
+               for _root, _dirs, files in os.walk(folder) for name in files)
+
+
+def available_model() -> str:
+    """The image model to use: the best one already on disk that fits.
+
+    Never downloads. The default used to name a model that was not present
+    while a perfectly good one sat in the cache unused, so the first image
+    anyone asked for began with a multi-gigabyte download they had not agreed
+    to, on a machine that did not need it.
     """
     override = os.getenv("LOCAL_IMAGE_MODEL")
     if override:
         return override
 
-    candidates = (
-        "stable-diffusion-v1-5/stable-diffusion-v1-5",
-        "stabilityai/sd-turbo",
-    )
-    hub = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
-    for repo in candidates:
-        folder = os.path.join(hub, "models--" + repo.replace("/", "--"))
-        if os.path.isdir(folder) and any(
-            name.endswith((".safetensors", ".bin"))
-            for _root, _dirs, files in os.walk(folder) for name in files
-        ):
-            return repo
-    return candidates[0]
+    vram = probe_vram_gb()
+    for entry in LADDER:
+        if _is_downloaded(entry["repo"]) and vram >= entry["vram_gb"]:
+            return entry["repo"]
+    # Nothing that fits is installed; fall back to anything installed at all,
+    # then to the smallest sensible default for a first download.
+    for entry in LADDER:
+        if _is_downloaded(entry["repo"]):
+            return entry["repo"]
+    return LADDER[1]["repo"]
+
+
+def better_model_available(vram_gb: Optional[float] = None) -> Optional[dict]:
+    """A model this machine could run that would look better, if any.
+
+    Returned so the app can offer it rather than either downloading 7 GB
+    unasked or silently giving a 4090 the same picture as a 2060. None when
+    the best model the hardware supports is already installed.
+    """
+    if vram_gb is None:
+        vram_gb = probe_vram_gb()
+    current = available_model()
+    for entry in LADDER:
+        if vram_gb < entry["vram_gb"]:
+            continue
+        if entry["repo"] == current:
+            return None
+        if not _is_downloaded(entry["repo"]):
+            return dict(entry, reason=(
+                "This card has %.1f GB free, enough for %s, which renders at "
+                "%d natively instead of %d. It is a %.1f GB download and is "
+                "not fetched unless you ask."
+                % (vram_gb, entry["label"], entry["native"],
+                   next(e["native"] for e in LADDER if e["repo"] == current),
+                   entry["download_gb"])
+            ))
+    return None
