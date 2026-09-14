@@ -108,6 +108,24 @@ jobs:
           choco install innosetup --no-progress -y
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/SMARAN.AI.iss
 
+      # The same build the installer wraps, as a folder people can unzip and
+      # run without installing anything. It was uploaded by hand for 2.10.43
+      # and then not for 2.10.44, which broke the download page's Portable
+      # button - the page links through releases/latest/download/, so an
+      # asset that is missing from the newest release 404s even though the
+      # older one is still there.
+      #
+      # The name deliberately has no version in it. The previous one was
+      # SMARAN.AI-v2.10.43-Windows-Portable.zip, which cannot work behind
+      # /latest/download/ for longer than a single release.
+      - name: Pack the portable build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path installer/output | Out-Null
+          Compress-Archive -Path dist/SMARAN.AI `
+                           -DestinationPath installer/output/SMARAN.AI-Windows-Portable.zip `
+                           -CompressionLevel Optimal
+
       - name: Build the command line tool
         working-directory: cli
         run: python -m PyInstaller --noconfirm --clean smaran.spec
@@ -117,6 +135,7 @@ jobs:
           name: windows
           path: |
             installer/output/SMARAN.AI-Setup.exe
+            installer/output/SMARAN.AI-Windows-Portable.zip
             cli/dist/smaran.exe
           if-no-files-found: error
 
@@ -304,6 +323,7 @@ jobs:
         run: |
           mkdir -p release
           cp artifacts/windows/installer/output/SMARAN.AI-Setup.exe release/
+          cp artifacts/windows/installer/output/SMARAN.AI-Windows-Portable.zip release/
           cp artifacts/windows/cli/dist/smaran.exe release/
           # SMARAN-AI.apk, not SMARAN.AI.apk. A dot inside the base name
           # makes some Android download handlers read the type wrongly:
@@ -337,7 +357,37 @@ jobs:
             exit 1
           fi
           tag="${GITHUB_REF_NAME}"
-          gh release create "$tag" release/* \
-            --repo SHASHWAT-MISHRA-997/SMARAN.AI-downloads \
-            --title "SMARAN.AI ${tag#v}" \
-            --generate-notes
+          repo=SHASHWAT-MISHRA-997/SMARAN.AI-downloads
+          # Re-runnable. `gh release create` fails outright if the release is
+          # already there, so a job that failed after publishing - or a rerun
+          # to add an asset that was missing - could not be repeated without
+          # deleting the release by hand first.
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            echo "Release $tag exists; replacing its assets."
+            gh release upload "$tag" release/* --repo "$repo" --clobber
+          else
+            gh release create "$tag" release/* \
+              --repo "$repo" \
+              --title "SMARAN.AI ${tag#v}" \
+              --generate-notes
+          fi
+
+          # Every file the download page links to, checked against what is
+          # actually on the release. The page links through
+          # releases/latest/download/<name>, so a missing or renamed asset is
+          # a 404 on a button rather than a visible failure anywhere.
+          expected="SMARAN.AI-Setup.exe SMARAN.AI-Windows-Portable.zip smaran.exe
+                    SMARAN-AI.apk SMARAN.AI-x86_64.AppImage smaran-ai_amd64.deb
+                    smaran-ai.x86_64.rpm smaran-ai-linux-x86_64.tar.gz
+                    smaran-linux-x86_64"
+          published="$(gh release view "$tag" --repo "$repo" --json assets \
+                       --jq '.assets[].name')"
+          missing=0
+          for name in $expected; do
+            if ! printf '%s\n' "$published" | grep -qx "$name"; then
+              echo "::error::$name is missing from $tag - the download page links to it"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "All download-page assets are present."
