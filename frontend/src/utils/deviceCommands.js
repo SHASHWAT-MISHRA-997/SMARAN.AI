@@ -41,8 +41,11 @@ export function isBeingDiscussed(utterance) {
 // "open Chrome" and "Chrome kholo" are the same instruction.
 const OPEN_FIRST = '(?:open|launch|start|run|kholo|khol\\s+do|chalu\\s+karo|start\\s+karo|open\\s+karo)';
 const OPEN_LAST = '(?:kholo|khol\\s+do|chalu\\s+karo|start\\s+karo|open\\s+karo|kholna)';
-const PLAY_FIRST = '(?:play|bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do)';
-const PLAY_LAST = '(?:bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|play\\s+karo)';
+// "lagao" belongs here as much as "bajao" does - "tum hi ho youtube par lagao"
+// is how people actually ask - and it was missing, so that sentence reached
+// the model instead of the player.
+const PLAY_FIRST = '(?:play|bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|lagao|laga\\s+do)';
+const PLAY_LAST = '(?:bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|lagao|laga\\s+do|play\\s+karo|play\\s+kar\\s+do)';
 
 const RULES = [
   // YouTube, before the generic "play", so "YouTube pe X chalao" is a video
@@ -54,6 +57,15 @@ const RULES = [
       new RegExp(`(?:${OPEN_FIRST}|${PLAY_FIRST}|search|dikhao)\\s+(?:on\\s+|pe\\s+|par\\s+)?youtube\\s+(.+)$`, 'i'),
       new RegExp(`youtube\\s+(?:pe|par|mein|mai|men)\\s+(.+?)\\s+(?:${PLAY_LAST}|${OPEN_LAST}|dikhao|search\\s+karo)$`, 'i'),
       new RegExp(`(?:${PLAY_FIRST})\\s+(.+?)\\s+(?:on|pe|par)\\s+youtube$`, 'i'),
+      // What is being played, then where, then the verb:
+      // "ganpati bappa song youtube par play karo".
+      //
+      // The single most common way this is said, and the one shape that was
+      // missing. Four of the seven phrasings the desktop handles reached
+      // nothing here, so the phone answered "I have no tool that can open apps
+      // on your device" to a request it was perfectly able to carry out. The
+      // desktop had this exact gap once and it was fixed there and not here.
+      new RegExp(`^(.+?)\\s+(?:youtube|यूट्यूब)\\s+(?:pe|par|mein|mai|men|पर|पे)\\s+(?:${PLAY_LAST}|${OPEN_LAST}|dikhao|search\\s+karo)$`, 'i'),
     ],
     argument: 'query',
   },

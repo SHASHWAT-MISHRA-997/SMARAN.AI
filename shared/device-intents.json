@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "The phrases a device command has to answer to, in one place.",
+    "",
+    "The desktop matches these in Python (app/desktop_agent.py) and the phone",
+    "matches them in JavaScript (frontend/src/utils/deviceIntents.js), because",
+    "a phone running standalone has no backend to ask - it is on its own with",
+    "the cloud keys stored on it. Two matchers is one more than anybody wants,",
+    "but the alternative was the phone answering 'I have no tool that can open",
+    "apps on your device' to a request the desktop handles fine.",
+    "",
+    "What must NOT be duplicated is the contract. Both test suites read this",
+    "file, so a phrase that works on one and not the other fails a test rather",
+    "than being discovered on a phone.",
+    "",
+    "'desktop_only' are things a phone genuinely cannot do - there is no",
+    "taking a screenshot of someone else's computer from an Android webview -",
+    "and the phone is expected to say so plainly rather than pretend."
+  ],
+  "play_on_youtube": [
+    "ganpati bappa song youtube par play karo",
+    "play ganpati bappa on youtube",
+    "ganpati bappa gaana youtube pe chalao",
+    "youtube par ganpati bappa song play karo",
+    "arijit singh song youtube pe bajao",
+    "tum hi ho youtube par lagao",
+    "play lofi beats on youtube"
+  ],
+  "open_youtube_plain": [
+    "open youtube",
+    "youtube kholo"
+  ],
+  "not_a_device_command": [
+    "what is youtube",
+    "youtube ka matlab kya hai",
+    "write a song about youtube",
+    "explain how youtube makes money"
+  ],
+  "desktop_only": [
+    "screenshot lo",
+    "lock karo",
+    "volume badhao",
+    "kitna battery hai"
+  ]
+}

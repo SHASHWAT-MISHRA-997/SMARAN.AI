@@ -19,6 +19,7 @@ These pin the phrasings rather than the regexes, so the patterns can be
 rewritten as long as the sentences keep working.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -43,16 +44,20 @@ def route(text):
     return None, None
 
 
-PLAY_PHRASINGS = [
-    # the one that was reported
-    "ganpati bappa song youtube par play karo",
-    "play ganpati bappa on youtube",
-    "ganpati bappa gaana youtube pe chalao",
-    "youtube par ganpati bappa song play karo",
-    "arijit singh song youtube pe bajao",
-    "tum hi ho youtube par lagao",
-    "play lofi beats on youtube",
-]
+# Read from the file the phone's tests read too.
+#
+# The phone has its own matcher, in JavaScript, because a handset that is not
+# paired with a desktop has no backend to ask - it went to a cloud model, which
+# answered "I have no tool that can open apps on your device". Two matchers is
+# one more than anybody wants, so the phrases they must both answer to live in
+# one place and both suites read it. A phrase that works on the desktop and not
+# on the phone now fails a test instead of being found on a phone.
+_SHARED = json.loads(
+    (Path(__file__).resolve().parents[2] / "shared" / "device-intents.json")
+    .read_text(encoding="utf-8")
+)
+
+PLAY_PHRASINGS = _SHARED["play_on_youtube"]
 
 
 @pytest.mark.parametrize("text", PLAY_PHRASINGS)
@@ -105,6 +110,22 @@ def test_plain_open_youtube_still_just_opens_it():
     """The broader play patterns must not swallow a bare open request."""
     action, _ = route("open youtube")
     assert action == "open_website"
+
+
+@pytest.mark.parametrize("text", _SHARED["not_a_device_command"])
+def test_talking_about_youtube_is_not_a_command_to_open_it(text):
+    """Pinned on both sides. Reading a question as an instruction hijacks it:
+    the user asks what YouTube is and the app launches it instead of
+    answering."""
+    action, _ = route(text)
+    assert action != "search_youtube", "%r was read as a play command" % text
+
+
+@pytest.mark.parametrize("text", _SHARED["desktop_only"])
+def test_the_desktop_can_still_do_its_own_commands(text):
+    """These are the ones the phone honestly cannot, so the desktop must."""
+    action, _ = route(text)
+    assert action, "%r reaches nothing on the desktop either" % text
 
 
 # ---------------------------------------------------------------------------
