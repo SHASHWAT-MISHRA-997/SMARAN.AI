@@ -152,10 +152,18 @@ def load(for_image: bool = False, progress: Optional[Callable[[str], None]] = No
             if other is not None:
                 pipe = cls(**other.components)
             else:
+                # Loaded without the text encoder, which is two thirds of the
+                # download and the part that could not be held in memory at
+                # all: T5-XXL needs about 9.5 GB at bfloat16 and killed the
+                # process outright on a 16 GB machine with a browser open -
+                # a segmentation fault inside the loader, no exception, no log.
+                # The prompt is encoded separately in prompt_embeds.py and the
+                # encoder is freed before this runs, so the two never coexist.
+                kwargs = dict(text_encoder=None, tokenizer=None)
                 try:
-                    pipe = cls.from_pretrained(model.hf_repo, dtype=dtype)
+                    pipe = cls.from_pretrained(model.hf_repo, dtype=dtype, **kwargs)
                 except TypeError:
-                    pipe = cls.from_pretrained(model.hf_repo, torch_dtype=dtype)
+                    pipe = cls.from_pretrained(model.hf_repo, torch_dtype=dtype, **kwargs)
         except Exception as exc:
             msg = str(exc)
             if "unauthenticated" in msg.lower() or "401" in msg or "403" in msg or "rate limit" in msg.lower():
@@ -242,6 +250,18 @@ def generate(
     if impossible:
         raise VideoError(impossible)
 
+    # Before the pipeline, not after: the encoder has to be loaded and freed
+    # while the transformer and VAE are still absent, or the machine runs out
+    # of memory holding both.
+    from . import prompt_embeds as _prompt_embeds
+
+    conditioning = _prompt_embeds.encode(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        dtype=_resolve_dtype(probe(), by_id(MODEL_ID)),
+        progress=progress,
+    )
+
     pipe = load(for_image=bool(image_path), progress=progress)
 
     generator = None
@@ -249,8 +269,12 @@ def generate(
         generator = torch.Generator(device="cpu").manual_seed(int(seed))
 
     kwargs = dict(
-        prompt=prompt,
-        negative_prompt=negative_prompt,
+        # The encoded prompt rather than the text, because this pipeline has
+        # no text encoder attached to do it with.
+        prompt_embeds=conditioning["prompt_embeds"],
+        prompt_attention_mask=conditioning["prompt_attention_mask"],
+        negative_prompt_embeds=conditioning["negative_prompt_embeds"],
+        negative_prompt_attention_mask=conditioning["negative_prompt_attention_mask"],
         width=width,
         height=height,
         num_frames=frames,
