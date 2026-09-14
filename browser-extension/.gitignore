@@ -1,3 +1,0 @@
-# The signing key that fixes the extension id. Losing control of this lets
-# someone publish an extension Chrome treats as this one.
-extension-key.pem

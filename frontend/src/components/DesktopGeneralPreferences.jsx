@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Laptop, RefreshCw, Check, X } from 'lucide-react';
+import { Laptop, Check, X } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
 const DesktopGeneralPreferences = () => {
@@ -10,8 +10,6 @@ const DesktopGeneralPreferences = () => {
     system_tray: true,
     keep_awake: false,
   });
-  const [browserStatus, setBrowserStatus] = useState(null);
-  const [rechecking, setRechecking] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
 
   const fetchSettings = async () => {
@@ -26,24 +24,8 @@ const DesktopGeneralPreferences = () => {
     }
   };
 
-  const fetchBrowserStatus = async () => {
-    setRechecking(true);
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/browser-extension/status`);
-      if (res.ok) {
-        const data = await res.json();
-        setBrowserStatus(data);
-      }
-    } catch {
-      // Fallback
-    } finally {
-      setTimeout(() => setRechecking(false), 400);
-    }
-  };
-
   useEffect(() => {
     fetchSettings();
-    fetchBrowserStatus();
   }, []);
 
   const updateSetting = async (key, value) => {
@@ -189,50 +171,6 @@ const DesktopGeneralPreferences = () => {
       </div>
 
       <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
-
-      {/* Browser use & Connected browsers card */}
-      <div className="space-y-3 pt-2">
-        <div>
-          <p className="text-sm font-bold">Browser use</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Not available in cloud Code sessions, which don&rsquo;t run on this computer.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-xs font-bold text-zinc-400">Connected browsers</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Chrome instances signed in to your account that SMARAN can automate.
-          </p>
-
-          <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${browserStatus?.connected ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
-                <span className="text-xs font-bold">
-                  {browserStatus?.connected
-                    ? `${browserStatus.instances?.[0]?.name || 'Google Chrome Connected'}`
-                    : 'No browsers connected'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={fetchBrowserStatus}
-                disabled={rechecking}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs font-bold hover:bg-zinc-100 dark:hover:bg-zinc-700 transition cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${rechecking ? 'animate-spin' : ''}`} />
-                <span>Recheck</span>
-              </button>
-            </div>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-              {browserStatus?.connected
-                ? 'Chrome CDP endpoint active on port 9222. Automation commands and visual scraping enabled.'
-                : 'No Chrome instances are connected. Open Chrome with the SMARAN extension and sign in.'}
-            </p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

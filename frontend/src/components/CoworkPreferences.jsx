@@ -260,7 +260,10 @@ const CoworkPreferences = () => {
           onChange={(e) => updateSetting('preferred_browser', e.target.value)}
           className="px-3 py-1.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs font-semibold text-zinc-900 dark:text-zinc-100 outline-none cursor-pointer"
         >
-          <option value="chrome">Chrome (SMARAN in Chrome)</option>
+          {/* Named the extension, which no longer exists. Chrome is still a
+              perfectly good choice of browser; it just is not driven by an
+              extension any more, so the label should not imply one. */}
+          <option value="chrome">Chrome</option>
           <option value="builtin">Built-in browser</option>
         </select>
       </div>

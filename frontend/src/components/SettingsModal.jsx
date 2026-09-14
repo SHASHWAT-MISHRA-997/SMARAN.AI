@@ -9,7 +9,6 @@ import ComputerUsePreferences from './ComputerUsePreferences';
 import ShortcutsPreferences from './ShortcutsPreferences';
 import GitPreferences from './GitPreferences';
 import CoworkPreferences from './CoworkPreferences';
-import ChromeExtensionPreferences from './ChromeExtensionPreferences';
 import DesktopGeneralPreferences from './DesktopGeneralPreferences';
 import MemoryPreferences from './MemoryPreferences';
 
@@ -604,7 +603,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
     ...(!isMobile ? [{ id: "computer_use", label: "Capabilities", category: "Settings", icon: Monitor }] : []),
     ...(!isMobile ? [{ id: "git", label: "SMARAN Code", category: "Settings", icon: GitBranch }] : []),
     ...(!isMobile ? [{ id: "cowork", label: "Cowork", category: "Settings", icon: Users }] : []),
-    ...(!isMobile ? [{ id: "chrome", label: "SMARAN in Chrome", category: "Settings", icon: Globe }] : []),
 
     // Desktop app Category (Screenshot 3)
     ...(!isMobile ? [{ id: "desktop_general", label: "General (Desktop)", category: "Desktop app", icon: Laptop }] : []),
@@ -733,7 +731,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
             {activeTab === 'shortcuts' && !isMobile && <ShortcutsPreferences />}
             {activeTab === 'git' && <GitPreferences />}
             {activeTab === 'cowork' && <CoworkPreferences />}
-            {activeTab === 'chrome' && <ChromeExtensionPreferences />}
             {activeTab === 'desktop_general' && <DesktopGeneralPreferences />}
             {activeTab === 'memory' && <MemoryPreferences />}
             {activeTab === "general" && (

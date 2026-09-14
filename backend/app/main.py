@@ -693,10 +693,9 @@ _LOCAL_ORIGIN_PATTERN = (
     r")(:\d+)?$"
 )
 
-_CHROME_EXTENSION_ORIGIN = "chrome-extension://chhffklihgllkmhnjbpcljppdpgihpfm"
-_ALLOWED_ORIGIN_PATTERN = (
-    _LOCAL_ORIGIN_PATTERN[:-1] + r"|^" + re.escape(_CHROME_EXTENSION_ORIGIN) + r"$"
-)
+# The Chrome extension's origin was allowed through here. The extension is
+# gone, and an origin nothing can come from is a hole kept open for no one.
+_ALLOWED_ORIGIN_PATTERN = _LOCAL_ORIGIN_PATTERN
 
 app.add_middleware(
     CORSMiddleware,
@@ -2355,37 +2354,6 @@ async def update_desktop_settings(payload: dict, current_user: User = Depends(ge
     settings_file = settings_dir / f"desktop_{current_user.id}.json"
     settings_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return {"status": "ok", "settings": payload}
-
-
-@app.get("/api/browser-extension/status")
-async def get_browser_extension_status(current_user: User = Depends(get_current_user)):
-    connected_instances = []
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(0.2)
-    chrome_port_open = False
-    try:
-        if s.connect_ex(('127.0.0.1', 9222)) == 0:
-            chrome_port_open = True
-    except Exception:
-        pass
-    finally:
-        s.close()
-
-    if chrome_port_open:
-        connected_instances.append({
-            "id": "chrome_local",
-            "name": "Google Chrome (CDP Port 9222)",
-            "status": "connected",
-            "extension_version": "1.4.0",
-        })
-
-    return {
-        "extension_enabled": True,
-        "connected": len(connected_instances) > 0,
-        "instances": connected_instances,
-        "site_permissions_default": "ask",
-    }
 
 
 @app.delete("/api/privacy/clear-all")

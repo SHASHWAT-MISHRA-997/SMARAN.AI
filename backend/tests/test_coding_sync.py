@@ -325,9 +325,8 @@ def test_cowork_desktop_settings_and_memory_import(sync_db):
 
     assert res_desktop_get.json()["version"] == APP_VERSION
 
-    # 5. Browser extension status
-    res_ext_status = client.get("/api/browser-extension/status", headers=headers)
-    assert res_ext_status.status_code == 200
-    assert "extension_enabled" in res_ext_status.json()
+    # The browser extension was removed at the owner's request, so there is
+    # no /api/browser-extension/status left to check. Chrome is still usable
+    # as a browser; it is simply no longer driven by an extension.
 
 
