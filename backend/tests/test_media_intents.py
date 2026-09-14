@@ -105,3 +105,63 @@ def test_plain_open_youtube_still_just_opens_it():
     """The broader play patterns must not swallow a bare open request."""
     action, _ = route("open youtube")
     assert action == "open_website"
+
+
+# ---------------------------------------------------------------------------
+# Desktop commands, in the other word order
+# ---------------------------------------------------------------------------
+#
+# The same fault as the YouTube one, spread across the whole agent: every rule
+# was written for one word order and only that one. Twenty of twenty-seven
+# ordinary commands reached nothing. The actions all existed and worked -
+# take_screenshot, lock_computer, get_battery_status, minimize_all_windows -
+# there was simply no sentence that arrived at them.
+
+DESKTOP_PHRASINGS = [
+    ("screenshot lo", "take_screenshot"),
+    ("screenshot le lo", "take_screenshot"),
+    ("screen capture karo", "take_screenshot"),
+    ("lock karo", "lock_computer"),
+    ("computer lock kar do", "lock_computer"),
+    ("sleep kar do", "sleep_computer"),
+    ("kitna battery hai", "get_battery_status"),
+    ("battery kitni hai", "get_battery_status"),
+    ("time kya hua", "get_time"),
+    ("window minimize karo", "minimize_all_windows"),
+    ("downloads folder kholo", "open_folder"),
+    ("sound increase karo", "volume_up"),
+]
+
+
+@pytest.mark.parametrize("text,expected", DESKTOP_PHRASINGS)
+def test_desktop_commands_reach_their_action(text, expected):
+    action, _ = route(text)
+    assert action == expected, f"{text!r} routed to {action!r}"
+
+
+# The orders that already worked must keep working: the new rules sit above
+# the originals, so a mistake there would shadow them silently.
+@pytest.mark.parametrize("text,expected", [
+    ("take a screenshot", "take_screenshot"),
+    ("lock my computer", "lock_computer"),
+    ("volume badhao", "volume_up"),
+    ("volume kam karo", "volume_down"),
+    ("chrome kholo", "open_application"),
+])
+def test_the_orders_that_already_worked_still_do(text, expected):
+    action, _ = route(text)
+    assert action == expected, f"{text!r} routed to {action!r}"
+
+
+@pytest.mark.parametrize("text,expected", [
+    # Broadening these rules is exactly how "awaz band karo" was once captured
+    # by the media stop rule and muted nothing while stopping the track.
+    ("awaz band karo", "toggle_mute"),
+    ("band karo", "media_stop"),
+    ("gaana band karo", "media_stop"),
+    ("open youtube", "open_website"),
+    ("ganpati bappa song youtube par play karo", "search_youtube"),
+])
+def test_the_wider_rules_do_not_swallow_other_commands(text, expected):
+    action, _ = route(text)
+    assert action == expected, f"{text!r} routed to {action!r}"

@@ -2339,6 +2339,40 @@ INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
 
     # System
     (re.compile(r"(?:empty|clear|khali\s+karo|saaf\s+karo)\s+(?:the\s+)?recycle\s*bin", re.I), "empty_recycle_bin", {}),
+    # The same sentences, the other way round.
+    #
+    # Each rule below was written for one word order and only that one. Twenty
+    # of twenty-seven ordinary commands reached nothing: "screenshot lo" failed
+    # because the verb had to come first, "lock karo" because a noun had to
+    # follow, "kitna battery hai" because the question word had to come after
+    # "battery". Every action they name already existed and worked - there was
+    # simply no sentence that arrived at it.
+    #
+    # These sit above the originals rather than replacing them, so the orders
+    # that already worked keep working.
+    (re.compile(r"^(?:please\s+)?(?:screenshot|screen\s*shot)\s*(?:lo|le\s*lo|liya|karo|kar\s*do|please)?[.!?]*$"
+                r"|^(?:screen\s*capture|capture\s*screen)\s*(?:karo|kar\s*do|lo)?[.!?]*$",
+                re.I), "take_screenshot", {}),
+    (re.compile(r"^(?:please\s+)?(?:computer|pc|laptop|screen)?\s*lock\s*(?:karo|kar\s*do|do|kardo)[.!?]*$"
+                r"|^(?:please\s+)?lock\s*(?:it|this)?[.!?]*$",
+                re.I), "lock_computer", {}),
+    (re.compile(r"^(?:please\s+)?(?:computer|pc|laptop)?\s*sleep\s*(?:karo|kar\s*do|do|mode)?[.!?]*$"
+                r"|^(?:so\s*ja(?:o)?)\s*(?:computer|pc|laptop)?[.!?]*$",
+                re.I), "sleep_computer", {}),
+    (re.compile(r"\b(?:kitn[ia]|how\s+much)\s+battery\b|\bbattery\s+kitn[ia]\b|\bbattery\s+bach[ai]\b",
+                re.I), "get_battery_status", {}),
+    (re.compile(r"\btime\s+kya\s+hua\b|\bkya\s+baja\s+hai\b|\babhi\s+(?:kya\s+)?time\b",
+                re.I), "get_time", {}),
+    (re.compile(r"\b(?:sab\s+)?window[s]?\s+(?:ko\s+)?minimi[sz]e\s*(?:karo|kar\s*do)?\b"
+                r"|\bsab\s+window[s]?\s+(?:band|chhota)\s*karo\b",
+                re.I), "minimize_all_windows", {}),
+    (re.compile(r"(?:^|\b)(desktop|downloads?|documents?|pictures?|videos?|music)\s+(?:ka\s+)?folder\s+"
+                r"(?:kholo|khol\s*do|open\s*karo|dikhao)",
+                re.I), "open_folder", {"path": "$1"}),
+    (re.compile(r"\b(?:sound|awaz|awaaz|volume)\s+(?:ko\s+)?(?:increase|badha|tez)\w*\s*(?:karo|kar\s*do|do)?\b",
+                re.I), "volume_up", {}),
+    (re.compile(r"\b(?:sound|awaz|awaaz|volume)\s+(?:ko\s+)?(?:decrease|kam|dhee?ma)\w*\s*(?:karo|kar\s*do|do)?\b",
+                re.I), "volume_down", {}),
     (re.compile(r"(?:take|capture|lelo|lo)\s+(?:a\s+)?screenshot", re.I), "take_screenshot", {}),
     (re.compile(r"(?:lock|band\s+karo)\s+(?:my\s+)?(?:computer|pc|laptop|screen)", re.I), "lock_computer", {}),
     # Asked before the running-processes pattern: "what apps do I have open"
