@@ -958,19 +958,22 @@
      install section (Linux, CLI, etc.).
   ------------------------------------------------------------------------- */
   (() => {
-    const codeBlocks = document.querySelectorAll('pre.code');
-    codeBlocks.forEach((pre) => {
-      if (pre.closest('.code-wrap')) return;
-
-      const wrap = document.createElement('div');
-      wrap.className = 'code-wrap';
-      pre.parentNode.insertBefore(wrap, pre);
-      wrap.appendChild(pre);
-
+    /* One button per command, not one per block.
+     *
+     * The package manager step lists two commands that are alternatives, not a
+     * sequence - apt on Debian, dnf on Fedora - and a single button copied
+     * both at once, so whichever machine you were on you got one command you
+     * wanted and one you did not. The same was true of the four `smaran`
+     * examples. Each line gets its own button.
+     *
+     * The trailing "# Debian, Ubuntu, Mint" comments are left out of what is
+     * copied. They are there to be read, not pasted.
+     */
+    const makeButton = (label) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'code-copy-btn';
-      btn.setAttribute('aria-label', 'Copy command to clipboard');
+      btn.setAttribute('aria-label', label);
       btn.innerHTML =
         '<svg class="copy-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
         '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>' +
@@ -980,11 +983,13 @@
         '<polyline points="20 6 9 17 4 12"></polyline>' +
         '</svg>' +
         '<span class="copy-text">Copy</span>';
+      return btn;
+    };
 
+    const attach = (btn, getText) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const codeEl = pre.querySelector('code') || pre;
-        const text = codeEl.innerText.trim();
+        const text = getText();
         if (!text) return;
 
         const performCopy = () => {
@@ -1026,8 +1031,73 @@
         try { document.execCommand('copy'); } catch (err) {}
         document.body.removeChild(ta);
       }
+    };
 
-      wrap.appendChild(btn);
+    // The command on a line, without the explanatory comment after it.
+    const commandOf = (node) => {
+      const clone = node.cloneNode(true);
+      clone.querySelectorAll('.c').forEach((comment) => comment.remove());
+      return clone.textContent.replace(/\s+$/, '').trim();
+    };
+
+    document.querySelectorAll('pre.code').forEach((pre) => {
+      if (pre.closest('.code-wrap')) return;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'code-wrap';
+      pre.parentNode.insertBefore(wrap, pre);
+      wrap.appendChild(pre);
+
+      const codeEl = pre.querySelector('code') || pre;
+
+      // Split on newlines while keeping the markup - the comments are spans,
+      // so the lines cannot simply be read as text and rebuilt.
+      const lines = [];
+      let current = document.createElement('span');
+      Array.from(codeEl.childNodes).forEach((node) => {
+        if (node.nodeType === Node.TEXT_NODE && node.nodeValue.includes('\n')) {
+          const parts = node.nodeValue.split('\n');
+          parts.forEach((part, index) => {
+            if (index > 0) {
+              lines.push(current);
+              current = document.createElement('span');
+            }
+            if (part) current.appendChild(document.createTextNode(part));
+          });
+        } else {
+          current.appendChild(node.cloneNode(true));
+        }
+      });
+      lines.push(current);
+
+      const filled = lines.filter((line) => line.textContent.trim());
+
+      if (filled.length < 2) {
+        // A single command keeps the button in the corner, out of the way.
+        wrap.classList.add('has-corner-btn');
+        const btn = makeButton('Copy command to clipboard');
+        attach(btn, () => commandOf(codeEl));
+        wrap.appendChild(btn);
+        return;
+      }
+
+      codeEl.textContent = '';
+      filled.forEach((line) => {
+        const row = document.createElement('span');
+        row.className = 'code-line';
+
+        const text = document.createElement('span');
+        text.className = 'code-line-text';
+        while (line.firstChild) text.appendChild(line.firstChild);
+
+        const btn = makeButton('Copy this command to clipboard');
+        btn.classList.add('code-copy-inline');
+        attach(btn, () => commandOf(text));
+
+        row.appendChild(text);
+        row.appendChild(btn);
+        codeEl.appendChild(row);
+      });
     });
   })();
 

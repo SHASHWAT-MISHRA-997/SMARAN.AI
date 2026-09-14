@@ -2399,9 +2399,47 @@ html.light .theme-toggle .moon { display: none; }
   border-radius: 12px;
   border: 1px solid var(--line);
   background: var(--code-bg, rgba(127, 127, 140, .09));
-  overflow-x: auto;
+  /* Long commands wrap instead of scrolling sideways.
+   *
+   * The curl line that fetches smaran.exe is a full GitHub release URL and ran
+   * off the edge of the block. With overflow-x it became a scrollbar: the
+   * command was there but you had to drag to read it, and most of it was
+   * simply invisible on a phone. Wrapping shows all of it at once, which is
+   * the only way anyone can check what they are about to run. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.75;
+}
+
+/* One command per row, with its own button on the right. */
+.code-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.code-line + .code-line { margin-top: 6px; }
+
+.code-line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Both class names, deliberately. .code-copy-btn sets position:absolute and
+   is defined further down this file; a single-class rule here has equal
+   specificity and loses on source order, which left all four buttons stacked
+   on top of each other at the top of the block with the commands running
+   underneath them. */
+.code-copy-btn.code-copy-inline {
+  position: static;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  top: auto;
+  right: auto;
 }
 
 .code code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
@@ -2499,7 +2537,10 @@ html.light .theme-toggle .moon { display: none; }
   max-width: 100%;
 }
 
-.code-wrap .code {
+/* Room for the button in the corner - but only where there is one. Blocks
+   with a button per line put them in the flow, so reserving the gutter there
+   just narrowed the commands for nothing. */
+.code-wrap.has-corner-btn .code {
   padding-right: 76px;
 }
 
