@@ -151,6 +151,23 @@ class UserMemory(Base):
     # browsed by topic rather than as one long undifferentiated list.
     category = Column(String, nullable=True, default="durable_record")
     source_session_id = Column(String, nullable=True)  # Which session it came from
+    # Which uploaded documents this fact came out of, as a JSON list of ids.
+    #
+    # Without it, deleting a document removed the file and its vectors and left
+    # everything the app had already learned from it still answering. A
+    # confidential file could be deleted, reported "deleted successfully", and
+    # go on being quoted from memory in a brand new chat - measured, not
+    # theorised.
+    #
+    # A list rather than one id, because retrieval draws chunks from the whole
+    # collection: a turn is normally grounded in several files at once. The
+    # first attempt here stored a single id and only when exactly one document
+    # was involved, which in any real collection is almost never - so nothing
+    # was ever attributed and the leak stayed open.
+    #
+    # Null for the ordinary case of a fact that came out of conversation and
+    # belongs to no file at all.
+    source_document_ids = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
     # Relationships

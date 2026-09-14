@@ -281,6 +281,31 @@ _add_user_id_column(
     "UPDATE document_chunks SET user_id = (SELECT d.user_id FROM documents d WHERE d.id = document_chunks.document_id) WHERE user_id = 0;",
 )
 
+
+def _add_memory_source_document():
+    """Give remembered facts a link back to the file they came from.
+
+    Existing rows keep NULL, which is correct rather than convenient: nothing
+    recorded where those facts came from at the time, and inventing a
+    provenance now would mean deleting a document silently removing memories
+    that had nothing to do with it.
+    """
+    try:
+        with engine.begin() as conn:
+            columns = {
+                row[1] for row in conn.execute(_sql_text("PRAGMA table_info(user_memory);"))
+            }
+            if "source_document_ids" in columns:
+                return
+            conn.execute(_sql_text(
+                "ALTER TABLE user_memory ADD COLUMN source_document_ids TEXT;"))
+        logger.info("Migrated SQL: added source_document_ids to user_memory.")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("The user_memory provenance migration could not be applied: %s", exc)
+
+
+_add_memory_source_document()
+
 # Accounts are created through registration/device login. Startup used to
 # install a public default admin password and even reset locked accounts to
 # it, turning the failed-login lock into an account takeover on restart.
@@ -1585,14 +1610,54 @@ def delete_document(doc_id: int, db: Session = Depends(get_db), current_user: Us
             pass
             
     # Delete from database(s)
+    vector_error = None
     try:
         rag_pipeline.delete_document(doc.collection_id, doc.id)
     except Exception as e:
+        vector_error = str(e)
         logger.error(f"Vector delete failed for document {doc_id}: {e}")
-        
+
+    # Everything learned from this document goes with it.
+    #
+    # Removing the file and its vectors used to be the whole of "delete", and
+    # it was not enough: facts the app had already extracted stayed in memory
+    # and kept being quoted in new conversations. Deleting a confidential file,
+    # being told "deleted successfully", and then seeing it answered from is
+    # the worst version of this - measured on a real upload, not theorised.
+    # Filtered in Python rather than SQL: the ids are a JSON list, and a LIKE
+    # against it would match 3 inside 13. The memory table is small enough that
+    # being exact costs nothing.
+    forgotten = 0
+    for memory in db.query(UserMemory).filter(
+        UserMemory.user_id == current_user.id,
+        UserMemory.source_document_ids.isnot(None),
+    ).all():
+        try:
+            sources = json.loads(memory.source_document_ids)
+        except (TypeError, ValueError):
+            continue
+        if doc.id in sources:
+            db.delete(memory)
+            forgotten += 1
+
+    name = doc.name
     db.delete(doc)
     db.commit()
-    return {"message": f"Document '{doc.name}' deleted successfully"}
+
+    # Said, not assumed. Reporting success while the vectors are still there
+    # means a deleted document goes on answering questions and nothing tells
+    # the person who deleted it.
+    if vector_error:
+        raise HTTPException(
+            status_code=500,
+            detail=("'%s' was removed from your files, but its search index "
+                    "could not be cleared, so it may still be found in "
+                    "answers: %s" % (name, vector_error)),
+        )
+    message = f"Document '{name}' deleted successfully"
+    if forgotten:
+        message += f", along with {forgotten} fact(s) remembered from it"
+    return {"message": message, "memories_removed": forgotten}
 
 @app.get("/api/documents/{doc_id}/content")
 def get_document_content(doc_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -1894,7 +1959,8 @@ async def _extract_facts_via_cloud(prompt_text: str) -> str:
     return ""
 
 
-async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: str, ai_response: str):
+async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: str,
+                                   ai_response: str, source_document_ids=None):
     """Background task: extract meaningful facts from the turn and persist them in user_memory table.
     Runs in a fire-and-forget asyncio task never blocks the streaming response."""
     try:
@@ -2063,6 +2129,14 @@ async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: s
                         fact=text,
                         category=category or _categorise_fact(text),
                         source_session_id=session_id,
+                        # Every document the answer drew on. Deleting any one
+                        # of them removes this fact: over-forgetting is the
+                        # safe direction when the alternative is a deleted
+                        # confidential file still being quoted.
+                        source_document_ids=(
+                            json.dumps(sorted({int(d) for d in source_document_ids}))
+                            if source_document_ids else None
+                        ),
                     ))
             db_mem.commit()
             logger.info(f"Saved {len(facts_to_save)} memory facts for user_id={user_id}")
@@ -4798,7 +4872,13 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                     user_id=current_user.id,
                                     session_id=session.id,
                                     user_prompt=chat_req.prompt,
-                                    ai_response=accumulated_response
+                                    ai_response=accumulated_response,
+                                    # So that deleting the file later also
+                                    # removes what was learned from it.
+                                    source_document_ids=[
+                                        c.get("document_id") for c in retrieved_chunks
+                                        if c.get("document_id")
+                                    ],
                                 ), label="memory extraction")
                             finally:
                                 db_session.close()
@@ -5304,7 +5384,11 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                     user_id=current_user.id,
                     session_id=session.id,
                     user_prompt=chat_req.prompt,
-                    ai_response=accumulated_response
+                    ai_response=accumulated_response,
+                    source_document_ids=[
+                        c.get("document_id") for c in retrieved_chunks
+                        if c.get("document_id")
+                    ],
                 ), label="memory extraction")
                 # 6. Store in Zep Memory asynchronously
                 spawn_background(zep_add_message(session.id, "user", chat_req.prompt), label="zep user message")
