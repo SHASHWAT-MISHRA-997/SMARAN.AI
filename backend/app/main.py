@@ -2733,10 +2733,15 @@ VIDEO_TAG_TEMPLATE = (
     'src="/api/video/file/{job_id}"></video>'
 )
 
-def call_sd_txt2img_bridge(prompt: str) -> str:
+def call_sd_txt2img_bridge(prompt: str, aspect: str = None,
+                           target: str = None) -> str:
     service_url = os.getenv("LOCAL_IMAGE_SERVICE_URL", "http://media-generator:8002")
     try:
-        response = requests.post(f"{service_url}/generate", json={"prompt": prompt}, timeout=900)
+        response = requests.post(
+            f"{service_url}/generate",
+            json={"prompt": prompt, "aspect": aspect, "target": target},
+            timeout=900,
+        )
         if response.ok and response.json().get("filename"):
             return f"![Generated Image](/api/static/{response.json()['filename']})"
         if not response.ok:
@@ -2744,7 +2749,8 @@ def call_sd_txt2img_bridge(prompt: str) -> str:
     except requests.RequestException as exc:
         logger.warning("Local media service request failed: %s", exc)
         output_dir = os.path.join(os.getenv("DATA_DIR", "./data"), "uploads")
-        filename = generate_local_image(prompt, output_dir)
+        filename = generate_local_image(prompt, output_dir, aspect=aspect,
+                                        target=target)
         return f"![Generated Image](/api/static/{filename})"
 
 
@@ -4364,10 +4370,30 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         # a video of a sunset" came back as ordinary conversation.
         if is_image_generation_request(chat_req.prompt):
             clean_prompt = clean_image_prompt(chat_req.prompt)
-            yield json.dumps({"token": "Creating your image on this device.\n\n"}) + "\n"
+            # "a 4K portrait photo of a temple" says what it wants. Read it,
+            # rather than making the same square picture every time and never
+            # mentioning that the size asked for was ignored.
+            from app.image_plan import available_model
+            from app.image_plan import plan as plan_image
+            from app.local_image import read_image_options
+
+            clean_prompt, want_aspect, want_target = read_image_options(clean_prompt)
+            shape = plan_image(available_model(), want_aspect or "1:1")
+            yield json.dumps({"token": "Creating your image on this device: "
+                                       "%dx%d, %d steps.\n\n"
+                                       % (shape["width"], shape["height"],
+                                          shape["steps"])}) + "\n"
+            if want_target:
+                # Said before it happens, not discovered from a filename.
+                yield json.dumps({"token":
+                    "It will be enlarged to %s afterwards. This card renders "
+                    "at %dx%d - enlarging adds pixels, not detail.\n\n"
+                    % (want_target, shape["width"], shape["height"])}) + "\n"
             try:
                 loop = asyncio.get_running_loop()
-                img_tag = await loop.run_in_executor(None, call_sd_txt2img_bridge, clean_prompt)
+                img_tag = await loop.run_in_executor(
+                    None, call_sd_txt2img_bridge, clean_prompt,
+                    want_aspect, want_target)
             except Exception as image_error:
                 logger.exception("Local image generation failed")
                 yield json.dumps({"token": "Image generation failed: " + str(image_error)}) + "\n"

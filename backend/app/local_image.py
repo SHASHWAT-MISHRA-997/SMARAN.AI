@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import threading
+from typing import Optional
 import difflib
 import uuid
 
@@ -21,7 +22,13 @@ def _load_pipeline():
     except ImportError as exc:
         raise RuntimeError("Local image engine is not installed. Install backend requirements and restart Smaran AI.") from exc
 
-    model_id = os.getenv("LOCAL_IMAGE_MODEL", "stabilityai/sd-turbo")
+    # Whichever image model is actually on disk, rather than a fixed name.
+    # The default was sd-turbo on every machine, downloaded or not, so the
+    # first image request on a machine that already held Stable Diffusion 1.5
+    # started a fresh multi-gigabyte download instead of using it.
+    from app.image_plan import available_model
+
+    model_id = available_model()
     offline_only = os.getenv("LOCAL_IMAGE_OFFLINE_ONLY", "0") == "1"
     use_cuda = torch.cuda.is_available() and os.getenv("LOCAL_IMAGE_DEVICE", "auto").lower() != "cpu"
     dtype = torch.float16 if use_cuda else torch.float32
@@ -49,12 +56,36 @@ def _load_pipeline():
     else:
         pipe.to("cpu")
     pipe.set_progress_bar_config(disable=True)
+    # Carried on the pipeline because the step count and guidance depend on
+    # which family of model this is, and the pipeline object does not say.
+    pipe._smaran_model_id = model_id
     _pipeline = pipe
     return pipe
 
 
-def generate_local_image(prompt: str, output_dir: str) -> str:
-    """Generate one local PNG and return its filename."""
+def _is_blank(image) -> bool:
+    """Whether an image carries no picture at all.
+
+    Checked by extremes rather than the mean: a legitimately dark night scene
+    still varies, while a substituted frame is one flat colour throughout.
+    """
+    try:
+        extrema = image.convert("RGB").getextrema()
+    except Exception:  # noqa: BLE001
+        logger.debug("could not inspect the generated image", exc_info=True)
+        return False
+    return all(low == high for low, high in extrema)
+
+
+def generate_local_image(prompt: str, output_dir: str,
+                         aspect: Optional[str] = None,
+                         target: Optional[str] = None) -> str:
+    """Generate one local PNG and return its filename.
+
+    aspect is one of image_plan.ASPECTS; target is an enlargement size such as
+    "4K". Both default to the machine's own choice when not given, so every
+    existing caller keeps working unchanged.
+    """
     prompt = prompt.strip()
     if not prompt:
         raise ValueError("Image prompt cannot be empty")
@@ -67,16 +98,35 @@ def generate_local_image(prompt: str, output_dir: str) -> str:
                 pipe.to("cuda")
             except Exception:
                 logger.exception("Could not move the image pipeline to CUDA")
-        image_size = max(256, min(512, int(os.getenv("LOCAL_IMAGE_SIZE", "384"))))
-        image_size -= image_size % 8
-        steps = max(1, min(20, int(os.getenv("LOCAL_IMAGE_STEPS", "2"))))
-        guidance = float(os.getenv("LOCAL_IMAGE_GUIDANCE", "0.0"))
+        # Chosen from the card, not fixed at 384 with a hard ceiling of 512.
+        # That ceiling was the blurriness: this machine renders 768x768 in
+        # about fifteen seconds, which is four times the pixels, and was never
+        # allowed to. Steps and guidance come with the size because they belong
+        # to the model - a turbo model wants 4 steps at guidance 0 and SD 1.5
+        # wants 25 at 7.5, so one fixed pair is always wrong for one of them.
+        from app.image_plan import plan as plan_image
+
+        settings = plan_image(
+            model_id=getattr(pipe, "_smaran_model_id", "") or "",
+            aspect=aspect or os.getenv("LOCAL_IMAGE_ASPECT", "1:1"),
+        )
+        override = os.getenv("LOCAL_IMAGE_SIZE")
+        if override:
+            asked = max(256, min(1024, int(override)))
+            settings["width"] = settings["height"] = asked - asked % 8
+        steps = int(os.getenv("LOCAL_IMAGE_STEPS") or settings["steps"])
+        guidance = float(os.getenv("LOCAL_IMAGE_GUIDANCE") or settings["guidance"])
+        logger.info(
+            "image: %dx%d, %d steps, guidance %.1f, %.1f GB free",
+            settings["width"], settings["height"], steps, guidance,
+            settings["vram_gb"],
+        )
         try:
             result = pipe(
                 prompt=prompt,
                 negative_prompt="blurry, low quality, distorted, watermark, unreadable text",
-                width=image_size,
-                height=image_size,
+                width=settings["width"],
+                height=settings["height"],
                 num_inference_steps=steps,
                 guidance_scale=guidance,
             )
@@ -91,7 +141,33 @@ def generate_local_image(prompt: str, output_dir: str) -> str:
         if not result.images:
             raise RuntimeError("The local image model returned no image")
         filename = f"local_gen_{uuid.uuid4().hex}.png"
-        result.images[0].save(os.path.join(output_dir, filename), format="PNG")
+        image = result.images[0]
+
+        # A completely black frame is not a picture, and it is what the safety
+        # checker substitutes when it flags something. At two steps the model
+        # produces noise, noise reads as a false positive, and a request for a
+        # snow leopard came back as a 509-byte black square reported as
+        # success. Saying so beats saving it and calling it done.
+        if _is_blank(image):
+            raise RuntimeError(
+                "The model returned a blank image. This is usually the safety "
+                "filter misreading an under-developed result; raising "
+                "LOCAL_IMAGE_STEPS, or rephrasing the prompt, normally fixes it."
+            )
+
+        if target:
+            # Enlargement, not a render at that size. The card cannot draw 4K
+            # and this does not pretend to - the note is logged so the size on
+            # a label is never the only thing said about it.
+            from app.image_plan import enlarge
+
+            try:
+                image, note = enlarge(image, target)
+                logger.info("image: %s", note)
+            except ValueError as exc:
+                # An unknown size must not lose an image that already rendered.
+                logger.warning("image: %s", exc)
+        image.save(os.path.join(output_dir, filename), format="PNG")
         return filename
 
 
@@ -247,7 +323,7 @@ def _shape_words(*words):
     # of a lantern", a prompt with its subject removed - so it is matched by
     # lookahead and stays where it is.
     debris = r"(?:mode|format|orientation|aspect|ratio|size)"
-    kept = r"(?:video|clip|screen|shot|film|reel)"
+    kept = r"(?:video|clip|screen|shot|film|reel|image|images|photo|photos|picture|pictures|wallpaper)"
     return (
         r"\b(?:in\s+(?:the\s+)?)?(?:%s)\s+%s\b"      # portrait mode
         r"|\b%s\s+(?:%s)\b"                          # format: portrait
@@ -326,3 +402,39 @@ def clean_image_prompt(prompt: str) -> str:
     if text.lower().startswith(("/image", "/txt2img")):
         return text.split(" ", 1)[1].strip() if " " in text else ""
     return text
+
+
+# "QHD", "4K", "8K" asked for in the sentence. Same reasoning as the video
+# options: a control nobody can find is not a choice, and the words have to
+# come out of the prompt or the model is asked to draw the text "4K".
+_TARGET_RE = re.compile(r"\b(hd|qhd|4\s*k|8\s*k|uhd)\b", re.IGNORECASE)
+
+
+def read_image_options(prompt: str):
+    """Pull the requested shape and output size out of a prompt.
+
+    Returns (prompt without those words, aspect or None, target or None).
+    None means the user did not say, and the machine's own choice is used.
+    """
+    text = prompt or ""
+    target = None
+    aspect = None
+
+    found = _TARGET_RE.search(text)
+    if found:
+        word = re.sub(r"\s+", "", found.group(1)).upper()
+        # UHD is 4K by every consumer definition; treating it as its own tier
+        # would mean two names for one size.
+        target = {"UHD": "4K"}.get(word, word)
+        text = text[: found.start()] + " " + text[found.end():]
+
+    for pattern, value in _ASPECT_WORDS:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            aspect = value
+            text = text[: match.start()] + " " + text[match.end():]
+            break
+
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    text = re.sub(r"\b(?:ka|ki|of|in|wala|wali)\s*$", "", text, flags=re.IGNORECASE)
+    return text.strip(" ,.-"), aspect, target
