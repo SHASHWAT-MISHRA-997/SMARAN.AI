@@ -91,6 +91,34 @@ def test_a_missing_model_is_an_honest_refusal_not_a_fake_tone(tmp_path):
 # Muxing - real ffmpeg, no model needed
 # ---------------------------------------------------------------------------
 
+def test_the_install_fetches_only_the_files_that_get_loaded():
+    """Downloading the whole repository costs 5.8 GB for a 2.4 GB model.
+
+    Measured, not guessed: a plain snapshot_download pulled 5.81 GB in 13
+    files. The same weights arrive twice - model.safetensors and the older
+    pytorch_model.bin - and state_dict.bin plus compression_state_dict.bin are
+    audiocraft's format, which nothing here loads.
+    """
+    import inspect
+
+    source = inspect.getsource(soundtrack.install)
+    assert "allow_patterns" in source, (
+        "the installer fetches the whole repository, which is more than twice "
+        "what is needed"
+    )
+    assert "model.safetensors" in soundtrack._WANTED
+    for unwanted in ("pytorch_model.bin", "state_dict.bin",
+                     "compression_state_dict.bin"):
+        assert unwanted not in soundtrack._WANTED, (
+            "%s is redundant and doubles the download" % unwanted
+        )
+
+
+def test_the_quoted_size_matches_what_is_actually_fetched():
+    """A figure that is only half the real download is worse than none."""
+    assert 2.0 <= soundtrack.APPROX_DOWNLOAD_GB <= 3.0
+
+
 @needs_ffmpeg
 def test_a_silent_clip_is_detected_as_silent(tmp_path):
     """has_audio is the check that stops 'sound added' being said blindly."""

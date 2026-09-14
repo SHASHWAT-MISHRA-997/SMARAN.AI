@@ -32,8 +32,25 @@ logger = logging.getLogger(__name__)
 # run the video, the medium and large variants cost more than the soundtrack is
 # worth, and MusicGen runs acceptably on CPU at this size.
 MODEL_ID = "facebook/musicgen-small"
-APPROX_DOWNLOAD_GB = 2.2
+APPROX_DOWNLOAD_GB = 2.4
 SAMPLE_RATE = 32000
+
+# Only the files transformers actually reads.
+#
+# Fetching the repository wholesale pulls 5.8 GB for a 2.4 GB model: the same
+# weights arrive twice, once as model.safetensors and again as the older
+# pytorch_model.bin, and state_dict.bin plus compression_state_dict.bin are
+# audiocraft's format, which nothing here loads. Measured on a real download -
+# 5.81 GB in 13 files where 2.36 GB was needed. Naming the files is the
+# difference between a five minute wait and a quarter of an hour.
+_WANTED = [
+    "*.json",
+    "*.model",
+    "model.safetensors",
+    "preprocessor_config.json",
+    "spiece.model",
+    "tokenizer.json",
+]
 
 
 class SoundtrackError(RuntimeError):
@@ -87,6 +104,22 @@ def status() -> dict:
             "so it will not line up with what happens on screen."
         ),
     }
+
+
+def install(progress: Optional[Callable[[str], None]] = None) -> dict:
+    """Fetch the soundtrack weights, and only the ones that get used."""
+    state = status()
+    if state["installed"]:
+        return {"installed": True, "detail": "Already installed."}
+    if not state["can_install"]:
+        raise SoundtrackError(state["reason"])
+
+    from huggingface_hub import snapshot_download
+
+    if progress:
+        progress("Fetching %s, about %.1f GB." % (MODEL_ID, APPROX_DOWNLOAD_GB))
+    path = snapshot_download(MODEL_ID, allow_patterns=_WANTED)
+    return {"installed": True, "path": path}
 
 
 def generate_track(
