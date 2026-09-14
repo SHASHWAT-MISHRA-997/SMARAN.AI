@@ -377,6 +377,74 @@ const labelFor = (state) => ({
 
 const DesktopPet = () => {
   const frame = useRef(null);
+
+  /* Where the user put it, remembered between sessions.
+     Null means "never moved", which leaves the CSS corner in charge. */
+  const [pinned, setPinned] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('sm_pet_position') || 'null');
+      return saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : null;
+    } catch { return null; }
+  });
+  const [dragging, setDragging] = useState(false);
+  const dragState = useRef(null);
+
+  const beginDrag = (event) => {
+    // Only a primary press on the companion itself, so the close button and
+    // the speech bubble's own controls still work normally.
+    if (event.button !== 0) return;
+    const box = frame.current?.getBoundingClientRect();
+    if (!box) return;
+    dragState.current = {
+      dx: event.clientX - box.left,
+      dy: event.clientY - box.top,
+      w: box.width,
+      h: box.height,
+      moved: false,
+    };
+    setDragging(true);
+  };
+
+  useEffect(() => {
+    if (!dragging) return undefined;
+    const onMove = (event) => {
+      const state = dragState.current;
+      if (!state) return;
+      state.moved = true;
+      /* Kept inside the window. Dragged past an edge it would otherwise sit
+         half off-screen with no way to get hold of it again. */
+      const x = Math.min(Math.max(0, event.clientX - state.dx), window.innerWidth - state.w);
+      const y = Math.min(Math.max(0, event.clientY - state.dy), window.innerHeight - state.h);
+      setPinned({ x, y });
+    };
+    const onUp = () => {
+      setDragging(false);
+      if (dragState.current?.moved) {
+        setPinned((current) => {
+          try { localStorage.setItem('sm_pet_position', JSON.stringify(current)); } catch { /* not fatal */ }
+          return current;
+        });
+      }
+      dragState.current = null;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [dragging]);
+
+  /* A window that gets smaller can leave it stranded outside the viewport. */
+  useEffect(() => {
+    if (!pinned) return undefined;
+    const onResize = () => setPinned((p) => (p ? {
+      x: Math.min(p.x, Math.max(0, window.innerWidth - 96)),
+      y: Math.min(p.y, Math.max(0, window.innerHeight - 96)),
+    } : p));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [pinned]);
   const [visible, setVisible] = useState(() => localStorage.getItem('sm_pet_visible') !== 'false');
   const [pet, setPet] = useState(() => {
     const saved = localStorage.getItem('sm_pet_type');
@@ -445,7 +513,17 @@ const DesktopPet = () => {
     <aside
       ref={frame}
       aria-label="Desktop AI Companion"
-      className="sm-pet fixed z-30 flex flex-col items-end pointer-events-none transition-all duration-300"
+      /* Dragged position wins over the CSS corner.
+         It was pinned to the bottom-right by .sm-pet and could not be moved,
+         so it covered whatever happened to be under that corner. Once it has
+         been dragged, inline left/top take over and the CSS right/bottom are
+         cleared, because a box cannot honour both. Until then the corner
+         placement stands, so nothing changes for anyone who never drags it. */
+      style={pinned ? { left: `${pinned.x}px`, top: `${pinned.y}px`, right: 'auto', bottom: 'auto' } : undefined}
+      onPointerDown={beginDrag}
+      className={`sm-pet fixed z-30 flex flex-col items-end pointer-events-none transition-all duration-300 ${
+        dragging ? 'sm-pet-dragging' : ''
+      }`}
     >
       {/* Interactive Floating speech bubble */}
       {showMessage && !minimized && (
@@ -525,7 +603,16 @@ const DesktopPet = () => {
           }}
           className="group relative border-0 bg-transparent p-0 cursor-pointer transform hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none"
         >
-          <PetAvatar pet={pet} size={minimized ? 36 : size} activity={state} />
+          {/* The round neon ring the companion sits inside.
+              It was a bare figure on the page with nothing marking it out as
+              the assistant. The ring rotates its hue continuously, so the
+              colour cycles rather than sitting on one accent, and it reads as
+              a single glowing circle at any size. Purely decorative, and
+              behind the avatar, so nothing here intercepts a click or a drag. */}
+          <span aria-hidden="true" className="sm-pet-ring" />
+          <span className="relative z-[1] block">
+            <PetAvatar pet={pet} size={minimized ? 36 : size} activity={state} />
+          </span>
         </button>
 
         {/* Hover mini menu */}

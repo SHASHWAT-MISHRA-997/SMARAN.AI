@@ -2731,3 +2731,46 @@ html[data-reduce-motion="on"] *::after {
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(300%); }
 }
+
+/* The companion's neon ring, and dragging it.
+ *
+ * It sat pinned in the bottom-right corner with no way to move it, covering
+ * whatever was underneath, and nothing marked it out as the assistant. The
+ * ring is drawn behind the avatar and is inert - pointer-events are off, so
+ * it never eats the click or the drag that the button underneath needs. */
+.sm-pet-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+  pointer-events: none;
+  padding: 2px;
+  /* A conic sweep masked to the border, which gives a ring rather than a
+     filled disc without needing a second element behind it. */
+  background: conic-gradient(from 0deg,
+    #ff0055, #ff8a00, #ffe600, #34d399, #00f3ff, #6366f1, #d946ef, #ff0055);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+  filter: drop-shadow(0 0 6px rgba(0, 243, 255, 0.55)) drop-shadow(0 0 12px rgba(217, 70, 239, 0.35));
+  animation: sm-pet-hue 6s linear infinite;
+}
+
+@keyframes sm-pet-hue {
+  to { filter: drop-shadow(0 0 6px rgba(0, 243, 255, 0.55)) drop-shadow(0 0 12px rgba(217, 70, 239, 0.35)) hue-rotate(360deg); }
+}
+
+/* Grabbing it should feel like grabbing it: the whole frame takes pointer
+   events while dragging, and the usual position transition is dropped so it
+   tracks the cursor instead of easing behind it. */
+.sm-pet { touch-action: none; }
+.sm-pet-dragging {
+  pointer-events: auto !important;
+  transition: none !important;
+  cursor: grabbing;
+}
+
+/* Someone who has asked for less motion should not be given a spinning ring. */
+@media (prefers-reduced-motion: reduce) {
+  .sm-pet-ring { animation: none; }
+}
