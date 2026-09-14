@@ -264,17 +264,65 @@ const MarkdownText = ({ text }) => {
     blockLines.forEach((line, lineIdx) => {
       const trimmed = line.trim();
 
+      /* A generated video, shown as a video.
+         The backend finishes a generation by sending a raw
+         <video controls src="/api/video/file/…"></video> tag, and nothing here
+         ever handled it - this renderer builds elements from markdown and has
+         no HTML branch at all. So the reward for waiting out a generation was
+         the tag itself, printed as text. Nothing in the frontend referenced
+         /api/video/file anywhere, which is how it stayed that way. */
+      const videoMatch = trimmed.match(/<video[^>]*\ssrc=["']([^"']+)["'][^>]*>/i);
+      if (videoMatch) {
+        flushTable(lineIdx);
+        flushList(lineIdx);
+        const videoSrc = videoMatch[1].startsWith('/') ? `${API_BASE}${videoMatch[1]}` : videoMatch[1];
+        const videoName = `${(videoSrc.split('/').pop() || 'smaran-video').split('?')[0]}.mp4`;
+        elements.push(
+          <figure key={`video-${lineIdx}`} className="my-4 max-w-2xl">
+            <video
+              src={videoSrc}
+              controls
+              playsInline
+              className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-black shadow-xl"
+            />
+            <figcaption className="mt-1.5">
+              {/* Chrome hides saving behind an overflow menu and a phone offers
+                  nothing at all, so the way to keep it is spelled out. */}
+              <a href={videoSrc} download={videoName}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] font-bold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                <ArrowDown className="h-3.5 w-3.5" /> Download video
+              </a>
+            </figcaption>
+          </figure>
+        );
+        return;
+      }
+
       const imageMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
       if (imageMatch) {
         flushTable(lineIdx);
         flushList(lineIdx);
         const imageSrc = imageMatch[2].startsWith('/') ? `${API_BASE}${imageMatch[2]}` : imageMatch[2];
+        /* Saving a generated picture took a right-click and "save image as" -
+           not obvious, and not available at all on a phone. The download
+           attribute also names the file, so it does not arrive in the
+           downloads folder as an opaque id. The picture still opens full size
+           in a new tab, which is what the wrapping link was for. */
+        const imageName = (imageSrc.split('/').pop() || 'smaran-image').split('?')[0];
         elements.push(
-          <a key={`image-${lineIdx}`} href={imageSrc} target="_blank" rel="noopener noreferrer"
-            className="block my-4 max-w-2xl overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl">
-            <img src={imageSrc} alt={imageMatch[1] || 'Locally generated image'}
-              className="w-full h-auto object-contain bg-zinc-100 dark:bg-zinc-950" loading="lazy" />
-          </a>
+          <figure key={`image-${lineIdx}`} className="my-4 max-w-2xl">
+            <a href={imageSrc} target="_blank" rel="noopener noreferrer"
+              className="block overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl">
+              <img src={imageSrc} alt={imageMatch[1] || 'Locally generated image'}
+                className="w-full h-auto object-contain bg-zinc-100 dark:bg-zinc-950" loading="lazy" />
+            </a>
+            <figcaption className="mt-1.5">
+              <a href={imageSrc} download={imageName}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] font-bold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                <ArrowDown className="h-3.5 w-3.5" /> Download image
+              </a>
+            </figcaption>
+          </figure>
         );
         return;
       }
