@@ -808,6 +808,9 @@ inference_semaphore = asyncio.Semaphore(1)
 
 class DeviceRequest(BaseModel):
     device_id: str
+    # The app has always sent this alongside the id; the model did not declare
+    # it, so Pydantic dropped it and the account was stored without one.
+    device_fingerprint: Optional[str] = None
 
 class UserResponse(BaseModel):
     id: int
@@ -997,6 +1000,14 @@ def google_sign_in_config():
     return {"configured": bool(current), "client_id": current or None}
 
 
+# Hosts that mean "this request came from the machine the backend runs on".
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1"})
+
+# The single account the desktop app owns. Loopback callers resolve to this
+# rather than to whatever id their localStorage holds; see get_current_user.
+LOCAL_OWNER_DEVICE_ID = "local_default_user"
+
+
 def _get_or_create_device_user(db: Session, device_id: str, device_fingerprint: str = None) -> User:
     user = db.query(User).filter(User.username == f"device_{device_id}").first()
     if not user:
@@ -1025,14 +1036,31 @@ def get_current_user(request: Request, db: Session = Depends(get_db), session_to
     
     device_id = request.headers.get("X-Device-ID", "").strip()
     device_fingerprint = request.headers.get("X-Device-Fingerprint", "").strip()
-    
-    if not device_id:
-        client_ip = request.client.host if request.client else "127.0.0.1"
-        if client_ip in ["127.0.0.1", "localhost", "::1"]:
-            device_id = "local_default_user"
-        else:
-            device_id = f"guest_{hashlib.md5(client_ip.encode()).hexdigest()[:12]}"
-            
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    if client_ip in LOOPBACK_HOSTS:
+        # The browser is on the same machine as this backend, so it is the
+        # owner, whatever id its localStorage happens to be holding.
+        #
+        # It used to be trusted to say who it was, and it names itself with
+        # Date.now() plus Math.random() kept only in localStorage. Every reason
+        # that store gets cleared - a reinstall, a port change, clearing app
+        # data - minted a fresh id, which created a fresh account, which owned
+        # nothing. The history was not lost; it belonged to an account nobody
+        # was any more. This machine had accumulated 95 such accounts under a
+        # single hardware fingerprint, with the conversations and memories
+        # scattered across them, and analytics scope every count to the
+        # logged-in user - which is why the dashboard read zero while the
+        # database held hundreds of rows.
+        #
+        # Remote callers are unchanged: the companion phone authenticates with
+        # a pairing token above and never reaches here, and a device id from
+        # off-machine still identifies its own account.
+        device_id = LOCAL_OWNER_DEVICE_ID
+    elif not device_id:
+        device_id = f"guest_{hashlib.md5(client_ip.encode()).hexdigest()[:12]}"
+
     if device_id:
         user = _get_or_create_device_user(db, device_id, device_fingerprint)
         return user
@@ -1260,8 +1288,15 @@ async def device_login(req: DeviceRequest, request: Request, db: Session = Depen
     device_id = req.device_id.strip()
     if not device_id or not re.fullmatch(r"[A-Za-z0-9\-_]{8,64}", device_id):
         raise HTTPException(status_code=400, detail="Invalid device ID format.")
-    
-    user = _get_or_create_device_user(db, device_id)
+
+    # This is the endpoint that actually created the 95 duplicate accounts:
+    # the app calls it on startup with whatever id localStorage holds. Same
+    # rule as get_current_user - on this machine there is one owner.
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    if client_ip in LOOPBACK_HOSTS:
+        device_id = LOCAL_OWNER_DEVICE_ID
+
+    user = _get_or_create_device_user(db, device_id, req.device_fingerprint)
     return UserResponse(
         id=user.id, 
         username=user.username, 

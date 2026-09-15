@@ -491,6 +491,14 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
   // during the previous render" and took the whole app down with it.
   const [localModels, setLocalModels] = useState(null);
   const [localState, setLocalState] = useState(null);
+  /* Which cloud providers have a key saved.
+   *
+   * This panel calls itself "Local LLMs running on Ollama/vLLM & Cloud API
+   * connectors" and listed neither the cloud side nor anything downloaded -
+   * only what Ollama happened to be serving. Two models downloaded through
+   * Model Hub and several configured providers were all absent, which reads
+   * as the downloads having failed. Booleans only; no key material is sent. */
+  const [cloudProviders, setCloudProviders] = useState(null);
   useEffect(() => {
     if (!isOpen) return undefined;
     let cancelled = false;
@@ -503,6 +511,14 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
         setLocalModels(Array.isArray(data?.models) ? data.models : []);
       } catch  {
         if (!cancelled) { setLocalModels([]); setLocalState({ detail: 'The local model server could not be reached.' }); }
+      }
+      try {
+        const res = await fetch(`${API_BASE}/api/cloud/keys-status`, { credentials: 'include' });
+        const data = res.ok ? await res.json() : null;
+        if (!cancelled) setCloudProviders(data?.configured_providers || []);
+      } catch {
+        // A cloud list that cannot be fetched must not blank the local one.
+        if (!cancelled) setCloudProviders([]);
       }
     })();
     return () => { cancelled = true; };
@@ -1264,6 +1280,56 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                       </div>
                       <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
                         Installed
+                      </span>
+                    </div>
+                  ))}
+
+                  {/* Weights downloaded through Model Hub. Ollama does not know
+                      about these, and this list only ever asked Ollama - so a
+                      model the user had just downloaded appeared nowhere. */}
+                  {(localState?.downloaded_models || []).map((m) => (
+                    <div key={m.id} className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
+                      <div className="min-w-0">
+                        <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate">{m.name}</span>
+                        <span className="block text-[10px] text-zinc-500">
+                          Downloaded weights{m.publisher ? ` · ${m.publisher}` : ''} · no runtime serving it yet
+                        </span>
+                      </div>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-600 dark:text-sky-400 shrink-0">
+                        Downloaded
+                      </span>
+                    </div>
+                  ))}
+
+                  {/* On disk but unreadable. Saying nothing left gigabytes
+                      invisible with no explanation of why the model could not
+                      be chosen. */}
+                  {(localState?.unreadable_models || []).map((m) => (
+                    <div key={m.id} className="p-3.5 rounded-xl border border-amber-500/40 bg-amber-500/5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate">{m.name}</span>
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
+                          Needs re-download
+                        </span>
+                      </div>
+                      <span className="block mt-1 text-[10px] text-amber-600/90 dark:text-amber-400/80">
+                        {(m.bytes_on_disk / 1e9).toFixed(1)} GB on disk, but this machine cannot read it.
+                        Delete it in Model Hub and download again.
+                      </span>
+                    </div>
+                  ))}
+
+                  {/* The panel says "& Cloud API connectors" and listed none. */}
+                  {(cloudProviders || []).map((p) => (
+                    <div key={p} className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
+                      <div className="min-w-0">
+                        <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate capitalize">{p}</span>
+                        <span className="block text-[10px] text-zinc-500">
+                          Cloud provider · key saved, not verified until a request is made
+                        </span>
+                      </div>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-600 dark:text-violet-400 shrink-0">
+                        Key saved
                       </span>
                     </div>
                   ))}

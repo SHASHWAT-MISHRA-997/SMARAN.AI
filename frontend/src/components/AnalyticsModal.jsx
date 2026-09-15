@@ -12,6 +12,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { todayLocalISO } from '../utils/localDate';
 
 const numberOrZero = (value) => {
   const parsed = Number(value);
@@ -37,7 +38,8 @@ export default function AnalyticsModal({ isOpen, onClose, token, apiBase }) {
   const [selectedMonth, setSelectedMonth] = useState(
     `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`,
   );
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  // The local date, not the UTC one - see todayLocalISO.
+  const [selectedDate, setSelectedDate] = useState(() => todayLocalISO());
   const refreshRef = useRef(null);
 
   useEffect(() => {
@@ -186,6 +188,15 @@ export default function AnalyticsModal({ isOpen, onClose, token, apiBase }) {
   if (!isOpen) return null;
 
   const { summary, dailyHistory, modelBreakdown, monthlyHistory, hourlyDistribution, recentActivity } = filteredData;
+  /* A day with no activity used to render as four zeros and an "Unavailable"
+   * latency, which is indistinguishable from the panel being broken - and the
+   * panel picks the date itself on open, so the user never chose the empty day
+   * they are looking at. Say it is empty, and offer the most recent day that
+   * is not. */
+  const filteredRangeIsEmpty = filterType !== 'all' && dailyHistory.length === 0;
+  const latestRecordedDate = rawDailyHistory.length
+    ? rawDailyHistory[rawDailyHistory.length - 1].date
+    : null;
   const maxWords = Math.max(1, ...dailyHistory.map((row) => numberOrZero(row.words)));
   const maxRequests = Math.max(1, ...modelBreakdown.map((row) => numberOrZero(row.requests)));
   const maxHourly = Math.max(1, ...hourlyDistribution.map(numberOrZero));
@@ -295,6 +306,24 @@ export default function AnalyticsModal({ isOpen, onClose, token, apiBase }) {
             </div>
           ) : (
             <>
+              {filteredRangeIsEmpty && (
+                <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span>
+                    Nothing was recorded for this {filterType === 'date' ? 'day' : filterType}.
+                    The counts below are zero because there is no activity in the range, not because reading failed.
+                  </span>
+                  {latestRecordedDate && filterType === 'date' && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDate(latestRecordedDate)}
+                      className="underline font-bold hover:text-amber-100"
+                    >
+                      Show {latestRecordedDate}, the most recent day with activity
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 {[
                   ['Audit requests', displayCount(summary.total_requests), `${displayCount(summary.total_messages)} saved chat messages`, BarChart2, 'text-indigo-400'],
