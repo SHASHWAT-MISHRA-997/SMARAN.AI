@@ -83,6 +83,15 @@ def test_claim_and_list_devices():
 
 
 def test_sync_conversations():
+    """Pairs a phone, syncs from it, and unpairs it again.
+
+    The unpair is the point. This test used to pair a device and leave it
+    there, so every run of the suite added one permanent row to whatever
+    database it ran against - the developer's own, in practice. Sixty-four
+    phantom "Sync Test Phone" entries had accumulated in the running app: they
+    filled the device list, and dispatching to "all devices" reported sixty-four
+    recipients that do not exist.
+    """
     import uuid
     sess_id = f"test-sync-{uuid.uuid4().hex[:8]}"
     start_resp = client.post("/api/companion/pairing/start?port=3003")
@@ -93,7 +102,9 @@ def test_sync_conversations():
         "device_name": "Sync Test Phone",
         "device_kind": "phone"
     })
-    token = claim_resp.json()["token"]
+    claim_data = claim_resp.json()
+    token = claim_data["token"]
+    device_id = claim_data["device_id"]
 
     sync_payload = {
         "token": token,
@@ -114,7 +125,17 @@ def test_sync_conversations():
             }
         ]
     }
-    sync_resp = client.post("/api/companion/sync", json=sync_payload)
-    assert sync_resp.status_code == 200, sync_resp.text
-    data = sync_resp.json()
-    assert data["accepted"] == 2
+    try:
+        sync_resp = client.post("/api/companion/sync", json=sync_payload)
+        assert sync_resp.status_code == 200, sync_resp.text
+        data = sync_resp.json()
+        assert data["accepted"] == 2
+    finally:
+        # In a finally block: a failing assertion above must not be the reason
+        # a device is left behind, which is exactly how they accumulated.
+        client.delete(f"/api/companion/devices/{device_id}")
+
+    remaining = client.get("/api/companion/devices").json().get("devices", [])
+    assert not any(d["id"] == device_id for d in remaining), (
+        "the paired test device outlived the test and will pollute the device list"
+    )
