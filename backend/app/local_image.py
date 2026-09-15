@@ -18,7 +18,14 @@ def _load_pipeline():
         return _pipeline
     try:
         import torch
-        from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
+        # AutoPipeline rather than the Stable Diffusion 1.x class by name.
+        #
+        # The fixed class was fine while SD 1.5 was the only thing that could
+        # be chosen. Once the model is picked from what the card can run, it
+        # can be SDXL - which is a different architecture with two text
+        # encoders, and loading it through the 1.x pipeline does not work. The
+        # selector would offer a model the loader could not open.
+        from diffusers import AutoPipelineForText2Image
     except ImportError as exc:
         raise RuntimeError("Local image engine is not installed. Install backend requirements and restart Smaran AI.") from exc
 
@@ -32,14 +39,43 @@ def _load_pipeline():
     offline_only = os.getenv("LOCAL_IMAGE_OFFLINE_ONLY", "0") == "1"
     use_cuda = torch.cuda.is_available() and os.getenv("LOCAL_IMAGE_DEVICE", "auto").lower() != "cpu"
     dtype = torch.float16 if use_cuda else torch.float32
-    pipe = StableDiffusionPipeline.from_pretrained(
-        model_id,
+    common = dict(
         torch_dtype=dtype,
         local_files_only=offline_only,
         use_safetensors=os.getenv("LOCAL_IMAGE_USE_SAFETENSORS", "1") == "1",
     )
+    # Prefer the fp16 weights where a repository publishes them.
+    #
+    # SDXL ships both, and the fp32 copies are twice the size for a pipeline
+    # that runs in fp16 anyway - so only the fp16 variant is downloaded. Asking
+    # without naming the variant asks for the fp32 files, which are not there,
+    # and the load fails with "1 file(s) are missing" on a model that is
+    # perfectly well installed.
+    try:
+        pipe = AutoPipelineForText2Image.from_pretrained(
+            model_id, variant="fp16", **common)
+    except Exception:  # noqa: BLE001
+        # No fp16 variant published, or only the full weights are on disk.
+        # Both are normal; the plain load is correct for them.
+        logger.info("No fp16 variant for %s; loading the default weights.", model_id)
+        pipe = AutoPipelineForText2Image.from_pretrained(model_id, **common)
     if use_cuda:
-        offload_mode = os.getenv("LOCAL_IMAGE_OFFLOAD", "model").lower()
+        # Sequential offload when the model does not fit, component offload
+        # when it does.
+        #
+        # Component-level offload moves whole pieces at a time, and SDXL's unet
+        # alone is 5.1 GB - more than a 6 GB card has free - so it runs out of
+        # memory on exactly the machines that need offloading most. Sequential
+        # moves a layer at a time and is what the measurement was taken with:
+        # 1024x1024 at 3.23 GB peak on a 6 GB card.
+        from app.image_plan import plan as _plan_image
+
+        try:
+            fits = not _plan_image(model_id)["offloaded"]
+        except Exception:  # noqa: BLE001
+            fits = False
+        offload_mode = os.getenv(
+            "LOCAL_IMAGE_OFFLOAD", "model" if fits else "sequential").lower()
         if offload_mode == "sequential":
             pipe.enable_sequential_cpu_offload()
         elif offload_mode == "model":

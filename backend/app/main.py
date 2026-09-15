@@ -4440,6 +4440,11 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                        "%dx%d, %d steps.\n\n"
                                        % (shape["width"], shape["height"],
                                           shape["steps"])}) + "\n"
+            # Minutes rather than seconds, said before the wait rather than
+            # during it. A better picture is worth waiting for only if you
+            # know you are waiting for one.
+            if shape.get("speed_note"):
+                yield json.dumps({"token": shape["speed_note"] + "\n\n"}) + "\n"
             if want_target:
                 # Said before it happens, not discovered from a filename.
                 yield json.dumps({"token":

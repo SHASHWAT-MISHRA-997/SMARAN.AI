@@ -122,7 +122,15 @@ def plan(model_id: str, aspect: str = DEFAULT_ASPECT,
     # native size is recorded, and from the name only as a last resort.
     known = next((e for e in LADDER if e["repo"] == model_id), None)
     if known:
-        longest = min(longest, known["native"])
+        if vram_gb >= known["vram_gb"]:
+            # Enough for this model at the size it was trained for, measured.
+            # Its native resolution is the right answer whether that is above
+            # or below the generic tier.
+            longest = known["native"]
+        else:
+            # Not enough: fall back to whatever the card can hold, but never
+            # ask for more than the model was built to draw.
+            longest = min(longest, known["native"])
     else:
         name = (model_id or "").lower()
         if "xl" not in name and "sd-3" not in name and "flux" not in name:
@@ -140,6 +148,12 @@ def plan(model_id: str, aspect: str = DEFAULT_ASPECT,
     else:
         guidance = 7.5
 
+    # Whether this will be quick or slow, and said rather than discovered.
+    # The same model is seconds on a card that can hold it and minutes on one
+    # that has to stream it: 18 s against 213 s for the same picture, measured.
+    entry = next((e for e in LADDER if e["repo"] == model_id), None)
+    offloaded = bool(entry and vram_gb < entry.get("resident_gb", 0))
+
     return {
         "width": _round(int(width)),
         "height": _round(int(height)),
@@ -149,6 +163,13 @@ def plan(model_id: str, aspect: str = DEFAULT_ASPECT,
         "vram_gb": round(vram_gb, 2),
         "model": model_id,
         "turbo": _turbo(model_id),
+        "offloaded": offloaded,
+        "speed_note": (
+            "This card cannot hold %s in memory, so layers are streamed onto "
+            "it as they run. The picture is the better one; it takes minutes "
+            "rather than seconds."
+            % (entry["label"] if entry else "this model")
+        ) if offloaded else "",
     }
 
 
@@ -189,14 +210,31 @@ def enlarge(image, target: str):
 # picture than SD 1.5 upscaled - but it is a 7 GB download and needs roughly
 # 10 GB free to run comfortably, so it is offered to machines that can use it
 # rather than forced on machines that cannot.
+# vram_gb is the measured peak plus headroom - what the model needs to run at
+# all, with layers streamed onto the card as they execute. resident_gb is what
+# it takes to hold the whole thing in VRAM, which is the difference between
+# seconds and minutes.
+#
+# The SDXL figure was a guess at 9.5 GB and it was wrong by a wide margin.
+# Measured on a 6 GB RTX 2060 with sequential offload: 768 in 147 s at 1.82 GB
+# peak, and 1024 - its native size - in 213 s at 3.23 GB peak. A card that the
+# ladder had written off runs it perfectly well, just slowly.
 LADDER = (
-    {"repo": "stabilityai/stable-diffusion-xl-base-1.0", "vram_gb": 9.5,
-     "download_gb": 6.9, "native": 1024, "label": "SDXL"},
-    {"repo": "stable-diffusion-v1-5/stable-diffusion-v1-5", "vram_gb": 2.5,
-     "download_gb": 2.0, "native": 768, "label": "Stable Diffusion 1.5"},
-    {"repo": "stabilityai/sd-turbo", "vram_gb": 2.0,
-     "download_gb": 2.5, "native": 512, "label": "SD-Turbo"},
+    {"repo": "stabilityai/stable-diffusion-xl-base-1.0", "vram_gb": 3.8,
+     "resident_gb": 10.0, "download_gb": 6.9, "native": 1024, "label": "SDXL"},
+    {"repo": "stable-diffusion-v1-5/stable-diffusion-v1-5", "vram_gb": 3.9,
+     "resident_gb": 4.0, "download_gb": 2.0, "native": 768,
+     "label": "Stable Diffusion 1.5"},
+    {"repo": "stabilityai/sd-turbo", "vram_gb": 2.5,
+     "resident_gb": 3.0, "download_gb": 2.5, "native": 512, "label": "SD-Turbo"},
 )
+
+# The VRAM tiers above were measured with Stable Diffusion 1.5 and describe how
+# large a picture *that* model can be pushed to. They are not a ceiling for a
+# model built to draw bigger: SDXL's native 1024 peaks at 3.23 GB, less than
+# SD 1.5 needs for 768, because the two spend memory differently. Capping SDXL
+# by SD 1.5's tiers rendered it at 768 - below its training size, where it is
+# measurably worse - on a card that could do 1024 comfortably.
 
 
 def _is_downloaded(repo: str) -> bool:
@@ -224,11 +262,23 @@ def available_model() -> str:
     for entry in LADDER:
         if _is_downloaded(entry["repo"]) and vram >= entry["vram_gb"]:
             return entry["repo"]
-    # Nothing that fits is installed; fall back to anything installed at all,
-    # then to the smallest sensible default for a first download.
-    for entry in LADDER:
-        if _is_downloaded(entry["repo"]):
-            return entry["repo"]
+    # Nothing that fits is installed. Fall back to the *smallest* installed
+    # model, not the first one in the ladder.
+    #
+    # The ladder is ordered largest first, so returning the first match handed
+    # back SDXL - the heaviest thing on disk - exactly when the card had been
+    # measured as unable to run it. That is the worst possible choice for the
+    # case it was meant to cover: a machine reporting no usable VRAM, either
+    # because it has none or because the driver would not answer, would try to
+    # render at 1024 and either thrash for minutes or run out of memory.
+    installed = [e for e in LADDER if _is_downloaded(e["repo"])]
+    if installed:
+        # Ranked by how heavy the model is, not by vram_gb. Once vram_gb became
+        # "enough to run at native size", SDXL's figure dropped below Stable
+        # Diffusion 1.5's - because it reaches 1024 in less memory than SD 1.5
+        # needs for 768 - and picking the minimum handed the largest model to
+        # the weakest machines, which is precisely backwards.
+        return min(installed, key=lambda e: (e["native"], e["download_gb"]))["repo"]
     return LADDER[1]["repo"]
 
 
@@ -242,11 +292,19 @@ def better_model_available(vram_gb: Optional[float] = None) -> Optional[dict]:
     if vram_gb is None:
         vram_gb = probe_vram_gb()
     current = available_model()
+    current_native = next(
+        (e["native"] for e in LADDER if e["repo"] == current), 0)
     for entry in LADDER:
         if vram_gb < entry["vram_gb"]:
             continue
         if entry["repo"] == current:
             return None
+        # Only something genuinely better. Walking the ladder by what the card
+        # can run offered SD-Turbo - which draws at 512 - to a machine already
+        # using Stable Diffusion 1.5 at 768, and called it an improvement. A
+        # download suggested as an upgrade has to actually be one.
+        if entry["native"] <= current_native:
+            continue
         if not _is_downloaded(entry["repo"]):
             return dict(entry, reason=(
                 "This card has %.1f GB free, enough for %s, which renders at "
