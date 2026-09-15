@@ -4692,7 +4692,25 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         # instead of quietly using one that works.
         auto_candidates = await _auto_cloud_candidates()
 
-        if chat_req.cloud_provider or auto_candidates:
+        # A model the user picked by hand is not a suggestion.
+        #
+        # This branch was entered whenever any saved provider key existed, so
+        # choosing an installed local model - qwen2.5-coder:7b, sitting right
+        # there in Ollama - still sent the turn to OpenRouter. When those keys
+        # were expired the answer was "No cloud model could answer... or run a
+        # local model instead", advising exactly what had already been asked
+        # for. The picker looked decorative because it was.
+        #
+        # An explicit cloud choice still wins; this only stops saved keys from
+        # overruling a deliberate local one.
+        chose_local_model = bool(
+            selected_model
+            and raw_model
+            and raw_model != "auto"
+            and not chat_req.cloud_provider
+        )
+
+        if chat_req.cloud_provider or (auto_candidates and not chose_local_model):
             endpoints = {
                 'groq': 'https://api.groq.com/openai/v1',
                 'openrouter': 'https://openrouter.ai/api/v1',
@@ -5441,10 +5459,22 @@ class SherpaOnnxRequest(BaseModel):
 # for. Pitch in edge-tts is Hz, not percent, which is why the number looks
 # unlike the brief's.
 PERSONA_VOICE_PROFILES = {
-    "myra":   {"gender": "female", "pitch_hz": 50, "speed": 0.93},
-    "myraa":  {"gender": "female", "pitch_hz": 50, "speed": 0.93},
-    "amarya": {"gender": "female", "pitch_hz": 50, "speed": 0.93},
-    "evelyn": {"gender": "female", "pitch_hz": 50, "speed": 0.93},
+    # Down, not up.
+    #
+    # The MYRAA brief asks for a voice 20-35% *above* conversational, and
+    # following it produced something heard immediately as "bilkul choti bachi
+    # jaisi" - exactly like a small girl. The brief was written against its own
+    # base voice; applied to an Indian English voice already at 250-274 Hz it
+    # lands in a child's range rather than a young woman's.
+    #
+    # Measured on en-IN-NeerjaExpressiveNeural: +0Hz is 250.0 Hz, -20Hz is
+    # 233.0, -35Hz is 206.9. -25Hz sits at roughly 225 - clearly an adult
+    # woman, still warm and unhurried, which is the part of the brief worth
+    # keeping. The owner's ear outranks the document.
+    "myra":   {"gender": "female", "pitch_hz": -25, "speed": 0.94},
+    "myraa":  {"gender": "female", "pitch_hz": -25, "speed": 0.94},
+    "amarya": {"gender": "female", "pitch_hz": -25, "speed": 0.94},
+    "evelyn": {"gender": "female", "pitch_hz": -25, "speed": 0.94},
     # Energy Core is the male character. He is not in the MYRAA brief, which is
     # written for a "cute anime heroine", so lifting his pitch would be wrong:
     # he keeps a steady, level male delivery.
@@ -5473,7 +5503,15 @@ def voice_profile_for(persona: Optional[str], gender: str, speed: float) -> dict
 # The old table had one voice per language and all of them were women, so a
 # male character answered in a woman's voice whatever was selected.
 NEURAL_VOICES = {
-    "en": {"female": "en-IN-NeerjaNeural",   "male": "en-IN-PrabhatNeural"},
+    # NeerjaExpressive rather than Neerja for the English female voice.
+    #
+    # Plain Neerja reads at a median 274 Hz, which is a child's range - adult
+    # female speech sits nearer 200-220 - and it was heard as exactly that.
+    # It also ignores the pitch parameter completely: measured, +50Hz produced
+    # an identical file, so the voice could not be brought down. The expressive
+    # variant is the same Indian English accent, starts at 250 Hz, and does
+    # honour pitch, which is what makes a grown woman's voice reachable at all.
+    "en": {"female": "en-IN-NeerjaExpressiveNeural", "male": "en-IN-PrabhatNeural"},
     "hi": {"female": "hi-IN-SwaraNeural",    "male": "hi-IN-MadhurNeural"},
     "gu": {"female": "gu-IN-DhwaniNeural",   "male": "gu-IN-NiranjanNeural"},
     "mr": {"female": "mr-IN-AarohiNeural",   "male": "mr-IN-ManoharNeural"},

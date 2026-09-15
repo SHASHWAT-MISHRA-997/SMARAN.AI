@@ -56,11 +56,25 @@ def test_energy_core_is_a_male_voice(persona):
 
 
 @pytest.mark.parametrize("persona", FEMALE)
-def test_the_women_get_the_pitch_lift_the_brief_asks_for(persona):
-    """+20% to +35% above conversational. +50Hz measured +30.4% on this engine."""
+def test_the_women_sound_like_women_and_not_like_children(persona):
+    """The brief asks for a voice 20-35% above conversational. Following it
+    produced something heard immediately as a small girl.
+
+    This test previously asserted that lift, which was the wrong thing to
+    protect. The brief was written against its own base voice; the Indian
+    English voice used here already sits at 250-274 Hz, and lifting it lands
+    in a child's range. Adult female speech is nearer 200-220 Hz.
+
+    Measured on en-IN-NeerjaExpressiveNeural: +0Hz gives 250.0 Hz, -25Hz gives
+    221.2. The pitch must therefore come *down*, and what matters is where it
+    ends up, not which direction the document pointed.
+    """
     profile = voice_profile_for(persona, "female", 1.0)
-    assert profile["pitch_hz"] >= 40, (
-        "%s is not lifted; it will sound like the default voice" % persona
+    assert profile["pitch_hz"] <= 0, (
+        "%s is pitched up; measured, that lands in a child's range" % persona
+    )
+    assert profile["pitch_hz"] >= -45, (
+        "%s is pitched so far down it stops sounding like this voice" % persona
     )
 
 
