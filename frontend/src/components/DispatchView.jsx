@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Smartphone, Send, CheckCircle2, ArrowLeft, Plus } from 'lucide-react';
-import { API_BASE } from '../context/AuthContext';
+import { Smartphone, Send, ArrowLeft, Plus } from 'lucide-react';
+import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
 export default function DispatchView({ onNavigate, onOpenPairing }) {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deviceError, setDeviceError] = useState('');
   const [dispatchPrompt, setDispatchPrompt] = useState('');
   const [selectedDevice, setSelectedDevice] = useState('all');
   const [dispatching, setDispatching] = useState(false);
@@ -12,10 +13,8 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
   const [dispatchLogs, setDispatchLogs] = useState(() => {
     try {
       const saved = localStorage.getItem('sm_dispatch_logs');
-      return saved ? JSON.parse(saved) : [
-        { id: 'log-1', target: 'Companion Phone', command: 'Sync Workspace Files', time: '10 mins ago', status: 'delivered' },
-        { id: 'log-2', target: 'All Devices', command: 'System Ping Heartbeat', time: '1 hour ago', status: 'delivered' }
-      ];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.filter(log => log && !['log-1', 'log-2'].includes(log.id)) : [];
     } catch {
       return [];
     }
@@ -29,16 +28,14 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
   const loadDevices = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/companion/devices`);
-      if (res.ok) {
-        const data = await res.json();
-        setDevices(data.devices || []);
-      }
+      const res = await fetchWithAuth(`${API_BASE}/api/companion/devices`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error('Device list unavailable');
+      const data = await res.json();
+      setDevices(Array.isArray(data.devices) ? data.devices : []);
+      setDeviceError('');
     } catch {
-      // Fallback local mock if offline
-      setDevices((curr) => curr.length > 0 ? curr : [
-        { id: 'dev-1', name: 'Android Companion (Pixel)', ip: '192.168.1.42', paired_at: 'Today', status: 'online' }
-      ]);
+      setDevices([]);
+      setDeviceError('Could not load paired devices. Check the connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -53,7 +50,7 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
 
   const handleDispatch = async (e) => {
     e.preventDefault();
-    if (!dispatchPrompt.trim() || dispatching) return;
+    if (!dispatchPrompt.trim() || dispatching || loading || deviceError || !devices.length) return;
     setDispatching(true);
 
     const logEntry = {
@@ -61,29 +58,38 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
       target: selectedDevice === 'all' ? 'All Devices' : (devices.find(d => d.id === selectedDevice)?.name || 'Device'),
       command: dispatchPrompt.trim(),
       time: 'Just now',
-      status: 'delivered'
+      status: 'queued'
     };
 
     try {
       // Dispatch payload to backend
-      await fetch(`${API_BASE}/api/companion/dispatch`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/companion/dispatch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           device_id: selectedDevice,
           action: 'prompt',
           data: { prompt: dispatchPrompt.trim() }
-        })
-      }).catch(() => {});
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) throw new Error(`Dispatch failed (${response.status}). Your command has been kept for retry.`);
+      const acknowledgement = await response.json();
+      if (!acknowledgement.dispatched || acknowledgement.devices_count === 0) {
+        throw new Error('No device accepted this command. Your command has been kept for retry.');
+      }
 
       const updatedLogs = [logEntry, ...dispatchLogs.slice(0, 19)];
       setDispatchLogs(updatedLogs);
-      localStorage.setItem('sm_dispatch_logs', JSON.stringify(updatedLogs));
       setDispatchPrompt('');
-      showToast(`Dispatched command to ${logEntry.target}`);
+      try {
+        localStorage.setItem('sm_dispatch_logs', JSON.stringify(updatedLogs));
+        showToast(`Command queued for ${logEntry.target}`);
+      } catch {
+        showToast('Command queued, but its history could not be saved on this device.');
+      }
     } catch (err) {
-      console.error(err);
-      showToast('Dispatch sent');
+      showToast(err?.message || 'Dispatch failed. Your command has been kept for retry.');
     } finally {
       setDispatching(false);
     }
@@ -93,8 +99,7 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
     <div className="flex-1 min-h-0 flex flex-col bg-zinc-50 dark:bg-[#0c0c0e] text-zinc-900 dark:text-zinc-100 overflow-y-auto transition-colors duration-200">
       {/* Toast */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3">
-          <CheckCircle2 className="w-4 h-4" />
+        <div role="status" className="fixed top-5 right-5 z-50 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3">
           <span>{toastMessage}</span>
         </div>
       )}
@@ -169,7 +174,7 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
               />
               <button
                 type="submit"
-                disabled={!dispatchPrompt.trim() || dispatching}
+                disabled={!dispatchPrompt.trim() || dispatching || loading || !!deviceError || !devices.length}
                 className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-600/25 shrink-0"
               >
                 <Send className="w-3.5 h-3.5" /> Dispatch
@@ -185,7 +190,9 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
             screens at once and neither said which one was authoritative.
             Dispatch keeps the one thing only it does - sending work to a
             device - and the Target selector above still names them. */}
-        {devices.length === 0 && (
+        {loading && <p role="status">Loading paired devices…</p>}
+        {deviceError && <p role="alert">{deviceError}</p>}
+        {!loading && !deviceError && devices.length === 0 && (
           <div className="p-8 text-center rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 bg-white dark:bg-zinc-900/40">
             <Smartphone className="w-10 h-10 text-zinc-400 mx-auto mb-2 opacity-60" />
             <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200">No paired devices found</p>

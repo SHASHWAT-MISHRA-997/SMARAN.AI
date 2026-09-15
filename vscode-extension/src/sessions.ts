@@ -185,6 +185,7 @@ export class SessionStore {
             }
 
             const allStored = this.memento.get<Session[]>(KEY) || [];
+            const beforePull = new Map(allStored.map(s => [s.id, JSON.stringify(s)]));
             const localMap = new Map<string, Session>(allStored.map((s) => [s.id, s]));
             let changed = false;
             let conflicted = false;
@@ -225,13 +226,27 @@ export class SessionStore {
                         projectId: rTask.project_id || config.projectId,
                     };
                     localMap.set(rTask.id, merged);
-                    this.revisions.set(rTask.id, rTask.revision);
                     changed = true;
                 }
             }
 
             if (changed) {
-                const sorted = Array.from(localMap.values())
+                // Network reads can take seconds. Reconcile against current
+                // storage, not the snapshot taken before those reads, or a
+                // streamed edit (and even a newly created task) disappears.
+                const current = new Map((this.memento.get<Session[]>(KEY) || []).map(s => [s.id, s]));
+                for (const [id, candidate] of localMap) {
+                    const latest = current.get(id);
+                    if (JSON.stringify(latest) !== beforePull.get(id)) {
+                        if (latest?.dirty && (candidate.revision || 0) > (latest.revision || 0)) {
+                            conflicted = true;
+                        }
+                        continue;
+                    }
+                    current.set(id, candidate);
+                    if (candidate.revision) this.revisions.set(id, candidate.revision);
+                }
+                const sorted = Array.from(current.values())
                     .sort((a, b) => b.updatedAt - a.updatedAt);
                 await this.memento.update(KEY, sorted);
             }

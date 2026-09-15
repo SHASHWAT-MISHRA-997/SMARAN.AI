@@ -218,8 +218,18 @@ const VideoPackages = () => {
           <div>
             <div className="flex items-baseline justify-between gap-3 text-[11px] font-mono">
               <span className="text-zinc-500">Overall (estimate)</span>
+              {/* obtained_bytes, not downloaded_bytes.
+                *
+                * The percentage beside this is calculated from everything
+                * obtained - what was fetched plus what pip already had cached -
+                * while this printed only the freshly downloaded part. On a
+                * machine with most of the wheels already on disk that read
+                * "13 MB of about 3.2 GB · 85%": two numbers describing
+                * different things, one of which looks like a lie about the
+                * other. Cached packages are counted because they are genuinely
+                * obtained, and the line below says how much of it was. */}
               <span className="shrink-0 text-zinc-400">
-                {formatBytes(state.downloaded_bytes)} of about {state.approx_download_gb} GB
+                {formatBytes(state.obtained_bytes)} of about {state.approx_download_gb} GB
                 {' · '}{state.approx_percent}%
               </span>
             </div>
@@ -229,6 +239,15 @@ const VideoPackages = () => {
                 style={{ width: `${state.approx_percent ?? 0}%` }}
               />
             </div>
+            {/* Where the total came from, when most of it was already here.
+              * Without this, a bar that jumps straight to 85% on a machine
+              * that has installed before looks like the figure is invented. */}
+            {state.cached_bytes > 0 && (
+              <p className="mt-1 text-[10px] font-mono text-zinc-600">
+                {formatBytes(state.cached_bytes)} already on disk
+                {' · '}{formatBytes(state.downloaded_bytes)} downloaded this time
+              </p>
+            )}
           </div>
         </div>
       )}

@@ -16,6 +16,7 @@ import {
   Music2,
 } from 'lucide-react';
 import { LiveVoiceSession } from '../utils/liveVoice';
+import { liveVoiceForPersona } from '../utils/liveVoicePersona';
 import { Ambience } from '../utils/ambience';
 import * as nativeSpeech from '../utils/nativeSpeech';
 import { isNativeApp, loadLink } from '../utils/hostLink';
@@ -71,16 +72,6 @@ const CallToggle = ({ icon: Icon, label, active = false, disabled = false, dange
     </span>
   </button>
 );
-
-const LIVE_VOICES = [
-  { id: 'Aoede', label: 'Aoede — warm', gender: 'female' },
-  { id: 'Kore', label: 'Kore — clear', gender: 'female' },
-  { id: 'Leda', label: 'Leda — bright', gender: 'female' },
-  { id: 'Puck', label: 'Puck — lively', gender: 'male' },
-  { id: 'Charon', label: 'Charon — deep', gender: 'male' },
-  { id: 'Fenrir', label: 'Fenrir — strong', gender: 'male' },
-  { id: 'Orus', label: 'Orus — steady', gender: 'male' },
-];
 
 const isMobileVoiceDevice = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
 
@@ -313,7 +304,8 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
   const [speechBus, setSpeechBus] = useState(null);
   const [visionMode, setVisionMode] = useState('off');
 
-  // Character and speaking voice are the user's choice and are remembered.
+  // Character choice is remembered. Gemini Live's reference voice is derived
+  // from that character, so a stale device preference cannot change timbre.
   const [avatarId, setAvatarId] = useState(() => {
     const saved = localStorage.getItem('sm_avatar_id');
     // A character that no longer exists leaves the picker showing a blank and
@@ -335,7 +327,6 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
   const [gestureMode, setGestureMode] = useState(false);
 
 
-  const [voiceName, setVoiceName] = useState(() => localStorage.getItem('sm_voice_name') || 'Aoede');
   const [showAvatar, setShowAvatar] = useState(() => localStorage.getItem('sm_show_avatar') !== 'false');
 
   // Start and switch the bed with the workspace and the chosen character.
@@ -376,16 +367,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     const gender = showAvatar && character?.gender ? character.gender : 'male';
     localStorage.setItem('sm_voice_gender', gender);
 
-    // Reconcile the speaking voice with the character every time, not only when
-    // the picker is touched: a saved pairing could otherwise leave a male
-    // character answering in a woman's voice.
-    setVoiceName((current) => {
-      const currentVoice = LIVE_VOICES.find((v) => v.id === current);
-      if (currentVoice && currentVoice.gender === gender) return current;
-      return (LIVE_VOICES.find((v) => v.gender === gender) || {}).id || current;
-    });
   }, [avatarId, showAvatar]);
-  useEffect(() => { localStorage.setItem('sm_voice_name', voiceName); }, [voiceName]);
   useEffect(() => { localStorage.setItem('sm_show_avatar', String(showAvatar)); }, [showAvatar]);
   const [recognizerIssue, setRecognizerIssue] = useState('');
 
@@ -1511,7 +1493,10 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled) setLiveAvailable(Boolean(data?.available) && !isMobileVoiceDevice());
+        // A configured key is not consent to replace local speech with a
+        // metered service. Only an explicit saved Gemini choice enables it.
+        if (!cancelled) setLiveAvailable(Boolean(data?.available)
+          && localStorage.getItem('sm_voice_engine') === 'gemini');
       } catch  {
         /* leave real-time voice switched off */
       }
@@ -1529,9 +1514,12 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
 
   // Which engine serves a live call. Remembered, because someone running
   // without a key wants local every time, not once.
-  const [voiceEngine] = useState(
-    () => localStorage.getItem('sm_voice_engine') || 'local',
-  );
+  const [voiceEngine] = useState(() => {
+    // Preserve the local choice; reference-voice matching must not silently
+    // migrate an installation to a paid service.
+    const saved = localStorage.getItem('sm_voice_engine');
+    return saved === 'gemini' ? 'gemini' : 'local';
+  });
   useEffect(() => { localStorage.setItem('sm_voice_engine', voiceEngine); }, [voiceEngine]);
 
   useEffect(() => {
@@ -1621,11 +1609,14 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     setLiveActive(true);
     setVoiceIssue('');
     liveStartFailedRef.current = false;
+    const persona = showAvatar ? (avatarId === 'evelyn' ? 'myraa' : 'myra') : 'core';
     const started = await session.start({
       apiBase: API_BASE,
-      // No language is forced: the model answers in whatever the user speaks.
-      language: 'auto',
-      voice: voiceName,
+      // Use the same explicit reply language as the input bar.
+      language: selectedLanguage,
+      // Keep the reference timbre fixed: Aoede for Myra/Amarya and Orus for
+      // Energy Core. The server enforces the same mapping for untrusted calls.
+      voice: liveVoiceForPersona(persona),
       // The character's own gender, read the same way the rest of the app
       // reads it. The energy core has no character, and is male.
       gender: (showAvatar
@@ -1634,13 +1625,29 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
         || 'male',
       // Which character is on screen decides how the voice is directed:
       // pitch, pacing and manner differ per persona, not just the timbre.
-      persona: showAvatar ? (avatarId === 'evelyn' ? 'myraa' : 'myra') : 'core',
+      persona,
     });
     if (!started) {
       liveStartFailedRef.current = true;
       await stopLiveSession();
     }
-  }, [API_BASE, selectedLanguage, voiceName, finalizeRecordedAudio, stopRecognition, stopLiveSession, showAvatar, avatarId]);
+  }, [API_BASE, selectedLanguage, finalizeRecordedAudio, stopRecognition, stopLiveSession, showAvatar, avatarId]);
+
+  const previousReplyLanguage = useRef(selectedLanguage);
+  useEffect(() => {
+    if (previousReplyLanguage.current === selectedLanguage) return;
+    previousReplyLanguage.current = selectedLanguage;
+    if (!isOpen || !liveSessionRef.current) return;
+    let cancelled = false;
+    (async () => {
+      await stopLiveSession();
+      if (cancelled) return;
+      endedByUserRef.current = false;
+      liveStartFailedRef.current = false;
+      await startLiveSession();
+    })();
+    return () => { cancelled = true; };
+  }, [selectedLanguage, isOpen, stopLiveSession, startLiveSession]);
 
   // Always release the microphone and socket when the panel closes.
   useEffect(() => {
@@ -1674,20 +1681,6 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     startLiveSession();
   }, [isOpen, liveAvailable, startLiveSession]);
 
-  // The speaking voice is fixed when a session opens, so switching character
-  // mid-call left a male character still answering in the previous voice.
-  // Reconnect when the voice changes so the two always agree.
-  const activeVoiceRef = useRef(voiceName);
-  useEffect(() => {
-    if (activeVoiceRef.current === voiceName) return;
-    activeVoiceRef.current = voiceName;
-    if (!isOpen || !liveSessionRef.current) return;
-    (async () => {
-      await stopLiveSession();
-      await startLiveSession();
-    })();
-  }, [voiceName, isOpen, startLiveSession, stopLiveSession]);
-
   // Every character that can be on screen, in picker order, so a swipe
   // steps through the same list the dropdown shows.
   const characterCycle = useMemo(
@@ -1695,14 +1688,24 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     [],
   );
 
+  const selectCharacter = useCallback(async (next) => {
+    // Gemini fixes the speaker when a connection starts. Changing only the
+    // avatar leaves the previous speaker talking through the new character.
+    const wasConnected = Boolean(liveSessionRef.current);
+    await stopLiveSession();
+    if (wasConnected) endedByUserRef.current = false;
+    liveStartFailedRef.current = false;
+    localStorage.setItem('sm_voice_gender', next === 'core' ? 'male' : 'female');
+    setShowAvatar(next !== 'core');
+    if (next !== 'core') setAvatarId(next);
+  }, [stopLiveSession]);
+
   const stepCharacter = useCallback((delta) => {
     const current = showAvatar ? avatarId : 'core';
     const index = characterCycle.indexOf(current);
     const next = characterCycle[(index + delta + characterCycle.length) % characterCycle.length];
-    if (next === 'core') { setShowAvatar(false); return; }
-    setShowAvatar(true);
-    setAvatarId(next);
-  }, [characterCycle, showAvatar, avatarId]);
+    selectCharacter(next);
+  }, [characterCycle, showAvatar, avatarId, selectCharacter]);
 
   // A gesture stands in for the control it names; nothing here does
   // anything the on-screen buttons cannot already do.
@@ -2092,14 +2095,12 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
               voiceEngine still exists and still decides who answers; it is
               simply not a second badge in this header. */}
           {/* Character picker */}
-          <div className="flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1 shadow-sm max-w-[130px] sm:max-w-none" title="Choose who you are speaking with">
+          <div className="flex items-center gap-1 bg-zinc-900/90 border border-emerald-500/30 rounded-xl px-2 py-1 shadow-sm max-w-[130px] sm:max-w-none" title="Choose a character. Gemini Live uses the reference Aoede voice for Myra and Amarya, and Orus for Energy Core.">
             <UserRound className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <select
               value={showAvatar ? avatarId : 'core'}
               onChange={(e) => {
-                if (e.target.value === 'core') { setShowAvatar(false); return; }
-                setShowAvatar(true);
-                setAvatarId(e.target.value);
+                selectCharacter(e.target.value);
               }}
               className="bg-transparent text-[11px] font-black text-zinc-200 outline-none cursor-pointer truncate w-full"
             >

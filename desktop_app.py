@@ -613,6 +613,10 @@ def _run_tts_worker(argv: list[str]) -> int:
     if len(argv) < 5:
         return 2
     voice, rate, out_path, text_path = argv[1], argv[2], argv[3], argv[4]
+    # Optional, and last, so a server that does not send it still works here.
+    # The characters' delivery depends on it: the reference brief asks for a
+    # voice 20-35% above conversational, which is pitch, not rate.
+    pitch = argv[5] if len(argv) > 5 else "+0Hz"
     with open(text_path, encoding="utf-8") as handle:
         text = handle.read()
 
@@ -621,7 +625,7 @@ def _run_tts_worker(argv: list[str]) -> int:
     import edge_tts
 
     async def render() -> None:
-        communicator = edge_tts.Communicate(text, voice, rate=rate)
+        communicator = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
         with open(out_path, "wb") as handle:
             async for chunk in communicator.stream():
                 if chunk.get("type") == "audio" and chunk.get("data"):

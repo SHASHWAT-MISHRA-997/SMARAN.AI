@@ -1,16 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { voicePersonaRule } from '../src/utils/voicePersona.js';
+import { liveVoiceForPersona, REFERENCE_LIVE_VOICES } from '../src/utils/liveVoicePersona.js';
 
-test('female characters receive feminine Hindi first-person examples', () => {
-  const prompt = voicePersonaRule('female');
-  assert.match(prompt, /मैं करती हूँ, खोलती हूँ, कर सकती हूँ/);
-  assert.doesNotMatch(prompt, /मैं करता हूँ/);
+test('reference characters keep the recovered Gemini voice', () => {
+  assert.equal(liveVoiceForPersona('myra'), 'Aoede');
+  assert.equal(liveVoiceForPersona('myraa'), 'Aoede');
+  assert.equal(liveVoiceForPersona('amarya'), 'Aoede');
+  assert.equal(liveVoiceForPersona('evelyn'), 'Aoede');
+  assert.equal(liveVoiceForPersona('core'), 'Orus');
 });
 
-test('Energy Core receives masculine grammar independently of female characters', () => {
-  const prompt = voicePersonaRule('male');
-  assert.match(prompt, /Energy Core/);
-  assert.match(prompt, /मैं करता हूँ, खोलता हूँ, कर सकता हूँ/);
-  assert.doesNotMatch(prompt, /मैं करती हूँ/);
+test('unknown personas fail closed to the female reference voice', () => {
+  assert.equal(liveVoiceForPersona('other'), 'Aoede');
+  assert.deepEqual(Object.keys(REFERENCE_LIVE_VOICES).sort(), ['amarya', 'core', 'evelyn', 'myra', 'myraa']);
 });
+

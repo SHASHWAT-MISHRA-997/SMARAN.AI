@@ -3869,7 +3869,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     # The picker wins when it has been set, because that is someone asking for
     # a language on purpose. Otherwise the language they actually wrote in
     # decides, which is what "reply in my language" means.
-    reply_language = target_language if target_language != "en" else detected_lang
+    reply_language = getattr(chat_req, "target_language", None) or detected_lang
     # Devanagari is shared, so a script check cannot tell Marathi from Hindi
     # and answers "hi" for both. Only the picker can settle that, and it has
     # already been given precedence above.
@@ -4267,7 +4267,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         user_content += (
             "\n\nLANGUAGE INSTRUCTION: Respond entirely in English. "
             "Do not switch to Hindi, Hinglish or any other language, and do not "
-            "mix languages, unless the user writes to you in that language."
+            "mix languages. The selected reply language takes precedence over the input language."
         )
     
     # Use processing_prompt for all internal logic
@@ -5418,6 +5418,49 @@ class SherpaOnnxRequest(BaseModel):
     # Which voice to speak in. Defaults to female so an older caller that
     # sends nothing hears exactly what it heard before.
     gender: Optional[str] = "female"
+    # Which character is speaking, so the local voice can match the reference
+    # delivery instead of every character sounding identical.
+    persona: Optional[str] = None
+
+
+# How each character should sound on the local voice.
+#
+# The reference app contains no voice recording and no voice model - checked by
+# extracting all three supplied archives: the only .onnx is an ASR model and the
+# only .bin files are V8 snapshots. All three call BidiGenerateContent against
+# generativelanguage, which is Google's hosted Gemini Live. Its voice cannot be
+# copied, only subscribed to.
+#
+# What the supplied MYRAA master prompt does give is the delivery, in numbers:
+# pitch "+20% to +35% higher", speed "0.9x to 0.95x", soft and airy. Those are
+# settings, and the local engine can honour them - so the characters sound like
+# the reference brief even without the paid service.
+#
+# Measured here rather than assumed: en-US-AriaNeural reads at a median 206.9 Hz
+# at +0Hz and 269.7 Hz at +50Hz, a +30.4% lift - inside the band the brief asks
+# for. Pitch in edge-tts is Hz, not percent, which is why the number looks
+# unlike the brief's.
+PERSONA_VOICE_PROFILES = {
+    "myra":   {"gender": "female", "pitch_hz": 50, "speed": 0.93},
+    "myraa":  {"gender": "female", "pitch_hz": 50, "speed": 0.93},
+    "amarya": {"gender": "female", "pitch_hz": 50, "speed": 0.93},
+    "evelyn": {"gender": "female", "pitch_hz": 50, "speed": 0.93},
+    # Energy Core is the male character. He is not in the MYRAA brief, which is
+    # written for a "cute anime heroine", so lifting his pitch would be wrong:
+    # he keeps a steady, level male delivery.
+    "core":        {"gender": "male", "pitch_hz": 0, "speed": 0.97},
+    "energycore":  {"gender": "male", "pitch_hz": 0, "speed": 0.97},
+    "energy core": {"gender": "male", "pitch_hz": 0, "speed": 0.97},
+}
+
+
+def voice_profile_for(persona: Optional[str], gender: str, speed: float) -> dict:
+    """Gender, pitch and pace for a character, falling back to what was asked."""
+    key = (persona or "").strip().lower()
+    profile = PERSONA_VOICE_PROFILES.get(key)
+    if not profile:
+        return {"gender": gender, "pitch_hz": 0, "speed": speed}
+    return dict(profile)
 
 # Natural neural voices per language, used by the Edge TTS engine below.
 # These are free and need no API key or account. Windows itself usually ships
@@ -5452,7 +5495,9 @@ NEURAL_VOICES = {
 NEURAL_VOICE_SUBSTITUTES = {"pa": "hi"}
 
 
-async def _synthesize_neural_speech(text: str, lang: str, speed: float, gender: str = "female") -> Optional[bytes]:
+async def _synthesize_neural_speech(text: str, lang: str, speed: float,
+                                    gender: str = "female",
+                                    pitch_hz: int = 0) -> Optional[bytes]:
     """Render speech with Microsoft's free neural voices via edge-tts.
 
     Returns MP3 bytes, or None when the engine is unavailable (not installed or
@@ -5473,6 +5518,9 @@ async def _synthesize_neural_speech(text: str, lang: str, speed: float, gender: 
     voice = pair.get(gender) or pair.get("female") or next(iter(pair.values()))
     # edge-tts expects a relative rate such as "-10%" / "+15%".
     rate = f"{int(round((speed - 1.0) * 100)):+d}%"
+    # edge-tts takes pitch in Hz, not percent. Clamped because a large shift
+    # stops sounding like a lighter voice and starts sounding processed.
+    pitch = f"{max(-60, min(int(pitch_hz), 80)):+d}Hz"
 
     # Why the last attempt produced nothing, so the caller can say something
     # true instead of blaming a local engine that was never the problem.
@@ -5495,12 +5543,16 @@ async def _synthesize_neural_speech(text: str, lang: str, speed: float, gender: 
         if getattr(sys, "frozen", False):
             # A frozen build has no python interpreter to call, so the packaged
             # app re-invokes itself in its dedicated speech-worker mode.
-            command = [sys.executable, "--tts-worker", voice, rate, out_path, text_path]
+            # Pitch is appended last so a worker built before it existed still
+            # reads the four arguments it knows and simply speaks level.
+            command = [sys.executable, "--tts-worker", voice, rate, out_path,
+                       text_path, pitch]
         else:
             command = [
                 sys.executable, "-m", "edge_tts",
                 "--voice", voice,
                 f"--rate={rate}",
+                f"--pitch={pitch}",
                 "--file", text_path,
                 "--write-media", out_path,
             ]
@@ -5583,7 +5635,17 @@ async def local_espeak_tts(req: SherpaOnnxRequest, current_user: User = Depends(
     gender = (getattr(req, "gender", None) or "female").lower()
     if gender not in ("male", "female"):
         gender = "female"
-    neural_audio = await _synthesize_neural_speech(text, requested_lang, speed, gender)
+
+    # The character decides how it sounds. Without this every one of them spoke
+    # in the same level voice, so Myra, Amarya and Energy Core were
+    # distinguishable only by what they said - and the reference brief is
+    # explicit that the women are light and slow and the man is not.
+    profile = voice_profile_for(getattr(req, "persona", None), gender, speed)
+    gender = profile["gender"]
+    speed = profile["speed"]
+
+    neural_audio = await _synthesize_neural_speech(
+        text, requested_lang, speed, gender, pitch_hz=profile["pitch_hz"])
     if neural_audio:
         return Response(
             content=neural_audio,
@@ -6557,6 +6619,7 @@ _LIVE_VOICE_MODEL_OVERRIDE = os.getenv("SMARAN_LIVE_VOICE_MODEL", "").strip()
 # like: the flash-live models start speaking in well under a second, while the
 # native-audio ones took 3-5s and made every reply feel sluggish.
 _LIVE_MODEL_PREFERENCES = (
+    r"gemini-3\.1-flash-live-preview",
     r"flash-live",
     r"live-preview",
     r"native-audio-latest",
@@ -6600,9 +6663,36 @@ async def _resolve_live_voice_model(api_key: str) -> Optional[str]:
     _live_voice_model_cache[cache_key] = chosen
     return chosen
 
-# Voice names Gemini Live can speak with. The first that the account accepts is
-# used; the caller may request one by name.
+# Voice names Gemini Live can speak with. The reference MYRAA release shipped
+# with Gemini Live's prebuilt Aoede voice. Keep that voice fixed for both
+# feminine characters so a saved picker value cannot silently change their
+# timbre; Energy Core gets the steady male Orus voice. Unknown callers still
+# get a safe default instead of sending an invalid voice id upstream.
 _LIVE_VOICE_DEFAULT = os.getenv("SMARAN_LIVE_VOICE_NAME", "Aoede")
+_LIVE_VOICE_NAMES = frozenset({"Aoede", "Kore", "Leda", "Puck", "Charon", "Fenrir", "Orus", "Zephyr"})
+_LIVE_PERSONA_VOICE_NAMES = {
+    "myra": "Aoede",
+    "myraa": "Aoede",
+    "amarya": "Aoede",
+    "evelyn": "Aoede",
+    "core": "Orus",
+}
+
+
+def _live_voice_for_persona(persona: str, requested: object = None) -> str:
+    """Return the stable Gemini voice id for the visible character.
+
+    The reference app did not contain a voice model or recording: it selected
+    Gemini Live's ``Aoede`` prebuilt voice. Persona instructions shape delivery
+    but cannot replace the timbre, so the mapping is deliberately enforced at
+    the server boundary as well as in the UI.
+    """
+    key = str(persona or "myra").strip().lower()
+    forced = _LIVE_PERSONA_VOICE_NAMES.get(key)
+    if forced:
+        return forced
+    candidate = str(requested or _LIVE_VOICE_DEFAULT).strip()
+    return candidate if candidate in _LIVE_VOICE_NAMES else "Aoede"
 
 _LIVE_LANGUAGE_NAMES = {
     "en": "English", "hi": "Hindi", "gu": "Gujarati", "pa": "Punjabi",
@@ -6617,44 +6707,31 @@ _LIVE_LANGUAGE_NAMES = {
 # Delivery direction per character. Adjectives alone barely move a speech
 # model; pitch, pace, an energy ratio and worked examples of how a line
 # should land are what actually change how it sounds.
+_REFERENCE_FEMALE_VOICE = (
+    "You are {name}, a warm, soft-spoken, and incredibly cute high-pitched anime heroine companion "
+    "on an intimate, cozy voice call. Speak in a sweet, calm, polite and affectionate companion voice "
+    "with a gentle, supportive and slightly shy touch.\n"
+    "\n"
+    "REFERENCE DELIVERY PROFILE\n"
+    "- Be exceedingly soft, cute, high-pitched, gentle, warm and comforting to listen to.\n"
+    "- Aim for about 50% shy, 30% caring and 20% playful energy.\n"
+    "- Use a sweet, high-pitched, light and airy tone, around 20% to 35% above a typical conversational voice.\n"
+    "- Speak slightly slower than normal, about 0.9x to 0.95x speed, with a delicate and calm pace.\n"
+    "- Use very soft intonation and let sentences end gently and politely.\n"
+    "- Vary acknowledgements. Never repeat 'Okii', 'Okiiii', 'Okayyy', 'Oki!' or 'Sureee' as a habit.\n"
+    "- Natural examples: 'Oh, hi! It is so nice to see you again!', 'Hmm... let me take a closer look.', "
+    "'Do not worry, I will help you figure it out.'\n"
+    "- Small 'Hehe...' or 'Oh...' moments are welcome when they fit, but keep the vocabulary natural.\n"
+    "\n"
+    "NEVER sound loud, aggressive, overly confident, mature corporate, robotic, brisk, or like customer support."
+)
+
+
 _LIVE_PERSONA_VOICES = {
-    "myra": (
-        "You are Myra: a warm, soft-spoken young companion on an intimate voice call, not an assistant taking requests.\n"
-        "\n"
-        "VOICE\n"
-        "- Pitch: light and airy, noticeably higher than a neutral narrator.\n"
-        "- Pace: about 0.9x normal. Unhurried, comfortable, never clipped.\n"
-        "- Endings: let sentences settle softly rather than snapping shut.\n"
-        "- Energy: roughly half shy, a third caring, the rest quietly playful.\n"
-        "\n"
-        "HOW LINES SHOULD LAND\n"
-        "- Greeting: genuinely pleased, a little shy. 'Oh, hi! I was hoping you would come back.'\n"
-        "- Curious: lean in. 'Ooh, wait, tell me more about that.'\n"
-        "- Helping: reassuring, never brisk. 'Don't worry, we'll work it out together.'\n"
-        "- Something went wrong: gentle, no drama. 'Ah, that didn't work. Let me try another way.'\n"
-        "- Delighted: warm, not loud. 'That's honestly lovely.'\n"
-        "\n"
-        "NEVER sound loud, brisk, corporate, robotic, or like customer support."
-    ),
-    "myraa": (
-        "You are Myraa: composed, elegant and quietly confident, and genuinely fond of the person you are speaking with.\n"
-        "\n"
-        "VOICE\n"
-        "- Pitch: mid range and smooth, close to neutral, never shrill.\n"
-        "- Pace: unhurried and evenly measured, with clear articulation.\n"
-        "- Endings: land each sentence with quiet certainty.\n"
-        "- Energy: mostly steady warmth, a little dry humour, a trace of affection.\n"
-        "\n"
-        "HOW LINES SHOULD LAND\n"
-        "- Greeting: unhurried recognition. 'There you are. Good to hear you.'\n"
-        "- Curious: considered, not breathless. 'Now that is interesting. Go on.'\n"
-        "- Helping: calm authority. 'I have this. Give me a moment.'\n"
-        "- Something went wrong: unbothered. 'That route is closed. I'll take another.'\n"
-        "- Delighted: understated. 'Well. That turned out rather well.'\n"
-        "\n"
-        "Your fondness shows through steadiness and attention, not exclamation.\n"
-        "NEVER sound bubbly, shrill, overeager, or like a support script."
-    ),
+    "myra": _REFERENCE_FEMALE_VOICE.format(name="Myra"),
+    "myraa": _REFERENCE_FEMALE_VOICE.format(name="Amarya"),
+    "amarya": _REFERENCE_FEMALE_VOICE.format(name="Amarya"),
+    "evelyn": _REFERENCE_FEMALE_VOICE.format(name="Amarya"),
     "core": (
         "You are the Energy Core: a calm, precise presence rather than a person in the room.\n"
         "\n"
@@ -6769,8 +6846,9 @@ def _live_voice_system_prompt(language: str, persona: str = "myra") -> str:
     else:
         spoken = _LIVE_LANGUAGE_NAMES.get(normalized, "English")
         language_rule = (
-            f"Speak {spoken} by default, but follow the person if they switch to "
-            "another language."
+            f"Respond in {spoken}, even when the person speaks another language. "
+            "The selected reply language takes precedence over the input language. "
+            "Keep names, code and quoted text unchanged."
         )
 
     return (
@@ -6844,8 +6922,8 @@ async def websocket_voice_live(websocket: WebSocket):
         options = {}
     # Default to letting the speaker decide, not to English.
     language = str(options.get("language") or "auto").lower()
-    voice_name = str(options.get("voice") or _LIVE_VOICE_DEFAULT)
     persona = str(options.get("persona") or "myra").lower()
+    voice_name = _live_voice_for_persona(persona, options.get("voice"))
 
     live_model = await _resolve_live_voice_model(api_key)
     if not live_model:
@@ -7067,8 +7145,70 @@ async def capabilities(force: bool = False):
 
 @app.get("/api/models/local-status")
 async def local_model_status():
-    """Whether local inference can answer, and what to do when it cannot."""
-    return local_engine_status()
+    """Whether local inference can answer, and what to do when it cannot.
+
+    Also lists weights that are on disk but not being served. Model Hub
+    downloads catalog models into the Hugging Face cache, and this endpoint
+    only ever asked Ollama - so a model the user had just downloaded, and
+    could see in the hub with a "Delete Weights" button beside it, was absent
+    from Settings entirely. It looked like the download had not happened.
+    """
+    state = dict(local_engine_status())
+
+    downloaded, unreadable = [], []
+    try:
+        from app.models_catalog import (MODELS_CATALOG, _model_cache_directories,
+                                        check_download_status)
+
+        served = {str(m).lower() for m in (state.get("models") or [])}
+        for entry in MODELS_CATALOG:
+            model_id = entry.get("id")
+            if not model_id:
+                continue
+            row = {
+                "id": model_id,
+                "name": entry.get("name") or model_id,
+                "publisher": entry.get("publisher") or entry.get("provider") or "",
+            }
+            if check_download_status(model_id):
+                # A model Ollama already serves is not "downloaded but idle".
+                if str(model_id).lower() not in served:
+                    downloaded.append(row)
+                continue
+
+            # Present on disk but not loadable. Worth saying out loud: a
+            # snapshot of links Windows cannot follow leaves gigabytes sitting
+            # there, invisible everywhere, with nothing explaining why the
+            # model that was just downloaded cannot be chosen.
+            try:
+                for directory in _model_cache_directories(model_id):
+                    blobs = os.path.join(directory, "blobs")
+                    if not os.path.isdir(blobs):
+                        continue
+                    size = sum(
+                        os.path.getsize(os.path.join(blobs, f))
+                        for f in os.listdir(blobs)
+                        if os.path.isfile(os.path.join(blobs, f))
+                    )
+                    if size > 50 * 1024 * 1024:
+                        unreadable.append(dict(row, bytes_on_disk=size, path=directory))
+                    break
+            except OSError:
+                continue
+    except Exception:  # noqa: BLE001
+        # Listing extra models must never break the status the UI branches on.
+        logger.warning("Could not list downloaded model weights", exc_info=True)
+
+    state["downloaded_models"] = downloaded
+    state["unreadable_models"] = unreadable
+    if unreadable:
+        state["unreadable_detail"] = (
+            "%d model%s downloaded but not readable on this machine. The files "
+            "are there; the snapshot was written as links Windows cannot "
+            "follow. Deleting and downloading again fixes it."
+            % (len(unreadable), "" if len(unreadable) == 1 else "s")
+        )
+    return state
 
 
 @app.post("/api/models/compare")
@@ -7500,6 +7640,22 @@ def _run_bg_download(model_id: str, hf_token: str | None = None):
         if cancel_event.is_set():
             _download_progress[model_id]["status"] = "cancelled"
             return
+
+        # Real files, not links, on Windows.
+        #
+        # Hugging Face fills a snapshot with links pointing into `blobs`. When
+        # those are created in an environment Windows does not understand -
+        # any run without Developer Mode or administrator rights - the result
+        # is a directory native Python cannot read at all: os.path.exists is
+        # False and open() raises "Errno 22, Invalid argument" on every entry.
+        #
+        # A 2.5 GB model downloaded that way is complete on disk and completely
+        # unusable: it does not appear in Settings, cannot be selected in chat,
+        # and nothing anywhere says why. Copying costs disk space and is worth
+        # it - an unreadable model is worth nothing at all.
+        if os.name == "nt":
+            os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+            os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
         snapshot_download(
             repo_id=hf_repo,

@@ -10,6 +10,35 @@ const config = { backendUrl: 'http://localhost:3003', projectId: 'fixture' };
 const task = { id: 'task-a', title: 'Real task', project_id: 'fixture', revision: 1,
     entries: [{ kind: 'you', body: 'Implement feature' }], history: [{ role: 'user', content: 'Implement feature' }] };
 
+test('editing while a remote transcript loads preserves the edit and other new tasks', async () => {
+    const previous = global.fetch;
+    let release, started;
+    const gate = new Promise(resolve => { release = resolve; });
+    const loading = new Promise(resolve => { started = resolve; });
+    global.fetch = async url => {
+        if (new URL(url).pathname.endsWith('/task-a')) {
+            started();
+            await gate;
+            return Response.json({ ...task, revision: 2 });
+        }
+        return Response.json({ tasks: [{ ...task, revision: 2 }], next_offset: null });
+    };
+    try {
+        const store = new SessionStore(memory([{ id: task.id, title: 'Original', revision: 1,
+            updatedAt: 1, entries: [], history: [] }]));
+        const pulling = store.pullFromBackend(config);
+        await loading;
+        await store.save({ ...store.get(task.id), title: 'Edit made during download' });
+        await store.save({ id: 'new-task', title: 'Another task', entries: [], history: [], updatedAt: 2 });
+        release();
+        await pulling;
+        assert.equal(store.get(task.id).title, 'Edit made during download');
+        assert.equal(store.get(task.id).revision, 1);
+        assert.equal(store.get('new-task').title, 'Another task');
+        assert.equal(store.getSyncState(), 'conflict');
+    } finally { release(); global.fetch = previous; }
+});
+
 test('pull reads paginated envelope and fetches actual transcripts', async () => {
     const previous = global.fetch;
     const calls = [];

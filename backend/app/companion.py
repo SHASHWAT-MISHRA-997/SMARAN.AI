@@ -410,12 +410,24 @@ def dispatch_to_device(
     action = payload.action
     params = payload.data or {}
 
+    if action not in ALLOWED_REMOTE_ACTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{action}' is not a permitted remote action.",
+        )
+
     if target_id == "all":
         devices = (
             db.query(PairedDevice)
             .filter(PairedDevice.user_id == current_user.id)
             .all()
         )
+        if not devices:
+            # Do not report a successful dispatch when there is no recipient.
+            # The desktop UI checks the count too, but API clients need an
+            # unambiguous failure response so they cannot claim the work was
+            # delivered to a phone that does not exist.
+            raise HTTPException(status_code=404, detail="No paired devices found.")
         count = 0
         for dev in devices:
             q = _command_queues.setdefault(dev.id, [])
@@ -435,10 +447,8 @@ def dispatch_to_device(
             .first()
         )
         if not dev:
-            # If not in database, also check if any device exists
-            dev = db.query(PairedDevice).first()
-        if not dev:
-            raise HTTPException(status_code=404, detail="No paired devices found.")
+            # Never redirect a missing or foreign ID to an arbitrary phone.
+            raise HTTPException(status_code=404, detail="Paired device not found.")
         q = _command_queues.setdefault(dev.id, [])
         q.append({
             "id": secrets.token_urlsafe(8),

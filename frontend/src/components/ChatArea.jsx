@@ -3881,7 +3881,7 @@ const ChatArea = ({
           assistant_gender: assistantGender(),
           // Spoken turns get short, proactive replies written to be heard.
           voice_mode: isVoiceTurn,
-          target_language: selectedLanguage === 'en' ? undefined : selectedLanguage,
+          target_language: selectedLanguage,
           custom_instructions: localStorage.getItem('sm_custom_instructions') || undefined,
           memory_enabled: localStorage.getItem('sm_memory_enabled') !== 'false',
           ...getCloudRoutingPayload(),

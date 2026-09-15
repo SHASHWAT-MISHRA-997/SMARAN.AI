@@ -55,8 +55,8 @@ export function languageRule(selected) {
   }
   return (
     'LANGUAGE INSTRUCTION: Respond entirely in English. Do not switch to Hindi, ' +
-    'Hinglish or any other language, and do not mix languages, unless the person ' +
-    'writes to you in that language.'
+    'Hinglish or any other language, and do not mix languages. The selected ' +
+    'reply language takes precedence over the input language.'
   );
 }
 

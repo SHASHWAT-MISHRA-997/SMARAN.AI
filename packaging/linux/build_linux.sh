@@ -63,8 +63,17 @@ echo "[linux] packaging $APP_NAME $VERSION"
 # release it came from and can be asked directly.
 frozen_is_current() {
     [ -x "$FROZEN_DIR/$APP_NAME" ] || return 1
-    ls "$FROZEN_DIR/_internal/frontend_dist/assets/" 2>/dev/null \
-        | grep -q -- "-v$VERSION-" || return 1
+    # A version-only check is insufficient: Vite can emit several different
+    # bundles for the same release. Requiring the exact entrypoint named by
+    # the source index prevents a stale build from being packaged silently.
+    expected_index="$(sed -n 's#.*src="/assets/\(index-v[^"]*\.js\)".*#\1#p' \
+        "$ROOT/backend/frontend_dist/index.html" | head -n 1)"
+    [ -n "$expected_index" ] || return 1
+    [ -f "$FROZEN_DIR/_internal/frontend_dist/assets/$expected_index" ] || return 1
+    expected_vision="$(find "$ROOT/backend/frontend_dist/assets" -maxdepth 1 \
+        -type f -name 'vision_bundle-v*.js' -printf '%f\n' | head -n 1)"
+    [ -n "$expected_vision" ] || return 1
+    [ -f "$FROZEN_DIR/_internal/frontend_dist/assets/$expected_vision" ] || return 1
 }
 
 if ! frozen_is_current; then

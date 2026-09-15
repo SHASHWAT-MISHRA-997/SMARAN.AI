@@ -17,9 +17,10 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('chat-composer')).toBeVisible();
 });
 
-test('fenced explanations stay readable without project controls; explicit code retains its download', async ({ page }) => {
+test('fenced explanations stay readable and code uses the requested Copy-only controls', async ({ page }) => {
   await expect(page.getByText('Forward Deploy Engineer = AI + Development + Customer Support', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Download ZIP/ })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /Download ZIP/ })).toHaveCount(0);
+  await expect(page.getByText('console.log("actual code");', { exact: true })).toBeVisible();
   await expect(page.getByText('Summary\nAll words stay visible.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run Output', exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
@@ -71,4 +72,15 @@ test('mobile handset ends the call instead of only pausing the microphone', asyn
   await expect(page.getByTestId('chat-composer')).toBeVisible();
   await page.waitForTimeout(250);
   expect(renderLoops).toEqual([]);
+});
+
+test('reply language preserves an explicit English choice after Hindi and reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const picker = page.getByRole('combobox', { name: 'Reply language', exact: true });
+  await picker.selectOption('hi');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sm_response_language'))).toBe('hi');
+  await picker.selectOption('en');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sm_response_language'))).toBe('en');
+  await page.reload();
+  await expect(picker).toHaveValue('en');
 });

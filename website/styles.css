@@ -574,6 +574,11 @@ main, .nav, .foot { position: relative; z-index: 3; }
   border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
   background: rgba(239, 68, 68, .035);
   overflow: hidden;
+  /* A transformed, max-content track can otherwise contribute its off-screen
+     paint area to document.scrollWidth in Chromium, even though it is hidden.
+     Clip the paint area itself so the moving labels never create a horizontal
+     page overflow on narrow screens. */
+  overflow: clip;
   mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
 }
@@ -1555,7 +1560,9 @@ html.motion-calm .reveal { opacity: 1; transform: none; transition: none; }
 .meet-stage { position: relative; display: grid; place-items: center; }
 
 .stage-halo {
-  position: absolute; inset: 0;
+  /* Keep the animated blur inside its layout box. Scaling a full-bleed halo
+     makes a few pixels of transformed overflow part of the page width. */
+  position: absolute; inset: 8%;
   border-radius: 50%;
   background: radial-gradient(circle, rgba(239,68,68,.28) 0%, transparent 65%);
   filter: blur(48px);

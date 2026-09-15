@@ -185,6 +185,10 @@ export default function VoicePreferences() {
           <span>Speech Synthesizer Voice</span>
           <span className="text-xs text-ink-faint">{voices.length} voices available</span>
         </label>
+        <p className="text-[11px] text-ink-faint">
+          Gemini Live uses the reference Aoede voice for Amarya and Myra, and Orus for Energy Core.
+          This picker applies only to the local browser or Android fallback voice.
+        </p>
         <div className="flex gap-2">
           <select
             id="sm-tts-select"
