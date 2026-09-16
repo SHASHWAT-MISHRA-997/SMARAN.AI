@@ -30,11 +30,34 @@ SECRET = "meeting at seven"
 
 
 @pytest.fixture
-def opened(monkeypatch):
+def opened(monkeypatch, copied):
     """Capture what would have been handed to the browser or app handler."""
     seen = []
     monkeypatch.setattr(messaging, "_open", lambda url: seen.append(url))
     return seen
+
+
+@pytest.fixture(autouse=True)
+def copied(monkeypatch):
+    """Capture the clipboard write instead of performing it.
+
+    social() puts the message on the real clipboard for services that cannot
+    take text in a link. The first version of this file replaced only _open,
+    so running the suite silently replaced the clipboard of whoever ran it -
+    which it did, on the owner's machine, and the text it left there was this
+    file's own fixture string.
+
+    A test that checks messages are never sent without permission has no
+    business taking something of the user's without asking either.
+    """
+    written = []
+
+    def fake_copy(text):
+        written.append(text)
+        return True
+
+    monkeypatch.setattr(messaging, "_copy", fake_copy)
+    return written
 
 
 CASES = (
@@ -82,16 +105,21 @@ def test_a_telegram_handle_is_required_rather_than_guessed(opened):
     assert opened == [], "an empty handle still opened something"
 
 
-def test_a_service_with_no_prefill_does_not_pretend_to_have_one(opened):
+def test_a_service_with_no_prefill_does_not_pretend_to_have_one(opened, copied):
     """Some services cannot take text in a link. Saying otherwise would lose
     the message silently - the window opens empty and the text is gone."""
     result = messaging.social("instagram", SECRET, "someone")
     assert result.get("sent") is False
-    # Either it prefilled, or it says plainly that it could not.
-    prefilled = "meeting" in (opened[0] if opened else "")
-    assert prefilled or result.get("note"), (
-        "no prefill and no explanation of where the text went: %r" % result
-    )
+    # It cannot prefill, so it must say where the text went instead.
+    assert result.get("copied_to_clipboard") is True
+    assert copied == [SECRET], "the text was not the thing put on the clipboard"
+    assert "clipboard" in result.get("note", "").lower()
+
+
+def test_an_unknown_service_is_refused_before_anything_happens(opened, copied):
+    with pytest.raises(messaging.MessagingError):
+        messaging.social("not-a-service", SECRET, "someone")
+    assert opened == [] and copied == []
 
 
 def test_every_documented_service_is_covered_here():

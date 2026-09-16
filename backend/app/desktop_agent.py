@@ -39,6 +39,20 @@ logger = logging.getLogger("smaran.desktop_agent")
 # ---------------------------------------------------------------------------
 WIN_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
+
+def _preview(prefix: str, text: str, limit: int) -> str:
+    """A one-line summary that only claims to be shortened when it is.
+
+    The clipboard messages appended an ellipsis unconditionally, so a
+    two-word clipboard was reported as "Clipboard: hello world...". That
+    reads as truncation, and something downstream believed it: an audit run
+    restored the clipboard from this field instead of the raw one and wrote
+    the decorated, apparently-truncated string back over the real contents.
+    """
+    if len(text) <= limit:
+        return prefix + text
+    return prefix + text[:limit] + "..."
+
 SAFE_USER_DIRS = {
     "desktop": Path.home() / "Desktop",
     "documents": Path.home() / "Documents",
@@ -1562,7 +1576,8 @@ class DesktopAgent:
                     creationflags=WIN_NO_WINDOW,
                 )
                 text = result.stdout.strip()
-                return {"success": True, "clipboard_text": text, "message": f"Clipboard: {text[:100]}..."}
+                return {"success": True, "clipboard_text": text,
+                        "message": _preview("Clipboard: ", text, 100)}
             except Exception as e:
                 return {"success": False, "error": str(e)}
         return {"success": False, "error": "Clipboard access only supported on Windows."}
@@ -1582,7 +1597,8 @@ class DesktopAgent:
                     capture_output=True, timeout=5,
                     creationflags=WIN_NO_WINDOW,
                 )
-                return {"success": True, "message": f"Copied to clipboard: {text[:50]}..."}
+                return {"success": True,
+                        "message": _preview("Copied to clipboard: ", text, 50)}
             except Exception as e:
                 return {"success": False, "error": str(e)}
         return {"success": False, "error": "Clipboard access only supported on Windows."}
