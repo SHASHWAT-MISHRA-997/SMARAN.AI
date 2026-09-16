@@ -2,3 +2,9 @@ node_modules/
 out/
 *.vsix
 src/analyticsConfig.ts
+
+# a full VS Code build the integration run downloads, about 1 GB
+.vscode-test/
+
+# scratch workspace the integration run opens
+test/integration/fixture/
