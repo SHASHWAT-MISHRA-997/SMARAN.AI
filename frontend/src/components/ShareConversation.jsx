@@ -1,12 +1,22 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { API_BASE } from '../context/AuthContext';
+import { loadLink, isNativeApp } from '../utils/hostLink';
 
 export default function ShareConversation({ messages }) {
   const [snapshot, setSnapshot] = useState(null);
   const [notice, setNotice] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
   const [shareData, setShareData] = useState(null);
+
+  const getBackendHost = () => {
+    try {
+      const link = loadLink();
+      if (link?.url) return link.url.replace(/\/+$/, '');
+    } catch {}
+    if (API_BASE) return API_BASE.replace(/\/+$/, '');
+    return '';
+  };
 
   const text = snapshot?.map(m => `${m.role === 'user' ? 'You' : 'SMARAN'}\n\n${m.content}`).join('\n\n---\n\n') || '';
 
@@ -24,8 +34,28 @@ export default function ShareConversation({ messages }) {
     if (!snapshot || !snapshot.length) return;
     setIsPublishing(true);
     setNotice('');
+    const host = getBackendHost();
+
+    if (!host && isNativeApp()) {
+      setIsPublishing(false);
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        try {
+          await navigator.share({
+            title: 'SMARAN Conversation',
+            text: text,
+          });
+          setNotice('Shared snapshot via system share.');
+          return;
+        } catch (e) {
+          if (e.name === 'AbortError') return;
+        }
+      }
+      setNotice('Public link sharing requires a paired SMARAN desktop backend. You can export as text or snapshot below.');
+      return;
+    }
+
     try {
-      const resp = await fetch(`${API_BASE}/api/share`, {
+      const resp = await fetch(`${host}/api/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -57,8 +87,9 @@ export default function ShareConversation({ messages }) {
   const revokePublicLink = async () => {
     if (!shareData?.share_id || !shareData?.revocation_token) return;
     setNotice('Revoking public link...');
+    const host = getBackendHost();
     try {
-      const resp = await fetch(`${API_BASE}/api/share/${shareData.share_id}?secret=${encodeURIComponent(shareData.revocation_token)}`, {
+      const resp = await fetch(`${host}/api/share/${shareData.share_id}?secret=${encodeURIComponent(shareData.revocation_token)}`, {
         method: 'DELETE',
       });
       const contentType = resp.headers.get('content-type') || '';
@@ -76,8 +107,57 @@ export default function ShareConversation({ messages }) {
 
   const getFullShareUrl = (path) => {
     if (shareData?.lan_url) return shareData.lan_url;
+    const host = getBackendHost();
+    if (host) return `${host}${path}`;
     if (typeof window === 'undefined') return path;
-    return `${window.location.origin}${path}`;
+    if (!isNativeApp()) {
+      return `${window.location.origin}${path}`;
+    }
+    return path;
+  };
+
+  const handleDownloadSnapshot = async () => {
+    if (!text) return;
+    const isMobile = isNativeApp() || (typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+
+    if (isMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        if (typeof File !== 'undefined' && navigator.canShare) {
+          const file = new File([text], 'smaran-conversation.txt', { type: 'text/plain' });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: 'SMARAN Conversation Snapshot',
+            });
+            setNotice('Snapshot saved / shared.');
+            return;
+          }
+        }
+        await navigator.share({
+          title: 'SMARAN Conversation Snapshot',
+          text: text,
+        });
+        setNotice('Snapshot shared.');
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+      }
+    }
+
+    try {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'smaran-conversation.txt';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice('Snapshot downloaded.');
+    } catch {
+      setNotice('Download failed. Use "Copy text" instead.');
+    }
   };
 
   return (
@@ -208,14 +288,7 @@ export default function ShareConversation({ messages }) {
               <button
                 disabled={!text}
                 className="rounded-lg border border-line bg-raised px-3 py-1.5 text-xs font-medium text-ink hover:bg-sunken disabled:opacity-40 transition"
-                onClick={() => {
-                  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
-                  const link = document.createElement('a');
-                  link.href = url;
-                  link.download = 'smaran-conversation.txt';
-                  link.click();
-                  setTimeout(() => URL.revokeObjectURL(url), 1000);
-                }}
+                onClick={handleDownloadSnapshot}
               >
                 Download snapshot
               </button>

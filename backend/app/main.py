@@ -2545,10 +2545,13 @@ def _openai_compatible_bases(api_url: str = "") -> list[str]:
     bases.extend([
         "http://127.0.0.1:1234/v1",        # LM Studio's default
         "http://127.0.0.1:8001/v1",        # vLLM run locally
-        "http://host.docker.internal:8001/v1",
-        "http://smaran-inference:8000/v1",  # the Docker compose names
-        "http://inference-server:8000/v1",
     ])
+    if os.path.exists("/.dockerenv") or os.getenv("DOCKER_CONTAINER"):
+        bases.extend([
+            "http://host.docker.internal:8001/v1",
+            "http://smaran-inference:8000/v1",  # the Docker compose names
+            "http://inference-server:8000/v1",
+        ])
 
     # http://127.0.0.1:8000/v1 used to be in this list. That is the port this
     # app itself listens on, so it probed itself for models and asked itself
@@ -6201,8 +6204,15 @@ async def chat_vision_interaction(
 
 
 
+_available_models_cache = {"data": None, "ts": 0}
+
+
 @app.get("/api/system/models")
 def get_available_models(current_user: User = Depends(get_current_user)):
+    now = time.time()
+    if _available_models_cache["data"] is not None and (now - _available_models_cache["ts"] < 10):
+        return dict(_available_models_cache["data"])
+
     import json
     hw_config = {}
     hw_path = os.path.join(settings.DATA_DIR, "hardware_config.json")
@@ -6222,16 +6232,16 @@ def get_available_models(current_user: User = Depends(get_current_user)):
 
     # Query Ollama for installed models
     ollama_installed = []
+    is_docker = os.path.exists("/.dockerenv") or bool(os.getenv("DOCKER_CONTAINER"))
     ollama_candidates = list(dict.fromkeys(filter(None, [
         os.getenv("OLLAMA_URL", "").rstrip("/"),
         settings.OLLAMA_URL.rstrip("/") if settings.OLLAMA_URL else "",
-        "http://host.docker.internal:11434",
-        "http://ollama:11434",
         "http://127.0.0.1:11434",
+        *(["http://host.docker.internal:11434", "http://ollama:11434"] if is_docker else []),
     ])))
     for ollama_url in ollama_candidates:
         try:
-            resp = requests.get(f"{ollama_url}/api/tags", timeout=1.2)
+            resp = requests.get(f"{ollama_url}/api/tags", timeout=0.5)
             if resp.status_code == 200:
                 ollama_installed = [
                     m["name"] for m in resp.json().get("models", [])
@@ -6264,7 +6274,7 @@ def get_available_models(current_user: User = Depends(get_current_user)):
     vllm_candidates = _openai_compatible_bases()
     for vurl in dict.fromkeys(url for url in vllm_candidates if url):
         try:
-            resp = requests.get(f"{vurl}/models", timeout=3)
+            resp = requests.get(f"{vurl}/models", timeout=0.5)
             if resp.ok:
                 served_vllm_models.update(
                     _normalize(item.get("id", ""))
@@ -6336,7 +6346,7 @@ def get_available_models(current_user: User = Depends(get_current_user)):
 
     display_name = configured_display_name if _models_equivalent(active_model, configured_model) else (active_model or "No active model")
 
-    return {
+    res = {
         "engine": active_source,
         "configured_engine": configured_engine,
         "configured_model": configured_model,
@@ -6348,6 +6358,9 @@ def get_available_models(current_user: User = Depends(get_current_user)):
         "auto_ready": bool(runtime_models),
         "display_name": display_name
     }
+    _available_models_cache["data"] = res
+    _available_models_cache["ts"] = time.time()
+    return res
 
 
 @app.get("/api/system/device-specs")

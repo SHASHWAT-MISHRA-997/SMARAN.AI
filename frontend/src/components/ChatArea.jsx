@@ -4394,7 +4394,7 @@ const ChatArea = ({
       </div>}
 
       {/* Model Downloading Banner  shown when AI model is still being pulled */}
-      {!modelStatus.ready && (
+      {!modelStatus.ready && (noBackend() || modelStatus.downloading) && (
         <div className="shrink-0 z-20 relative border-b border-amber-300/80 dark:border-amber-800/60 bg-amber-50/95 dark:bg-amber-950/45">
           <div className="flex flex-wrap items-center gap-2 px-3 sm:px-5 py-2">
             <div className="shrink-0 relative flex items-center justify-center w-5 h-5" aria-hidden="true">
