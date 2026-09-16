@@ -4246,7 +4246,7 @@ const ChatArea = ({
               <button
                 type="button"
                 onClick={openModelSheet}
-                className="relative h-8 inline-flex items-center px-2.5 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0 shrink-0"
+                className="relative h-8 inline-flex items-center px-2.5 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0 shrink max-w-[45vw] sm:max-w-none overflow-hidden"
                 title={deviceChoice.model ? `${providerLabel(deviceChoice.provider)} · ${deviceChoice.model}` : 'Choose a provider and model'}
               >
                 <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${deviceChoice.model ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse' : 'bg-amber-500'}`} />
@@ -4267,7 +4267,7 @@ const ChatArea = ({
                    phone-width window emptied the screen and left a lone Back
                    bar. The prop was there all along. */
                 onClick={onOpenModelHub}
-                className="relative h-8 inline-flex items-center px-2.5 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0 shrink-0"
+                className="relative h-8 inline-flex items-center px-2.5 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0 shrink max-w-[45vw] sm:max-w-none overflow-hidden"
                 title={`${activeModelDisplay} — click to choose a model`}
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse mr-1.5" />

@@ -110,3 +110,6 @@ installer/output/
 /m[0-9]*.png
 /n[0-9]*.png
 /*_dump.xml
+
+# CI build artifacts (too large for GitHub)
+ci-windows/installer/output/
