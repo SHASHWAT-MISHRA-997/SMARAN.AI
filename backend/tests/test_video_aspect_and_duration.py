@@ -103,24 +103,24 @@ def test_fit_aspect_never_returns_something_degenerate():
 # ---------------------------------------------------------------------------
 
 
-def test_an_impossible_length_is_refused_before_anything_starts():
+def test_an_impossible_length_is_refused_before_anything_starts(measured_rtx2060):
     """Five minutes was asked for. It cannot be decoded here.
 
     The wrong answer is to accept it, run for hours, and fail. The wrong answer
     is also to silently return two seconds. The right one is to say no now.
     """
-    result = plan_clip(seconds=300.0, aspect="16:9")
+    result = plan_clip(seconds=300.0, aspect="16:9", hw=measured_rtx2060)
     assert result["possible"] is False
     assert result["reason"], "refused without saying why"
 
 
-def test_a_refusal_says_what_would_fit_instead():
-    result = plan_clip(seconds=300.0, aspect="16:9")
+def test_a_refusal_says_what_would_fit_instead(measured_rtx2060):
+    result = plan_clip(seconds=300.0, aspect="16:9", hw=measured_rtx2060)
     longest = result["longest_possible_seconds"]
     assert longest is not None, "refused without offering a length that works"
     assert longest > 0
     # And that offer has to be true, not a guess.
-    assert plan_clip(seconds=longest, aspect="16:9")["possible"] is True, (
+    assert plan_clip(seconds=longest, aspect="16:9", hw=measured_rtx2060)["possible"] is True, (
         f"offered {longest}s as the longest possible, but it is refused too"
     )
 

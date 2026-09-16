@@ -3,6 +3,69 @@
 Updated 16 September 2026. This records verified scope, not a promise of zero defects.
 The supplied engineering handoff is not fully accepted yet.
 
+## Independent review, 16 September 2026
+
+Final fresh backend run after these fixes: **920 passed, 2 failed, 1 skipped,
+3 subtests passed**, with 12 warnings retained in
+`.cache/audit/codex-backend-final.log`. Both failures are the existing 2.10.50
+frozen bundles versus 2.10.53 source; neither output tree was deleted or relabeled.
+
+The original handoff is superseded by the detailed evidence below, but a route
+answering or refusing a request is not full feature acceptance. Existing evidence
+was reviewed; it was not all rerun against the installed application.
+
+Prior JSON files were checked in `.cache/audit/codex-prior-evidence-review.json`.
+The Sites/Updates/Connectors evidence actually reports 17/18 checks, including
+a failed update-response assertion; its driver was subsequently corrected but
+that historical file was not a clean pass. A fresh read-only HTTP check in
+`.cache/audit/codex-updates-readonly.json` returns 200 with valid version fields.
+The process at port 8000 currently reports both current/latest as **2.10.52**,
+whereas the source tree is **2.10.53**. This does not independently verify the
+published release or prove an installed upgrade; runtime parity remains open.
+
+- Newly reproduced and fixed: an anonymous network caller could open the shared
+  workspace, propose an edit, receive its ID and apply it. The previous claim
+  that an unguessable proposal ID protected `/apply` was incorrect. All twelve
+  workspace routes now require a local peer; forwarded headers grant nothing.
+  Remote workspace use is explicitly refused until remote ownership is designed.
+  An isolated FastAPI HTTP test changed a disposable file before the fix:
+  `.cache/audit/codex-workspace-boundary-before.log` (11 failed, 3 passed).
+  After the fix, all 15 boundary tests (including localhost) plus atomic-save and installer checks pass:
+  `.cache/audit/codex-workspace-boundary-after.log` (23 passed). This is source
+  verification, not a claim that the installed executable contains the fix.
+- Frontend freshly rerun: 195 passed and lint passed, in
+  `.cache/audit/codex-frontend.log` and `.cache/audit/codex-frontend-lint.log`.
+- Extension Node regression runner: 29 passed, 1 skipped, in
+  `.cache/audit/codex-extension-unit.log`. This invocation used existing compiled
+  output and is not a rebuild or a fresh editor-host acceptance run.
+- Four video duration tests depended on detecting this machine's GPU while
+  asserting the measured RTX 2060 limits. The full run recorded 916 passed,
+  six failures and one skip in `.cache/audit/codex-backend-full.log`: two stale
+  bundles and four hardware-dependent assertions. The four now pass explicit
+  6 GB hardware and isolate saved calibration. All 87 aspect, continuity and
+  high-end-path checks pass in `.cache/audit/codex-video-regression.log`.
+- Desktop evidence `.cache/audit/desktop-actions-723149945d.json` contains 28
+  real-handler checks for **26 of 66 catalog actions** (one extra label is clipboard restoration), and 66 disabled-policy
+  refusals. Refusals do not establish success of the underlying OS action.
+  The catalog comparison in `.cache/audit/codex-desktop-coverage.json` lists the
+  remaining 40 actions. This is about 39% success-path coverage, not 39% of the
+  whole application complete; some checks also use weak response-shape assertions.
+- Linux evidence described below establishes the `.deb` on Ubuntu under WSL
+  only. `.rpm`, `.AppImage` and `.tar.gz` installation/launch remain open.
+- VS Code's six host tests establish activation, command registration and a
+  mode-picker invocation. They do not execute a model-backed coding task.
+- Remaining success-path checks include Office writers/drafts, orchestrator
+  execution and stream completion, Director rendering, actual optional
+  connectors, plugin installation, updater download/install, interactive Windows
+  installation, and real-phone pairing/voice/interruption/Cowork. Publishing and
+  system-changing actions retain the handoff's authorization requirements.
+- Installed PIN-protected screens require the owner. High-end GPU speed needs
+  the hardware. Local site variation is demonstrated, but HTML markers and text
+  overlap alone do not establish visual quality or production readiness.
+
+There is no defensible overall completion percentage: these checks differ in
+scope and effort. The explicit counts above measure coverage, not product completion.
+
 ## Handoff continuation baseline
 
 Evidence: `.cache/audit/handoff-live-acceptance-baseline.json` records 175 source-declared
@@ -50,7 +113,7 @@ Completion must distinguish these categories:
 | Lock / PIN acceptance | 19 passing in `backend/tests/test_app_lock_security.py`, covering all 5 routes. Deliberately NOT driven live: `/verify` records a failed attempt keyed by the caller, and the caller is loopback — the same key the owner's own app uses, so five wrong guesses from an audit run would lock the owner out of their own application. The state file is redirected to a temporary path instead. Verified: the PIN is never written in the clear, guessing is throttled at 5 attempts, the lockout blocks even the correct PIN, a correct PIN clears the counter, changing or disabling requires the current PIN, a wrong PIN at disable also counts toward the lockout, and reset needs the account password, is throttled on the same counter, and does not reveal which accounts exist. The owner's real lock was read once and is unchanged: enabled, configured 2026-08-26, no lockout. |
 | Cowork / companion loop | 16 cases in `backend/tests/test_cowork_dispatch_loop.py` drive every leg with a simulated handset: pairing, dispatch, at-most-once delivery (the queue is cleared by the poll, so a phone on a flaky connection cannot act twice), the 50-command bound keeping the newest, refusal of actions outside `ALLOWED_REMOTE_ACTIONS`, a dispatch to nobody failing rather than claiming delivery, a vetted desktop action really running from the phone, invented and revoked tokens, and one account not reaching another's phone. Every device paired is unpaired in a finally block. What a real handset would add is the radio and the app's own UI; it would not add any of the behaviour above. |
 | Companion desktop controls accepted anyone | Found live. `get_current_user_dep` claimed to do a session check and did none — it returned the local user for every caller. These routes answer on the LAN because that is how the phone finds this machine, so anyone on the same wifi could list the owner's paired devices, dispatch speak/notify/open_url/screenshot to them, and unpair them, with no credential. Fixed: loopback is the owner as before (which keeps devices already paired under `local_user` visible); otherwise a valid session or the pairing token of a device the owner paired. The phone is explicitly still allowed — it loads the same screens over the LAN — and revoking a pairing revokes that access, which is tested. Two of the 16 cases fail without the fix. |
-| Unauthenticated state-changing routes, swept | After two LAN-reachable defects of the same shape, the remaining state-changing routes were checked rather than assumed. `memory/clear` and `privacy/clear-all` are scoped to `current_user` (an earlier regex missed their multi-line signatures). `/api/control/session` has no auth but grants nothing: it is a stop switch for multi-step work, not a permission gate, and an absent token is explicitly allowed — worst case a LAN nuisance that stops a task, which fails safe. `/api/workspace/apply` is the only file-changing endpoint and needs a `uuid4().hex[:12]` id that was already proposed, which is not guessable. No third defect of that severity was found. |
+| Unauthenticated state-changing routes, swept | Earlier audit conclusion corrected by independent review: a proposal ID is returned by the unauthenticated proposal endpoint, so guessing it was unnecessary. Workspace read and write routes now require a local peer; see the before/after evidence above. The prior sweep must not be treated as comprehensive security acceptance. |
 | Backend regression suite | 805 passed, 1 skipped, 3 subtests, at 2.10.52. Two failures remain in `test_frozen_bundle.py`: the local `dist/` and `build-linux/` trees are stale at 2.10.50 and are gitignored build output, not deleted without owner approval. CI rebuilds both. |
 | Frontend regression suite | 195 passed; oxlint clean. |
 | Account identity | Fixed and verified live. The app named itself with `Date.now()` plus `Math.random()` in localStorage and the backend created an account per value, so every reinstall or cleared store produced a new account owning nothing while analytics scope to the logged-in user. The installed database held 107 user rows, 95 sharing one hardware fingerprint. Loopback callers now resolve to one owner in both `get_current_user` and `/api/auth/device-login`; two different random ids and a header-less request returned the same account and its full history (119 requests, 65 memories, 322 sessions). Off-machine callers unchanged and covered by `test_local_owner_is_one_account.py`. |
@@ -61,19 +124,21 @@ Completion must distinguish these categories:
 | Voice character switching | Source reconnects the live session on character change. Audible gender and reference accent matching remain unverified. |
 | Android | Latest APK installed and launched on connected CPH2573. Acoustic conversation, pairing and interruption acceptance pending. |
 | Windows local artifact | Rebuilt; isolated silent installation passed and installed EXE SHA256 matched `740007A6A38262B6FF1953CAB400D978982B2C246FFDE83D21B700CC8249613A`. Installed startup passed in 9.24 seconds; `.cache/audit/installed-voice-reply-final-result.json`. |
+| Windows installer, run for real | Closed 16 September 2026 on the owner's own machine, upgrading 2.10.51 → 2.10.53. The published `SMARAN.AI-Setup.exe` was downloaded from `releases/latest/download/` (236,691,689 bytes, SHA256 `67DCEE960455B81B33AE300ADAFEED346F2C75CAFE3A0472918DE2F12405393B`). The wizard was launched and its first page photographed rendering correctly — "Select install mode", per-user and all-users options, Cancel. The remaining pages were NOT clicked through: the owner had an unsaved Word document open, and driving a wizard by screen coordinates on that desktop risked a stray click landing in their work. The install was completed with `/SILENT /CURRENTUSER` instead, exit code 0. Afterwards `index.html` references v2.10.53, the EXE is the CI build, the app launches and reports `current_version: 2.10.53`, and both security fixes from this release were confirmed in the *installed* app: forgot-password answers an unknown address with the generic 200 rather than 404, and `X-Companion-Token` is present in the installed bundle. |
+| Installer never removed old assets | Found by installing rather than reading. Asset filenames carry the version that built them, and `[Files]` overwrites what it ships but removes nothing, so every upgrade left the previous release's assets in place. Measured before this install: 1,170 files, 49 MB, of which 1,080 files and 42.2 MB were assets no `index.html` had referenced since 2.10.7 — thirteen releases of accumulation. Installing 2.10.53 took it to 1,260 files and 53 MB across 14 versions, confirming it compounds. Nothing was broken by it, which is why it went unnoticed. Fixed with an `[InstallDelete]` clearing `{app}\_internal\frontend_dist\assets`, which `[Files]` repopulates in the same run. `backend/tests/test_installer_cleans_old_assets.py`; 3 of 6 fail without the fix. The fix takes effect from the next release — the 2.10.53 installer was built before it. |
 | Official release | 2.10.53 released 16 September 2026 with the owner's approval for that specific release. Built by GitHub Actions from tag `v2.10.53` in 15m13s; all 9 assets published to the downloads repository and every download link verified 200 through `releases/latest/download/`. `latest` resolves to v2.10.53. The bundle was verified by content before tagging: all 5 referenced assets present and hashed, every asset on disk at v2.10.53, and this release's own frontend changes found inside the shipped JavaScript rather than assumed. A process reporting itself as 2.10.52 is offered the update, with working URLs — checked rather than presumed. The website needed no deploy: `main.js` reads the release from the GitHub API at load, and the live page was confirmed showing v2.10.53 in the banner and all four version tags. |
-| Linux | Closed 16 September 2026. The published `smaran-ai_amd64.deb` was downloaded from `releases/latest/download/`, 386,630,388 bytes, and installed on Ubuntu 24.04.4 (glibc 2.39, x86_64) under WSL. Declares Version 2.10.53 and `libc6 (>= 2.28)`. The frontend inside the package is v2.10.53 and contains this release's own change, checked by extracting the archive rather than trusting the build. After install: `dpkg -s` reports 2.10.53, `/usr/bin/smaran-ai` and the `.desktop` entry are present, the app starts, answers `/api/ping` on port 3003, reports version 2.10.53 and serves its own frontend. `dpkg -r` removes it with nothing left behind and `/usr/bin/smaran-ai` gone. Driver: `packaging/linux/audit_installed_package.sh`. Two findings were the script's own: the app serves on 3003 and ignored `--port`, and a cold first launch warms a speech model for about 90 seconds, so a two-minute wait reported a working install as a failure. |
-| VS Code extension | Closed 16 September 2026. It had never run inside an editor: the existing tests stub the `vscode` module and run under plain node, which cannot see whether it loads, activates, or registers the commands its manifest advertises — a manifest naming a command the code never registers puts an entry in the palette that fails when pressed, and no unit test can see that. `npm run test:vscode` now downloads a real VS Code, loads the extension into its host and runs 6 checks there: VS Code sees it, it activates, **every one of the 8 commands the manifest promises is really registered**, the activation event is one that actually fires, the version is a real version rather than "unknown", and a contributed command (`smaran.switchMode`) can be invoked without throwing. 6 passing, host exit code 0. The `.vsix` was rebuilt and installed through `code --install-extension` as part of this. |
-| Design Studio / Sites output quality | Accepted on the owner's stated requirement: a different, production-grade page every time, from the prompt. Two runs of the identical prompt produced pages that were not identical, with only 20% visible-text overlap; both named the subject, both carried `<style>`, `@media` responsive rules, semantic sections, `<nav>` and `<form>`, and neither fell back to the stock placeholder. A four-part brief (name, opening hours, staff picks, newsletter) had all four reflected in the output. 5.4-5.9 KB per page. This was produced by the local `qwen2.5-coder:7b` with a second refinement pass — no cloud key was needed to meet the requirement. |
+| Linux | Partial: `.deb` verified 16 September 2026; the other three formats remain open. The published `smaran-ai_amd64.deb` was downloaded from `releases/latest/download/`, 386,630,388 bytes, and installed on Ubuntu 24.04.4 (glibc 2.39, x86_64) under WSL. Declares Version 2.10.53 and `libc6 (>= 2.28)`. The frontend inside the package is v2.10.53 and contains this release's own change, checked by extracting the archive rather than trusting the build. After install: `dpkg -s` reports 2.10.53, `/usr/bin/smaran-ai` and the `.desktop` entry are present, the app starts, answers `/api/ping` on port 3003, reports version 2.10.53 and serves its own frontend. `dpkg -r` removes it with nothing left behind and `/usr/bin/smaran-ai` gone. Driver: `packaging/linux/audit_installed_package.sh`. Two findings were the script's own: the app serves on 3003 and ignored `--port`, and a cold first launch warms a speech model for about 90 seconds, so a two-minute wait reported a working install as a failure. |
+| VS Code extension | Host smoke checks verified 16 September 2026; model-backed task acceptance remains open. It had never run inside an editor: the existing tests stub the `vscode` module and run under plain node, which cannot see whether it loads, activates, or registers the commands its manifest advertises — a manifest naming a command the code never registers puts an entry in the palette that fails when pressed, and no unit test can see that. `npm run test:vscode` now downloads a real VS Code, loads the extension into its host and runs 6 checks there: VS Code sees it, it activates, **every one of the 8 commands the manifest promises is really registered**, the activation event is one that actually fires, the version is a real version rather than "unknown", and a contributed command (`smaran.switchMode`) can be invoked without throwing. 6 passing, host exit code 0. The `.vsix` was rebuilt and installed through `code --install-extension` as part of this. |
+| Design Studio / Sites output quality | Partial: local generation and variation checks passed; visual production quality remains unverified. Two runs of the identical prompt produced pages that were not identical, with only 20% visible-text overlap; both named the subject, both carried `<style>`, `@media` responsive rules, semantic sections, `<nav>` and `<form>`, and neither fell back to the stock placeholder. A four-part brief (name, opening hours, staff picks, newsletter) had all four reflected in the output. 5.4-5.9 KB per page. This was produced by the local `qwen2.5-coder:7b` with a second refinement pass — no cloud key was needed to meet the requirement. |
 | Cloud providers, actually probed | Every configured provider was probed model by model on 16 September 2026, through the app's own code so no key was handled directly. anthropic: key refused. gemini: the key is valid — `gemini-3.1-pro-preview` is over a zero free-tier quota and `gemini-3.8-flash` answered 503, but `gemma-4-31b-it` replies. nvidia: the key lists ~80 models and all three top-ranked ones answer 404 to a completion, which is the "listed but not usable" case the builder already anticipates and walks past. openrouter: the key present in the environment is refused with "User not found". |
 | Site builder reported only the first failure | Found while probing the above. Three gemini models were tried and only the first reason survived, so the build said "gemini could not be used: gemini-3.1-pro is over a usage limit" while a third gemini model answered fine. Candidates are ranked best-first, so the top of the list is exactly where preview gating and zero quotas live — reporting only that reads as the provider being unusable and sends someone to check a key that is not the problem. Still one line per provider, but it now carries the count and the distinct reasons. `backend/tests/test_site_builder_reports_every_model.py`; 3 of 6 fail without the fix. |
-| Desktop automation | Exhaustive end-to-end coverage of 67 actions pending. |
-| VS Code extension | Unit tests do not establish operation inside VS Code with a live backend. Live integration pending. |
+| Desktop automation | 26 of 66 catalog actions have real-handler evidence in `.cache/audit/desktop-actions-723149945d.json`; exhaustive success-path coverage remains pending. |
+| VS Code model-backed task acceptance | Host activation coverage is recorded above. A real model-backed coding task inside the editor remains unverified by the six host tests. |
 | Connectors, telemetry, PIN/auth | Telemetry dashboard root cause found and fixed: the zeros were correct counts for the wrong account, see Account identity. The date filter also defaulted to the UTC date, selecting yesterday in India until 05:30; now local, in `frontend/src/utils/localDate.js` with six tests. An empty range now says so instead of rendering four zeros. The panel itself was not driven visually because the installed app is PIN-locked and device security was not bypassed. Connectors and PIN/auth integration acceptance still pending. Do not change credentials or security configuration to pass tests. |
 | High-end GPU adaptation | Unverified without the hardware. Existing RTX 2060 measurements are in `media-acceptance.md`. |
 | Multi-model director | Full requested architecture and acceptance remain incomplete. |
 | Cache cleanup | Not performed; owner approval required for deleting redundant model files. |
-| Website and release assets | No new publication approved or performed. Windows portable, CLI, extension and Linux release parity must be checked in CI. |
+| Website and release assets | Prior 2.10.53 publication is recorded above. This independent review has not published a release; its workspace guard remains a source change. Cross-platform runtime parity is not established by CI packaging alone. |
 
 ## Voice prerequisite
 

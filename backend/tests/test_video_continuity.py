@@ -103,9 +103,9 @@ def test_resolution_is_held_and_length_is_chunked():
         )
 
 
-def test_a_long_request_is_answered_with_its_real_cost():
+def test_a_long_request_is_answered_with_its_real_cost(measured_rtx2060):
     """Five minutes is possible and absurd. Both facts are reported."""
-    plan = continuity.plan_sequence(300.0, aspect="16:9")
+    plan = continuity.plan_sequence(300.0, aspect="16:9", hw=measured_rtx2060)
     assert plan["possible"] is True
     assert plan["chunks"] > 100
     assert plan["estimate_seconds"] > 3600 * 24, (
@@ -115,8 +115,8 @@ def test_a_long_request_is_answered_with_its_real_cost():
     assert "hours" in plan["estimate_text"]
 
 
-def test_a_multi_clip_plan_says_what_it_actually_is():
-    plan = continuity.plan_sequence(10.0, aspect="16:9")
+def test_a_multi_clip_plan_says_what_it_actually_is(measured_rtx2060):
+    plan = continuity.plan_sequence(10.0, aspect="16:9", hw=measured_rtx2060)
     assert plan["chunks"] > 1
     assert plan["caveat"], "a chain of continuations is described as one shot"
     assert "not a single unbroken shot" in plan["caveat"]

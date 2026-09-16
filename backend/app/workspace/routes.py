@@ -7,12 +7,28 @@ route that writes, and it takes an id that a person has seen the diff for.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .core import WorkspaceError, workspace
 
-router = APIRouter(prefix="/api/workspace", tags=["workspace"])
+def require_local_workspace(request: Request):
+    """The shared desktop folder is not a remotely owned workspace.
+
+    Proposal IDs are returned to their creator and listed by /pending, so
+    they cannot authenticate approval. Gate reads and proposals as well as
+    apply, before touching any state. Never trust forwarded headers here.
+    """
+    host = request.client.host if request.client else ""
+    if host not in {"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Workspace controls are available only on this computer.",
+        )
+
+
+router = APIRouter(prefix="/api/workspace", tags=["workspace"],
+                   dependencies=[Depends(require_local_workspace)])
 
 
 class OpenRequest(BaseModel):

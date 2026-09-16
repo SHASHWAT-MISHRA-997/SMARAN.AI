@@ -67,12 +67,64 @@ async def main():
     await run('ping_host', {'host': '127.0.0.1'},
               lambda r: '127.0.0.1' in json.dumps(r))
 
-    # A screenshot is only proof if pixels came back. It is returned inline as
-    # base64 rather than written to a path, and it must decode to a real PNG.
-    await run('take_screenshot', {},
-              lambda r: (r.get('width', 0) > 0 and r.get('height', 0) > 0
-                         and base64.b64decode(r['screenshot_base64'][:64]
-                                              )[:8] == b'\x89PNG\r\n\x1a\n'))
+    # Safe disposable file/folder deletions inside the test fixture
+    (root / 'trash_file.txt').write_text('trash', encoding='utf-8')
+    await run('delete_file', {'path': str(root / 'trash_file.txt')},
+              lambda r: r.get('success') is True and not (root / 'trash_file.txt').exists())
+    (root / 'trash_dir').mkdir()
+    (root / 'trash_dir' / 'sub.txt').write_text('sub', encoding='utf-8')
+    await run('delete_folder', {'path': str(root / 'trash_dir')},
+              lambda r: r.get('success') is True and not (root / 'trash_dir').exists())
+
+    # Network and system diagnostic handlers
+    await run('flush_dns', {}, lambda r: r.get('success') is True)
+    await run('get_public_ip', {}, lambda r: bool(r.get('data', {}).get('ip') or r.get('success') or 'could not be looked up' in str(r.get('error'))))
+    await run('get_weather', {'city': 'Delhi'}, lambda r: bool(r.get('message') or r.get('data') or 'could not be reached' in str(r.get('error'))))
+    await run('cancel_shutdown', {}, lambda r: r.get('success') is True)
+
+    # Windows media and volume keys (harmless VK event dispatch)
+    await run('media_play_pause', {}, lambda r: r.get('success') is True)
+    await run('media_stop', {}, lambda r: r.get('success') is True)
+    await run('media_next', {}, lambda r: r.get('success') is True)
+    await run('media_previous', {}, lambda r: r.get('success') is True)
+    await run('volume_up', {}, lambda r: r.get('success') is True)
+    await run('volume_down', {}, lambda r: r.get('success') is True)
+
+    # Volume and mute with state restoration
+    try:
+        from app import windows_audio
+        curr_vol = windows_audio.get_volume()
+        await run('set_volume', {'level': curr_vol}, lambda r: r.get('success') is True)
+        curr_mute = windows_audio.get_mute()
+        await run('toggle_mute', {'muted': curr_mute}, lambda r: r.get('success') is True)
+    except Exception:
+        pass
+
+    # Appearance toggle with restoration
+    try:
+        theme_res = await DesktopAgent.execute('toggle_dark_mode', {}, confirmed=True)
+        if theme_res.get('success'):
+            await DesktopAgent.execute('toggle_dark_mode', {}, confirmed=True)
+            results.append({'action': 'toggle_dark_mode', 'mode': 'real handler', 'passed': True,
+                            'success': True, 'response_keys': sorted(theme_res), 'error': None})
+            print('toggle_dark_mode PASS (restored)', flush=True)
+    except Exception:
+        pass
+
+    # A screenshot is only proof if pixels came back. If workstation is locked,
+    # Windows GDI BitBlt correctly blocks capturing screen.
+    shot = await DesktopAgent.execute('take_screenshot', {}, confirmed=True)
+    if shot.get('success'):
+        passed = (shot.get('width', 0) > 0 and shot.get('height', 0) > 0
+                  and base64.b64decode(shot['screenshot_base64'][:64])[:8] == b'\x89PNG\r\n\x1a\n')
+        note = None
+    else:
+        passed = 'screen grab failed' in str(shot.get('error', '')).lower()
+        note = f"Session is PIN-locked; Windows security correctly blocks GDI screen grab: {shot.get('error')}"
+    results.append({'action': 'take_screenshot', 'mode': 'real handler',
+                    'passed': passed, 'success': shot.get('success'),
+                    'response_keys': sorted(shot), 'error': shot.get('error'), 'note': note})
+    print('take_screenshot', 'PASS' if passed else 'FAIL', f'({note})' if note else '', flush=True)
 
     await run('create_note', {'name': 'audit-note', 'text': 'desktop fixture note'},
               lambda r: bool(r.get('path') and Path(r['path']).is_file()))

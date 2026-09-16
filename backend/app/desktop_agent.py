@@ -1269,23 +1269,25 @@ class DesktopAgent:
         if not path.exists():
             return {"success": False, "error": f"File not found: {path}"}
         if not _is_safe_path(path):
-            return {"success": False, "error": f"Cannot delete system files. Only user files can be deleted."}
+            return {"success": False, "error": "Cannot delete system files. Only user files can be deleted."}
 
         # Use Windows Shell to move to Recycle Bin (recoverable)
         if sys.platform == "win32":
             try:
-                from ctypes import windll, c_int, c_wchar_p, byref, Structure, c_ushort
-                # Use SHFileOperationW for Recycle Bin
-                _run_host_cmd(["powershell", "-Command",
+                ok, _ = _run_host_cmd(["powershell", "-Command",
                     f"Add-Type -AssemblyName Microsoft.VisualBasic; "
-                    f"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('{path}', 'UIOption.OnlyErrorDialogs', 'RecycleOption.SendToRecycleBin')"])
-                return {"success": True, "message": f"Moved '{path.name}' to Recycle Bin."}
+                    f"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('{path}', 'OnlyErrorDialogs', 'SendToRecycleBin')"])
+                if ok and not path.exists():
+                    return {"success": True, "message": f"Moved '{path.name}' to Recycle Bin."}
             except Exception:
                 pass
 
         # Fallback: regular delete
-        path.unlink()
-        return {"success": True, "message": f"Deleted '{path.name}'."}
+        try:
+            path.unlink()
+            return {"success": True, "message": f"Deleted '{path.name}'."}
+        except OSError as exc:
+            return {"success": False, "error": f"Failed to delete '{path.name}': {exc}"}
 
     @staticmethod
     def _action_delete_folder(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1295,19 +1297,25 @@ class DesktopAgent:
         if not path.is_dir():
             return {"success": False, "error": f"Not a folder: {path}"}
         if not _is_safe_path(path):
-            return {"success": False, "error": f"Cannot delete system folders."}
+            return {"success": False, "error": "Cannot delete system folders."}
 
         if sys.platform == "win32":
             try:
-                _run_host_cmd(["powershell", "-Command",
+                ok, _ = _run_host_cmd(["powershell", "-Command",
                     f"Add-Type -AssemblyName Microsoft.VisualBasic; "
-                    f"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory('{path}', 'UIOption.OnlyErrorDialogs', 'RecycleOption.SendToRecycleBin')"])
-                return {"success": True, "message": f"Moved folder '{path.name}' to Recycle Bin."}
+                    f"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory('{path}', 'OnlyErrorDialogs', 'SendToRecycleBin')"])
+                if ok and not path.exists():
+                    return {"success": True, "message": f"Moved folder '{path.name}' to Recycle Bin."}
             except Exception:
                 pass
 
-        shutil.rmtree(str(path), ignore_errors=True)
-        return {"success": True, "message": f"Deleted folder '{path.name}'."}
+        try:
+            shutil.rmtree(str(path), ignore_errors=True)
+            if not path.exists():
+                return {"success": True, "message": f"Deleted folder '{path.name}'."}
+            return {"success": False, "error": f"Could not remove folder '{path.name}'."}
+        except OSError as exc:
+            return {"success": False, "error": f"Failed to delete folder '{path.name}': {exc}"}
 
     # ---- System Operations ----
 

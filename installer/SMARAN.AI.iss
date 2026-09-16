@@ -69,6 +69,20 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
+[InstallDelete]
+; The built frontend names every asset after the version that produced it -
+; index-v2.10.53-BREG8BZN.js and so on. [Files] overwrites what it ships and
+; removes nothing, so each upgrade landed a new set of names beside the old
+; ones and none of them were ever cleaned up.
+;
+; Measured on a machine that had been upgraded thirteen times: 1,170 files in
+; that folder, of which 1,080 were dead. 42.2 MB of the 49 MB was assets no
+; index.html had referenced since 2.10.7. It grows with every release.
+;
+; Deleting the folder is safe because [Files] repopulates it completely in the
+; same run; nothing the user owns lives here.
+Type: filesandordirs; Name: "{app}\_internal\frontend_dist\assets"
+
 [Files]
 ; The whole PyInstaller folder build: the EXE plus its _internal payload.
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
