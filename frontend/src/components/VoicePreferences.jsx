@@ -162,7 +162,7 @@ export default function VoicePreferences() {
             }`}
           >
             <div className="text-xs font-bold text-ink">AMARYA / MYRA</div>
-            <div className="text-[11px] text-ink-muted mt-1">Natural female persona. Uses feminine grammar (karti hoon, kholti hoon).</div>
+            <div className="text-[11px] text-ink-muted mt-1">Natural female persona. Uses feminine grammar.</div>
           </button>
           <button
             type="button"
@@ -174,7 +174,7 @@ export default function VoicePreferences() {
             }`}
           >
             <div className="text-xs font-bold text-ink">Energy Core</div>
-            <div className="text-[11px] text-ink-muted mt-1">Natural male persona. Uses masculine grammar (karta hoon, kholta hoon).</div>
+            <div className="text-[11px] text-ink-muted mt-1">Natural male persona. Uses masculine grammar.</div>
           </button>
         </div>
       </div>

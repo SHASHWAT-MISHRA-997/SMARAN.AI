@@ -1274,17 +1274,49 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                       {localState?.fix ? ` ${localState.fix}` : ''}
                     </p>
                   )}
-                  {(localModels || []).map((m) => (
-                    <div key={m} className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
-                      <div className="min-w-0">
-                        <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate">{m}</span>
-                        <span className="block text-[10px] text-zinc-500">Local · served by Ollama</span>
+                  {(localModels || []).map((m) => {
+                    const isSelected = selectedModel === m;
+                    return (
+                      <div key={m} className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
+                        isSelected
+                          ? 'border-emerald-500/60 bg-emerald-500/10 shadow-sm ring-1 ring-emerald-500/30'
+                          : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60'
+                      }`}>
+                        <div className="min-w-0 pr-3">
+                          <div className="flex items-center gap-2">
+                            <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate">{m}</span>
+                            {isSelected && (
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-500 text-white dark:bg-emerald-600 shrink-0">
+                                ACTIVE
+                              </span>
+                            )}
+                          </div>
+                          <span className="block text-[10px] text-zinc-500">Local · served by Ollama</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                            Installed
+                          </span>
+                          {!isSelected ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onModelChange?.(m);
+                                onClose?.();
+                              }}
+                              className="px-3 py-1 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition shadow-xs cursor-pointer"
+                            >
+                              Use in chat
+                            </button>
+                          ) : (
+                            <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                              ✓ In use
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
-                        Installed
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   {/* Weights downloaded through Model Hub. Ollama does not know
                       about these, and this list only ever asked Ollama - so a

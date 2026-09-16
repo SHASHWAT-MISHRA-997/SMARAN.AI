@@ -4464,7 +4464,12 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             "ru": "Russian",
         }
         lang_name = lang_names.get(chat_req.target_language, chat_req.target_language)
-        model_identity_block += f"\n\nCRITICAL RESPONSE LANGUAGE: The user has explicitly selected {lang_name}. You MUST write and structure your entire response directly in {lang_name} (using proper native script/words) so it is clear, helpful, and sounds completely natural and fluent when spoken aloud by the voice engine."
+        model_identity_block += (
+            f"\n\nCRITICAL RESPONSE LANGUAGE: The user has explicitly selected {lang_name} ({chat_req.target_language}). "
+            f"You MUST write and structure your entire response directly in {lang_name} (using proper native script/words). "
+            f"Even if the user writes in English (e.g. 'Hi', 'Hello') or any other language, your response MUST be in {lang_name}. "
+            f"Do NOT answer in English. Do NOT mix English into prose. Keep code, commands, URLs and product names unchanged."
+        )
 
     if messages_payload and messages_payload[0]["role"] == "system":
         messages_payload[0]["content"] += model_identity_block
@@ -8856,7 +8861,7 @@ from app import share as _share  # noqa: E402
 
 
 @app.post("/api/share", tags=["share"])
-async def create_public_share(payload: dict, db: Session = Depends(get_db)):
+async def create_public_share(request: Request, payload: dict, db: Session = Depends(get_db)):
     """Create an immutable public snapshot of selected conversation messages.
 
     Sanitizes content, checks length bounds, and returns an opaque share ID
@@ -8866,6 +8871,14 @@ async def create_public_share(payload: dict, db: Session = Depends(get_db)):
     title = (payload or {}).get("title")
     try:
         result = _share.create_share(db, messages, title=title)
+        try:
+            from app.companion import local_network_address
+            lan_ip = local_network_address()
+            port = request.url.port or 3003
+            if lan_ip:
+                result["lan_url"] = f"http://{lan_ip}:{port}/share/{result['share_id']}"
+        except Exception:
+            pass
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

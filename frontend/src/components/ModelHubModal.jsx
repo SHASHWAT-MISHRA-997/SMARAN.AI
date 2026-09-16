@@ -269,7 +269,8 @@ const VideoPackages = () => {
   );
 };
 
-const ModelHubModal = ({ isOpen, onClose, token, onModelChange }) => {
+const ModelHubModal = ({ isOpen, onClose, token, onModelChange, onSelectModel }) => {
+  const setModel = onModelChange || onSelectModel;
   const mobileDevice = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
   const [activeTab, setActiveTab] = useState(() => mobileDevice ? 'cloud' : 'local'); // 'local' | 'cloud'
 
@@ -982,7 +983,7 @@ Download it anyway?`)) {
                                     button that does nothing. */}
                                 <button
                                   type="button"
-                                  onClick={() => { onModelChange?.(m.ollama_tag || m.id); onClose?.(); }}
+                                  onClick={() => { setModel?.(m.ollama_tag || m.id); onClose?.(); }}
                                   title="Use this model for new messages"
                                   className="px-3 py-1.5 text-xs font-black text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
                                 >
@@ -1209,7 +1210,7 @@ Download it anyway?`)) {
                             </div>
                             {providerErrors[provider.id] && <p className="text-[10px] font-bold text-amber-300">{providerErrors[provider.id]}</p>}
                             {providerNotices[provider.id] && <p className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-[10px] font-bold leading-relaxed text-sky-200">{providerNotices[provider.id]}</p>}
-                            <button type="button" disabled={!cloudModels[provider.id]} onClick={() => { const modelId = cloudModels[provider.id]; localStorage.setItem('sm_cloud_selected_models', JSON.stringify({ provider: provider.id, model: modelId })); onModelChange?.(`cloud:${provider.id}:${modelId}`); onClose?.(); }} className="w-full rounded-xl border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-[11px] font-black text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50">Use selected Cloud API model in Chat</button>
+                            <button type="button" disabled={!cloudModels[provider.id]} onClick={() => { const modelId = cloudModels[provider.id]; localStorage.setItem('sm_cloud_selected_models', JSON.stringify({ provider: provider.id, model: modelId })); setModel?.(`cloud:${provider.id}:${modelId}`); onClose?.(); }} className="w-full rounded-xl border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-[11px] font-black text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50">Use selected Cloud API model in Chat</button>
                           </div>
                         )}
                         {savedKey && !provider.chatCompatible && <p className="text-[10px] font-bold text-zinc-400">Key saved. This provider is listed for direct access, but it is not connected to the chat engine yet.</p>}

@@ -811,12 +811,12 @@ const Sidebar = ({
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
-          className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white p-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer"
+          className="w-9 h-9 flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white rounded-xl bg-zinc-100 dark:bg-zinc-800/90 border border-zinc-200 dark:border-zinc-700/80 cursor-pointer shrink-0 transition-colors shadow-xs"
           aria-label="Open navigation menu"
           aria-controls="smaran-mobile-navigation"
           aria-expanded={mobileOpen}
         >
-          <Menu className="w-5 h-5" />
+          <Menu className="w-5 h-5 shrink-0" />
         </button>
       </div>
 

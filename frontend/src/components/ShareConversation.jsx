@@ -75,6 +75,7 @@ export default function ShareConversation({ messages }) {
   };
 
   const getFullShareUrl = (path) => {
+    if (shareData?.lan_url) return shareData.lan_url;
     if (typeof window === 'undefined') return path;
     return `${window.location.origin}${path}`;
   };
@@ -84,7 +85,7 @@ export default function ShareConversation({ messages }) {
       <button
         type="button"
         onClick={open}
-        className="px-3 py-2 rounded-xl border border-line text-xs font-semibold text-ink transition hover:bg-raised"
+        className="h-8 px-3 rounded-xl border border-line text-xs font-semibold text-ink transition hover:bg-raised flex items-center justify-center shrink-0"
         disabled={!messages.length}
       >
         Share
@@ -179,7 +180,9 @@ export default function ShareConversation({ messages }) {
                     </button>
                   </div>
                   <p className="text-[11px] text-ink-faint">
-                    Snapshot is published. You can revoke and disable this link at any time from this device.
+                    {shareData.lan_url
+                      ? 'Link is reachable by any phone or PC on your local Wi-Fi. For friends outside your network, use "Copy text" or "Download snapshot" below.'
+                      : 'Snapshot is published. You can revoke and disable this link at any time from this device.'}
                   </p>
                 </div>
               )}

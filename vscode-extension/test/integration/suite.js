@@ -13,6 +13,8 @@
 
 const assert = require('node:assert/strict');
 const vscode = require('vscode');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const ID = 'ShashwatMishra.smaran-ai-codex';
 
@@ -70,8 +72,29 @@ suite('the extension inside VS Code', () => {
         const found = vscode.extensions.all.find(
             (e) => e.id.toLowerCase() === ID.toLowerCase());
         await found.activate();
-        // switchMode opens a picker and returns; it touches no file and needs
-        // no backend, which makes it the one safe command to actually press.
-        await vscode.commands.executeCommand('smaran.switchMode');
+        await vscode.commands.executeCommand('smaran.undoLastChange');
+    });
+
+    test('a live editing task can be executed and undone in workspace', async () => {
+        const found = vscode.extensions.all.find(
+            (e) => e.id.toLowerCase() === ID.toLowerCase());
+        await found.activate();
+        const tools = require(path.join(found.extensionPath, 'out', 'agent', 'tools.js'));
+        tools.confineToFolder(true);
+        const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || path.join(__dirname, '..', '..');
+        const testFile = path.join(workspace, 'live-task-test.txt');
+        fs.writeFileSync(testFile, 'initial line\n');
+        try {
+            const change = tools.prepareFileChange('edit_file', { path: 'live-task-test.txt', find: 'initial line', replace: 'verified live task execution' }, workspace);
+            assert.ok(change.preview.includes('verified live task execution'));
+            tools.applyFileChange(change, workspace);
+            assert.equal(fs.readFileSync(testFile, 'utf8'), 'verified live task execution\n');
+            tools.undoLast(workspace);
+            assert.equal(fs.readFileSync(testFile, 'utf8'), 'initial line\n');
+        } finally {
+            if (fs.existsSync(testFile)) {
+                fs.unlinkSync(testFile);
+            }
+        }
     });
 });

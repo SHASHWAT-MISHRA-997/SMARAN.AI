@@ -49,7 +49,9 @@ export function languageRule(selected) {
   const name = languageName(selected);
   if (name && name !== 'English') {
     return (
-      `LANGUAGE INSTRUCTION: Respond entirely in ${name}, using its native script. ` +
+      `CRITICAL LANGUAGE REQUIREMENT: Respond entirely in ${name}, using its native script. ` +
+      `Even if the user writes in English (e.g. "Hi", "Hello") or any other language, you MUST respond entirely in ${name}. ` +
+      'Do NOT answer in English. Do NOT mix English into conversational sentences. ' +
       'Keep code, commands, URLs and product names unchanged.'
     );
   }

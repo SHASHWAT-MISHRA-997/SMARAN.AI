@@ -2711,15 +2711,15 @@ const ChatArea = ({
       return `Cloud API · ${provider.toUpperCase()} · ${parts.join(':')}`;
     }
     const direct = displayMap[modelId];
-    if (direct) return direct;
+    if (direct) return `LOCAL · ${direct}`;
     const lowered = modelId.toLowerCase();
-    if (lowered.includes('qwen3') && lowered.includes('4b')) return 'Qwen 3 4B AWQ (Quantized)';
-    if (lowered.includes('qwen3') && lowered.includes('8b')) return 'Qwen 3 8B (High Precision Reasoning)';
-    if (lowered.includes('nemotron')) return 'Nemotron-3 Nano 4B (NVIDIA Instruct)';
-    if (lowered.includes('phi-3.5') || lowered.includes('phi3.5')) return 'Phi-3.5 Vision 4.2B (Microsoft Vision)';
-    if (lowered.includes('phi-3') || lowered.includes('phi3')) return 'Phi-3 Mini 3.8B (Microsoft Instruct)';
-    if (lowered.includes('llama')) return 'Llama 3.1 8B (Core)';
-    return modelId;
+    if (lowered.includes('qwen3') && lowered.includes('4b')) return 'LOCAL · Qwen 3 4B AWQ (Quantized)';
+    if (lowered.includes('qwen3') && lowered.includes('8b')) return 'LOCAL · Qwen 3 8B (High Precision Reasoning)';
+    if (lowered.includes('nemotron')) return 'LOCAL · Nemotron-3 Nano 4B (NVIDIA Instruct)';
+    if (lowered.includes('phi-3.5') || lowered.includes('phi3.5')) return 'LOCAL · Phi-3.5 Vision 4.2B (Microsoft Vision)';
+    if (lowered.includes('phi-3') || lowered.includes('phi3')) return 'LOCAL · Phi-3 Mini 3.8B (Microsoft Instruct)';
+    if (lowered.includes('llama')) return 'LOCAL · Llama 3.1 8B (Core)';
+    return `LOCAL · ${modelId}`;
   };
 
   useEffect(() => {
@@ -4246,7 +4246,7 @@ const ChatArea = ({
               <button
                 type="button"
                 onClick={openModelSheet}
-                className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0"
+                className="relative h-8 inline-flex items-center px-2.5 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0 shrink-0"
                 title={deviceChoice.model ? `${providerLabel(deviceChoice.provider)} · ${deviceChoice.model}` : 'Choose a provider and model'}
               >
                 <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${deviceChoice.model ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse' : 'bg-amber-500'}`} />
@@ -4267,7 +4267,7 @@ const ChatArea = ({
                    phone-width window emptied the screen and left a lone Back
                    bar. The prop was there all along. */
                 onClick={onOpenModelHub}
-                className="relative inline-flex items-center px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0"
+                className="relative h-8 inline-flex items-center px-2.5 rounded-xl bg-indigo-50 dark:bg-gradient-to-r dark:from-zinc-900 dark:via-indigo-950/40 dark:to-zinc-900 border border-indigo-200 dark:border-indigo-500/40 text-indigo-950 dark:text-white font-extrabold font-mono text-[10px] sm:text-xs shadow-xs hover:border-indigo-400 transition-all cursor-pointer min-w-0 shrink-0"
                 title={`${activeModelDisplay} — click to choose a model`}
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse mr-1.5" />
@@ -4278,16 +4278,16 @@ const ChatArea = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           {/* Clear Current Chat */}
           <ShareConversation messages={messages} />
           {messages.length > 0 && (
             <button
               onClick={handleClearCurrentChat}
               title="Clear current conversation"
-              className="p-2 rounded-xl bg-orange-50 dark:bg-zinc-900 hover:bg-orange-100 dark:hover:bg-rose-950/50 border border-orange-200 dark:border-zinc-800 text-orange-600 dark:text-rose-400 hover:text-orange-700 dark:hover:text-rose-300 shadow-xs hover:scale-105 transition-all cursor-pointer flex items-center gap-1.5 font-bold text-xs"
+              className="h-8 w-8 md:w-auto md:px-2.5 rounded-xl bg-orange-50 dark:bg-zinc-900 hover:bg-orange-100 dark:hover:bg-rose-950/50 border border-orange-200 dark:border-zinc-800 text-orange-600 dark:text-rose-400 hover:text-orange-700 dark:hover:text-rose-300 shadow-xs hover:scale-105 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5 font-bold text-xs shrink-0"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="w-4 h-4 shrink-0" />
               <span className="hidden md:inline text-[11px]">Clear Chat</span>
             </button>
           )}
