@@ -1239,16 +1239,35 @@ async def resend_verification(request: Request, current_user: User = Depends(get
 @app.post("/api/auth/forgot-password", response_model=dict)
 @auth_limiter.limit("3/hour")
 async def forgot_password(req: PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
+    # There is no SMTP server, so the token is handed straight back rather than
+    # emailed. That is the right call for someone resetting their own password
+    # on their own machine - but this backend also answers on the LAN, because
+    # that is how the phone reaches it. Returned to anyone who asked, the token
+    # is a complete account takeover: ask for a reset, receive the token, set a
+    # new password, log in. Knowing an email address was the only requirement.
+    #
+    # So the token goes to the owner, at the keyboard of the machine running
+    # SMARAN, and to nobody else. Callers from the network are told where to do
+    # it instead.
+    client_ip = request.client.host if request.client else ""
+    local = client_ip in LOOPBACK_HOSTS
+
     user = db.query(User).filter(User.email == req.email.lower()).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="No account found with this email address")
-    
+
+    # The reply is the same whether or not the account exists. It used to 404
+    # for an unknown address and 200 for a real one, which let anyone with a
+    # list of addresses learn which of them have accounts here.
+    generic = {"message": "If that account exists, a reset can be completed on the "
+                          "machine running SMARAN.AI."}
+    if not user or not local:
+        return generic
+
     reset_token = secrets.token_urlsafe(32)
     user.reset_token = reset_token
     user.reset_token_expires = datetime.now() + timedelta(hours=1)
     db.commit()
-    # Local desktop app — return token directly (no SMTP server configured)
-    return {"message": "Password reset token generated. Use it below to set your new password.", "reset_token": reset_token}
+    return {"message": "Password reset token generated. Use it below to set your new password.",
+            "reset_token": reset_token}
 
 @app.post("/api/auth/reset-password", response_model=dict)
 @auth_limiter.limit("5/hour")
