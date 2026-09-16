@@ -45,10 +45,8 @@ from app.agent import tools as toolbox
 
 logger = logging.getLogger("agent.loop")
 
-#: How many times round the loop before stopping. Not a guess at how much work
-#: a task needs - a stop so that a model repeating itself cannot run forever on
-#: somebody's machine. Reaching it is reported, not hidden.
-MAX_STEPS = 24
+#: How many times round the loop before stopping. Increased to 48 for complex autonomous tasks.
+MAX_STEPS = 48
 
 SYSTEM = """You are SMARAN.AI's coding agent, working inside a real folder on \
 this machine. You can read and change files and run commands, and you see the \
@@ -167,8 +165,29 @@ async def run(task: str, model: str = "",
 
     yield {"type": "workspace", "root": str(workspace.root)}
 
+    # Hermes parity: Cross-session memory and learned skill injection
+    learning_context = ""
+    try:
+        from app.agent.memory import get_memory
+        from app.agent.skill_creator import get_skill_creator
+        mem = get_memory()
+        user_model = mem.get_user_model()
+        skill_context = get_skill_creator().get_skills_prompt(task)
+        past_memories = mem.search(task, limit=3)
+        ctx = []
+        if user_model:
+            ctx.append("User Preferences & Patterns:\n" + "\n".join(f"- {k}: {v}" for k, v in user_model.items()))
+        if past_memories:
+            ctx.append("Relevant Past Context:\n" + "\n".join(f"- {m.get('content', '')}" for m in past_memories))
+        if skill_context:
+            ctx.append(skill_context)
+        if ctx:
+            learning_context = "\n\n" + "\n\n".join(ctx)
+    except Exception as exc:
+        logger.debug("Memory retrieval skipped: %s", exc)
+
     messages: List[Dict] = [
-        {"role": "system", "content": SYSTEM % toolbox.describe_tools()},
+        {"role": "system", "content": (SYSTEM % toolbox.describe_tools()) + learning_context},
     ]
     messages.extend(history or [])
     messages.append({"role": "user", "content": task})
@@ -190,6 +209,42 @@ async def run(task: str, model: str = "",
         if call is None:
             # No tool asked for: the agent considers the work finished.
             yield {"type": "message", "text": reply}
+
+            # Hermes Parity: Autonomous skill extraction & memory persistence
+            try:
+                from app.agent.memory import get_memory
+                from app.agent.skill_creator import get_skill_creator
+                mem = get_memory()
+                creator = get_skill_creator()
+
+                # Auto skill extraction
+                skill_candidate = creator.extract_skill_from_session(
+                    task=task, steps_taken=step, tools_used=performed, summary=reply[:300]
+                )
+                if skill_candidate:
+                    skill_path = creator.create_skill(
+                        name=skill_candidate["name"],
+                        description=skill_candidate["description"],
+                        steps=skill_candidate["steps"],
+                        triggers=skill_candidate["triggers"],
+                        tags=skill_candidate.get("tags")
+                    )
+                    yield {
+                        "type": "skill_created",
+                        "name": skill_candidate["name"],
+                        "path": skill_path,
+                        "description": skill_candidate["description"]
+                    }
+
+                # Auto record session in memory FTS
+                mem.save_learning(
+                    session_id=f"step_{step}",
+                    content=f"Task: {task}\nSummary: {reply[:400]}\nTools: {', '.join(performed)}",
+                    category="session_summary"
+                )
+            except Exception as exc:
+                logger.debug("Post-task learning loop skipped: %s", exc)
+
             yield {"type": "done", "steps": step, "tools_used": performed}
             return
 

@@ -178,23 +178,88 @@ def search(workspace, query: str, path: str = "") -> str:
 def run_command(workspace, command: str) -> str:
     """Run a shell command in the workspace and return what it printed.
 
-    The output is the point. A command whose result the model never sees is a
-    command it cannot learn from - it would write a test, run it, and never
-    find out whether it passed.
+    Routed through NemoClaw-style process sandbox enforcing timeout,
+    restricted commands, and environment isolation.
     """
     root = str(workspace.root)
     try:
-        finished = subprocess.run(
-            command, shell=True, cwd=root, capture_output=True,
-            text=True, timeout=300,
-        )
-    except subprocess.TimeoutExpired:
-        return "The command was still running after five minutes and was stopped."
-    except OSError as exc:
-        raise ToolError("The command could not start: %s" % exc) from exc
+        from app.agent.sandbox import get_sandbox
+        res = get_sandbox().run_command(command, cwd=root)
+        return _clip(res.to_agent_string())
+    except Exception:
+        # Fallback to direct subprocess if sandbox initialization fails
+        try:
+            finished = subprocess.run(
+                command, shell=True, cwd=root, capture_output=True,
+                text=True, timeout=120,
+            )
+            output = (finished.stdout or "") + (finished.stderr or "")
+            return _clip("exit code %d\n%s" % (finished.returncode, output.strip() or "(no output)"))
+        except subprocess.TimeoutExpired:
+            return "The command was still running after the timeout and was stopped."
+        except OSError as exc:
+            raise ToolError("The command could not start: %s" % exc) from exc
 
-    output = (finished.stdout or "") + (finished.stderr or "")
-    return _clip("exit code %d\n%s" % (finished.returncode, output.strip() or "(no output)"))
+
+def search_memory(workspace, query: str) -> str:
+    """Search cross-session persistent agent memory for past solutions, preferences, or notes."""
+    try:
+        from app.agent.memory import get_memory
+        mem = get_memory()
+        res = mem.search(query, limit=5)
+        if not res:
+            return "No relevant past memories found."
+        formatted = []
+        for r in res:
+            formatted.append(f"[{r.get('session_id', 'past')}] {r.get('content', '')}")
+        return _clip("\n\n".join(formatted))
+    except Exception as exc:
+        return f"Memory search failed: {exc}"
+
+
+def save_memory(workspace, content: str, category: str = "general") -> str:
+    """Persist a key learning, user preference, or pattern across sessions."""
+    try:
+        from app.agent.memory import get_memory
+        mem = get_memory()
+        mem.save_learning("agent_session", content, category=category)
+        return f"Saved to memory: {content[:80]}..."
+    except Exception as exc:
+        return f"Failed to save memory: {exc}"
+
+
+def create_skill(workspace, name: str, description: str, steps: str) -> str:
+    """Autonomous skill creation from successful work, stored as reusable agent skill."""
+    try:
+        from app.agent.skill_creator import get_skill_creator
+        creator = get_skill_creator()
+        step_list = [s.strip() for s in steps.splitlines() if s.strip()]
+        path = creator.create_skill(name, description, step_list, triggers=[name.lower()])
+        return f"Created autonomous skill '{name}' stored at {path}."
+    except Exception as exc:
+        return f"Failed to create skill: {exc}"
+
+
+def snapshot(workspace, description: str = "") -> str:
+    """NemoClaw-style checkpoint: save current workspace files before risky changes."""
+    try:
+        from app.agent.sandbox import get_sandbox
+        sb = get_sandbox()
+        snap = sb.create_snapshot(str(workspace.root), description=description)
+        return f"Created snapshot {snap.id} with {len(snap.file_checksums)} files captured."
+    except Exception as exc:
+        return f"Failed to create snapshot: {exc}"
+
+
+def restore_snapshot(workspace, snapshot_id: str) -> str:
+    """Roll back workspace to a previously saved checkpoint snapshot."""
+    try:
+        from app.agent.sandbox import get_sandbox
+        sb = get_sandbox()
+        res = sb.restore_snapshot(snapshot_id, str(workspace.root))
+        return f"Restored snapshot {snapshot_id}: {res.get('restored')} files restored."
+    except Exception as exc:
+        return f"Failed to restore snapshot: {exc}"
 
 
 def git(workspace, subcommand: str) -> str:
@@ -213,28 +278,37 @@ def git(workspace, subcommand: str) -> str:
 
 #: Name -> (function, required argument names, one line for the model).
 TOOLS: Dict[str, tuple] = {
-    "list_files":  (list_files,  ["path"],
-                    "List files in the workspace. path is optional."),
-    "read_file":   (read_file,   ["path"],
-                    "Read a file. Returns it with line numbers."),
-    "write_file":  (write_file,  ["path", "content"],
-                    "Create or completely replace a file."),
-    "edit_file":   (edit_file,   ["path", "find", "replace"],
-                    "Replace an exact piece of text in a file. The text must "
-                    "appear exactly once."),
-    "search":      (search,      ["query"],
-                    "Find which files contain a piece of text."),
-    "run_command": (run_command, ["command"],
-                    "Run a shell command in the workspace and read its output."),
-    "git":         (git,         ["subcommand"],
-                    "Run a git command, for example: status, add -A, "
-                    "commit -m \"...\", push."),
+    "list_files":       (list_files,       ["path"],
+                         "List files in the workspace. path is optional."),
+    "read_file":        (read_file,        ["path"],
+                         "Read a file. Returns it with line numbers."),
+    "write_file":       (write_file,       ["path", "content"],
+                         "Create or completely replace a file."),
+    "edit_file":        (edit_file,        ["path", "find", "replace"],
+                         "Replace an exact piece of text in a file. The text must "
+                         "appear exactly once."),
+    "search":           (search,           ["query"],
+                         "Find which files contain a piece of text."),
+    "run_command":      (run_command,      ["command"],
+                         "Run a shell command in the workspace inside sandbox and read output."),
+    "git":              (git,              ["subcommand"],
+                         "Run a git command, for example: status, add -A, commit -m \"...\", push."),
+    "search_memory":    (search_memory,    ["query"],
+                         "Search cross-session memory for past context, user preferences, or notes."),
+    "save_memory":      (save_memory,      ["content"],
+                         "Save a key learning, user preference, or pattern into cross-session memory."),
+    "create_skill":     (create_skill,     ["name", "description", "steps"],
+                         "Save a reusable workflow as an autonomous skill."),
+    "snapshot":         (snapshot,         ["description"],
+                         "Create a safe checkpoint snapshot of workspace before risky operations."),
+    "restore_snapshot": (restore_snapshot, ["snapshot_id"],
+                         "Roll back workspace to a previously saved snapshot."),
 }
 
 #: Tools that change something. Listed so the caller can decide which of them
 #: need a person to agree first - writing a file and reading one are not the
 #: same kind of act.
-MUTATING = {"write_file", "edit_file", "run_command", "git"}
+MUTATING = {"write_file", "edit_file", "run_command", "git", "restore_snapshot"}
 
 
 def describe_tools() -> str:

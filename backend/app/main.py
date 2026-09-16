@@ -318,8 +318,18 @@ async def lifespan(application: FastAPI):
     await _load_enabled_plugins()
     await _warm_speech_recognition()
     try:
+        from app.agent.scheduler import AutomationScheduler
+        AutomationScheduler.get_instance().start()
+    except Exception as exc:
+        logger.warning(f"Automation scheduler startup failed: {exc}")
+    try:
         yield
     finally:
+        try:
+            from app.agent.scheduler import AutomationScheduler
+            AutomationScheduler.get_instance().stop()
+        except Exception:
+            pass
         await _settle_the_database()
 
 

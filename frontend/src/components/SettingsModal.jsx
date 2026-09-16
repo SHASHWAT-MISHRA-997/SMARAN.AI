@@ -12,6 +12,9 @@ import GitPreferences from './GitPreferences';
 import CoworkPreferences from './CoworkPreferences';
 import DesktopGeneralPreferences from './DesktopGeneralPreferences';
 import MemoryPreferences from './MemoryPreferences';
+import SchedulerView from './SchedulerView';
+import GatewayPreferences from './GatewayPreferences';
+import SandboxPreferences from './SandboxPreferences';
 
 import { detectClientDevice } from './RightPanel';
 import { isPhone } from '../utils/device';
@@ -633,6 +636,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
     // Customize Category (Screenshot 4)
     ...(noBackend() ? [{ id: "provider", label: "AI Provider", category: "Customize", icon: Boxes }] : []),
     { id: "memory", label: "Memory", category: "Customize", icon: Brain },
+    { id: "scheduler", label: "Automations (Cron)", category: "Customize", icon: Terminal },
+    { id: "gateway", label: "Gateway & Bots", category: "Customize", icon: Globe },
+    { id: "sandbox", label: "Sandbox & Security", category: "Customize", icon: Lock },
     { id: "connections", label: "Connectors & Devices", category: "Customize", icon: Wifi },
     { id: "pets", label: isMobile ? "Mobile Pets" : "Desktop Pets", category: "Customize", icon: PawPrint },
   ];
@@ -751,6 +757,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
             {activeTab === 'cowork' && <CoworkPreferences />}
             {activeTab === 'desktop_general' && <DesktopGeneralPreferences />}
             {activeTab === 'memory' && <MemoryPreferences />}
+            {activeTab === 'scheduler' && <SchedulerView />}
+            {activeTab === 'gateway' && <GatewayPreferences />}
+            {activeTab === 'sandbox' && <SandboxPreferences />}
             {activeTab === "general" && (
               <div className="space-y-6">
                 <div>
