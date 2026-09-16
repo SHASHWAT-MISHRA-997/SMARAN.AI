@@ -92,12 +92,30 @@ def status() -> dict:
             }
 
     if reachable and models:
+        chat_models = []
+        embedding_models = []
+        for m in models:
+            name = m.get("name", "")
+            caps = m.get("capabilities") or []
+            details = m.get("details") or {}
+            family = str(details.get("family", "")).lower()
+            is_embed = (
+                (caps and "completion" not in caps and "embedding" in caps)
+                or "embed" in name.lower()
+                or "bert" in family
+            )
+            if is_embed:
+                embedding_models.append(name)
+            else:
+                chat_models.append(name)
+
         return {
             "state": "ready",
             "url": reachable,
-            "models": [m.get("name") for m in models],
-            "detail": "%d local model%s available."
-                      % (len(models), "" if len(models) == 1 else "s"),
+            "models": chat_models,
+            "embedding_models": embedding_models,
+            "detail": "%d local chat model%s available."
+                      % (len(chat_models), "" if len(chat_models) == 1 else "s"),
             "fix": None,
         }
 

@@ -186,7 +186,7 @@ def start_pairing(port: int = Query(..., ge=1, le=65535), current_user: User = D
     # This installs nothing, and the dialog no longer claims it does. An
     # Android build exists and the website offers it, but it is not needed
     # here and scanning does not fetch it.
-    qr_payload = f"{base}/?pair={code}"
+    qr_payload = json.dumps({"v": 1, "url": base, "code": code})
     return {
         "code": code,
         "url": base,

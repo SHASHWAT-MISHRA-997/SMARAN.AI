@@ -88,13 +88,25 @@ export const resolveHost = async () => {
  */
 export const pairWithPayload = async (payload, deviceName = 'Phone') => {
   let parsed;
-  try {
-    parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
-  } catch {
-    throw new Error('That QR code is not a SMARAN.AI pairing code.');
+  if (typeof payload === 'string') {
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      try {
+        const u = new URL(payload);
+        const code = u.searchParams.get('pair') || u.searchParams.get('code');
+        if (code) {
+          parsed = { url: `${u.protocol}//${u.host}`, code };
+        }
+      } catch {
+        /* neither json nor url */
+      }
+    }
+  } else {
+    parsed = payload;
   }
   if (!parsed?.url || !parsed?.code) {
-    throw new Error('That QR code is missing the address or the pairing code.');
+    throw new Error('That QR code is not a SMARAN.AI pairing code.');
   }
   if (!await probeHost(parsed.url)) {
     throw new Error(`${parsed.url} did not answer. Check that both devices are on the same Wi-Fi.`);

@@ -1274,7 +1274,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                       {localState?.fix ? ` ${localState.fix}` : ''}
                     </p>
                   )}
-                  {(localModels || []).map((m) => {
+                  {(localModels || []).filter((m) => !/embed/i.test(m)).map((m) => {
                     const isSelected = selectedModel === m;
                     return (
                       <div key={m} className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
@@ -1317,6 +1317,24 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                       </div>
                     );
                   })}
+
+                  {/* Embedding models (e.g. nomic-embed-text) used for vector memory & search */}
+                  {((localState?.embedding_models && localState.embedding_models.length > 0)
+                    ? localState.embedding_models
+                    : (localModels || []).filter((m) => /embed/i.test(m))
+                  ).map((m) => (
+                    <div key={m} className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
+                      <div className="min-w-0 pr-3">
+                        <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate">{m}</span>
+                        <span className="block text-[10px] text-zinc-500">
+                          Local vector model · used for memory search & documents
+                        </span>
+                      </div>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 shrink-0">
+                        Embedding only
+                      </span>
+                    </div>
+                  ))}
 
                   {/* Weights downloaded through Model Hub. Ollama does not know
                       about these, and this list only ever asked Ollama - so a
