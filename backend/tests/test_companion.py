@@ -13,7 +13,12 @@ from app.main import app
 from app.database import Base, engine, SessionLocal
 from app.models import PairedDevice, User, ChatSession, ChatMessage
 
-client = TestClient(app)
+# Pinned to loopback on purpose. These exercise the desktop half of the
+# companion API - pairing, listing and unlinking - which is now the owner's to
+# drive from the machine SMARAN runs on, and answers 401 to the network.
+# TestClient otherwise reports its peer as "testclient", which is not loopback,
+# so every one of these would fail as an unauthenticated LAN caller.
+client = TestClient(app, client=("127.0.0.1", 54321))
 
 
 @pytest.fixture(autouse=True)

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, QrCode, RefreshCw, Smartphone, Trash2, X } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { isNativeApp, loadLink, pairWithPayload, saveLink, syncWithHost } from '../utils/hostLink';
+import { companionHeaders } from '../utils/companionAuth';
 
 /**
  * Linking a phone to this desktop.
@@ -23,7 +24,13 @@ const POLL_MS = 4000;
 const jsonRequest = async (url, options = {}) => {
   const response = await fetch(`${API_BASE}${url}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      // Only set when this browser is itself a paired device, which is when
+      // the request is crossing the network to the desktop.
+      ...companionHeaders(),
+      ...options.headers,
+    },
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.detail || `Request failed (${response.status}).`);

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Lock, X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint, UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop, RefreshCw, CheckCircle2, ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe, Mic, Monitor, Keyboard, GitBranch, Search, Users } from "lucide-react";
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
+import { companionHeaders } from "../utils/companionAuth";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
 import { useTheme } from "../context/ThemeContext";
 import AppearancePreferences from './AppearancePreferences';
@@ -547,7 +548,8 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
   const fetchPairedDevices = useCallback(async () => {
     setLoadingDevices(true);
     try {
-      const res = await fetch(`${API_BASE}/api/companion/devices`);
+      const res = await fetch(`${API_BASE}/api/companion/devices`,
+        { headers: companionHeaders() });
       if (res.ok) {
         const data = await res.json();
         setPairedDevices(data.devices || []);
@@ -1498,7 +1500,8 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                           type="button"
                           onClick={async () => {
                             try {
-                              await fetch(`${API_BASE}/api/companion/devices/${dev.id}`, { method: 'DELETE' });
+                              await fetch(`${API_BASE}/api/companion/devices/${dev.id}`,
+                                { method: 'DELETE', headers: companionHeaders() });
                               setPairedDevices((prev) => prev.filter((d) => d.id !== dev.id));
                             } catch (e) {
                               console.error(e);

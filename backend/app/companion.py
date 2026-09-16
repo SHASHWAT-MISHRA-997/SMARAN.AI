@@ -40,8 +40,64 @@ from app.models import ChatMessage, ChatSession, PairedDevice, User
 router = APIRouter(prefix="/api/companion", tags=["companion"])
 
 
+#: Hosts that mean "this request came from the machine SMARAN runs on".
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1"})
+
+
 def get_current_user_dep(request: Request, db: Session = Depends(get_db)) -> User:
-    """The app's own user session check or default local user."""
+    """The owner, for the routes the desktop drives.
+
+    This said "the app's own user session check or default local user" and did
+    no session check at all: it returned the local user for every caller,
+    whatever they presented. These routes are reachable from the LAN - that is
+    the whole point, it is how the phone finds this machine, and pairing hands
+    out a network address to prove it. So anyone on the same wifi could list
+    the paired devices, dispatch speak, notify, open_url or screenshot to them,
+    and unpair them again, with no credential of any kind.
+
+    The device-facing half of this module was never affected: /sync, /commands
+    and /from-device each authenticate with the pairing token issued at claim
+    time, and still do. It is only the desktop-facing half that trusted
+    everybody.
+
+    So: from this machine, the owner, exactly as before - which keeps devices
+    already paired under `local_user` visible. From anywhere else, a valid
+    session token or nothing.
+    """
+    client_ip = request.client.host if request.client else ""
+    if client_ip not in _LOOPBACK_HOSTS:
+        # A phone the owner paired is not a stranger: pairing is the owner
+        # saying, at their own keyboard, that this device may act for them. The
+        # phone loads the same screens over the LAN, so it reaches these routes
+        # too, and it carries the token it was issued at claim time.
+        paired = (request.headers.get("X-Companion-Token", "")
+                  or request.query_params.get("companion_token", "")).strip()
+        if paired:
+            device = db.query(PairedDevice).filter(
+                PairedDevice.token == paired).first()
+            if device:
+                holder = db.query(User).filter(User.id == device.user_id).first()
+                if holder:
+                    return holder
+            raise HTTPException(status_code=401,
+                                detail="That device is no longer paired.")
+
+        token = ""
+        header = request.headers.get("Authorization", "").strip()
+        if header.startswith("Bearer "):
+            token = header[7:].strip()
+        if not token:
+            raise HTTPException(
+                status_code=401,
+                detail="These controls are driven from the machine SMARAN.AI "
+                       "is running on, or from a paired device.",
+            )
+        holder = db.query(User).filter(User.session_token == token).first()
+        if not holder or not holder.session_expires or \
+                holder.session_expires <= datetime.now():
+            raise HTTPException(status_code=401, detail="That session is not valid.")
+        return holder
+
     user = db.query(User).filter(User.username == "local_user").first()
     if not user:
         user = User(username="local_user", email="local@smaran.ai", is_approved=True, role="admin")

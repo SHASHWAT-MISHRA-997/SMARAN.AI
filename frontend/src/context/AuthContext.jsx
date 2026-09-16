@@ -1,3 +1,5 @@
+import { companionHeaders } from '../utils/companionAuth';
+
 /* Where the API is, for this launch.
  *
  * On the desktop the backend is the page's own origin and the empty string is
@@ -185,6 +187,9 @@ export async function fetchWithAuth(url, options = {}) {
   const headers = {
     'X-Device-ID': deviceId,
     'X-Device-Fingerprint': deviceFingerprint,
+    // Present only when this browser is a paired device, which is when the
+    // request is leaving the handset for the desktop over the LAN.
+    ...companionHeaders(),
     ...options.headers,
   };
   return fetch(url, {
