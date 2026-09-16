@@ -316,12 +316,17 @@ def plan_sequence(total_seconds: float, aspect: str = "16:9", hw=None) -> dict:
     # shape is deliberately a minimum-length clip - it is there for its
     # resolution - so estimating against it would have quoted a fraction of
     # the true cost, which is the opposite of what an estimate is for.
-    total_estimate = sum(
+    estimates = [
         estimate_seconds(
             width=fixed_w, height=fixed_h, steps=shape["steps"],
-            seconds=length, fps=fps,
-        )["seconds"]
+            seconds=length, fps=fps, hw=hw,
+        )
         for length in durations
+    ]
+    unknown = next((item for item in estimates if item["seconds"] is None), None)
+    total_estimate = None if unknown else sum(item["seconds"] for item in estimates)
+    bound = unknown["bound"] if unknown else (
+        "measured" if all(item["bound"] == "measured" for item in estimates) else "at most"
     )
     chunks = len(durations)
 
@@ -338,7 +343,8 @@ def plan_sequence(total_seconds: float, aspect: str = "16:9", hw=None) -> dict:
         "steps": shape["steps"],
         "aspect": aspect,
         "estimate_seconds": total_estimate,
-        "estimate_text": _duration_text(total_estimate, chunks),
+        "estimate_bound": bound,
+        "estimate_text": unknown["text"] if unknown else _duration_text(total_estimate, chunks, bound),
         # Said plainly rather than left for the user to notice.
         "caveat": (
             "Each clip continues from the last frame of the one before it, so "
@@ -349,15 +355,16 @@ def plan_sequence(total_seconds: float, aspect: str = "16:9", hw=None) -> dict:
     }
 
 
-def _duration_text(seconds: float, chunks: int) -> str:
+def _duration_text(seconds: float, chunks: int, bound: str = "at most") -> str:
     if seconds < 90:
         amount = "%d seconds" % round(seconds)
     elif seconds < 5400:
         amount = "%.0f minutes" % (seconds / 60.0)
     else:
         amount = "%.1f hours" % (seconds / 3600.0)
-    return ("About %s in total, at most - %d clip%s, one after another."
-            % (amount, chunks, "" if chunks == 1 else "s"))
+    qualifier = ", at most" if bound == "at most" else ""
+    return ("About %s in total%s - %d clip%s, one after another."
+            % (amount, qualifier, chunks, "" if chunks == 1 else "s"))
 
 
 def generate_sequence(

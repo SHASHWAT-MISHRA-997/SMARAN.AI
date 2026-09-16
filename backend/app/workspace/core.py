@@ -25,6 +25,7 @@ import hashlib
 import logging
 import os
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -470,9 +471,18 @@ class Workspace:
             path.parent.mkdir(parents=True, exist_ok=True)
             # Written whole, then moved into place, so an interrupted write
             # cannot leave a half-file where a working one was.
-            temp = path.with_name(path.name + ".smaran-tmp")
-            temp.write_text(change.new_text, encoding="utf-8", newline="")
-            os.replace(temp, path)
+            temp = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", newline="", delete=False,
+                    dir=path.parent, prefix=path.name + ".", suffix=".smaran-tmp",
+                ) as handle:
+                    temp = Path(handle.name)
+                    handle.write(change.new_text)
+                os.replace(temp, path)
+            finally:
+                if temp is not None:
+                    temp.unlink(missing_ok=True)
 
         del self._pending[change_id]
         record = {

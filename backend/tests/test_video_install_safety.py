@@ -58,7 +58,24 @@ def test_compatible_and_pure_python_wheels_are_accepted(installer):
         metadata = live / f"{name}-1.0.dist-info" / "WHEEL"
         metadata.parent.mkdir(parents=True)
         metadata.write_text(f"Wheel-Version: 1.0\nTag: {tag}\n")
+        (metadata.parent / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n")
     assert installer._compatibility_error(str(live)) is None
+
+
+@pytest.mark.parametrize('metadata', [None, 'Name: torch\n', 'Name: torch\nVersion: invalid!\n'])
+def test_incomplete_metadata_cannot_shadow_working_packages(installer, metadata):
+    """A partial local Torch install shadowed valid metadata and crashed Transformers."""
+    info = Path(installer.packages_dir()) / 'torch-2.14.0.dist-info'
+    info.mkdir(parents=True)
+    if metadata is not None:
+        (info / 'METADATA').write_text(metadata)
+    original_path = list(installer.sys.path)
+    assert installer.ensure_on_path() is False
+    assert installer.sys.path == original_path
+    assert 'metadata' in installer._activation_error.lower()
+    assert info.exists()
+    if metadata is not None:
+        assert (info / 'METADATA').read_text() == metadata
 
 
 def test_failed_promotion_restores_working_copy(installer, monkeypatch):

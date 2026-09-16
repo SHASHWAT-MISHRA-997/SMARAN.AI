@@ -198,7 +198,9 @@ def ensure_on_path() -> bool:
 
 def _compatibility_error(directory: str) -> Optional[str]:
     """Reject foreign wheels before they can shadow bundled speech packages."""
+    from email.parser import Parser
     from packaging.tags import parse_tag, sys_tags
+    from packaging.version import Version
 
     supported = set(sys_tags())
     for metadata in sorted(Path(directory).glob("*.dist-info/WHEEL")):
@@ -213,6 +215,19 @@ def _compatibility_error(directory: str) -> Optional[str]:
             return (f"Video package {metadata.parent.name} is incompatible with this "
                     "operating system or Python version. Reinstall video packages "
                     "for this runtime; the existing files have been preserved.")
+    # importlib.metadata finds dist-info even when an interrupted install left
+    # no METADATA behind. Its None version then crashes Transformers before
+    # the otherwise working system Torch can be used.
+    for info in sorted(Path(directory).glob("*.dist-info")):
+        try:
+            metadata = Parser().parsestr((info / "METADATA").read_text(encoding="utf-8"))
+            if not metadata.get("Name") or not metadata.get("Version"):
+                raise ValueError("missing Name or Version")
+            Version(metadata["Version"])
+        except (OSError, ValueError, UnicodeError) as exc:
+            return (f"Video package {info.name} has incomplete or invalid metadata: {exc}. "
+                    "Reinstall video packages for this runtime; the existing files "
+                    "have been preserved.")
     return None
 
 

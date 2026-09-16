@@ -54,6 +54,39 @@ def card(vram, ram=64.0, name="Test GPU"):
     )
 
 
+def test_sequence_preserves_unmeasured_time_and_selected_hardware(monkeypatch):
+    """Sequence planning summed unknown times and reprobed a different machine."""
+    from app.video import planner
+    chosen = card(24)
+    calls = []
+
+    def untimed(width, height, steps, seconds, fps, hw=None):
+        calls.append(hw)
+        return {'seconds': None, 'bound': 'unmeasured', 'text': 'Not timed yet.'}
+
+    monkeypatch.setattr(planner, 'estimate_seconds', untimed)
+    result = plan_sequence(2, hw=chosen)
+    assert result['possible']
+    assert result['estimate_seconds'] is None
+    assert result['estimate_bound'] == 'unmeasured'
+    assert 'Not timed yet.' in result['estimate_text']
+    assert calls and all(hardware is chosen for hardware in calls)
+
+
+def test_chat_duration_guard_accepts_unknown_timing():
+    """The chat consumer also compared unknown timing with a numeric limit."""
+    import ast
+    tree = ast.parse((BACKEND / 'app/main.py').read_text(encoding='utf-8'))
+    guards = [node.test for node in ast.walk(tree) if isinstance(node, ast.If)
+              and any(isinstance(part, ast.Name) and part.id == 'CHAT_VIDEO_AUTOSTART_LIMIT_SECONDS'
+                      for part in ast.walk(node.test))]
+    assert len(guards) == 1
+    expression = compile(ast.Expression(guards[0]), 'chat-duration-guard', 'eval')
+    for seconds, should_pause in [(None, False), (10, False), (200, True)]:
+        assert eval(expression, {'shape': {'estimate_seconds': seconds},
+                                 'CHAT_VIDEO_AUTOSTART_LIMIT_SECONDS': 100}) is should_pause
+
+
 @pytest.fixture(autouse=True)
 def isolated_calibration(tmp_path, monkeypatch):
     """No test may read or write the real machine's measurements."""

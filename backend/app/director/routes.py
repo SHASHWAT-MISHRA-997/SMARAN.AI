@@ -24,13 +24,12 @@ class PlanRequest(BaseModel):
     script: str = Field(..., description="The script, one shot per paragraph.")
     default_seconds: float = DEFAULT_SECONDS
     #: Only used to time the estimate; /plan renders nothing.
-    steps: int = 40
+    steps: int = Field(default=40, ge=1)
 
 
 class RenderRequest(PlanRequest):
-    width: int = 960
-    height: int = 576
-    steps: int = 40
+    width: int = Field(default=960, ge=1)
+    height: int = Field(default=576, ge=1)
     seed: int | None = None
 
 

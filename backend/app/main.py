@@ -4621,7 +4621,8 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             # in hours. Starting a multi-day job because the sentence contained
             # "5 minute" would be the worst version of doing what was asked, so
             # past a few hours it is quoted and left to the user.
-            if shape["estimate_seconds"] > CHAT_VIDEO_AUTOSTART_LIMIT_SECONDS:
+            if (shape["estimate_seconds"] is not None
+                    and shape["estimate_seconds"] > CHAT_VIDEO_AUTOSTART_LIMIT_SECONDS):
                 yield json.dumps({"token":
                     "That works out at %d clips joined end to end - %s\n\n"
                     "I haven't started it, because that is a long time to "
