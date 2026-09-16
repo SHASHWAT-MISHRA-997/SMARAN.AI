@@ -674,25 +674,51 @@ def build(name: str, prompt: str, previous: Optional[str] = None) -> tuple[Optio
 
     document = None
     generator = None
-    # One line per provider, not one per model. Three dead NVIDIA models
-    # say the same thing three times and push the two that matter - an
-    # invalid key and an exhausted free tier - off the end of the message.
+    # One line per provider, not one per model. Three dead NVIDIA models say
+    # the same thing three times and push the two that matter - an invalid key
+    # and an exhausted free tier - off the end of the message.
+    #
+    # But it used to keep the *first* reason and drop the rest, and the first
+    # is the least informative one: the top-ranked model is the one most likely
+    # to be rate limited or preview-gated. So a machine whose gemini key worked
+    # perfectly well on a third model reported "gemini could not be used:
+    # gemini-3.1-pro is over a usage limit", which reads as the provider being
+    # unusable and sends someone to check a key that is fine.
+    #
+    # One line still, but it says how many were tried and gives the distinct
+    # reasons, so "all three 404" and "the first was rate limited" stop looking
+    # alike.
+    attempts: dict[str, list[str]] = {}
     failures: dict[str, str] = {}
     for note in skipped:
         failures.setdefault(note.split(" was skipped:")[0], note)
 
+    def note_failure(provider: str, reason: str) -> None:
+        attempts.setdefault(provider, []).append(reason.strip())
+
     for candidate in generators:
         replies, why_not = answers(candidate)
         if not replies:
-            failures.setdefault(candidate.provider,
-                                "%s could not be used: %s" % (candidate.provider, why_not))
+            note_failure(candidate.provider, why_not)
             continue
         document, error = _complete(candidate, BUILD_INSTRUCTIONS, brief)
         if document is not None:
             generator = candidate
             break
-        failures.setdefault(candidate.provider,
-                            "%s could not be used: %s" % (candidate.provider, error))
+        note_failure(candidate.provider, error)
+
+    for provider, reasons in attempts.items():
+        if provider in failures:
+            continue
+        seen: list[str] = []
+        for reason in reasons:
+            if reason not in seen:
+                seen.append(reason)
+        summary = "; ".join(seen[:2])
+        if len(seen) > 2:
+            summary += "; and %d more" % (len(seen) - 2)
+        failures[provider] = "%s could not be used (%d model%s tried): %s" % (
+            provider, len(reasons), "" if len(reasons) == 1 else "s", summary)
 
     if document is None or generator is None:
         return None, ("; ".join(failures.values())
