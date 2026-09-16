@@ -151,6 +151,13 @@ def write_word(title: str, paragraphs: List[str],
                heading: Optional[str] = None) -> dict:
     """A Word document with a heading and paragraphs, left open on screen."""
     _require("word")
+    if not paragraphs and not heading:
+        # Excel and PowerPoint both refuse to open with nothing to show; Word
+        # did not, so a request that produced no text still started Word and
+        # left an empty document on screen. Asking for a document is never a
+        # request for a blank one - it means the text that was meant to fill
+        # it never arrived, and opening Word anyway hides that.
+        raise OfficeError("There is nothing to write in the document.")
     path = _unique(title, ".docx")
 
     app = _dispatch("Word.Application")

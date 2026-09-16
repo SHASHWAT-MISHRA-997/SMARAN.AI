@@ -52,11 +52,37 @@ def test_a_paid_provider_is_not_used_without_permission(client):
     assert "sk-test" not in detail, "the key must not come back in an error"
 
 
-def test_a_run_with_no_models_says_so(client):
+def test_a_run_with_no_models_and_none_installed_says_so(client, monkeypatch):
+    """Naming no model is only an error when there is nothing installed.
+
+    This used to assert the refusal unconditionally, because naming no model
+    always meant having none. It does not any more: an unnamed run falls back
+    to whatever Ollama already has, so the refusal now depends on the machine.
+    Left as it was, this test passed or failed according to whether Ollama
+    happened to be running beside the suite.
+    """
+    from app.orchestrator import routes as orchestrator_routes
+    monkeypatch.setattr(orchestrator_routes, "local_chat_models", lambda: [])
+
     response = client.post("/api/orchestrator/runs",
                            json={"request": "build something", "root": ".", "models": []})
     assert response.status_code == 400
     assert "No model is configured" in response.json()["detail"]
+
+
+def test_a_run_with_no_models_uses_an_installed_one(client, monkeypatch):
+    """The other half, and the defect that prompted the change: a machine with
+    a local model was told to go and start a local model."""
+    from app.orchestrator import routes as orchestrator_routes
+    monkeypatch.setattr(orchestrator_routes, "local_chat_models",
+                        lambda: [{"model": "qwen2.5-coder:7b"}])
+
+    response = client.post("/api/orchestrator/runs",
+                           json={"request": "build something", "root": ".", "models": []})
+    assert response.status_code != 400 or "No model is configured" not in \
+        response.json().get("detail", ""), (
+        "an installed local model was not used when none was named"
+    )
 
 
 def test_an_unknown_run_is_a_404_not_an_empty_run(client):

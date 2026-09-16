@@ -63,9 +63,25 @@ class RunRequest(BaseModel):
 
 
 def _candidates(choices: List[ModelChoice]) -> List[Candidate]:
-    return [Candidate(provider=c.provider, model=c.model, api_key=c.api_key,
-                      capabilities=tuple(c.capabilities))
-            for c in choices if (c.model or "").strip()]
+    chosen = [Candidate(provider=c.provider, model=c.model, api_key=c.api_key,
+                        capabilities=tuple(c.capabilities))
+              for c in choices if (c.model or "").strip()]
+    if chosen:
+        return chosen
+
+    # Nothing named, so use what is already installed here.
+    #
+    # This used to return an empty list, and the run was then refused with
+    # "No model is configured. Start a local model in Ollama" - on a machine
+    # with a local model running in Ollama, which /api/orchestrator/models
+    # listed correctly on the same request. The advice was to do the thing the
+    # user had already done.
+    #
+    # Only local models are picked up this way. A metered provider is never
+    # reached for without the run asking, and nothing from Ollama is metered,
+    # so this cannot start spending money on the caller's behalf.
+    return [Candidate(provider="ollama", model=entry["model"])
+            for entry in local_chat_models() if entry.get("model")]
 
 
 def _remember(run: Run) -> None:
