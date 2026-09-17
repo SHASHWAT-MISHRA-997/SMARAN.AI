@@ -129,9 +129,8 @@ const githubDownloads = async () => {
     let rawTotal = 0;
     const latest = releases[0];
     for (const asset of (latest?.assets || [])) rawTotal += asset.download_count;
-    // Baseline internal verification downloads (6) so client downloads start fresh from 0
-    const INTERNAL_TEST_BASELINE = 6;
-    const total = Math.max(0, rawTotal - INTERNAL_TEST_BASELINE);
+    // Genuine download count starts cleanly from 0 for v1.0.0 official release
+    const total = rawTotal;
     try {
       await cache.setJSON('github-downloads', { total, at: Date.now() });
     } catch { /* serving the number matters more than remembering it */ }

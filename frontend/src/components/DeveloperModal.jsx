@@ -98,8 +98,9 @@ const DeveloperModal = ({ isOpen, onClose }) => {
             <p className="text-xs font-bold text-indigo-400 tracking-wide uppercase mt-1">Creator of SMARAN.AI</p>
             <p className="text-xs text-zinc-300 leading-relaxed mt-3">Created SMARAN.AI. The highlights below describe code paths present in this build; they do not claim that an optional runtime or provider is currently connected.</p>
             <div className="pt-4 flex flex-wrap gap-3">
-              <a href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener noreferrer" className="dev-link dev-link-linkedin group backdrop-blur-md"><span className="dev-link-sheen" aria-hidden="true" />LinkedIn <ExternalLink className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /></a>
               <a href="https://shashwatmishra-portfolio.netlify.app/" target="_blank" rel="noopener noreferrer" className="dev-link dev-link-portfolio group backdrop-blur-md"><span className="dev-link-sheen" aria-hidden="true" /><Globe className="w-4 h-4 transition-transform duration-500 group-hover:rotate-[20deg]" /> Portfolio <ExternalLink className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /></a>
+              <a href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener noreferrer" className="dev-link dev-link-linkedin group backdrop-blur-md"><span className="dev-link-sheen" aria-hidden="true" />LinkedIn <ExternalLink className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /></a>
+              <a href="https://github.com/SHASHWAT-MISHRA-997" target="_blank" rel="noopener noreferrer" className="dev-link dev-link-github group backdrop-blur-md"><span className="dev-link-sheen" aria-hidden="true" />GitHub <ExternalLink className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /></a>
             </div>
           </section>
 

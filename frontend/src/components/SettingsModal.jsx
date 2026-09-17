@@ -1967,49 +1967,50 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                       <div>
                         <div className="flex items-center gap-2">
                           <h4 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">SHASHWAT MISHRA</h4>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">Verified Architect</span>
                         </div>
-                        <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400">Founder & AI Systems Architect | MTech – Automation & Robotics</p>
-                        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Parul University, Vadodara • AI, Robotics & Autonomous Systems</p>
+                        <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">Developer</p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Comprehensive Professional Bio */}
+                  {/* Comprehensive Professional Bio tailored to SMARAN.AI */}
                   <div className="space-y-3 relative z-10 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300">
                     <p>
-                      Results-driven <strong className="text-indigo-600 dark:text-indigo-400 font-bold">AI & Robotics Systems Architect</strong> with deep expertise in autonomous intelligent systems, physical-digital robotics control, physics-based simulations, and next-generation Large Language Model (LLM) orchestration.
+                      Shashwat Mishra is the <strong className="text-indigo-600 dark:text-indigo-400 font-bold">Developer of SMARAN.AI</strong>. Conceived and engineered as a sovereign, local-first autonomous AI coding workstation, SMARAN.AI provides developers with an intelligent on-device environment running completely without cloud telemetry.
                     </p>
                     <p>
-                      As the creator of <strong className="text-zinc-900 dark:text-white font-bold">SMARAN.AI</strong>, engineered a complete local-first, zero-telemetry autonomous coding workstation and agentic operating system. Proven track record across enterprise on-premise RAG pipelines at <em>GreyMatter Robotics</em>, multi-sensor Autonomous Mobile Robots (LiDAR, IMU, Depth) at <em>SVR Robotics</em>, real-time command systems (<em>SHARVAGYA.AI</em>), and 7-DOF Franka Panda robotic peg-in-hole simulation dashboards with real-time LLM telemetry.
+                      Built specifically for software engineers, researchers, and creators, <strong className="text-zinc-900 dark:text-white font-bold">SMARAN.AI</strong> unifies autonomous software development (<span className="text-emerald-500 dark:text-emerald-400 font-bold">SMARAN Code</span>), native OS automation, multi-agent collaboration (<span className="text-purple-500 dark:text-purple-400 font-bold">Cowork</span>), long-term persistent memory vaults, background automations, and neural voice intelligence (<span className="text-cyan-500 dark:text-cyan-400 font-bold">J.A.R.V.I.S.</span>) — running 100% on your machine with absolute privacy.
+                    </p>
+                    <p>
+                      Driven by a passion for sovereign computing and agentic intelligence, his goal is delivering an ultra-fast, capable, and air-gapped AI development platform where your code, data, and models stay strictly your own.
                     </p>
                   </div>
 
-                  {/* Skills & Badges Grid */}
+                  {/* SMARAN.AI Core Architecture Badges */}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 relative z-10">
                     <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
-                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Generative & Agentic AI</div>
-                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">RAG, Claude Code, LangChain</div>
+                      <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">SMARAN Code Agent</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">Autonomous Coding & Diffs</div>
                     </div>
                     <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
-                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Robotics & Simulation</div>
-                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">ROS 2, PyBullet, MuJoCo</div>
+                      <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Desktop OS Control</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">Native Windows/Linux Automation</div>
                     </div>
                     <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
-                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vision & Telemetry</div>
-                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">OpenCV, LiDAR & Depth SLAM</div>
+                      <div className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">Neural Voice Assistant</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">J.A.R.V.I.S. Hands-Free HUD</div>
                     </div>
                     <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
-                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vector Stores & Data</div>
-                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">ChromaDB, FAISS, PostgreSQL</div>
+                      <div className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Persistent Memory</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">Cross-Session Vector Vault</div>
                     </div>
                     <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
-                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Certifications</div>
-                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">Microsoft GenAI, Infosys ROS2</div>
+                      <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Zero-Telemetry Privacy</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">100% Local On-Device Compute</div>
                     </div>
                     <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
-                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Local Workstations</div>
-                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">Docker, FastAPI, Electron/Vite</div>
+                      <div className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Dispatch & Mobile</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">P2P Encrypted Companion Link</div>
                     </div>
                   </div>
 
@@ -2043,13 +2044,14 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                       href="https://github.com/SHASHWAT-MISHRA-997"
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black bg-zinc-900 text-white hover:bg-zinc-800 border border-zinc-700 transition shadow-sm"
+                      className="dev-link dev-link-github group backdrop-blur-md"
                     >
+                      <span className="dev-link-sheen" aria-hidden="true" />
                       <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
                         <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"/>
                       </svg>
-                      GitHub
-                      <ExternalLink className="w-3.5 h-3.5" />
+                      GitHub Profile
+                      <ExternalLink className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                     </a>
                   </div>
                 </div>
