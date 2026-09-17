@@ -2681,7 +2681,7 @@ const ChatArea = ({
   };
 
   /* "Cloud API - Groq" -> "GROQ". "ollama_runtime" -> "LOCAL". */
-  const sourceLabel = (source) => {
+  const _sourceLabel = (source) => {
     const text = String(source || '');
     if (!text) return '';
     const cloud = /cloud api\s*[-–]\s*(.+)/i.exec(text);

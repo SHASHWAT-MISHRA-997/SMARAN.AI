@@ -101,7 +101,7 @@ export default function ScheduledTasksView({ onNavigate, onEnsureSession }) {
     setExecutingId(task.id);
     showToast(`Executing "${task.name}" now...`);
     try {
-      const session = await onEnsureSession?.();
+      await onEnsureSession?.();
       // No model name in the prompt. It named a model nothing routed to, so
       // all it did was put a misleading line in front of the instruction the
       // model actually reads.

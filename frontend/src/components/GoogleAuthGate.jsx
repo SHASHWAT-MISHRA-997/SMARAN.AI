@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ShieldCheck, Sparkles, ArrowRight, Lock, UserCheck, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Sparkles, ArrowRight, Lock, AlertCircle } from 'lucide-react';
 import CyberFX from './CyberFX';
 
 export const GOOGLE_STORAGE_KEY = 'smaran_google_user';
@@ -140,7 +140,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                     email: payload.email,
                     picture: payload.picture,
                   });
-                } catch (e) {
+                } catch {
                   handleSignInSuccess({ email: 'user@gmail.com', name: 'Google User' });
                 }
               }
