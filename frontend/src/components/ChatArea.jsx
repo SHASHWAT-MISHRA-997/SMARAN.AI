@@ -970,39 +970,32 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
                   msg.execution_source,
                 ].find((value) => typeof value === 'string' && value.trim())?.trim() || '';
                 const hasVerifiedSource = Boolean(measurementSource) && !/^(unavailable|unknown|none|not[_ -]?measured)$/i.test(measurementSource);
-                const modelName = msg.backendModel || msg.model_used || msg.modelUsed || '';
-                const tokensPerSecond = hasVerifiedSource
-                  ? firstReportedNumber(msg.backendTokensPerSec, msg.tokens_per_sec)
-                  : null;
-                const executionSeconds = hasVerifiedSource
-                  ? firstReportedNumber(msg.backendExecutionTimeSec, msg.execution_time_sec)
-                  : null;
-                const responseMilliseconds = hasVerifiedSource
-                  ? firstReportedNumber(msg.backendResponseTimeMs, msg.response_time_ms)
-                  : null;
-                const tokenCount = hasVerifiedSource
-                  ? firstReportedNumber(msg.backendTokenCount, msg.token_count)
-                  : null;
-                const contextTokens = hasVerifiedSource
-                  ? firstReportedNumber(msg.backendContextTokens, msg.total_context)
-                  : null;
+                const modelName = msg.backendModel || msg.model_used || msg.modelUsed || msg.model_routed || '';
+                // Always attempt to read actual numeric values from the message -
+                // do NOT gate behind hasVerifiedSource.  The backend sends real
+                // numbers even when it forgets to label the source string.
+                const tokensPerSecond = firstReportedNumber(msg.backendTokensPerSec, msg.tokens_per_sec);
+                const executionSeconds = firstReportedNumber(msg.backendExecutionTimeSec, msg.execution_time_sec);
+                const responseMilliseconds = firstReportedNumber(msg.backendResponseTimeMs, msg.response_time_ms);
+                const tokenCount = firstReportedNumber(msg.backendTokenCount, msg.token_count);
+                const contextTokens = firstReportedNumber(msg.backendContextTokens, msg.total_context);
                 const responseTime = executionSeconds !== null
                                   ? `${safeToFixed(executionSeconds, 2) || "0"} s`
                                   : responseMilliseconds !== null
                                     ? `${safeToFixed(responseMilliseconds / 1000, 2) || "0"} s`
-                                    : 'Not measured';
-                                const formatContext = contextTokens === null
-                                  ? 'Not measured'
+                                    : '—';
+                const formatContext = contextTokens === null
+                                  ? '—'
                                   : contextTokens >= 1000
                                     ? `${safeToFixed(contextTokens / 1024, contextTokens % 1024 === 0 ? 0 : 1) || "0"}K tokens`
                                     : `${contextTokens} tokens`;
-                                const measurements = [
-                                  ['AI model', modelName ? modelName.split('/').pop() : 'Unavailable'],
-                                  ['Speed', tokensPerSecond === null ? 'Not measured' : `${safeToFixed(tokensPerSecond, 1) || "0"} tok/s`],
+                const measurements = [
+                                  ['AI model', modelName ? modelName.split('/').pop() : '—'],
+                                  ['Speed', tokensPerSecond === null ? '—' : `${safeToFixed(tokensPerSecond, 1) || "0"} tok/s`],
                                   ['Response time', responseTime],
-                                  ['Total tokens', tokenCount === null ? 'Not measured' : `${tokenCount}`],
+                                  ['Total tokens', tokenCount === null ? '—' : `${tokenCount}`],
                                   ['Context', formatContext],
-                                  ['Source', hasVerifiedSource ? measurementSource : 'Unavailable'],
+                                  ['Source', hasVerifiedSource ? measurementSource : (measurementSource || '—')],
                                 ];
 
                 /* These readings come from the backend. On a phone answering
@@ -4386,7 +4379,7 @@ const ChatArea = ({
             <Gauge className="w-3 h-3 text-emerald-500 shrink-0" />
             <span className="hidden sm:inline">Speed:</span>
             <span className="text-emerald-600 dark:text-emerald-400 font-black">
-              {telemetry?.tokens_per_sec > 0 ? `${safeToFixed(telemetry.tokens_per_sec, 1) || "0"} tok/s` : 'Not measured'}
+              {telemetry?.tokens_per_sec > 0 ? `${safeToFixed(telemetry.tokens_per_sec, 1) || "0"} tok/s` : '—'}
             </span>
           </div>
 

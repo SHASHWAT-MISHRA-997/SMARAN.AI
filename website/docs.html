@@ -97,6 +97,17 @@
     .sidebar-links a:hover {
       background: rgba(255, 255, 255, 0.06); color: #fff; text-decoration: none;
     }
+    .sidebar-links a.active {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      font-weight: 600;
+      border-left: 2px solid var(--red);
+    }
+
+    /* Smooth Scroll */
+    html {
+      scroll-behavior: smooth;
+    }
 
     /* Content Area */
     .content { min-width: 0; }
@@ -142,11 +153,52 @@
     .code-box {
       background: var(--code-bg); border: 1px solid var(--card-border);
       border-radius: 12px; overflow: hidden; margin: 20px 0;
+      position: relative;
     }
     .code-header {
       background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid var(--card-border);
       padding: 8px 16px; font-size: 0.78rem; font-family: 'Fira Code', monospace; color: var(--dimmer);
       display: flex; justify-content: space-between; align-items: center;
+    }
+    .code-header-right {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .copy-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 6px;
+      color: #cbd5e1;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.18s ease;
+      user-select: none;
+      line-height: 1.2;
+    }
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.18);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.35);
+      transform: translateY(-1px);
+    }
+    .copy-btn:active {
+      transform: translateY(0) scale(0.96);
+    }
+    .copy-btn.copied {
+      background: rgba(16, 185, 129, 0.22);
+      border-color: rgba(16, 185, 129, 0.55);
+      color: #34d399;
+    }
+    .copy-btn svg {
+      width: 13px;
+      height: 13px;
+      fill: currentColor;
+      flex-shrink: 0;
     }
     .code-box pre {
       padding: 16px; overflow-x: auto; font-family: 'Fira Code', monospace; font-size: 0.88rem; color: #e5e7eb;
@@ -548,5 +600,128 @@
     </div>
   </footer>
 
+  <script>
+    (function () {
+      // 1. Interactive Copy Button for all code boxes
+      document.querySelectorAll('.code-box').forEach(function (box) {
+        var header = box.querySelector('.code-header');
+        var code = box.querySelector('pre code') || box.querySelector('code');
+        if (!header || !code) return;
+
+        // Ensure header has right actions container
+        var right = header.querySelector('.code-header-right');
+        if (!right) {
+          var children = Array.from(header.children);
+          right = document.createElement('div');
+          right.className = 'code-header-right';
+
+          if (children.length > 1) {
+            var tagBadge = children[children.length - 1];
+            header.removeChild(tagBadge);
+            right.appendChild(tagBadge);
+          }
+          header.appendChild(right);
+        }
+
+        // Create sleek copy button
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'copy-btn';
+        copyBtn.type = 'button';
+        copyBtn.setAttribute('title', 'Copy code to clipboard');
+        copyBtn.setAttribute('aria-label', 'Copy code to clipboard');
+        
+        var copyIconSvg = '<svg viewBox="0 0 24 24"><path d="M16 1H4C2.9 1 2 1.9 2 3V17H4V3H16V1ZM19 5H8C6.9 5 6 5.9 6 7V21C6 22.1 6.9 23 8 23H19C20.1 23 21 22.1 21 21V7C21 5.9 20.1 5 19 5ZM19 21H8V7H19V21Z"/></svg><span>Copy</span>';
+        var checkIconSvg = '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12L3.41 13.41L9 19L21 7L19.59 5.59L9 16.17Z"/></svg><span>Copied!</span>';
+        
+        copyBtn.innerHTML = copyIconSvg;
+
+        copyBtn.addEventListener('click', function () {
+          var text = code.innerText.trim();
+          var doSuccess = function () {
+            copyBtn.classList.add('copied');
+            copyBtn.innerHTML = checkIconSvg;
+            setTimeout(function () {
+              copyBtn.classList.remove('copied');
+              copyBtn.innerHTML = copyIconSvg;
+            }, 2200);
+          };
+
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(doSuccess).catch(function () {
+              fallbackCopy(text, doSuccess);
+            });
+          } else {
+            fallbackCopy(text, doSuccess);
+          }
+        });
+
+        right.appendChild(copyBtn);
+      });
+
+      function fallbackCopy(text, cb) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          cb();
+        } catch (e) {
+          console.error('Copy fallback failed', e);
+        }
+      }
+
+      // 2. Active Sidebar Section Highlighting (Scrollspy)
+      var links = document.querySelectorAll('.sidebar-links a');
+      var sections = document.querySelectorAll('.doc-section');
+
+      function setActiveLink(id) {
+        links.forEach(function (link) {
+          var href = link.getAttribute('href');
+          if (href === '#' + id) {
+            link.classList.add('active');
+          } else {
+            link.classList.remove('active');
+          }
+        });
+      }
+
+      // Click handler for instant active state
+      links.forEach(function (link) {
+        link.addEventListener('click', function () {
+          var targetId = this.getAttribute('href').replace('#', '');
+          setActiveLink(targetId);
+        });
+      });
+
+      // Intersection Observer for scroll tracking
+      if ('IntersectionObserver' in window) {
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) {
+              setActiveLink(entry.target.id);
+            }
+          });
+        }, {
+          rootMargin: '-20% 0px -60% 0px'
+        });
+
+        sections.forEach(function (sec) {
+          observer.observe(sec);
+        });
+      }
+
+      // Highlight on initial load if hash present
+      if (window.location.hash) {
+        var initialId = window.location.hash.substring(1);
+        setActiveLink(initialId);
+      }
+    })();
+  </script>
 </body>
 </html>

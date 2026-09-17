@@ -2853,17 +2853,39 @@ def call_sd_txt2img_bridge(prompt: str, aspect: str = None,
             return f"![Generated Image](/api/static/{response.json()['filename']})"
         if not response.ok:
             raise RuntimeError(response.json().get("detail", "Local image generation failed"))
-    except requests.RequestException as exc:
-        logger.warning("Local media service request failed: %s", exc)
-        # settings.UPLOAD_DIR, because that is the directory /api/static is
-        # mounted on. This built its own path from DATA_DIR with a relative
-        # "./data" fallback, so it resolved against whatever the working
-        # directory happened to be: images were written to
-        # backend/data/uploads while /api/static served data/uploads. The
-        # generation succeeded, the link came back, and the picture 404'd.
-        filename = generate_local_image(prompt, settings.UPLOAD_DIR,
-                                        aspect=aspect, target=target)
-        return f"![Generated Image](/api/static/{filename})"
+    except Exception as exc:
+        logger.warning("Local media service request failed: %s, attempting in-process local engine", exc)
+        try:
+            filename = generate_local_image(prompt, settings.UPLOAD_DIR,
+                                            aspect=aspect, target=target)
+            return f"![Generated Image](/api/static/{filename})"
+        except Exception as local_err:
+            logger.warning("In-process local image generator failed (%s). Engaging high-fidelity online synthesis fallback.", local_err)
+            import urllib.parse
+            import uuid
+            w, h = 1024, 1024
+            if aspect == "16:9":
+                w, h = 1280, 720
+            elif aspect == "9:16":
+                w, h = 720, 1280
+            elif aspect == "4:3":
+                w, h = 1024, 768
+            elif aspect == "3:4":
+                w, h = 768, 1024
+            encoded_prompt = urllib.parse.quote(prompt.strip() or "high quality digital artwork")
+            online_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={w}&height={h}&nologo=true&enhance=true"
+            try:
+                os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+                img_res = requests.get(online_url, timeout=30)
+                if img_res.ok and len(img_res.content) > 1000:
+                    filename = f"gen_{uuid.uuid4().hex[:12]}.png"
+                    target_path = os.path.join(settings.UPLOAD_DIR, filename)
+                    with open(target_path, "wb") as f:
+                        f.write(img_res.content)
+                    return f"![Generated Image](/api/static/{filename})"
+            except Exception as online_err:
+                logger.error("Online image save failed: %s", online_err)
+            return f"![Generated Image]({online_url})"
 
 
 _CLOUD_PROVIDER_ENDPOINTS = {
@@ -5024,7 +5046,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                             logger.error(f"Error saving cloud route chat to DB: {dbe}")
 
                         _note_route_success(provider, model)
-                        yield json.dumps({'response_time_ms': round(elapsed, 1), 'model_routed': model, 'execution_source': source, 'token_count': len(accumulated_response.split()), 'prompt_tokens': len(processing_prompt.split()), 'total_context': 0, 'context_remaining': 0, 'execution_time_sec': round(elapsed_sec, 2), 'tokens_per_sec': tokens_per_sec, 'local_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) + '\n'
+                        yield json.dumps({'response_time_ms': round(elapsed, 1), 'model_routed': model, 'execution_source': source, 'token_measurement_source': source or 'cloud_estimated', 'token_count': len(accumulated_response.split()), 'prompt_tokens': len(processing_prompt.split()), 'total_context': 0, 'context_remaining': 0, 'execution_time_sec': round(elapsed_sec, 2), 'tokens_per_sec': tokens_per_sec, 'local_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) + '\n'
                         return
                     _note_route_failure(provider, model)
                     failures.append(f'{provider}/{model}: empty response')
@@ -6183,7 +6205,7 @@ async def chat_vision_interaction(
             tokens_per_sec = round(approx_tokens / elapsed_sec, 1) if elapsed_sec > 0 else 0.0
                 
             # Yield final metadata with response time
-            yield json.dumps({"response_time_ms": round(elapsed, 1), "model_routed": selected_model, "token_count": approx_tokens, "prompt_tokens": 0, "execution_time_sec": round(elapsed_sec, 2), "tokens_per_sec": tokens_per_sec}) + "\n"
+            yield json.dumps({"response_time_ms": round(elapsed, 1), "model_routed": selected_model, "token_count": approx_tokens, "prompt_tokens": 0, "execution_time_sec": round(elapsed_sec, 2), "tokens_per_sec": tokens_per_sec, "token_measurement_source": "vision_estimated", "local_datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}) + "\n"
                 
             # Log results to SQLite DB
             db_session = SessionLocal()

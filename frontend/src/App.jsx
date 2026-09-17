@@ -13,6 +13,7 @@ import ModelHubModal from './components/ModelHubModal';
 import DeveloperModal from './components/DeveloperModal';
 import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
+import GoogleAuthGate, { getSavedGoogleUser } from './components/GoogleAuthGate';
 import { couldBePinned, isPhone } from './utils/device';
 import AuthModal from './components/AuthModal';
 import UpdateNotice from './components/UpdateNotice';
@@ -56,8 +57,8 @@ const LOCAL_USER = { id: 'local', username: 'You', email: 'local@smaran.ai', rol
 const needsModel = () => isNativeApp() && !loadLink()?.url && !standalone.isReady();
 
 const App = () => {
-  // Auth state — always the local device user; never gated.
-  const [currentUser, setCurrentUser] = useState(LOCAL_USER);
+  // Auth state — gated by GoogleAuthGate; initialized from persisted Google session
+  const [currentUser, setCurrentUser] = useState(() => getSavedGoogleUser() || LOCAL_USER);
 
   // Navigation & View state
   const [activeView, setActiveView] = useState('chat');
@@ -554,8 +555,9 @@ const App = () => {
   };
 
   return (
-    // Nothing behind the lock is rendered until the PIN is accepted, so the
-    // workspace is never briefly visible on the way in.
+    <GoogleAuthGate onUserChange={setCurrentUser}>
+    {/* Nothing behind the lock is rendered until the PIN is accepted, so the
+        workspace is never briefly visible on the way in. */}
     <PinLock>
     {/* The banner sits above the workspace rather than inside it: the frame
         below becomes a row on wide screens, and a notice dropped into that
@@ -773,6 +775,7 @@ const App = () => {
     </div>
     </div>
     </PinLock>
+    </GoogleAuthGate>
   );
 };
 
