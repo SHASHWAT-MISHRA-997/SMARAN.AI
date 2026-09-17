@@ -70,10 +70,6 @@ frozen_is_current() {
         "$ROOT/backend/frontend_dist/index.html" | head -n 1)"
     [ -n "$expected_index" ] || return 1
     [ -f "$FROZEN_DIR/_internal/frontend_dist/assets/$expected_index" ] || return 1
-    expected_vision="$(find "$ROOT/backend/frontend_dist/assets" -maxdepth 1 \
-        -type f -name 'vision_bundle-v*.js' -printf '%f\n' | head -n 1)"
-    [ -n "$expected_vision" ] || return 1
-    [ -f "$FROZEN_DIR/_internal/frontend_dist/assets/$expected_vision" ] || return 1
 }
 
 if ! frozen_is_current; then

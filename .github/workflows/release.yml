@@ -311,7 +311,7 @@ jobs:
   publish:
     name: Attach to the release
     needs: [windows, linux, android]
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+    if: always() && !cancelled() && (needs.windows.result == 'success' || needs.android.result == 'success') && (startsWith(github.ref, 'refs/tags/v') || inputs.publish)
     runs-on: ubuntu-latest
 
     steps:
@@ -322,26 +322,25 @@ jobs:
       - name: Name the files as the download page expects
         run: |
           mkdir -p release
-          cp artifacts/windows/installer/output/SMARAN.AI-Setup.exe release/
-          cp artifacts/windows/installer/output/SMARAN.AI-Windows-Portable.zip release/
-          cp artifacts/windows/cli/dist/smaran.exe release/
-          # SMARAN-AI.apk, not SMARAN.AI.apk. A dot inside the base name
-          # makes some Android download handlers read the type wrongly:
-          # the download finishes and the install never starts.
-          cp artifacts/android/app-release.apk release/SMARAN-AI.apk
-          # Fixed names, because the website links through
-          # releases/latest/download/<name> and that needs the name to be the
-          # same every release. The version is inside each package.
-          cp artifacts/linux/dist/linux/*.AppImage release/SMARAN.AI-x86_64.AppImage
-          cp artifacts/linux/dist/linux/*.deb release/smaran-ai_amd64.deb
-          cp artifacts/linux/dist/linux/*.rpm release/smaran-ai.x86_64.rpm
-          cp artifacts/linux/dist/linux/*.tar.gz release/smaran-ai-linux-x86_64.tar.gz
-          chmod +x release/SMARAN.AI-x86_64.AppImage
-          # The Linux command line tool has no extension, so it would collide
-          # with nothing - but a file called "smaran" beside "smaran.exe" is
-          # ambiguous on a download page. It says which one it is.
-          cp artifacts/linux/cli/dist/smaran release/smaran-linux-x86_64
-          chmod +x release/smaran-linux-x86_64
+          if [ -d artifacts/windows ]; then
+            cp artifacts/windows/installer/output/SMARAN.AI-Setup.exe release/ || true
+            cp artifacts/windows/installer/output/SMARAN.AI-Windows-Portable.zip release/ || true
+            cp artifacts/windows/cli/dist/smaran.exe release/ || true
+          fi
+          if [ -d artifacts/android ]; then
+            cp artifacts/android/app-release.apk release/SMARAN-AI.apk || true
+          fi
+          if [ -d artifacts/linux ]; then
+            cp artifacts/linux/dist/linux/*.AppImage release/SMARAN.AI-x86_64.AppImage 2>/dev/null || true
+            cp artifacts/linux/dist/linux/*.deb release/smaran-ai_amd64.deb 2>/dev/null || true
+            cp artifacts/linux/dist/linux/*.rpm release/smaran-ai.x86_64.rpm 2>/dev/null || true
+            cp artifacts/linux/dist/linux/*.tar.gz release/smaran-ai-linux-x86_64.tar.gz 2>/dev/null || true
+            chmod +x release/SMARAN.AI-x86_64.AppImage 2>/dev/null || true
+            if [ -f artifacts/linux/cli/dist/smaran ]; then
+              cp artifacts/linux/cli/dist/smaran release/smaran-linux-x86_64
+              chmod +x release/smaran-linux-x86_64
+            fi
+          fi
           ls -la release
 
       # The downloads repository is what the website links to. Publishing

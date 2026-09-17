@@ -1954,22 +1954,67 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                   </p>
                 </div>
 
-                <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center text-xl font-black text-white shadow-xl shadow-indigo-500/20 shrink-0">
-                      SM
-                    </div>
-                    <div>
-                      <h4 className="text-lg font-black text-zinc-900 dark:text-white">SHASHWAT MISHRA</h4>
-                      <p className="text-xs font-semibold text-indigo-500">Founder & AI Systems Architect</p>
+                <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-850 bg-zinc-50 dark:bg-zinc-900/70 space-y-5 shadow-xl relative overflow-hidden">
+                  {/* Glowing background aura */}
+                  <div className="absolute top-0 right-0 w-72 h-72 bg-gradient-to-bl from-indigo-500/10 via-purple-500/5 to-transparent rounded-full blur-3xl pointer-events-none" />
+
+                  {/* Header Profile Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800 relative z-10">
+                    <div className="flex items-center gap-4">
+                      <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center text-xl font-black text-white shadow-xl shadow-indigo-500/25 shrink-0 ring-2 ring-indigo-500/30">
+                        SM
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">SHASHWAT MISHRA</h4>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">Verified Architect</span>
+                        </div>
+                        <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400">Founder & AI Systems Architect | MTech – Automation & Robotics</p>
+                        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Parul University, Vadodara • AI, Robotics & Autonomous Systems</p>
+                      </div>
                     </div>
                   </div>
 
-                  <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                    SMARAN.AI is engineered as a local-first, privacy-respecting autonomous AI coding workstation designed to pair-program, scaffold full-stack web applications, control browser flows, and manage local MCP tools with zero data telemetry compromise.
-                  </p>
+                  {/* Comprehensive Professional Bio */}
+                  <div className="space-y-3 relative z-10 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300">
+                    <p>
+                      Results-driven <strong className="text-indigo-600 dark:text-indigo-400 font-bold">AI & Robotics Systems Architect</strong> with deep expertise in autonomous intelligent systems, physical-digital robotics control, physics-based simulations, and next-generation Large Language Model (LLM) orchestration.
+                    </p>
+                    <p>
+                      As the creator of <strong className="text-zinc-900 dark:text-white font-bold">SMARAN.AI</strong>, engineered a complete local-first, zero-telemetry autonomous coding workstation and agentic operating system. Proven track record across enterprise on-premise RAG pipelines at <em>GreyMatter Robotics</em>, multi-sensor Autonomous Mobile Robots (LiDAR, IMU, Depth) at <em>SVR Robotics</em>, real-time command systems (<em>SHARVAGYA.AI</em>), and 7-DOF Franka Panda robotic peg-in-hole simulation dashboards with real-time LLM telemetry.
+                    </p>
+                  </div>
 
-                  <div className="pt-2 flex flex-wrap items-center gap-3">
+                  {/* Skills & Badges Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 relative z-10">
+                    <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
+                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Generative & Agentic AI</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">RAG, Claude Code, LangChain</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
+                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Robotics & Simulation</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">ROS 2, PyBullet, MuJoCo</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
+                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vision & Telemetry</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">OpenCV, LiDAR & Depth SLAM</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
+                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Vector Stores & Data</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">ChromaDB, FAISS, PostgreSQL</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
+                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Certifications</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">Microsoft GenAI, Infosys ROS2</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-white/70 dark:bg-zinc-950/60">
+                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Local Workstations</div>
+                      <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 mt-0.5">Docker, FastAPI, Electron/Vite</div>
+                    </div>
+                  </div>
+
+                  {/* Connect / Portfolio Links */}
+                  <div className="pt-2 flex flex-wrap items-center gap-3 relative z-10">
                     <a
                       href="https://shashwatmishra-portfolio.netlify.app/"
                       target="_blank"
@@ -1978,7 +2023,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                     >
                       <span className="dev-link-sheen" aria-hidden="true" />
                       <Globe className="w-4 h-4 transition-transform duration-500 group-hover:rotate-[20deg]" />
-                      Portfolio
+                      Official Portfolio
                       <ExternalLink className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                     </a>
                     <a
@@ -1988,13 +2033,23 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                       className="dev-link dev-link-linkedin group backdrop-blur-md"
                     >
                       <span className="dev-link-sheen" aria-hidden="true" />
-                      {/* The actual mark, not the word. A link called LinkedIn
-                          with nothing of LinkedIn on it is just a word. */}
                       <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
                         <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05a3.74 3.74 0 0 1 3.37-1.85c3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13Zm1.78 13.02H3.55V9h3.57v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.2 0 22.22 0Z"/>
                       </svg>
-                      LinkedIn
+                      LinkedIn Profile
                       <ExternalLink className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                    </a>
+                    <a
+                      href="https://github.com/SHASHWAT-MISHRA-997"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black bg-zinc-900 text-white hover:bg-zinc-800 border border-zinc-700 transition shadow-sm"
+                    >
+                      <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"/>
+                      </svg>
+                      GitHub
+                      <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   </div>
                 </div>
