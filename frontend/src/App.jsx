@@ -88,10 +88,10 @@ const App = () => {
   const [activeSessionId, setActiveSessionId] = useState(null);
   const sessionRetryRef = useRef(null);
   const sessionsMountedRef = useRef(true);
-  const [activeCollections, setActiveCollections] = useState([]);
-  const [selectedModel, setSelectedModel] = useState(
-    () => localStorage.getItem('sm_selected_model') || 'auto',
-  );
+  const [selectedModel, setSelectedModel] = useState(() => {
+    const saved = localStorage.getItem('sm_selected_model');
+    return (saved && saved !== 'auto') ? saved : 'qwen2.5-coder:7b';
+  });
   const [turboMode] = useState(false);
   const [, setSidebarExpanded] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(() => {

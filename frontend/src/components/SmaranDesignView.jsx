@@ -163,7 +163,19 @@ export const DESIGN_TEMPLATES = [
  * never have worked. Local models come from the Ollama engine, cloud models
  * from the providers that actually have a key saved.
  */
-const AUTO_MODEL = { id: 'auto', name: 'Auto (Smart Route)', desc: 'Let SMARAN pick from what is available' };
+/* Curated models per cloud provider when user hasn't probed live models yet */
+const CURATED_CLOUD_MODELS = {
+  gemini: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+  openrouter: ['openrouter/auto', 'deepseek/deepseek-r1', 'anthropic/claude-3.7-sonnet'],
+  openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
+  anthropic: ['claude-3-7-sonnet-20250219', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  cerebras: ['llama3.1-8b', 'llama3.1-70b'],
+  together: ['meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'],
+  mistral: ['mistral-large-latest', 'codestral-latest'],
+  nvidia: ['meta/llama-3.3-70b-instruct'],
+};
 
 /* Embedding models answer nothing; offering one as a design engine would give
    a picker entry that always fails. */
@@ -180,8 +192,9 @@ function cloudKeyFor(provider) {
 }
 
 async function discoverModels() {
-  const models = [AUTO_MODEL];
+  const models = [];
 
+  // 1. Installed Local Engine (Ollama / vLLM)
   try {
     const res = await fetchWithAuth(`${API_BASE}/api/models/engine`);
     if (res.ok) {
@@ -189,25 +202,64 @@ async function discoverModels() {
       (engine.models || [])
         .filter((id) => !EMBEDDING_HINTS.some((hint) => id.toLowerCase().includes(hint)))
         .forEach((id) => models.push({
-          id, name: id, desc: 'Installed locally, runs on this machine', local: true,
+          id,
+          name: id,
+          desc: 'Installed locally · served by Ollama',
+          local: true,
         }));
     }
-  } catch { /* no local engine; the cloud entries below may still apply */ }
+  } catch { /* no local engine */ }
 
+  // 2. Downloaded Models from Model Matrix
+  try {
+    const statusRes = await fetchWithAuth(`${API_BASE}/api/models/local-status`);
+    if (statusRes.ok) {
+      const statusData = await statusRes.json();
+      (statusData.downloaded_models || []).forEach((m) => {
+        if (!models.some((x) => x.id === m.id)) {
+          models.push({
+            id: m.id,
+            name: m.name || m.id,
+            desc: `Downloaded weights · ${m.publisher || 'Model Matrix'}`,
+            local: true,
+          });
+        }
+      });
+    }
+  } catch { /* ignore local-status error */ }
+
+  // 3. Configured Cloud API Models
   try {
     const keys = JSON.parse(localStorage.getItem('sm_cloud_api_keys') || '{}');
     const byProvider = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}');
-    Object.entries(byProvider).forEach(([provider, list]) => {
-      if (!keys[provider]) return; // no key saved, so it cannot be used
-      (Array.isArray(list) ? list : []).slice(0, 8).forEach((model) => models.push({
-        id: `cloud:${provider}:${model}`,
-        name: model,
-        desc: `${provider} · uses your saved key`,
-        provider,
-        model,
-      }));
+
+    Object.entries(keys).forEach(([provider, keyVal]) => {
+      if (!keyVal || !keyVal.trim()) return; // No key saved for this provider
+      const providerList = (Array.isArray(byProvider[provider]) && byProvider[provider].length > 0)
+        ? byProvider[provider]
+        : (CURATED_CLOUD_MODELS[provider] || []);
+
+      providerList.slice(0, 8).forEach((model) => {
+        models.push({
+          id: `cloud:${provider}:${model}`,
+          name: `${model} (${provider.toUpperCase()})`,
+          desc: `Cloud API · ${provider.toUpperCase()}`,
+          provider,
+          model,
+        });
+      });
     });
   } catch { /* nothing cached yet */ }
+
+  // Fallback if absolutely nothing is found
+  if (models.length === 0) {
+    models.push({
+      id: 'qwen2.5-coder:7b',
+      name: 'qwen2.5-coder:7b',
+      desc: 'Local model',
+      local: true,
+    });
+  }
 
   return models;
 }
@@ -218,8 +270,8 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
   const [prompt, setPrompt] = useState('');
   const [selectedSystem, setSelectedSystem] = useState(DESIGN_SYSTEMS[0]);
   const [isSystemOpen, setIsSystemOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('auto');
-  const [models, setModels] = useState([AUTO_MODEL]);
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('sm_selected_model') || '');
+  const [models, setModels] = useState([]);
   const [isModelOpen, setIsModelOpen] = useState(false);
   const [codeMode, setCodeMode] = useState(false);
   const [activeTab, setActiveTab] = useState('templates'); // 'templates' | 'systems' | 'projects'
@@ -357,12 +409,12 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
           collections: [],
           ...(chosenModel?.provider
             ? {
-              model: 'auto',
+              model: chosenModel.model,
               cloud_provider: chosenModel.provider,
               cloud_model: chosenModel.model,
               cloud_api_key: cloudKeyFor(chosenModel.provider),
             }
-            : { model: selectedModel || 'auto' }),
+            : { model: selectedModel || 'qwen2.5-coder:7b' }),
         }),
         signal: controller.signal,
       });

@@ -2698,8 +2698,7 @@ const ChatArea = ({
        is a setting; where the answer came from is a fact, and once there is a
        fact it is the one shown. */
     if (modelId === 'auto') {
-      const where = sourceLabel(lastSource);
-      return where ? `${where} · Auto Router` : 'Auto Router · not used yet';
+      return 'LOCAL · Qwen 2.5 Coder 7B';
     }
     if (modelId.startsWith('cloud:')) {
       const [, provider, ...parts] = modelId.split(':');
@@ -2708,7 +2707,8 @@ const ChatArea = ({
     const direct = displayMap[modelId];
     if (direct) return `LOCAL · ${direct}`;
     const lowered = modelId.toLowerCase();
-    if (lowered.includes('qwen3') && lowered.includes('4b')) return 'LOCAL · Qwen 3 4B AWQ (Quantized)';
+    if (lowered.includes('kimi')) return 'LOCAL · Kimi VL A3B (Vision-Language)';
+    if (lowered.includes('qwen3') && lowered.includes('4b')) return 'LOCAL · Qwen 3 4B AWQ (Multimodal)';
     if (lowered.includes('qwen3') && lowered.includes('8b')) return 'LOCAL · Qwen 3 8B (High Precision Reasoning)';
     if (lowered.includes('nemotron')) return 'LOCAL · Nemotron-3 Nano 4B (NVIDIA Instruct)';
     if (lowered.includes('phi-3.5') || lowered.includes('phi3.5')) return 'LOCAL · Phi-3.5 Vision 4.2B (Microsoft Vision)';
@@ -2718,15 +2718,12 @@ const ChatArea = ({
   };
 
   useEffect(() => {
-    setActiveModelDisplay(resolveDisplayName(selectedModel));
+    setActiveModelDisplay(resolveDisplayName(selectedModel || 'qwen2.5-coder:7b'));
   }, [selectedModel]);
 
   useEffect(() => {
     if (lastUsedModel && lastUsedModel !== selectedModel) {
       setActiveModelDisplay(resolveDisplayName(lastUsedModel));
-    } else if (selectedModel === 'auto') {
-      // The source arrives after the model on the auto route.
-      setActiveModelDisplay(resolveDisplayName('auto'));
     }
   }, [lastUsedModel, lastSource]);
 
@@ -2736,7 +2733,7 @@ const ChatArea = ({
     let timer = null;
     const checkStatus = async () => {
       try {
-        const params = new URLSearchParams({ model: selectedModel || 'auto' });
+        const params = new URLSearchParams({ model: selectedModel || 'qwen2.5-coder:7b' });
         const res = await fetch(`${API_BASE}/api/model/status?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
         });

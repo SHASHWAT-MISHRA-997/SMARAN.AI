@@ -68,7 +68,7 @@ const ResourceBar = ({ percent, colour, label }) => {
   );
 };
 
-const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange, selectedModel = "auto", sidebarPosition = "left", onSidebarPositionChange, performancePosition = "right", onPerformancePositionChange, onOpenConnections, onOpenModels, onOpenAnalytics }) => {
+const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange, selectedModel = "", sidebarPosition = "left", onSidebarPositionChange, performancePosition = "right", onPerformancePositionChange, onOpenConnections, onOpenModels, onOpenAnalytics }) => {
   const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState(initialTab || "general");
   const [settingsSearch, setSettingsSearch] = useState("");
@@ -1345,22 +1345,53 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                     </div>
                   ))}
 
-                  {/* Weights downloaded through Model Hub. Ollama does not know
-                      about these, and this list only ever asked Ollama - so a
-                      model the user had just downloaded appeared nowhere. */}
-                  {(localState?.downloaded_models || []).map((m) => (
-                    <div key={m.id} className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
-                      <div className="min-w-0">
-                        <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate">{m.name}</span>
-                        <span className="block text-[10px] text-zinc-500">
-                          Downloaded weights{m.publisher ? ` · ${m.publisher}` : ''} · no runtime serving it yet
-                        </span>
+                  {/* Weights downloaded through Model Hub. */}
+                  {(localState?.downloaded_models || []).map((m) => {
+                    const modelKey = m.id || m.name;
+                    const isSelected = selectedModel === modelKey || selectedModel === m.name;
+                    return (
+                      <div key={m.id} className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
+                        isSelected
+                          ? 'border-emerald-500/60 bg-emerald-500/10 shadow-sm ring-1 ring-emerald-500/30'
+                          : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60'
+                      }`}>
+                        <div className="min-w-0 pr-3">
+                          <div className="flex items-center gap-2">
+                            <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate">{m.name}</span>
+                            {isSelected && (
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-500 text-white dark:bg-emerald-600 shrink-0">
+                                ACTIVE
+                              </span>
+                            )}
+                          </div>
+                          <span className="block text-[10px] text-zinc-500">
+                            Downloaded local model{m.publisher ? ` · ${m.publisher}` : ''} · Available for chat
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-600 dark:text-sky-400">
+                            Downloaded
+                          </span>
+                          {!isSelected ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onModelChange?.(modelKey);
+                                onClose?.();
+                              }}
+                              className="px-3 py-1 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition shadow-xs cursor-pointer"
+                            >
+                              Use in chat
+                            </button>
+                          ) : (
+                            <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                              ✓ In use
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-600 dark:text-sky-400 shrink-0">
-                        Downloaded
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   {/* On disk but unreadable. Saying nothing left gigabytes
                       invisible with no explanation of why the model could not
@@ -1380,20 +1411,61 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                     </div>
                   ))}
 
-                  {/* The panel says "& Cloud API connectors" and listed none. */}
-                  {(cloudProviders || []).map((p) => (
-                    <div key={p} className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60">
-                      <div className="min-w-0">
-                        <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate capitalize">{p}</span>
-                        <span className="block text-[10px] text-zinc-500">
-                          Cloud provider · key saved, not verified until a request is made
-                        </span>
+                  {/* The panel says "& Cloud API connectors" and exposes configured providers with their active models. */}
+                  {(cloudProviders || []).map((p) => {
+                    const providerLower = String(p).toLowerCase();
+                    const curatedModels = {
+                      gemini: ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash'],
+                      groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+                      openai: ['gpt-4o', 'gpt-4o-mini'],
+                      anthropic: ['claude-3-5-sonnet-20241022'],
+                      claude: ['claude-3-5-sonnet-20241022'],
+                      openrouter: ['openrouter/auto', 'deepseek/deepseek-chat'],
+                      deepseek: ['deepseek-chat', 'deepseek-coder'],
+                      mistral: ['mistral-large-latest', 'mistral-small-latest'],
+                      cerebras: ['llama3.1-70b', 'llama3.1-8b'],
+                      together: ['meta-llama/Llama-3-70b-chat-hf'],
+                    }[providerLower] || [p];
+
+                    return (
+                      <div key={p} className="p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="min-w-0">
+                            <span className="block text-xs font-extrabold text-zinc-900 dark:text-white truncate capitalize">{p}</span>
+                            <span className="block text-[10px] text-zinc-500">
+                              Cloud provider · API key active &amp; ready
+                            </span>
+                          </div>
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-600 dark:text-violet-400 shrink-0">
+                            Key active
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {curatedModels.map((cm) => {
+                            const isSelected = selectedModel === cm;
+                            return (
+                              <button
+                                key={cm}
+                                type="button"
+                                onClick={() => {
+                                  onModelChange?.(cm);
+                                  onClose?.();
+                                }}
+                                className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
+                                  isSelected
+                                    ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-500 font-bold'
+                                    : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:border-indigo-500 text-zinc-700 dark:text-zinc-200'
+                                }`}
+                              >
+                                <span>{cm}</span>
+                                {isSelected ? <span className="text-[10px] text-emerald-400">✓</span> : <span className="text-[10px] text-zinc-400">Use</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-violet-500/15 text-violet-600 dark:text-violet-400 shrink-0">
-                        Key saved
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

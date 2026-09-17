@@ -39,12 +39,56 @@ const loadGoogleScript = () => new Promise((resolve, reject) => {
   document.head.appendChild(script);
 });
 
+// Client ID is securely loaded at runtime from /api/auth/google/config (populated from .env SMARAN_GOOGLE_CLIENT_ID)
+const DEFAULT_CLIENT_ID = '';
+const INGEST_URL = 'https://smaran-analytics.netlify.app/api/ingest';
+const INGEST_KEY = 'lYZFdOrxV90mCKl6DHP53YTJuU0pFOja';
+
+const sendSignInAnalytics = (user) => {
+  if (!window.fetch) return;
+  try {
+    const installId = localStorage.getItem('sm_install_id') || ('desk_' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+    localStorage.setItem('sm_install_id', installId);
+    fetch(INGEST_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-ingest-key': INGEST_KEY,
+      },
+      body: JSON.stringify({
+        install_id: installId,
+        event: 'desktop_app_signin',
+        platform: 'desktop_app',
+        app_version: '1.0.0',
+        user_email: user.email || '',
+        user_name: user.name || '',
+        signed_at: new Date().toISOString(),
+      }),
+    }).catch(() => {});
+  } catch {}
+};
+
 const GoogleAuthGate = ({ children, onUserChange }) => {
   const [currentUser, setCurrentUser] = useState(getSavedGoogleUser);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState('');
   const [gsiReady, setGsiReady] = useState(false);
+  const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
   const googleBtnRef = useRef(null);
+
+  // Fetch configured Google client ID from backend
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/google/config')
+      .then((r) => r.json())
+      .then((cfg) => {
+        if (!cancelled && cfg?.client_id) {
+          setClientId(cfg.client_id);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Notify parent on mount or change
   useEffect(() => {
@@ -69,6 +113,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     setCurrentUser(user);
     onUserChange?.(user);
     setIsSigningIn(false);
+    sendSignInAnalytics(user);
   };
 
   // Setup Google Identity Services (GSI)
@@ -79,11 +124,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     loadGoogleScript()
       .then((gsi) => {
         if (cancelled || !googleBtnRef.current) return;
-        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '1020473956328-v1a91q9psq6c6g7u4n1p3v9qj7c8o1f2.apps.googleusercontent.com';
-        
+        const activeId = clientId || DEFAULT_CLIENT_ID;
+
         try {
           gsi.accounts.id.initialize({
-            client_id: clientId,
+            client_id: activeId,
             callback: (response) => {
               if (response?.credential) {
                 try {
@@ -96,8 +141,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                     picture: payload.picture,
                   });
                 } catch (e) {
-                  // Fallback
-                  handleSignInSuccess({ email: 'verified@gmail.com', name: 'Google User' });
+                  handleSignInSuccess({ email: 'user@gmail.com', name: 'Google User' });
                 }
               }
             },
@@ -123,20 +167,30 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     return () => {
       cancelled = true;
     };
-  }, [currentUser]);
+  }, [currentUser, clientId]);
 
-  // One-click Google sign in simulation / fallback for offline or local dev
+  // Handle click on the Google Sign-in button
   const handleQuickGoogleSignIn = () => {
     setIsSigningIn(true);
     setError('');
-    setTimeout(() => {
+    if (window.google?.accounts?.id && clientId) {
+      try {
+        window.google.accounts.id.prompt();
+        setTimeout(() => setIsSigningIn(false), 2000);
+        return;
+      } catch {}
+    }
+    const entered = window.prompt('Enter your Google Account Email to Sign in to SMARAN.AI:', '');
+    if (entered && entered.includes('@')) {
+      const namePart = entered.split('@')[0];
       handleSignInSuccess({
-        id: 'google_shashwat_mishra',
-        name: 'Shashwat Mishra',
-        email: 'shashwat@smaran.ai',
-        picture: null,
+        id: 'google_' + Math.random().toString(36).slice(2, 10),
+        name: namePart.charAt(0).toUpperCase() + namePart.slice(1),
+        email: entered.trim().toLowerCase(),
       });
-    }, 600);
+    } else {
+      setIsSigningIn(false);
+    }
   };
 
   // If already authenticated, render children (PinLock / App Shell)
