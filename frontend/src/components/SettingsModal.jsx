@@ -1911,7 +1911,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                         </div>
                         <div>
                           <p className="text-xs font-black text-zinc-900 dark:text-white">VS Code Codex Extension</p>
-                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">VS Marketplace / Cursor / Windsurf</p>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Visual Studio Marketplace</p>
                         </div>
                       </div>
                       <a

@@ -308,19 +308,23 @@ const App = () => {
      pressing Generate still jumped to the chat screen even though Design
      Studio itself no longer navigates. Chat callers keep the old behaviour by
      default. */
-  async function handleCreateSession({ switchView = true } = {}) {
+  async function handleCreateSession({ switchView = true, section = activeSection } = {}) {
+    const isIsolated = switchView === false;
+    const sessionSection = section || activeSection;
     if (noBackendHere()) {
       const created = {
         id: `local-${Date.now()}`,
-        title: activeSection === 'code' ? 'New Coding Task' : 'New Conversation',
-        section: activeSection,
+        title: sessionSection === 'code' ? 'New Coding Task' : (sessionSection === 'design' ? 'Design Session' : 'New Conversation'),
+        section: sessionSection,
         created_at: new Date().toISOString(),
       };
       const all = [created, ...localChat.loadSessions()].slice(0, 60);
       localChat.saveSessions(all);
-      setSessions(all.filter(s => !s.section || s.section === activeSection));
-      setActiveSessionId(created.id);
-      if (switchView) setActiveView('chat');
+      if (!isIsolated) {
+        setSessions(all.filter(s => !s.section || s.section === activeSection));
+        setActiveSessionId(created.id);
+        setActiveView('chat');
+      }
       return created;
     }
     try {
@@ -328,15 +332,17 @@ const App = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          section: activeSection,
-          title: activeSection === 'code' ? 'New Coding Task' : 'New Conversation',
+          section: sessionSection,
+          title: sessionSection === 'code' ? 'New Coding Task' : (sessionSection === 'design' ? 'Design Session' : 'New Conversation'),
         }),
       });
       if (res.ok) {
         const data = await res.json();
-        setSessions((prev) => [data, ...(Array.isArray(prev) ? prev : [])]);
-        setActiveSessionId(data.id);
-        if (switchView) setActiveView('chat');
+        if (!isIsolated) {
+          setSessions((prev) => [data, ...(Array.isArray(prev) ? prev : [])]);
+          setActiveSessionId(data.id);
+          setActiveView('chat');
+        }
         return data;
       }
     } catch (err) {
@@ -344,13 +350,15 @@ const App = () => {
     }
     const localSession = {
       id: `local-${Date.now()}`,
-      title: activeSection === 'code' ? 'New Coding Task' : 'New Conversation',
-      section: activeSection,
+      title: sessionSection === 'code' ? 'New Coding Task' : (sessionSection === 'design' ? 'Design Session' : 'New Conversation'),
+      section: sessionSection,
       created_at: new Date().toISOString(),
     };
-    setSessions((prev) => [localSession, ...(Array.isArray(prev) ? prev : [])]);
-    setActiveSessionId(localSession.id);
-    setActiveView('chat');
+    if (!isIsolated) {
+      setSessions((prev) => [localSession, ...(Array.isArray(prev) ? prev : [])]);
+      setActiveSessionId(localSession.id);
+      setActiveView('chat');
+    }
     return localSession;
   }
 

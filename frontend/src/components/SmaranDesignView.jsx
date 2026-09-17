@@ -300,9 +300,9 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      // Stay on this screen: the result renders here, so asking for a
-      // session must not drag the view to the chat.
-      const session = await onEnsureSession?.({ switchView: false });
+      // Stay on this screen: the result renders here in Design Studio,
+      // so asking for a session must not contaminate chat/code or switch views.
+      const session = await onEnsureSession?.({ switchView: false, section: 'design' });
       controller.signal.throwIfAborted();
       /* The design system is described, not just named.
          Only `System=<name>` used to be sent, while the palette, the fonts and

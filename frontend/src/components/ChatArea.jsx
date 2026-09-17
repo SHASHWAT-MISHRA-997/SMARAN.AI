@@ -1239,6 +1239,8 @@ const ChatArea = ({
     const handlePromptEvent = (e) => {
       const p = e.detail?.prompt;
       if (!p) return;
+      localStorage.removeItem('sm_pending_prompt');
+      localStorage.removeItem('sm_pending_autosend');
       setInput(p);
       window.setTimeout(() => {
         handleSendRef.current?.(null, p);
@@ -3611,8 +3613,8 @@ const ChatArea = ({
      *
      * Typing has the composer to show it was not sent. Speaking has
      * nothing, so it is said out loud. */
-    if (!userPrompt || streaming) {
-      if (userPrompt && streaming && (isVoicePrompt || isVoiceModeOpenRef.current)) {
+    if (!userPrompt || streaming || streamingRef.current) {
+      if (userPrompt && (streaming || streamingRef.current) && (isVoicePrompt || isVoiceModeOpenRef.current)) {
         emitVoiceReply(selectedLanguage === 'hi'
           ? (assistantGender() === 'female' ? 'मैं अभी पिछला जवाब दे रही हूँ। एक पल रुकिए और फिर कहिए।' : 'मैं अभी पिछला जवाब दे रहा हूँ। एक पल रुकिए और फिर कहिए।')
           : 'I am still answering the last one. Give me a moment, then say it again.');
@@ -4020,10 +4022,13 @@ const ChatArea = ({
       }
       const finalResult = fullResponseText.trim() || displayedResponse.trim();
       incomingQueueRef.current = [];
+      const fallbackNotice = selectedLanguage === 'hi'
+        ? "मॉडल से कोई उत्तर प्राप्त नहीं हुआ। कृपया पुनः प्रयास करें या मॉडल की स्थिति जांचें।"
+        : "No response was returned by the model. Please check the model status and retry.";
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === assistantMessage.id
-            ? { ...msg, content: finalResult || msg.content, isLoading: false }
+            ? { ...msg, content: finalResult || msg.content || fallbackNotice, isLoading: false }
             : msg
         )
       );
