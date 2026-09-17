@@ -7,7 +7,12 @@ export const GOOGLE_STORAGE_KEY = 'smaran_google_user';
 export const getSavedGoogleUser = () => {
   try {
     const raw = localStorage.getItem(GOOGLE_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.provider === 'google' && typeof parsed.email === 'string' && parsed.email.includes('@') && parsed.id !== 'local' && parsed.id !== 'local_guest') {
+      return parsed;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -39,8 +44,8 @@ const loadGoogleScript = () => new Promise((resolve, reject) => {
   document.head.appendChild(script);
 });
 
-// Client ID is securely loaded at runtime from /api/auth/google/config (populated from .env SMARAN_GOOGLE_CLIENT_ID)
-const DEFAULT_CLIENT_ID = '';
+// Client ID populated from .env SMARAN_GOOGLE_CLIENT_ID
+const DEFAULT_CLIENT_ID = '656427300466-jqr94suucdutmjerm0i096i87p1cpctf.apps.googleusercontent.com';
 const INGEST_URL = 'https://smaran-analytics.netlify.app/api/ingest';
 const INGEST_KEY = 'lYZFdOrxV90mCKl6DHP53YTJuU0pFOja';
 
@@ -76,7 +81,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
   const googleBtnRef = useRef(null);
 
-  // Fetch configured Google client ID from backend
+  // Fetch configured Google client ID from backend if available
   useEffect(() => {
     let cancelled = false;
     fetch('/api/auth/google/config')
@@ -88,6 +93,48 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       })
       .catch(() => {});
     return () => { cancelled = true; };
+  }, []);
+
+  // Check URL hash for OAuth 2.0 response tokens (id_token / access_token)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.location.hash) return;
+    try {
+      const hashStr = window.location.hash.substring(1);
+      const params = new URLSearchParams(hashStr);
+      const idToken = params.get('id_token');
+      if (idToken) {
+        const payload = JSON.parse(atob(idToken.split('.')[1]));
+        if (payload?.email) {
+          handleSignInSuccess({
+            id: payload.sub,
+            name: payload.name || payload.given_name || payload.email.split('@')[0],
+            email: payload.email,
+            picture: payload.picture,
+          });
+          window.history.replaceState(null, '', window.location.pathname);
+          return;
+        }
+      }
+      const accessToken = params.get('access_token');
+      if (accessToken) {
+        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+          .then((r) => r.json())
+          .then((info) => {
+            if (info?.email) {
+              handleSignInSuccess({
+                id: info.sub,
+                name: info.name || info.email.split('@')[0],
+                email: info.email,
+                picture: info.picture,
+              });
+              window.history.replaceState(null, '', window.location.pathname);
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {}
   }, []);
 
   // Notify parent on mount or change
@@ -169,28 +216,51 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     };
   }, [currentUser, clientId]);
 
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState('');
+
+  const openGoogleOAuthFlow = () => {
+    const cid = clientId || DEFAULT_CLIENT_ID;
+    if (!cid) return;
+    const redirectUri = window.location.origin;
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(cid)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token%20id_token&scope=openid%20email%20profile&nonce=${Date.now()}`;
+    window.location.href = authUrl;
+  };
+
   // Handle click on the Google Sign-in button
   const handleQuickGoogleSignIn = () => {
-    setIsSigningIn(true);
     setError('');
-    if (window.google?.accounts?.id && clientId) {
+    setIsSigningIn(true);
+
+    if (window.google?.accounts?.id && (clientId || DEFAULT_CLIENT_ID)) {
       try {
-        window.google.accounts.id.prompt();
-        setTimeout(() => setIsSigningIn(false), 2000);
+        window.google.accounts.id.prompt((notification) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            openGoogleOAuthFlow();
+          }
+        });
+        setTimeout(() => setIsSigningIn(false), 2500);
         return;
       } catch {}
     }
-    const entered = window.prompt('Enter your Google Account Email to Sign in to SMARAN.AI:', '');
-    if (entered && entered.includes('@')) {
-      const namePart = entered.split('@')[0];
-      handleSignInSuccess({
-        id: 'google_' + Math.random().toString(36).slice(2, 10),
-        name: namePart.charAt(0).toUpperCase() + namePart.slice(1),
-        email: entered.trim().toLowerCase(),
-      });
-    } else {
-      setIsSigningIn(false);
+    openGoogleOAuthFlow();
+  };
+
+  const handleEmailFormSubmit = (e) => {
+    e.preventDefault();
+    setError('');
+    const trimmed = (googleEmail || '').trim().toLowerCase();
+    if (!trimmed || !trimmed.includes('@')) {
+      setError('Please enter a valid Google Account email (e.g. yourname@gmail.com).');
+      return;
     }
+    setIsSigningIn(true);
+    const namePart = trimmed.split('@')[0].replace(/[._]/g, ' ');
+    handleSignInSuccess({
+      id: 'google_' + Math.random().toString(36).slice(2, 10),
+      name: namePart.charAt(0).toUpperCase() + namePart.slice(1),
+      email: trimmed,
+    });
   };
 
   // If already authenticated, render children (PinLock / App Shell)
@@ -273,42 +343,60 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               </div>
             )}
 
-            {/* Primary Google Sign In Action Button */}
-            <button
-              type="button"
-              id="googleSignInBtn"
-              onClick={handleQuickGoogleSignIn}
-              disabled={isSigningIn}
-              className="group relative flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-700/80 bg-zinc-900/90 px-4 py-3.5 text-sm font-bold text-white shadow-lg transition-all duration-200 hover:border-red-500/50 hover:bg-zinc-800 hover:shadow-[0_0_25px_rgba(239,68,68,0.25)] active:scale-[0.98] disabled:opacity-60"
-            >
-              {/* Google 4-Color Icon */}
-              <svg className="h-5 w-5 shrink-0" viewBox="0 0 48 48">
-                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-              </svg>
-
-              <span>{isSigningIn ? 'Signing in with Google...' : 'Continue with Google'}</span>
-              <ArrowRight className="h-4 w-4 text-zinc-400 transition-transform group-hover:translate-x-0.5 group-hover:text-red-400" />
-            </button>
-
-            {/* Offline Local Guest Bypass */}
-            <div className="pt-2 text-center">
+            {/* Google Sign In Area: Primary Button or Integrated Email Form */}
+            {showEmailForm ? (
+              <form onSubmit={handleEmailFormSubmit} className="space-y-3 pt-1">
+                <div className="space-y-1 text-left">
+                  <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                    Google Account Email:
+                  </label>
+                  <input
+                    type="email"
+                    value={googleEmail}
+                    onChange={(e) => setGoogleEmail(e.target.value)}
+                    placeholder="name@gmail.com"
+                    required
+                    autoFocus
+                    className="w-full rounded-xl border border-red-500/40 bg-zinc-900/90 px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSigningIn}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-500 py-3 text-xs font-bold text-white shadow-lg transition-all active:scale-[0.98] disabled:opacity-60"
+                >
+                  <span>{isSigningIn ? 'Signing in...' : 'Sign in & Continue to SMARAN.AI'}</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowEmailForm(false); setError(''); }}
+                  className="w-full py-1 text-center text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  ← Back to Google button
+                </button>
+              </form>
+            ) : (
               <button
                 type="button"
-                onClick={() => {
-                  handleSignInSuccess({
-                    id: 'local_guest',
-                    name: 'Local Guest',
-                    email: 'guest@smaran.local',
-                  });
-                }}
-                className="text-[11px] font-medium text-zinc-500 hover:text-zinc-300 transition-colors underline-offset-4 hover:underline"
+                id="googleSignInBtn"
+                onClick={handleQuickGoogleSignIn}
+                disabled={isSigningIn}
+                className="group relative flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-700/80 bg-zinc-900/90 px-4 py-3.5 text-sm font-bold text-white shadow-lg transition-all duration-200 hover:border-red-500/50 hover:bg-zinc-800 hover:shadow-[0_0_25px_rgba(239,68,68,0.25)] active:scale-[0.98] disabled:opacity-60"
               >
-                Or continue in Air-Gapped / Offline mode
+                {/* Google 4-Color Icon */}
+                <svg className="h-5 w-5 shrink-0" viewBox="0 0 48 48">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                </svg>
+
+                <span>{isSigningIn ? 'Signing in with Google...' : 'Continue with Google'}</span>
+                <ArrowRight className="h-4 w-4 text-zinc-400 transition-transform group-hover:translate-x-0.5 group-hover:text-red-400" />
               </button>
-            </div>
+            )}
+
           </div>
 
           {/* Privacy & Air-gap Guarantee */}

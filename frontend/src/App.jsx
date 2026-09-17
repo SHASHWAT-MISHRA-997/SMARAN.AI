@@ -38,9 +38,6 @@ const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'unknown';
 const noBackendHere = () => isNativeApp() && !loadLink()?.url;
 
 
-// SMARAN.AI runs as a free, offline, single-user desktop app. There is no
-// login, sign-up, Google auth, or legal gate — the local device is the user.
-const LOCAL_USER = { id: 'local', username: 'You', email: 'local@smaran.ai', role: 'user' };
 
 /* The phone app needs a model, not a computer.
  *
@@ -57,8 +54,8 @@ const LOCAL_USER = { id: 'local', username: 'You', email: 'local@smaran.ai', rol
 const needsModel = () => isNativeApp() && !loadLink()?.url && !standalone.isReady();
 
 const App = () => {
-  // Auth state — gated by GoogleAuthGate; initialized from persisted Google session
-  const [currentUser, setCurrentUser] = useState(() => getSavedGoogleUser() || LOCAL_USER);
+  // Strict Auth state — gated strictly by GoogleAuthGate; must sign in with Google
+  const [currentUser, setCurrentUser] = useState(() => getSavedGoogleUser());
 
   // Navigation & View state
   const [activeView, setActiveView] = useState('chat');
@@ -87,6 +84,7 @@ const App = () => {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const sessionRetryRef = useRef(null);
+  const sessionsMountedRef = useRef(true);
   const [activeCollections, setActiveCollections] = useState([]);
   const [selectedModel, setSelectedModel] = useState(() => {
     const saved = localStorage.getItem('sm_selected_model');
@@ -158,18 +156,19 @@ const App = () => {
     };
   }, []);
 
-  // Refine the local user from the backend when reachable, but never gate or
-  // log the user out — a backend hiccup must never show a login/legal screen.
+  // Refine user from the backend only if already authenticated via Google
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        const saved = getSavedGoogleUser();
+        if (!saved) return;
         const user = await getCurrentUser();
         if (!cancelled && user && (user.id || user.email || user.username)) {
-          setCurrentUser({ ...LOCAL_USER, ...user });
+          setCurrentUser((prev) => ({ ...(prev || saved), ...user }));
         }
       } catch {
-        /* stay on the local user */
+        /* keep current authenticated user */
       }
     })();
     return () => { cancelled = true; };
