@@ -3897,17 +3897,30 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         chat_req.collections = []
 
     # Validate session
+    req_section = getattr(chat_req, "section", "chat") or "chat"
     session = db.query(ChatSession).filter(ChatSession.id == chat_req.session_id).first()
     if not session:
         # Create dynamically if doesn't exist
-        session = ChatSession(id=chat_req.session_id, user_id=current_user.id, title=chat_req.prompt[:30])
+        session = ChatSession(
+            id=chat_req.session_id,
+            user_id=current_user.id,
+            title=chat_req.prompt[:30],
+            section=req_section
+        )
         db.add(session)
         db.commit()
         db.refresh(session)
-    elif session.user_id != current_user.id:
-        session.user_id = current_user.id
-        db.commit()
-        db.refresh(session)
+    else:
+        session_changed = False
+        if session.user_id != current_user.id:
+            session.user_id = current_user.id
+            session_changed = True
+        if getattr(session, "section", None) != req_section:
+            session.section = req_section
+            session_changed = True
+        if session_changed:
+            db.commit()
+            db.refresh(session)
 
     # Translation support: default English, detect user language, translate if needed
     target_language = getattr(chat_req, "target_language", None) or "en"
@@ -4041,18 +4054,47 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         if _is_reasoning_model else ""
     )
 
-    system_prompt = (
-        "You are Smaran AI, a precise local assistant. Answer the user's question directly and concisely. "
-        "Never invent facts, sources, document names, URLs, video events, or file contents. "
-        "When evidence is supplied, use only that evidence for claims that depend on it. If evidence is missing or extraction failed, say so plainly. "
-        "Cite only real supplied sources, and show the same URL no more than once. "
-        "For web evidence, answer from the fetched page content rather than explaining the domain or URL. "
-        "For YouTube/video/audio evidence, explain actual transcript and sampled-frame content; never describe the platform instead. "
-        "For calculations, show enough work to verify the result. "
-        "If asked about yourself, your model, or your developer, answer truthfully: you are SMARAN.AI running locally on the user's device. "
-        "Only discuss the developer when explicitly asked. Otherwise avoid mentioning Shashwat Mishra or developer links. "
-        "Do not expose hidden reasoning; provide only the final answer."
-    )
+    is_code_mode = (getattr(chat_req, "section", "chat") or "chat").lower() == "code"
+
+    if is_code_mode:
+        system_prompt = (
+            "You are SMARAN CODE, an autonomous senior staff software engineer, systems architect, and coding assistant "
+            "running directly on the user's workstation with local workspace intelligence.\n\n"
+            "SMARAN CODE ENGINEERING DIRECTIVES:\n"
+            "1. COMPLETE CODE: Always write full, production-grade, functional code with correct imports, typing, and robust error handling. Never output lazy snippets, omissions, or placeholders like '// TODO: implement remaining logic'.\n"
+            "2. CLEAR ARCHITECTURE: Explain architectural decisions, file paths, dependencies, and design patterns concisely and clearly.\n"
+            "3. TERMINAL & WORKFLOW: Provide exact, copy-pasteable terminal commands (PowerShell / Bash) to install dependencies, run scripts, test, or build.\n"
+            "4. DEBUGGING: When investigating bugs or errors, analyze stack traces, diagnose root causes with scientific precision, and provide exact before/after fixes.\n"
+            "5. SAFETY & APPROVAL: " + (
+                "Ask for approval mode is ON. Detail file modifications and terminal operations before suggesting destructive actions."
+                if getattr(chat_req, "ask_for_approval", True) else
+                "Auto-execute mode is ON. Provide direct, immediate solutions ready to run."
+            )
+        )
+        ws_root = getattr(chat_req, "workspace_root", None)
+        if ws_root and isinstance(ws_root, str) and ws_root.strip():
+            clean_root = ws_root.strip()
+            system_prompt += f"\n\nACTIVE WORKSPACE DIRECTORY: {clean_root}\n"
+            try:
+                import os
+                if os.path.isdir(clean_root):
+                    root_files = [f for f in os.listdir(clean_root) if not f.startswith(".")][:30]
+                    system_prompt += f"Workspace Root Items: {', '.join(root_files)}\n"
+            except Exception:
+                pass
+    else:
+        system_prompt = (
+            "You are Smaran AI, a precise local assistant. Answer the user's question directly and concisely. "
+            "Never invent facts, sources, document names, URLs, video events, or file contents. "
+            "When evidence is supplied, use only that evidence for claims that depend on it. If evidence is missing or extraction failed, say so plainly. "
+            "Cite only real supplied sources, and show the same URL no more than once. "
+            "For web evidence, answer from the fetched page content rather than explaining the domain or URL. "
+            "For YouTube/video/audio evidence, explain actual transcript and sampled-frame content; never describe the platform instead. "
+            "For calculations, show enough work to verify the result. "
+            "If asked about yourself, your model, or your developer, answer truthfully: you are SMARAN.AI running locally on the user's device. "
+            "Only discuss the developer when explicitly asked. Otherwise avoid mentioning Shashwat Mishra or developer links. "
+            "Do not expose hidden reasoning; provide only the final answer."
+        )
 
     if chat_req.rag_enabled:
         if context_str:

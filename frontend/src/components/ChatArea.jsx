@@ -3884,6 +3884,9 @@ const ChatArea = ({
           target_language: selectedLanguage,
           custom_instructions: localStorage.getItem('sm_custom_instructions') || undefined,
           memory_enabled: localStorage.getItem('sm_memory_enabled') !== 'false',
+          section: activeSection,
+          workspace_root: workspaceStatus?.root || undefined,
+          ask_for_approval: askForApproval,
           ...getCloudRoutingPayload(),
         }),
       });
@@ -4578,20 +4581,60 @@ const ChatArea = ({
               <HeroLogo3D />
             </div>
           ) : activeSection === 'code' ? (
-            <div className="min-h-full flex flex-col items-center justify-center text-center max-w-2xl mx-auto w-full space-y-4 px-3 py-8 select-none animate-in fade-in duration-300">
+            <div className="min-h-full flex flex-col items-center justify-center text-center max-w-2xl mx-auto w-full space-y-5 px-3 py-8 select-none animate-in fade-in duration-300">
               {/* Terminal Cloud Icon */}
               <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 shadow-xl shadow-black/30">
                 <Terminal className="w-8 h-8 text-emerald-400" />
               </div>
 
-              {/* Main Codex Prompt Heading - visible in all themes */}
-              <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-zinc-100">
-                What should we build in {workspaceStatus?.open ? String(workspaceStatus.root).split(/[\\/]/).filter(Boolean).pop() : 'SMARAN.AI'}?
-              </h1>
+              {/* Main Codex Prompt Heading */}
+              <div className="space-y-1.5">
+                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-zinc-100">
+                  What should we build in {workspaceStatus?.open ? String(workspaceStatus.root).split(/[\\/]/).filter(Boolean).pop() : 'SMARAN.AI'}?
+                </h1>
+                <p className="text-sm font-medium text-zinc-600 dark:text-zinc-400 max-w-md mx-auto leading-relaxed">
+                  Autonomous AI Coding Assistant ready for project commands, full-stack generation, tests, and debugging.
+                </p>
+              </div>
 
-              <p className="text-sm font-medium text-zinc-600 dark:text-zinc-400 max-w-md leading-relaxed">
-                Autonomous AI Coding Assistant ready for your project commands, code generation, and automated workflows.
-              </p>
+              {/* Quick Starter Prompts for Developers */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-xl text-left pt-2">
+                {[
+                  {
+                    title: '⚡ Inspect Architecture',
+                    desc: 'Analyze workspace structure & dependencies',
+                    prompt: 'Inspect this workspace architecture, list key components, dependencies, and summarize the project design.'
+                  },
+                  {
+                    title: '🚀 Build API Feature',
+                    desc: 'Create production-ready backend service',
+                    prompt: 'Design and implement a robust API service module with validation, error handling, and clean code.'
+                  },
+                  {
+                    title: '🧪 Generate Unit Tests',
+                    desc: 'Write automated test suite with edge cases',
+                    prompt: 'Generate a comprehensive unit test suite covering key logic, edge cases, and mocking dependencies.'
+                  },
+                  {
+                    title: '🐛 Debug & Optimize',
+                    desc: 'Detect bottlenecks and fix bugs',
+                    prompt: 'Analyze this project for performance bottlenecks, memory leaks, and unhandled edge cases, and propose fixes.'
+                  },
+                ].map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setInput(item.prompt);
+                      if (composerRef.current) composerRef.current.focus();
+                    }}
+                    className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/60 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition text-left group cursor-pointer shadow-sm"
+                  >
+                    <div className="text-xs font-black text-zinc-900 dark:text-zinc-100 group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition">{item.title}</div>
+                    <div className="text-[11px] text-zinc-500 dark:text-zinc-400 line-clamp-1 mt-0.5">{item.desc}</div>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="min-h-full flex flex-col items-center justify-start sm:justify-center text-center max-w-2xl mx-auto w-full space-y-4 sm:space-y-6 px-2 py-6 sm:py-8 select-none animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -4691,7 +4734,7 @@ const ChatArea = ({
 
       {/* Input Box Console — Responsive: Clean 2-tier toolbar on Mobile (<640px) | Single unified capsule on Desktop (≥640px) */}
       <div className="px-2 sm:px-5 pb-3 sm:pb-5 pt-1 bg-transparent shrink-0 relative z-10 w-full max-w-full">
-        <div className="composer-workspace-context mx-auto mb-2 hidden max-w-4xl items-center gap-1.5 sm:flex">
+        <div className="composer-workspace-context mx-auto mb-2 flex flex-wrap max-w-4xl items-center gap-1.5">
           <span className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-700/80 bg-zinc-900/90 px-2.5 text-[11px] font-semibold text-zinc-300">
           <Laptop className="h-3.5 w-3.5 text-indigo-400" /> Local
           </span>
@@ -4830,10 +4873,12 @@ const ChatArea = ({
               onCut={(e) => e.stopPropagation()}
               placeholder={
                 activeSection === 'code'
-                  ? 'Do anything'
+                  ? (workspaceStatus?.open
+                      ? `Ask SMARAN Code to build, test, refactor, or run tasks in ${String(workspaceStatus.root).split(/[\\/]/).filter(Boolean).pop()}...`
+                      : 'Ask SMARAN Code to write code, build apps, debug, or run terminal commands...')
                   : activeSessionId
-                    ? isWebSearchEnabled ? 'Search the live web...' : isRagEnabled ? 'Ask from uploaded files...' : 'Ask SMARAN.AI directly...'
-                    : 'Start a new conversation'
+                    ? isWebSearchEnabled ? 'Search the live web with SMARAN AI...' : isRagEnabled ? 'Ask from uploaded files...' : 'Ask SMARAN AI anything...'
+                    : 'Search the live web or ask SMARAN AI anything...'
               }
               disabled={streaming || directUploading}
               rows={1}
