@@ -1,8 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, Play, Trash2, Plus, CheckCircle, AlertCircle, RefreshCw, Terminal, Send, ArrowRight, Activity, Calendar } from 'lucide-react';
-import { API_BASE, fetchWithAuth } from '../context/AuthContext';
+import React, { useState, useEffect, useRef } from 'react';
+import { Clock, Play, Trash2, Plus, RefreshCw, Activity, Calendar } from 'lucide-react';
+import { agentSettingsRequest } from '../utils/agentSettingsRequest';
 
 export default function SchedulerView() {
+  const fetching = useRef(false);
+  const historyRequest = useRef(0);
+  const [error, setError] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [runningJobId, setRunningJobId] = useState(null);
@@ -20,16 +24,17 @@ export default function SchedulerView() {
   const [statusMsg, setStatusMsg] = useState('');
 
   const fetchJobs = async () => {
+    if (fetching.current) return;
+    fetching.current = true;
     setLoading(true);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/agent/scheduler/jobs`);
-      if (res.ok) {
-        const data = await res.json();
-        setJobs(data.jobs || []);
-      }
+      const data = await agentSettingsRequest('/scheduler/jobs');
+      setJobs(data.jobs || []);
+      setError('');
     } catch (err) {
-      console.error('Failed to fetch scheduled jobs:', err);
+      setError(err.message);
     } finally {
+      fetching.current = false;
       setLoading(false);
     }
   };
@@ -46,7 +51,7 @@ export default function SchedulerView() {
     setCreateLoading(true);
     setStatusMsg('');
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/agent/scheduler/jobs`, {
+      await agentSettingsRequest('/scheduler/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -57,19 +62,15 @@ export default function SchedulerView() {
           target_recipient: targetRecipient.trim(),
         }),
       });
-      if (res.ok) {
-        setShowCreateModal(false);
-        setName('');
-        setTaskPrompt('');
-        setScheduleExpr('every 1 hour');
-        setTargetRecipient('');
-        fetchJobs();
-      } else {
-        const err = await res.json();
-        setStatusMsg(err.detail || 'Failed to create job');
-      }
+      setShowCreateModal(false);
+      setName('');
+      setTaskPrompt('');
+      setScheduleExpr('every 1 hour');
+      setTargetRecipient('');
+      setTargetChannel('ui');
+      await fetchJobs();
     } catch (err) {
-      setStatusMsg(String(err));
+      setStatusMsg(err.message || String(err));
     } finally {
       setCreateLoading(false);
     }
@@ -78,14 +79,10 @@ export default function SchedulerView() {
   const handleRunNow = async (jobId) => {
     setRunningJobId(jobId);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/agent/scheduler/jobs/${jobId}/run`, {
-        method: 'POST',
-      });
-      if (res.ok) {
-        await fetchJobs();
-      }
+      await agentSettingsRequest(`/scheduler/jobs/${jobId}/run`, { method: 'POST' });
+      await fetchJobs();
     } catch (err) {
-      console.error('Error running job:', err);
+      setError(err.message);
     } finally {
       setRunningJobId(null);
     }
@@ -94,27 +91,25 @@ export default function SchedulerView() {
   const handleDeleteJob = async (jobId) => {
     if (!confirm('Are you sure you want to delete this scheduled automation?')) return;
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/agent/scheduler/jobs/${jobId}`, {
-        method: 'DELETE',
-      });
-      if (res.ok) {
-        setJobs((prev) => prev.filter((j) => j.id !== jobId));
-      }
+      await agentSettingsRequest(`/scheduler/jobs/${jobId}`, { method: 'DELETE' });
+      setJobs((prev) => prev.filter((j) => j.id !== jobId));
     } catch (err) {
-      console.error('Error deleting job:', err);
+      setError(err.message);
     }
   };
 
   const handleViewHistory = async (job) => {
+    const requestId = ++historyRequest.current;
     setSelectedJobHistory(job);
+    setHistoryLogs([]);
+    setHistoryLoading(true);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/agent/scheduler/jobs/${job.id}/history`);
-      if (res.ok) {
-        const data = await res.json();
-        setHistoryLogs(data.history || []);
-      }
+      const data = await agentSettingsRequest(`/scheduler/jobs/${job.id}/history`);
+      if (requestId === historyRequest.current) setHistoryLogs(data.history || []);
     } catch (err) {
-      console.error('Error loading history:', err);
+      setError(err.message);
+    } finally {
+      if (requestId === historyRequest.current) setHistoryLoading(false);
     }
   };
 
@@ -126,7 +121,7 @@ export default function SchedulerView() {
   return (
     <div className="flex flex-col h-full w-full space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex flex-wrap gap-3 items-center justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800">
         <div>
           <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
             <Calendar className="w-5 h-5 text-indigo-500" />
@@ -139,6 +134,7 @@ export default function SchedulerView() {
         <div className="flex items-center gap-2">
           <button
             onClick={fetchJobs}
+            disabled={loading}
             className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
             title="Refresh"
           >
@@ -154,9 +150,10 @@ export default function SchedulerView() {
         </div>
       </div>
 
+      {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
       {/* Jobs List */}
       <div className="flex-1 overflow-y-auto space-y-3">
-        {jobs.length === 0 && !loading ? (
+        {jobs.length === 0 && !loading && !error ? (
           <div className="text-center py-12 px-4 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl">
             <Clock className="w-8 h-8 text-zinc-400 mx-auto mb-2" />
             <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">No scheduled automations</p>
@@ -197,7 +194,7 @@ export default function SchedulerView() {
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
-                    disabled={runningJobId === job.id}
+                    disabled={runningJobId === job.id || job.last_status === 'running'}
                     onClick={() => handleRunNow(job.id)}
                     className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition disabled:opacity-50"
                     title="Run Now"
@@ -234,7 +231,7 @@ export default function SchedulerView() {
       {/* Create Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-lg max-h-[85dvh] overflow-y-auto p-6 space-y-4 shadow-2xl">
             <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">Create Scheduled Automation</h3>
             <form onSubmit={handleCreateJob} className="space-y-3">
               <div>
@@ -339,8 +336,9 @@ export default function SchedulerView() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto space-y-2">
+              {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
               {historyLogs.length === 0 ? (
-                <p className="text-xs text-zinc-400 text-center py-6">No execution runs yet.</p>
+                <p className="text-xs text-zinc-400 text-center py-6">{historyLoading ? 'Loading history…' : 'No execution runs yet.'}</p>
               ) : (
                 historyLogs.map((log) => (
                   <div key={log.id} className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-xs space-y-1 font-mono">

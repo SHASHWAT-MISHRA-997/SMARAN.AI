@@ -1,16 +1,8 @@
-"""Process-level sandboxing for agent command execution.
+"""Command filters, timeouts, and file checkpoints for agent execution.
 
-NemoClaw runs agents inside OpenShell sandboxes with filesystem isolation,
-network policy, and snapshot/restore. On Windows we achieve the same
-guarantees using:
-
-- Win32 Job Objects with restricted tokens (no admin, limited PATH)
-- Shadow directory for filesystem writes (changes staged as diffs)
-- Network whitelist enforcement via Windows Firewall rules
-- Workspace snapshots using file-level checksums for rollback
-
-The sandbox wraps `subprocess.run` so the existing `run_command` tool
-routes through it transparently.
+Strict mode restricts the environment and PATH. It is not an OS-level
+filesystem or network isolation boundary. Checkpoints restore captured files;
+new files are retained.
 """
 
 from __future__ import annotations
@@ -19,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,7 +30,7 @@ class SandboxMode(str, Enum):
     """How restrictive the sandbox is."""
     OFF = "off"              # No sandboxing — commands run directly
     PERMISSIVE = "permissive"  # Timeout + output capture, no filesystem isolation
-    STRICT = "strict"        # Full isolation: shadow dir, restricted PATH, network deny
+    STRICT = "strict"        # Restricted environment and PATH, not OS isolation
 
 
 @dataclass
@@ -259,33 +252,31 @@ class Sandbox:
         snap_id = f"snap_{uuid.uuid4().hex[:8]}"
         checksums: Dict[str, str] = {}
 
-        root = Path(workspace_root)
+        if not workspace_root.strip() or not Path(workspace_root).is_dir():
+            raise ValueError("Select an existing workspace directory")
+        root = Path(workspace_root).resolve()
+        workspace_root = str(root)
         skip = {".git", "node_modules", "__pycache__", ".venv", "dist", ".next"}
 
-        for filepath in root.rglob("*"):
-            if filepath.is_dir():
-                continue
-            # Skip large/binary directories
-            if any(part in skip for part in filepath.relative_to(root).parts):
-                continue
-            try:
-                content = filepath.read_bytes()
-                checksums[str(filepath.relative_to(root))] = hashlib.sha256(content).hexdigest()
-            except (OSError, PermissionError):
-                continue
-
-        # Save file copies for restore
         snap_dir = os.path.join(self._snapshot_dir, snap_id)
         os.makedirs(snap_dir, exist_ok=True)
-
-        for relpath, checksum in checksums.items():
-            src = root / relpath
-            dst = Path(snap_dir) / relpath
-            try:
+        snapshot_base = Path(self._snapshot_dir).resolve()
+        for directory, dirs, files in os.walk(root, followlinks=False):
+            parent = Path(directory)
+            dirs[:] = [d for d in dirs if d not in skip
+                       and not (parent / d).is_symlink()
+                       and not (parent / d).is_junction()
+                       and (parent / d).resolve() != snapshot_base]
+            for name in files:
+                src = parent / name
+                if src.is_symlink() or name == '_snapshot_meta.json':
+                    continue
+                relpath = str(src.relative_to(root))
+                dst = Path(snap_dir) / relpath
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(src), str(dst))
-            except (OSError, PermissionError):
-                continue
+                shutil.copy2(src, dst)
+                with dst.open('rb') as stream:
+                    checksums[relpath] = hashlib.file_digest(stream, 'sha256').hexdigest()
 
         snapshot = Snapshot(
             id=snap_id,
@@ -313,6 +304,8 @@ class Sandbox:
 
     def restore_snapshot(self, snap_id: str, target_dir: str = "") -> Dict[str, Any]:
         """Restore workspace to a snapshot state."""
+        if not re.fullmatch(r"snap_[0-9a-f]{8}", snap_id):
+            return {"success": False, "error": "Invalid snapshot ID"}
         snapshot = self._snapshots.get(snap_id)
         if not snapshot:
             # Try loading from disk
@@ -331,7 +324,7 @@ class Sandbox:
             )
 
         snap_dir = os.path.join(self._snapshot_dir, snap_id)
-        root = Path(target_dir or snapshot.workspace_root)
+        root = Path(target_dir or snapshot.workspace_root).resolve()
         restored = 0
         errors = []
 
@@ -341,10 +334,12 @@ class Sandbox:
             rel = relpath.relative_to(snap_dir)
             dst = root / rel
             try:
+                if relpath.is_symlink() or not dst.resolve().is_relative_to(root):
+                    raise ValueError("Snapshot path escapes workspace")
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(relpath), str(dst))
                 restored += 1
-            except (OSError, PermissionError) as exc:
+            except (OSError, ValueError) as exc:
                 errors.append(f"{rel}: {exc}")
 
         logger.info("Restored snapshot %s: %d files restored, %d errors",
@@ -372,6 +367,8 @@ class Sandbox:
 
     def delete_snapshot(self, snap_id: str) -> bool:
         """Delete a snapshot and its stored files."""
+        if not re.fullmatch(r"snap_[0-9a-f]{8}", snap_id):
+            return False
         snap_dir = os.path.join(self._snapshot_dir, snap_id)
         if os.path.isdir(snap_dir):
             shutil.rmtree(snap_dir, ignore_errors=True)

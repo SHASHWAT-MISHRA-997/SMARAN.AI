@@ -14,7 +14,7 @@ running on your own machine.
 [![Download APK](https://img.shields.io/badge/Android-Download%20APK-ef4444?style=for-the-badge&logo=android&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI.apk)
 [![VS Code extension](https://img.shields.io/badge/VS_Code-SMARAN.AI_Codex-00E5FF?style=for-the-badge&logo=visualstudiocode&logoColor=white&labelColor=04060f)](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)
 
-![Version](https://img.shields.io/badge/version-2.10.55-b91c1c)
+![Version](https://img.shields.io/badge/version-2.10.56-b91c1c)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-b91c1c)
 ![Android](https://img.shields.io/badge/Android-7.0%2B-b91c1c)
 ![Models](https://img.shields.io/badge/catalogue-63%20models-b91c1c)
@@ -52,7 +52,7 @@ A voice session laid out like a phone call — answer and hang up, with an
 animated character and a live waveform. Interruption is handled, so cutting in
 stops the assistant mid-sentence.
 
-![The Speak view: an animated character on stage with mute, screen, camera, call, gesture, ambience and wake controls](docs/images/speak.png)
+![The Speak view: an animated character on stage with mute, screen, camera, call, ambience and wake controls](docs/images/speak.png)
 
 ### Model Hub
 

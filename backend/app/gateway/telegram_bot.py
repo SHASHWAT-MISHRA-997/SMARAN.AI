@@ -38,6 +38,8 @@ class TelegramGateway(BaseGateway):
         self._last_update_id: int = 0
 
     async def start(self, config: Dict[str, Any]) -> bool:
+        if self._running:
+            return True
         token = config.get("token") or os.environ.get("SMARAN_TELEGRAM_TOKEN", "")
         if not token:
             logger.warning("Telegram Bot Token not provided.")
@@ -57,11 +59,13 @@ class TelegramGateway(BaseGateway):
             data = resp.json()
             if not data.get("ok"):
                 logger.error(f"Telegram getMe failed: {data}")
+                await self.stop()
                 return False
             bot_name = data.get("result", {}).get("username")
             logger.info(f"Connected to Telegram Bot: @{bot_name}")
         except Exception as exc:
             logger.error(f"Failed to connect to Telegram: {exc}")
+            await self.stop()
             return False
 
         self._running = True
@@ -72,6 +76,11 @@ class TelegramGateway(BaseGateway):
         self._running = False
         if self._poll_task and not self._poll_task.done():
             self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
+        self._poll_task = None
         if self._client:
             await self._client.aclose()
             self._client = None
@@ -82,26 +91,17 @@ class TelegramGateway(BaseGateway):
         if not self._client or not self.bot_token:
             return False
         try:
-            # Chunk long messages for Telegram's 4096 char limit
-            chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
-            for chunk in chunks:
-                await self._client.post("/sendMessage", json={
-                    "chat_id": recipient_id,
-                    "text": chunk,
-                    "parse_mode": "Markdown",
+            for offset in range(0, len(text), 4000):
+                response = await self._client.post("/sendMessage", json={
+                    "chat_id": recipient_id, "text": text[offset:offset + 4000],
                 })
+                response.raise_for_status()
+                if not response.json().get("ok"):
+                    return False
             return True
-        except Exception as exc:
-            # If Markdown parsing fails, retry with plain text
-            try:
-                await self._client.post("/sendMessage", json={
-                    "chat_id": recipient_id,
-                    "text": text[:4000],
-                })
-                return True
-            except Exception as e2:
-                logger.error(f"Failed to send Telegram message to {recipient_id}: {e2}")
-                return False
+        except Exception:
+            logger.warning("Telegram message delivery failed")
+            return False
 
     async def _poll_loop(self):
         while self._running and self._client:
@@ -111,6 +111,9 @@ class TelegramGateway(BaseGateway):
                     "timeout": 20,
                 })
                 data = resp.json()
+                if not data.get("ok"):
+                    await asyncio.sleep(5)
+                    continue
                 if data.get("ok"):
                     for update in data.get("result", []):
                         self._last_update_id = update.get("update_id", self._last_update_id)
@@ -128,7 +131,9 @@ class TelegramGateway(BaseGateway):
 
         chat_id = str(msg.get("chat", {}).get("id"))
         user_id = msg.get("from", {}).get("id")
-        text = msg.get("text", "")
+        text = msg.get("text", "").strip()
+        if not text:
+            return
 
         if self.allowed_users and user_id not in self.allowed_users:
             await self.send_message(chat_id, "⚠️ Unauthorized user.")

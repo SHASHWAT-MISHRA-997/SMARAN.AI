@@ -74,8 +74,14 @@ def test_a_run_with_no_models_uses_an_installed_one(client, monkeypatch):
     """The other half, and the defect that prompted the change: a machine with
     a local model was told to go and start a local model."""
     from app.orchestrator import routes as orchestrator_routes
+    from app.orchestrator.run import Run
     monkeypatch.setattr(orchestrator_routes, "local_chat_models",
                         lambda: [{"model": "qwen2.5-coder:7b"}])
+
+    async def noop_start(self):
+        return self.snapshot()
+
+    monkeypatch.setattr(Run, "start", noop_start)
 
     response = client.post("/api/orchestrator/runs",
                            json={"request": "build something", "root": ".", "models": []})

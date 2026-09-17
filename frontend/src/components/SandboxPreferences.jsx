@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Lock, RotateCcw, Camera, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
-import { API_BASE, fetchWithAuth } from '../context/AuthContext';
+import { Shield, RotateCcw, Camera, RefreshCw } from 'lucide-react';
+import { agentSettingsRequest } from '../utils/agentSettingsRequest';
 
 export default function SandboxPreferences() {
   const [sandboxInfo, setSandboxInfo] = useState(null);
@@ -12,17 +12,15 @@ export default function SandboxPreferences() {
   const fetchSandboxData = async () => {
     setLoading(true);
     try {
-      const [stRes, snapRes] = await Promise.all([
-        fetchWithAuth(`${API_BASE}/api/agent/sandbox/status`),
-        fetchWithAuth(`${API_BASE}/api/agent/sandbox/snapshots`),
+      const [info, data] = await Promise.all([
+        agentSettingsRequest('/sandbox/status'),
+        agentSettingsRequest('/sandbox/snapshots'),
       ]);
-      if (stRes.ok) setSandboxInfo(await stRes.json());
-      if (snapRes.ok) {
-        const d = await snapRes.json();
-        setSnapshots(d.snapshots || []);
-      }
+      setSandboxInfo(info);
+      setSnapshots(data.snapshots || []);
     } catch (err) {
-      console.error('Failed to get sandbox status:', err);
+      setNotice(err.message);
+      setSandboxInfo(null);
     } finally {
       setLoading(false);
     }
@@ -37,16 +35,15 @@ export default function SandboxPreferences() {
     setRestoreBusy(true);
     setNotice('');
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/agent/sandbox/restore`, {
+      const data = await agentSettingsRequest('/sandbox/restore', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ snapshot_id: snapId, root: '' }),
       });
-      const data = await res.json();
       if (data.success) {
         setNotice(`Successfully restored ${data.restored} files.`);
       } else {
-        setNotice(`Restore completed with errors: ${data.errors?.join(', ')}`);
+        setNotice(`Restore completed with errors: ${data.error || data.errors?.join(', ') || 'Unknown error'}`);
       }
     } catch (err) {
       setNotice(String(err));
@@ -60,10 +57,10 @@ export default function SandboxPreferences() {
       <div>
         <h3 className="text-sm font-bold flex items-center gap-2">
           <Shield className="w-4 h-4 text-emerald-500" />
-          Sandboxed Execution & Checkpoints (NemoClaw Parity)
+          Execution Controls & Checkpoints
         </h3>
         <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-          Guards against harmful commands, enforces execution timeouts, and enables snapshot rollback.
+          Command filters, execution timeouts, and saved-file restore. These controls do not provide OS-level filesystem or network isolation.
         </p>
       </div>
 
@@ -78,13 +75,13 @@ export default function SandboxPreferences() {
         <div className="p-3.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
           <span className="text-[11px] font-semibold text-zinc-500">Sandbox Mode</span>
           <p className="text-sm font-bold uppercase mt-1 text-indigo-500">
-            {sandboxInfo?.mode || 'Permissive'}
+            {sandboxInfo?.mode || (loading ? 'Loading…' : 'Unavailable')}
           </p>
         </div>
         <div className="p-3.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
           <span className="text-[11px] font-semibold text-zinc-500">Execution Timeout</span>
           <p className="text-sm font-bold mt-1">
-            {sandboxInfo?.timeout_seconds || 120}s limit
+            {sandboxInfo ? `${sandboxInfo.timeout_seconds}s limit` : 'Unavailable'}
           </p>
         </div>
         <div className="p-3.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
@@ -104,6 +101,8 @@ export default function SandboxPreferences() {
           </span>
           <button
             onClick={fetchSandboxData}
+            disabled={loading}
+            aria-label="Refresh checkpoints"
             className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -112,7 +111,7 @@ export default function SandboxPreferences() {
 
         {snapshots.length === 0 ? (
           <div className="p-4 rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800 text-center text-xs text-zinc-400">
-            No snapshots recorded yet. The agent creates automatic snapshots before large multi-step changes.
+            {loading ? 'Loading checkpoints…' : !sandboxInfo ? 'Checkpoint data is unavailable.' : 'No saved checkpoints. Snapshots preserve captured files; restoring does not remove newly created files.'}
           </div>
         ) : (
           <div className="space-y-2 max-h-60 overflow-y-auto">

@@ -16,7 +16,6 @@ claiming more than is true.
 
 | What | Where | Licence |
 |---|---|---|
-| MediaPipe Tasks (WASM + hand-tracking models) | `backend/frontend_dist/mediapipe/` | Apache-2.0, Google |
 | Inter | `backend/frontend_dist/assets/inter-*` | SIL Open Font License 1.1 |
 | JetBrains Mono | website | SIL Open Font License 1.1 |
 | React, Vite, Tailwind, lucide-react, three.js, @pixiv/three-vrm, Capacitor | `frontend/package.json` | MIT / Apache-2.0, each its own |

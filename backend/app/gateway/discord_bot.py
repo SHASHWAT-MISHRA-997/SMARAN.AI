@@ -39,11 +39,14 @@ class DiscordGateway(BaseGateway):
         self._bot_user_id: Optional[str] = None
 
     async def start(self, config: Dict[str, Any]) -> bool:
+        if self._running:
+            return True
         token = config.get("token") or os.environ.get("SMARAN_DISCORD_TOKEN", "")
         if not token:
             logger.warning("Discord Bot Token not provided.")
             return False
 
+        self._last_message_id = None
         self.bot_token = token
         self.default_channel_id = str(config.get("default_channel_id", ""))
         self.allowed_users = [str(u) for u in config.get("allowed_users", [])]
@@ -63,11 +66,13 @@ class DiscordGateway(BaseGateway):
             data = resp.json()
             if "id" not in data:
                 logger.error(f"Discord authentication failed: {data}")
+                await self.stop()
                 return False
             self._bot_user_id = data["id"]
             logger.info(f"Connected to Discord Bot: {data.get('username')}#{data.get('discriminator', '0')}")
         except Exception as exc:
             logger.error(f"Failed to connect to Discord: {exc}")
+            await self.stop()
             return False
 
         self._running = True
@@ -79,6 +84,11 @@ class DiscordGateway(BaseGateway):
         self._running = False
         if self._poll_task and not self._poll_task.done():
             self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
+        self._poll_task = None
         if self._client:
             await self._client.aclose()
             self._client = None
@@ -93,9 +103,10 @@ class DiscordGateway(BaseGateway):
         try:
             chunks = [text[i:i + 1900] for i in range(0, len(text), 1900)]
             for chunk in chunks:
-                await self._client.post(f"/channels/{channel_id}/messages", json={
+                response = await self._client.post(f"/channels/{channel_id}/messages", json={
                     "content": chunk
                 })
+                response.raise_for_status()
             return True
         except Exception as exc:
             logger.error(f"Failed to send Discord message: {exc}")
@@ -117,7 +128,7 @@ class DiscordGateway(BaseGateway):
                         self._last_message_id = messages[0]["id"]
                         for msg in reversed(messages):
                             author_id = msg.get("author", {}).get("id")
-                            if author_id == self._bot_user_id:
+                            if msg.get("author", {}).get("bot") or author_id == self._bot_user_id:
                                 continue  # Ignore own messages
 
                             content = msg.get("content", "").strip()

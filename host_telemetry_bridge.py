@@ -24,22 +24,33 @@ def command(args: list[str], timeout: int = 4) -> str:
         return ""
 
 
+_cached_cpu_name: str | None = None
+_cached_windows_controllers: list[dict] | None = None
+
+
 def cpu_name() -> str:
+    global _cached_cpu_name
+    if _cached_cpu_name is not None:
+        return _cached_cpu_name
     if platform.system() == "Windows":
         value = command(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)"])
         if value:
+            _cached_cpu_name = value
             return value
     if platform.system() == "Darwin":
         value = command(["sysctl", "-n", "machdep.cpu.brand_string"])
         if value:
+            _cached_cpu_name = value
             return value
     try:
         for line in Path("/proc/cpuinfo").read_text(errors="ignore").splitlines():
             if line.lower().startswith("model name"):
-                return line.split(":", 1)[1].strip()
+                _cached_cpu_name = line.split(":", 1)[1].strip()
+                return _cached_cpu_name
     except Exception:
         pass
-    return platform.processor() or "Unavailable"
+    _cached_cpu_name = platform.processor() or "Unavailable"
+    return _cached_cpu_name
 
 
 def operating_system_info() -> dict:
@@ -101,6 +112,7 @@ def operating_system_info() -> dict:
 
 
 def gpu_inventory() -> list[dict]:
+    global _cached_windows_controllers
     items: list[dict] = []
     output = command(["nvidia-smi", "--query-gpu=index,name,memory.total,memory.used,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"])
     for line in output.splitlines():
@@ -112,20 +124,26 @@ def gpu_inventory() -> list[dict]:
         except ValueError:
             continue
     if platform.system() == "Windows":
-        raw = command(["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json -Compress"])
-        try:
-            controllers = json.loads(raw) if raw else []
-            if isinstance(controllers, dict):
-                controllers = [controllers]
-            known = {str(item["name"]).lower() for item in items}
-            for controller in controllers:
-                name = str(controller.get("Name") or "").strip()
-                if not name or name.lower() in known or "microsoft basic" in name.lower():
-                    continue
-                ram = int(controller.get("AdapterRAM") or 0)
-                items.append({"index": len(items), "name": name, "vram_total_gb": round(ram / 1024**3, 2) if ram > 0 else None, "vram_used_gb": None, "temperature": None, "usage": None, "vendor": "amd" if "amd" in name.lower() or "radeon" in name.lower() else "intel" if "intel" in name.lower() else "other", "has_live_metrics": False})
-        except Exception:
-            pass
+        if _cached_windows_controllers is None:
+            _cached_windows_controllers = []
+            raw = command(["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json -Compress"])
+            try:
+                controllers = json.loads(raw) if raw else []
+                if isinstance(controllers, dict):
+                    controllers = [controllers]
+                known = {str(item["name"]).lower() for item in items}
+                for controller in controllers:
+                    name = str(controller.get("Name") or "").strip()
+                    if not name or name.lower() in known or "microsoft basic" in name.lower():
+                        continue
+                    ram = int(controller.get("AdapterRAM") or 0)
+                    _cached_windows_controllers.append({"name": name, "vram_total_gb": round(ram / 1024**3, 2) if ram > 0 else None, "vram_used_gb": None, "temperature": None, "usage": None, "vendor": "amd" if "amd" in name.lower() or "radeon" in name.lower() else "intel" if "intel" in name.lower() else "other", "has_live_metrics": False})
+            except Exception:
+                pass
+        known = {str(item["name"]).lower() for item in items}
+        for ctrl in _cached_windows_controllers:
+            if str(ctrl["name"]).lower() not in known:
+                items.append({**ctrl, "index": len(items)})
     return items
 
 

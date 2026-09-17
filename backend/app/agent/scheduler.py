@@ -50,7 +50,7 @@ class ScheduledJob:
 
 def _parse_schedule_to_next_ts(expr: str, after_ts: Optional[float] = None) -> float:
     """Parses a cron expression or natural language schedule into the next run epoch timestamp."""
-    base_dt = datetime.fromtimestamp(after_ts or time.time())
+    base_dt = datetime.fromtimestamp(time.time() if after_ts is None else after_ts)
     expr = expr.strip().lower()
 
     # 1. Natural Language matching
@@ -58,12 +58,16 @@ def _parse_schedule_to_next_ts(expr: str, after_ts: Optional[float] = None) -> f
     m_min = re.match(r"^every\s+(\d+)\s+min(?:ute)?s?$", expr)
     if m_min:
         mins = int(m_min.group(1))
+        if not 1 <= mins <= 525600:
+            raise ValueError("Minute interval must be between 1 and 525600")
         return (base_dt + timedelta(minutes=mins)).timestamp()
 
     # every X hours
     m_hr = re.match(r"^every\s+(\d+)\s+hours?$", expr)
     if m_hr:
         hrs = int(m_hr.group(1))
+        if not 1 <= hrs <= 8760:
+            raise ValueError("Hour interval must be between 1 and 8760")
         return (base_dt + timedelta(hours=hrs)).timestamp()
 
     # daily at HH:MM
@@ -82,21 +86,57 @@ def _parse_schedule_to_next_ts(expr: str, after_ts: Optional[float] = None) -> f
 
     # daily
     if expr in ("daily", "every day"):
-        candidate = (base_dt + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+        candidate = base_dt.replace(hour=9, minute=0, second=0, microsecond=0)
+        if candidate <= base_dt:
+            candidate += timedelta(days=1)
         return candidate.timestamp()
 
     # 2. Standard 5-field cron parsing: minute hour day-of-month month day-of-week
     parts = expr.split()
     if len(parts) == 5:
-        # Step forward minute by minute up to 30 days to find next match
-        candidate = (base_dt + timedelta(minutes=1)).replace(second=0, microsecond=0)
-        for _ in range(30 * 24 * 60):
-            if _cron_match(candidate, parts):
-                return candidate.timestamp()
-            candidate += timedelta(minutes=1)
+        fields = [_cron_values(p, lo, hi) for p, (lo, hi) in zip(
+            parts, [(0, 59), (0, 23), (1, 31), (1, 12), (0, 7)])]
+        minutes, hours, days, months, weekdays = fields
+        weekdays = {v % 7 for v in weekdays}
+        day = base_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Search days, not every minute; eight years includes the leap-year gap.
+        for _ in range(366 * 8):
+            dom = day.day in days
+            dow = (day.weekday() + 1) % 7 in weekdays
+            matches_day = (dom and dow) if (parts[2].startswith('*') or parts[4].startswith('*')) else (dom or dow)
+            if day.month in months and matches_day:
+                for hour in sorted(hours):
+                    for minute in sorted(minutes):
+                        candidate = day.replace(hour=hour, minute=minute)
+                        if candidate > base_dt:
+                            return candidate.timestamp()
+            day += timedelta(days=1)
+        raise ValueError("Schedule has no occurrence in the next eight years")
 
-    # Fallback default: run in 1 hour
-    return (base_dt + timedelta(hours=1)).timestamp()
+    raise ValueError("Use every N minutes/hours, daily at HH:MM, or a five-field cron schedule")
+
+
+def _cron_values(pattern: str, minimum: int, maximum: int) -> set[int]:
+    values = set()
+    try:
+        for part in pattern.split(','):
+            base, separator, step_text = part.partition('/')
+            step = int(step_text) if separator else 1
+            if step <= 0:
+                raise ValueError
+            if base == '*':
+                low, high = minimum, maximum
+            elif '-' in base:
+                low, high = map(int, base.split('-'))
+            else:
+                low = int(base)
+                high = maximum if separator else low
+            if not minimum <= low <= high <= maximum:
+                raise ValueError
+            values.update(range(low, high + 1, step))
+    except ValueError as exc:
+        raise ValueError(f"Invalid cron field: {pattern}") from exc
+    return values
 
 
 def _cron_field_match(val: int, pattern: str) -> bool:
@@ -105,7 +145,7 @@ def _cron_field_match(val: int, pattern: str) -> bool:
     if pattern.startswith("*/"):
         try:
             step = int(pattern[2:])
-            return val % step == 0
+            return step > 0 and val % step == 0
         except ValueError:
             return False
     if "," in pattern:
@@ -137,7 +177,7 @@ def _cron_match(dt: datetime, parts: List[str]) -> bool:
         return False
     # day of week: 0-6 (0=Sunday or 0=Monday; dt.weekday() is 0=Monday)
     dow = (dt.weekday() + 1) % 7  # 0=Sunday
-    if not _cron_field_match(dow, parts[4]) and not _cron_field_match(dt.weekday(), parts[4]):
+    if not _cron_field_match(dow, parts[4]) and not (dow == 0 and _cron_field_match(7, parts[4])):
         return False
     return True
 
@@ -191,6 +231,10 @@ class SchedulerStore:
                 model: str = "", provider: str = "", workspace_root: str = "",
                 target_channel: str = "ui", target_recipient: str = "") -> ScheduledJob:
         now = time.time()
+        if not name.strip() or not task_prompt.strip():
+            raise ValueError("Name and task instruction are required")
+        if target_channel not in {"ui", "telegram", "discord", "webhook"}:
+            raise ValueError("Unsupported delivery channel")
         job_id = f"job_{uuid.uuid4().hex[:10]}"
         next_run = _parse_schedule_to_next_ts(schedule_expr, now)
 
@@ -329,6 +373,7 @@ class AutomationScheduler:
         self.store = SchedulerStore()
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._active_jobs: Dict[str, asyncio.Task] = {}
 
     def start(self):
         if self._running:
@@ -341,6 +386,8 @@ class AutomationScheduler:
         self._running = False
         if self._task and not self._task.done():
             self._task.cancel()
+        for task in list(self._active_jobs.values()):
+            task.cancel()
         logger.info("Automation scheduler stopped.")
 
     async def _loop(self):
@@ -360,9 +407,42 @@ class AutomationScheduler:
             if not job.enabled:
                 continue
             if job.next_run_ts > 0 and job.next_run_ts <= now:
-                asyncio.create_task(self.run_job_now(job.id))
+                if job.id not in self._active_jobs:
+                    self.queue_job(job.id)
+
+    def queue_job(self, job_id: str) -> Dict[str, Any]:
+        if not self.store.get_job(job_id):
+            return {"status": "not_found", "message": "Job not found"}
+        if job_id in self._active_jobs:
+            return {"status": "running", "job_id": job_id}
+        task = asyncio.create_task(self.run_job_now(job_id))
+        self._active_jobs[job_id] = task
+        def completed(done):
+            if self._active_jobs.get(job_id) is done:
+                self._active_jobs.pop(job_id, None)
+            if not done.cancelled() and done.exception():
+                logger.error("Scheduled job failed: %s", done.exception())
+        task.add_done_callback(completed)
+        return {"status": "queued", "job_id": job_id}
 
     async def run_job_now(self, job_id: str) -> Dict[str, Any]:
+        current = asyncio.current_task()
+        if job_id in self._active_jobs and self._active_jobs[job_id] is not current:
+            return {"status": "running", "job_id": job_id}
+        self._active_jobs[job_id] = current
+        try:
+            return await asyncio.wait_for(self._execute_job(job_id), timeout=600)
+        except asyncio.TimeoutError:
+            job = self.store.get_job(job_id)
+            if job:
+                self.store.record_run(job_id, "error", "Execution exceeded 600 seconds", 600,
+                                      _parse_schedule_to_next_ts(job.schedule_expr))
+            return {"status": "error", "message": "Execution exceeded 600 seconds"}
+        finally:
+            if self._active_jobs.get(job_id) is current:
+                self._active_jobs.pop(job_id, None)
+
+    async def _execute_job(self, job_id: str) -> Dict[str, Any]:
         job = self.store.get_job(job_id)
         if not job:
             return {"status": "error", "message": "Job not found"}
@@ -396,6 +476,7 @@ class AutomationScheduler:
         duration = time.time() - start_time
         next_ts = _parse_schedule_to_next_ts(job.schedule_expr, time.time())
         self.store.record_run(job.id, status, final_output, duration, next_ts)
+        job.last_status = status
 
         # Route result to gateway or webhook if configured
         if job.target_channel in ("telegram", "discord", "webhook"):

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { X, ExternalLink, Sparkles, Globe, UserCheck, Boxes, Mic, Search, FileText, Gauge, Terminal, Languages, ShieldCheck, ArrowUpRight, ChevronRight, Hand, Smartphone } from 'lucide-react';
+import { X, ExternalLink, Sparkles, Globe, UserCheck, Boxes, Mic, Search, FileText, Gauge, Terminal, Languages, ShieldCheck, ArrowUpRight, ChevronRight, Smartphone } from 'lucide-react';
 
 /* Each entry describes a code path that exists in this build. Nothing here
    claims that an optional runtime or provider is currently connected. */
@@ -10,13 +10,6 @@ const highlights = [
     icon: Mic,
     accent: 'text-cyan-400',
     ring: 'group-hover:border-cyan-400/50',
-  },
-  {
-    title: 'Gesture Control',
-    detail: 'Nine hand gestures read by the camera on this device. No frame is uploaded and none is stored.',
-    icon: Hand,
-    accent: 'text-sky-400',
-    ring: 'group-hover:border-sky-400/50',
   },
   {
     title: 'Desktop & OS Control',

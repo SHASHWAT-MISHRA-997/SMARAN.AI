@@ -1,38 +1,56 @@
 import React, { useState, useEffect } from 'react';
-import { Globe, Send, CheckCircle2, AlertCircle, RefreshCw, Power, MessageSquare } from 'lucide-react';
-import { API_BASE, fetchWithAuth } from '../context/AuthContext';
+import { Globe, Power } from 'lucide-react';
+import { API_BASE } from '../context/AuthContext';
+import { agentSettingsRequest } from '../utils/agentSettingsRequest';
 
 export default function GatewayPreferences() {
-  const [status, setStatus] = useState({ telegram: { running: false }, discord: { running: false }, webhook: { running: false } });
+  const [status, setStatus] = useState({});
   const [loading, setLoading] = useState(true);
 
   // Telegram inputs
-  const [tgToken, setTgToken] = useState(() => localStorage.getItem('sm_tg_token') || '');
+  const [tgToken, setTgToken] = useState('');
   const [tgChatId, setTgChatId] = useState(() => localStorage.getItem('sm_tg_chat_id') || '');
   const [tgBusy, setTgBusy] = useState(false);
 
   // Discord inputs
-  const [dcToken, setDcToken] = useState(() => localStorage.getItem('sm_dc_token') || '');
+  const [dcToken, setDcToken] = useState('');
   const [dcChannelId, setDcChannelId] = useState(() => localStorage.getItem('sm_dc_channel_id') || '');
   const [dcBusy, setDcBusy] = useState(false);
 
   const [messageNotice, setMessageNotice] = useState('');
+  const [webhookBusy, setWebhookBusy] = useState(false);
+
+  const toggleWebhook = async () => {
+    setWebhookBusy(true);
+    setMessageNotice('');
+    try {
+      const action = status.webhook?.running ? 'stop' : 'start';
+      await agentSettingsRequest(`/gateway/webhook/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      await fetchStatus();
+    } catch (error) {
+      setMessageNotice(error.message);
+    } finally {
+      setWebhookBusy(false);
+    }
+  };
 
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/agent/gateway/status`);
-      if (res.ok) {
-        setStatus(await res.json());
-      }
+      setStatus(await agentSettingsRequest('/gateway/status'));
     } catch (err) {
-      console.error('Failed to get gateway status:', err);
+      setMessageNotice(err.message);
+      setStatus({});
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    localStorage.removeItem('sm_tg_token');
+    localStorage.removeItem('sm_dc_token');
     fetchStatus();
   }, []);
 
@@ -41,16 +59,14 @@ export default function GatewayPreferences() {
     setMessageNotice('');
     try {
       if (status.telegram?.running) {
-        await fetchWithAuth(`${API_BASE}/api/agent/gateway/telegram/stop`, { method: 'POST' });
+        await agentSettingsRequest('/gateway/telegram/stop', { method: 'POST' });
       } else {
-        localStorage.setItem('sm_tg_token', tgToken);
         localStorage.setItem('sm_tg_chat_id', tgChatId);
-        const res = await fetchWithAuth(`${API_BASE}/api/agent/gateway/telegram/start`, {
+        const data = await agentSettingsRequest('/gateway/telegram/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: tgToken, default_chat_id: tgChatId }),
+          body: JSON.stringify({ token: tgToken.trim(), default_chat_id: tgChatId }),
         });
-        const data = await res.json();
         if (!data.started) {
           setMessageNotice('Failed to start Telegram Bot. Check bot token.');
         }
@@ -68,23 +84,21 @@ export default function GatewayPreferences() {
     setMessageNotice('');
     try {
       if (status.discord?.running) {
-        await fetchWithAuth(`${API_BASE}/api/agent/gateway/discord/stop`, { method: 'POST' });
+        await agentSettingsRequest('/gateway/discord/stop', { method: 'POST' });
       } else {
-        localStorage.setItem('sm_dc_token', dcToken);
         localStorage.setItem('sm_dc_channel_id', dcChannelId);
-        const res = await fetchWithAuth(`${API_BASE}/api/agent/gateway/discord/start`, {
+        const data = await agentSettingsRequest('/gateway/discord/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: dcToken, default_channel_id: dcChannelId }),
+          body: JSON.stringify({ token: dcToken.trim(), default_channel_id: dcChannelId }),
         });
-        const data = await res.json();
         if (!data.started) {
           setMessageNotice('Failed to start Discord Bot. Check token & channel.');
         }
       }
       await fetchStatus();
     } catch (err) {
-      setMessageNotice(String(err));
+      setMessageNotice(err.message || String(err));
     } finally {
       setDcBusy(false);
     }
@@ -95,7 +109,7 @@ export default function GatewayPreferences() {
       <div>
         <h3 className="text-sm font-bold flex items-center gap-2">
           <Globe className="w-4 h-4 text-indigo-500" />
-          Multi-Platform Gateway (Hermes Parity)
+          Gateway & Bots
         </h3>
         <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
           Connect SMARAN.AI to Telegram, Discord, and Webhooks to chat and trigger agent runs remotely.
@@ -103,7 +117,7 @@ export default function GatewayPreferences() {
       </div>
 
       {messageNotice && (
-        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-500">
+        <div role="alert" className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-500">
           {messageNotice}
         </div>
       )}
@@ -118,12 +132,12 @@ export default function GatewayPreferences() {
                 ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
                 : 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'
             }`}>
-              {status.telegram?.running ? 'Connected' : 'Stopped'}
+              {loading ? 'Checking…' : !status.telegram ? 'Unavailable' : status.telegram.running ? 'Connected' : 'Stopped'}
             </span>
           </div>
           <button
             onClick={toggleTelegram}
-            disabled={tgBusy || (!status.telegram?.running && !tgToken)}
+            disabled={loading || !status.telegram || tgBusy || (!status.telegram?.running && !tgToken.trim())}
             className={`px-3 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition ${
               status.telegram?.running
                 ? 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20'
@@ -131,7 +145,7 @@ export default function GatewayPreferences() {
             } disabled:opacity-50`}
           >
             <Power className="w-3 h-3" />
-            {status.telegram?.running ? 'Disconnect' : 'Connect'}
+            {tgBusy ? 'Please wait…' : status.telegram?.running ? 'Disconnect' : 'Connect'}
           </button>
         </div>
 
@@ -171,12 +185,12 @@ export default function GatewayPreferences() {
                 ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
                 : 'bg-zinc-500/10 text-zinc-500 border border-zinc-500/20'
             }`}>
-              {status.discord?.running ? 'Connected' : 'Stopped'}
+              {loading ? 'Checking…' : !status.discord ? 'Unavailable' : status.discord.running ? 'Connected' : 'Stopped'}
             </span>
           </div>
           <button
             onClick={toggleDiscord}
-            disabled={dcBusy || (!status.discord?.running && !dcToken)}
+            disabled={loading || !status.discord || dcBusy || (!status.discord?.running && !dcToken.trim())}
             className={`px-3 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition ${
               status.discord?.running
                 ? 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20'
@@ -184,7 +198,7 @@ export default function GatewayPreferences() {
             } disabled:opacity-50`}
           >
             <Power className="w-3 h-3" />
-            {status.discord?.running ? 'Disconnect' : 'Connect'}
+            {dcBusy ? 'Please wait…' : status.discord?.running ? 'Disconnect' : 'Connect'}
           </button>
         </div>
 
@@ -217,11 +231,15 @@ export default function GatewayPreferences() {
       {/* Webhook Endpoint */}
       <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 space-y-2">
         <span className="text-xs font-bold">Webhook Trigger Ingress</span>
+        <button onClick={toggleWebhook} disabled={loading || webhookBusy || !status.webhook}
+          className="ml-3 px-3 py-1 rounded-xl bg-indigo-600 text-white text-xs disabled:opacity-50">
+          {webhookBusy ? 'Please wait…' : status.webhook?.running ? 'Disable webhook' : 'Enable webhook'}
+        </button>
         <p className="text-[11px] text-zinc-500">
-          Send HTTP POST payloads with <code>{`{"prompt": "..."}`}</code> to trigger agent runs from scripts or CI/CD pipelines:
+          Send HTTP POST payloads with <code>{`{"prompt": "..."}`}</code> while enabled to trigger agent runs from scripts or CI/CD pipelines. If configured, pass the secret in the X-Webhook-Secret header:
         </p>
         <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-950 font-mono text-[11px] text-indigo-500 select-all border border-zinc-200 dark:border-zinc-800">
-          {API_BASE}/api/agent/gateway/webhook/generic
+          {API_BASE || window.location.origin}/api/agent/gateway/webhook/generic
         </div>
       </div>
     </div>

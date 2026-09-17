@@ -6,7 +6,7 @@
  * packaged Android app - and twice the same phone, pointed at a paired computer
  * in a browser at 192.168.1.5:3003, has failed that test and been handed the
  * desktop behaviour: the composer hidden as though the window were pinned, and
- * Gesture and Vision offered on a device that cannot use either.
+ * Vision offered on a device that cannot use it.
  *
  * The packaged app is one way to be a phone, not the definition of one.
  *

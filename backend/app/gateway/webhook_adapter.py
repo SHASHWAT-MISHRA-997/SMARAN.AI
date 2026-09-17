@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from typing import Any, Callable, Dict, Optional
 
 import httpx
@@ -51,11 +52,12 @@ class WebhookGateway(BaseGateway):
             return False
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(url, json={
+                response = await client.post(url, json={
                     "event": "agent_response",
                     "text": text,
                     "timestamp": time.time(),
                 })
+                response.raise_for_status()
             return True
         except Exception as exc:
             logger.error(f"Failed to post webhook response: {exc}")
@@ -63,6 +65,10 @@ class WebhookGateway(BaseGateway):
 
     async def handle_incoming(self, platform: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Parses generic or platform-specific webhook payload and dispatches task."""
+        if not self._running:
+            return {"status": "unavailable", "reason": "Webhook gateway is stopped"}
+        if not isinstance(payload, dict):
+            return {"status": "ignored", "reason": "Payload must be a JSON object"}
         # Extract task prompt and optional callback url
         prompt = ""
         callback_url = payload.get("callback_url") or self.default_callback_url
@@ -78,11 +84,11 @@ class WebhookGateway(BaseGateway):
             # Generic format: {"prompt": "..."} or {"message": "..."} or {"text": "..."}
             prompt = payload.get("prompt") or payload.get("message") or payload.get("text", "")
 
-        if not prompt:
+        if not isinstance(prompt, str) or not prompt.strip():
             return {"status": "ignored", "reason": "No prompt found in payload"}
 
         # Run task in background or synchronously if wait requested
-        task_id = f"wh_{int(time.time()*1000)}"
+        task_id = f"wh_{uuid.uuid4().hex}"
         asyncio.create_task(self._process_webhook_task(task_id, prompt, callback_url))
 
         return {

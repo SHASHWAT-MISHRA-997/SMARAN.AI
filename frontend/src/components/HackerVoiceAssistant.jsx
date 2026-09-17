@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Mic,
   MicOff,
@@ -11,7 +11,6 @@ import {
   UserRound,
   Monitor,
   Camera,
-  Hand,
   Phone as PhoneIcon,
   Music2,
 } from 'lucide-react';
@@ -26,9 +25,7 @@ import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/devi
 const noBackend = () => isNativeApp() && !loadLink()?.url;
 import EnergyCore from './EnergyCore';
 import { resolveCoreState } from '../utils/coreStates';
-import GestureHUD from './GestureHUD';
 import CyberFX from './CyberFX';
-import { GESTURES } from '../utils/gestureControl';
 import { isDesktopApp } from './RightPanel';
 import AvatarVideo, { AVATAR_CHARACTERS } from './AvatarVideo';
 import AvatarMMD, { MMD_CHARACTERS } from './AvatarMMD';
@@ -323,8 +320,6 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
   );
   const ambienceRef = useRef(null);
 
-  // Gesture Mode: hand control, tracked on this device only.
-  const [gestureMode, setGestureMode] = useState(false);
 
 
   const [showAvatar, setShowAvatar] = useState(() => localStorage.getItem('sm_show_avatar') !== 'false');
@@ -1681,13 +1676,6 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     startLiveSession();
   }, [isOpen, liveAvailable, startLiveSession]);
 
-  // Every character that can be on screen, in picker order, so a swipe
-  // steps through the same list the dropdown shows.
-  const characterCycle = useMemo(
-    () => [...MMD_CHARACTERS.map((c) => c.id), ...AVATAR_CHARACTERS.map((c) => c.id), 'core'],
-    [],
-  );
-
   const selectCharacter = useCallback(async (next) => {
     // Gemini fixes the speaker when a connection starts. Changing only the
     // avatar leaves the previous speaker talking through the new character.
@@ -1700,53 +1688,6 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
     if (next !== 'core') setAvatarId(next);
   }, [stopLiveSession]);
 
-  const stepCharacter = useCallback((delta) => {
-    const current = showAvatar ? avatarId : 'core';
-    const index = characterCycle.indexOf(current);
-    const next = characterCycle[(index + delta + characterCycle.length) % characterCycle.length];
-    selectCharacter(next);
-  }, [characterCycle, showAvatar, avatarId, selectCharacter]);
-
-  // A gesture stands in for the control it names; nothing here does
-  // anything the on-screen buttons cannot already do.
-  const handleGestureAction = useCallback((gesture) => {
-    switch (gesture) {
-      case GESTURES.OPEN_PALM:
-        stopSpeaking?.();
-        break;
-      case GESTURES.FIST:
-        setGestureMode(false);
-        onClose?.();
-        break;
-      case GESTURES.POINT:
-        if (!liveActive) startLiveSession();
-        break;
-      case GESTURES.VICTORY: {
-        const session = liveSessionRef.current;
-        if (!session) break;
-        if (visionMode === 'camera') session.stopVision();
-        else session.startVision('camera');
-        break;
-      }
-      case GESTURES.THUMB_UP:
-        onSendQuery?.('yes');
-        break;
-      case GESTURES.THUMB_DOWN:
-        onSendQuery?.('no, cancel that');
-        break;
-      case GESTURES.PINCH:
-        setAmbienceOn((value) => !value);
-        break;
-      case GESTURES.SWIPE_LEFT:
-        stepCharacter(-1);
-        break;
-      case GESTURES.SWIPE_RIGHT:
-        stepCharacter(1);
-        break;
-      default:
-        break;
-    }
-  }, [stopSpeaking, onClose, liveActive, startLiveSession, visionMode, onSendQuery, stepCharacter]);
   const toggleMute = () => {
     if (isMuted) {
       isMutedRef.current = false;
@@ -2357,7 +2298,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
               This is one button that opens the pair, and shows which is live. */}
           {/* Vision needs the live session, which needs a computer. On a
               phone with none it was a permanently grey button with nothing
-              saying why - the same as Gesture, and gone for the same reason. */}
+              saying why. */}
           {!noBackend() && !isPhone() && (
           <div className="relative">
             <CallToggle
@@ -2448,35 +2389,13 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
                 : 'Start'}
           </span>
 
-          {/* Pinned above everything at 420x560 there is room for the
-              character, what she says, and talking to her. Gesture, ambience
-              and the vision picker are hidden there - not disabled, hidden -
-              so the small window is one thing you can use rather than six
-              you cannot. They all come back at full size. */}
-          {/* Gesture is not on the phone. It watches a camera for hand
-              poses to drive the call - on a phone the camera is pointed at
-              your face from six inches away and the hands holding it are not
-              in frame. The HUD was already suppressed there; the button that
-              turned on nothing is gone with it. */}
-          {/* isPhone, not isNativeApp. The packaged app was excluded and the
-              same phone in a browser was not, so Gesture came back the moment
-              you paired a computer - on a device whose camera is six inches
-              from your face and whose hands are holding it. */}
-          {!isPhone() && (
-            <span className="contents"><CallToggle icon={Hand} label="Gesture" active={gestureMode} onClick={() => setGestureMode((v) => !v)} /></span>
-          )}
           {Ambience.isSupported() && (
             <span className="contents"><CallToggle icon={Music2} label="Ambience" active={ambienceOn} onClick={() => setAmbienceOn((v) => !v)} /></span>
           )}
         </div>
       </div>
 
-      {/* Stark-workshop gesture layer, above everything but click-through. */}
-      <GestureHUD
-        isOpen={gestureMode && !isMobileVoiceDevice()}
-        onClose={() => setGestureMode(false)}
-        onAction={handleGestureAction}
-      />
+
     </div>
   );
 };

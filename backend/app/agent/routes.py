@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -175,24 +176,29 @@ class CreateJobRequest(BaseModel):
 async def list_scheduled_jobs():
     """List all scheduled tasks and next run times."""
     from app.agent.scheduler import AutomationScheduler
-    jobs = AutomationScheduler.get_instance().store.list_jobs()
-    return {"jobs": [j.__dict__ for j in jobs]}
+    scheduler = AutomationScheduler.get_instance()
+    jobs = scheduler.store.list_jobs()
+    return {"jobs": [{**j.__dict__, "last_status": "running" if j.id in scheduler._active_jobs else j.last_status}
+                     for j in jobs]}
 
 
 @router.post("/scheduler/jobs")
-async def create_scheduled_job(req: CreateJobRequest):
+def create_scheduled_job(req: CreateJobRequest):
     """Create a new recurring or one-shot scheduled automation."""
     from app.agent.scheduler import AutomationScheduler
-    job = AutomationScheduler.get_instance().store.add_job(
-        name=req.name,
-        schedule_expr=req.schedule_expr,
-        task_prompt=req.task_prompt,
-        model=req.model,
-        provider=req.provider,
-        workspace_root=req.workspace_root,
-        target_channel=req.target_channel,
-        target_recipient=req.target_recipient,
-    )
+    try:
+        job = AutomationScheduler.get_instance().store.add_job(
+            name=req.name,
+            schedule_expr=req.schedule_expr,
+            task_prompt=req.task_prompt,
+            model=req.model,
+            provider=req.provider,
+            workspace_root=req.workspace_root,
+            target_channel=req.target_channel,
+            target_recipient=req.target_recipient,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "created", "job": job.__dict__}
 
 
@@ -210,8 +216,10 @@ async def delete_scheduled_job(job_id: str):
 async def run_scheduled_job_now(job_id: str):
     """Trigger immediate execution of a scheduled automation."""
     from app.agent.scheduler import AutomationScheduler
-    result = await AutomationScheduler.get_instance().run_job_now(job_id)
-    return result
+    result = AutomationScheduler.get_instance().queue_job(job_id)
+    if result["status"] == "not_found":
+        raise HTTPException(status_code=404, detail=result["message"])
+    return JSONResponse(result, status_code=202)
 
 
 @router.get("/scheduler/jobs/{job_id}/history")
@@ -257,15 +265,18 @@ async def list_snapshots():
 
 
 @router.post("/sandbox/snapshots")
-async def create_snapshot(req: SnapshotCreateRequest):
+def create_snapshot(req: SnapshotCreateRequest):
     """Create a workspace snapshot."""
     from app.agent.sandbox import get_sandbox
-    snap = get_sandbox().create_snapshot(req.root, description=req.description)
+    try:
+        snap = get_sandbox().create_snapshot(req.root, description=req.description)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "created", "id": snap.id, "files_count": len(snap.file_checksums)}
 
 
 @router.post("/sandbox/restore")
-async def restore_snapshot(req: SnapshotRestoreRequest):
+def restore_snapshot(req: SnapshotRestoreRequest):
     """Restore workspace to a saved snapshot."""
     from app.agent.sandbox import get_sandbox
     res = get_sandbox().restore_snapshot(req.snapshot_id, req.root)
@@ -343,6 +354,8 @@ async def stop_gateway(platform: str):
     elif platform == "webhook":
         from app.gateway.webhook_adapter import WebhookGateway
         await WebhookGateway.get_instance().stop()
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown platform: {platform}")
     return {"platform": platform, "stopped": True}
 
 
@@ -350,6 +363,17 @@ async def stop_gateway(platform: str):
 async def receive_webhook(platform: str, request: Request):
     """Receive external webhook payload and trigger agent task."""
     from app.gateway.webhook_adapter import WebhookGateway
-    body = await request.json()
-    result = await WebhookGateway.get_instance().handle_incoming(platform, body)
+    gateway = WebhookGateway.get_instance()
+    if not gateway.is_running():
+        raise HTTPException(status_code=503, detail="Webhook gateway is stopped")
+    if gateway.secret_token and not secrets.compare_digest(
+            request.headers.get("X-Webhook-Secret", ""), gateway.secret_token):
+        raise HTTPException(status_code=403, detail="Invalid webhook secret")
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="Payload must be a JSON object")
+    result = await gateway.handle_incoming(platform, body)
     return result

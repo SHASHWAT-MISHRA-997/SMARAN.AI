@@ -53,7 +53,7 @@
          that network changes. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <!-- Speak: the microphone. Gesture Mode and screen vision: the camera. -->
+    <!-- Speak: the microphone. Screen vision: the camera. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Listening while the app is not on screen.
          Without a foreground service the activity is stopped the moment another

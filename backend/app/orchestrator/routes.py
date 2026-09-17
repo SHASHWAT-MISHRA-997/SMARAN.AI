@@ -88,7 +88,9 @@ def _remember(run: Run) -> None:
     _runs[run.id] = run
     while len(_runs) > MAX_REMEMBERED_RUNS:
         old_id, _ = _runs.popitem(last=False)
-        _tasks.pop(old_id, None)
+        old_task = _tasks.pop(old_id, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
 
 
 def _get(run_id: str) -> Run:
