@@ -38,6 +38,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 24.1,
             "ifeval": 58.2
         },
+        "benchmark_sources": {"url": "https://huggingface.co/vikhyatk/moondream2"},
         "hf_repo": "vikhyatk/moondream2",
         "ollama_tag": "moondream:1.8b",
         "is_default": False
@@ -67,6 +68,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 26.8,
             "ifeval": 62.4
         },
+        "benchmark_sources": {"url": "https://huggingface.co/HuggingFaceTB/SmolVLM-Instruct"},
         "hf_repo": "HuggingFaceTB/SmolVLM-Instruct",
         "ollama_tag": "smolvlm:2.2b",
         "is_default": False
@@ -96,6 +98,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 21.0,
             "ifeval": 59.5
         },
+        "benchmark_sources": {"url": "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct"},
         "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
         "ollama_tag": "llama3.2:1b",
         "is_default": False
@@ -125,6 +128,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 22.4,
             "ifeval": 56.7
         },
+        "benchmark_sources": {"url": "https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct"},
         "hf_repo": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
         "ollama_tag": "smollm2:1.7b",
         "is_default": False
@@ -154,6 +158,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 34.1,
             "ifeval": 61.8
         },
+        "benchmark_sources": {"url": "https://arxiv.org/abs/2501.12948"},
         "hf_repo": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
         "ollama_tag": "deepseek-r1:1.5b",
         "is_default": False
@@ -214,6 +219,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 33.5,
             "ifeval": 69.8
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen2.5-vl"},
         "hf_repo": "Qwen/Qwen2.5-VL-3B-Instruct-AWQ",
         "ollama_tag": "qwen2.5vl:3b",
         "is_default": False
@@ -243,6 +249,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 36.8,
             "ifeval": 71.3
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen3"},
         "hf_repo": "Qwen/Qwen3-4B-AWQ",
         "ollama_tag": "qwen2.5:3b",
         "is_default": True
@@ -272,6 +279,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 27.5,
             "ifeval": 65.1
         },
+        "benchmark_sources": {"url": "https://huggingface.co/google/gemma-2-2b-it"},
         "hf_repo": "google/gemma-2-2b-it",
         "ollama_tag": "gemma2:2b",
         "is_default": False
@@ -301,6 +309,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 30.5,
             "ifeval": 77.4
         },
+        "benchmark_sources": {"url": "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct"},
         "hf_repo": "meta-llama/Llama-3.2-3B-Instruct",
         "ollama_tag": "llama3.2:3b",
         "is_default": False
@@ -330,6 +339,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 31.0,
             "ifeval": 67.5
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen2.5"},
         "hf_repo": "Qwen/Qwen2.5-3B-Instruct",
         "ollama_tag": "qwen2.5:3b",
         "is_default": False
@@ -390,6 +400,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 32.8,
             "ifeval": 70.1
         },
+        "benchmark_sources": {"url": "https://huggingface.co/microsoft/Phi-3.5-vision-instruct"},
         "hf_repo": "microsoft/Phi-3.5-vision-instruct",
         "ollama_tag": "phi3.5:vision",
         "is_default": False
@@ -419,6 +430,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 30.2,
             "ifeval": 68.9
         },
+        "benchmark_sources": {"url": "https://arxiv.org/abs/2404.14219"},
         "hf_repo": "microsoft/Phi-3.5-mini-instruct",
         "ollama_tag": "phi3.5:latest",
         "is_default": False
@@ -448,6 +460,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 28.0,
             "ifeval": 64.2
         },
+        "benchmark_sources": {"url": "https://huggingface.co/nvidia/Nemotron-Mini-4B-Instruct"},
         "hf_repo": "nvidia/Nemotron-Mini-4B-Instruct",
         "ollama_tag": "nemotron-mini:4b",
         "is_default": False
@@ -508,6 +521,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 37.5,
             "ifeval": 73.1
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen2.5-vl"},
         "hf_repo": "Qwen/Qwen2.5-VL-7B-Instruct-AWQ",
         "ollama_tag": "qwen2.5vl:7b",
         "is_default": False
@@ -537,6 +551,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 39.2,
             "ifeval": 80.5
         },
+        "benchmark_sources": {"url": "https://huggingface.co/THUDM/glm-4v-9b"},
         "hf_repo": "THUDM/glm-4v-9b",
         "ollama_tag": "glm4v:9b",
         "is_default": False
@@ -566,6 +581,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 35.8,
             "ifeval": 79.8
         },
+        "benchmark_sources": {"url": "https://huggingface.co/meta-llama/Llama-3.2-11B-Vision-Instruct"},
         "hf_repo": "meta-llama/Llama-3.2-11B-Vision-Instruct",
         "ollama_tag": "llama3.2-vision:11b",
         "is_default": False
@@ -595,6 +611,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 49.1,
             "ifeval": 76.5
         },
+        "benchmark_sources": {"url": "https://arxiv.org/abs/2501.12948"},
         "hf_repo": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
         "ollama_tag": "deepseek-r1:7b",
         "is_default": False
@@ -624,6 +641,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 41.5,
             "ifeval": 78.9
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen2.5-coder-family"},
         "hf_repo": "Qwen/Qwen2.5-Coder-7B-Instruct",
         "ollama_tag": "qwen2.5-coder:7b",
         "is_default": False
@@ -653,6 +671,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 32.7,
             "ifeval": 80.4
         },
+        "benchmark_sources": {"url": "https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct"},
         "hf_repo": "meta-llama/Llama-3.1-8B-Instruct",
         "ollama_tag": "llama3.1:8b",
         "is_default": False
@@ -711,6 +730,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 32.5,
             "ifeval": 72.1
         },
+        "benchmark_sources": {"url": "https://huggingface.co/moonshotai/Kimi-VL-A3B-Instruct"},
         "hf_repo": "moonshotai/Kimi-VL-A3B-Instruct",
         "ollama_tag": "kimi-vl:a3b",
         "is_default": False
@@ -798,6 +818,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 52.4,
             "ifeval": 83.7
         },
+        "benchmark_sources": {"url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash"},
         "hf_repo": "deepseek-ai/DeepSeek-V4-Flash",
         "ollama_tag": "deepseek-v4:flash",
         "is_default": False
@@ -827,6 +848,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 61.4,
             "ifeval": 88.9
         },
+        "benchmark_sources": {"url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro"},
         "hf_repo": "deepseek-ai/DeepSeek-V4-Pro",
         "ollama_tag": "deepseek-v4:pro",
         "is_default": False
@@ -856,6 +878,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 26.5,
             "ifeval": 62.3
         },
+        "benchmark_sources": {"url": "https://huggingface.co/google/gemma-3-1b-it"},
         "hf_repo": "google/gemma-3-1b-it",
         "ollama_tag": "gemma3:1b",
         "is_default": False
@@ -885,6 +908,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 38.4,
             "ifeval": 74.2
         },
+        "benchmark_sources": {"url": "https://huggingface.co/google/gemma-3-4b-it"},
         "hf_repo": "google/gemma-3-4b-it",
         "ollama_tag": "gemma3:4b",
         "is_default": False
@@ -943,6 +967,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 54.2,
             "ifeval": 84.5
         },
+        "benchmark_sources": {"url": "https://huggingface.co/google/gemma-3-27b-it"},
         "hf_repo": "google/gemma-3-27b-it",
         "ollama_tag": "gemma3:27b",
         "is_default": False
@@ -1030,6 +1055,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 42.1,
             "ifeval": 74.8
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen3"},
         "hf_repo": "Qwen/Qwen3-8B-AWQ",
         "ollama_tag": "qwen3:8b",
         "is_default": False
@@ -1059,6 +1085,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 48.5,
             "ifeval": 78.2
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen3"},
         "hf_repo": "Qwen/Qwen3-14B-AWQ",
         "ollama_tag": "qwen3:14b",
         "is_default": False
@@ -1088,6 +1115,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 56.4,
             "ifeval": 83.6
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen3"},
         "hf_repo": "Qwen/Qwen3-32B-AWQ",
         "ollama_tag": "qwen3:32b",
         "is_default": False
@@ -1146,6 +1174,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 35.1,
             "ifeval": 79.1
         },
+        "benchmark_sources": {"url": "https://huggingface.co/google/gemma-2-9b-it"},
         "hf_repo": "google/gemma-2-9b-it",
         "ollama_tag": "gemma2:9b",
         "is_default": False
@@ -1175,6 +1204,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 38.9,
             "ifeval": 81.2
         },
+        "benchmark_sources": {"url": "https://huggingface.co/THUDM/glm-4-9b-chat"},
         "hf_repo": "THUDM/glm-4-9b-chat",
         "ollama_tag": "glm4:9b",
         "is_default": False
@@ -1206,6 +1236,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 36.0,
             "ifeval": 79.2
         },
+        "benchmark_sources": {"url": "https://huggingface.co/mistralai/Pixtral-12B-2409"},
         "hf_repo": "mistralai/Pixtral-12B-2409",
         "ollama_tag": "pixtral:12b",
         "is_default": False
@@ -1235,6 +1266,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 56.1,
             "ifeval": 85.0
         },
+        "benchmark_sources": {"url": "https://huggingface.co/microsoft/phi-4"},
         "hf_repo": "microsoft/phi-4",
         "ollama_tag": "phi4:latest",
         "is_default": False
@@ -1264,6 +1296,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 34.6,
             "ifeval": 78.8
         },
+        "benchmark_sources": {"url": "https://huggingface.co/mistralai/Mistral-Nemo-Instruct-2407"},
         "hf_repo": "mistralai/Mistral-Nemo-Instruct-2407",
         "ollama_tag": "mistral-nemo:latest",
         "is_default": False
@@ -1293,6 +1326,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 44.5,
             "ifeval": 82.4
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen2.5"},
         "hf_repo": "Qwen/Qwen2.5-14B-Instruct-AWQ",
         "ollama_tag": "qwen2.5:14b",
         "is_default": False
@@ -1411,6 +1445,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 55.4,
             "ifeval": 84.8
         },
+        "benchmark_sources": {"url": "https://arxiv.org/abs/2501.12948"},
         "hf_repo": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
         "ollama_tag": "deepseek-r1:32b",
         "is_default": False
@@ -1502,7 +1537,8 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
         "quantization": "Native checkpoint", "recommended_gpu_vram_gb": 160.0, "recommended_gpu_name": "Multi-GPU server deployment",
         "vram_gb_req": 160.0, "ram_gb_req": 256.0, "license": "Llama 4 Community License",
         "description": "Meta native multimodal model for image/text understanding and high-quality instruction following.",
-        "capabilities": ["Text", "Vision", "Files", "Code", "Reasoning"], "benchmarks": {}, "hf_repo": "meta-llama/Llama-4-Maverick-17B-128E-Instruct", "ollama_tag": "", "is_default": False
+        "capabilities": ["Text", "Vision", "Files", "Code", "Reasoning"], "benchmarks": {},
+        "benchmark_sources": {"url": "https://huggingface.co/meta-llama/Llama-4-Maverick-17B-128E-Instruct"}, "hf_repo": "meta-llama/Llama-4-Maverick-17B-128E-Instruct", "ollama_tag": "", "is_default": False
     },
     # ─── 🚀 NEW 2026 NEXT-GEN MODELS (NEMATRON, KIMI, GLM, DEEPSEEK V4, GEMMA 4) ───
     {
@@ -1684,6 +1720,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 79.8,
             "ifeval": 91.4
         },
+        "benchmark_sources": {"url": "https://huggingface.co/moonshotai/Kimi-K3-32B-Instruct"},
         "hf_repo": "moonshotai/Kimi-K3",
         "ollama_tag": "",
         "is_default": False
@@ -1713,6 +1750,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 74.1,
             "ifeval": 88.8
         },
+        "benchmark_sources": {"url": "https://huggingface.co/THUDM/GLM-5.2"},
         "hf_repo": "zai-org/GLM-5.2",
         "ollama_tag": "",
         "is_default": False
@@ -1742,6 +1780,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 70.5,
             "ifeval": 86.3
         },
+        "benchmark_sources": {"url": "https://huggingface.co/MiniMaxAI/MiniMax-M3"},
         "hf_repo": "MiniMaxAI/MiniMax-M3",
         "ollama_tag": "",
         "is_default": False
@@ -1771,6 +1810,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 65.2,
             "ifeval": 84.9
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen3"},
         "hf_repo": "Qwen/Qwen3-Next-80B-A3B-Instruct",
         "ollama_tag": "",
         "is_default": False
@@ -1800,6 +1840,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 62.7,
             "ifeval": 85.2
         },
+        "benchmark_sources": {"url": "https://huggingface.co/nvidia/Llama-3_3-Nemotron-Super-49B-v1"},
         "hf_repo": "nvidia/Llama-3_3-Nemotron-Super-49B-v1",
         "ollama_tag": "",
         "is_default": False
@@ -1829,6 +1870,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 56.3,
             "ifeval": 83.1
         },
+        "benchmark_sources": {"url": "https://huggingface.co/mistralai/Mistral-Small-3.2-24B-Instruct-2506"},
         "hf_repo": "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
         "ollama_tag": "",
         "is_default": False
@@ -1858,6 +1900,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 48.9,
             "ifeval": 79.5
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen3"},
         "hf_repo": "Qwen/Qwen3-VL-8B-Instruct",
         "ollama_tag": "",
         "is_default": False
@@ -1887,6 +1930,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 42.1,
             "ifeval": 75.8
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen3"},
         "hf_repo": "Qwen/Qwen3-VL-4B-Instruct",
         "ollama_tag": "",
         "is_default": False
@@ -1916,6 +1960,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 41.5,
             "ifeval": 73.2
         },
+        "benchmark_sources": {"url": "https://huggingface.co/OpenGVLab/InternVL3-8B"},
         "hf_repo": "OpenGVLab/InternVL3-8B",
         "ollama_tag": "",
         "is_default": False
@@ -1945,6 +1990,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 45.2,
             "ifeval": 74.6
         },
+        "benchmark_sources": {"url": "https://huggingface.co/moonshotai/Kimi-VL-A3B-Thinking"},
         "hf_repo": "moonshotai/Kimi-VL-A3B-Thinking",
         "ollama_tag": "",
         "is_default": False
@@ -1974,6 +2020,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 52.6,
             "ifeval": 81.3
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen3"},
         "hf_repo": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
         "ollama_tag": "",
         "is_default": False
@@ -2003,6 +2050,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 45.8,
             "ifeval": 76.1
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen2.5-coder-family"},
         "hf_repo": "Qwen/Qwen2.5-Coder-14B-Instruct",
         "ollama_tag": "",
         "is_default": False
@@ -2032,6 +2080,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 43.1,
             "ifeval": 73.8
         },
+        "benchmark_sources": {"url": "https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"},
         "hf_repo": "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
         "ollama_tag": "",
         "is_default": False
@@ -2061,6 +2110,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 56.1,
             "ifeval": 78.9
         },
+        "benchmark_sources": {"url": "https://huggingface.co/deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"},
         "hf_repo": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
         "ollama_tag": "",
         "is_default": False
@@ -2090,6 +2140,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 58.4,
             "ifeval": 80.2
         },
+        "benchmark_sources": {"url": "https://huggingface.co/microsoft/Phi-4-reasoning-plus"},
         "hf_repo": "microsoft/Phi-4-reasoning-plus",
         "ollama_tag": "",
         "is_default": False
@@ -2111,14 +2162,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
         "license": "MIT",
         "description": "Speech to text in 99 languages, several times faster than the original large model. Runs on almost any hardware.",
         "capabilities": ["Audio", "Files", "Multilingual"],
-        "benchmarks": {
-            "mmlu": 0.0,
-            "humaneval": 0.0,
-            "gsm8k": 0.0,
-            "math": 0.0,
-            "gpqa": 0.0,
-            "ifeval": 0.0
-        },
+        "benchmarks": {},
         "hf_repo": "openai/whisper-large-v3-turbo",
         "ollama_tag": "",
         "is_default": False
@@ -2140,14 +2184,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
         "license": "Apache 2.0",
         "description": "A tiny, natural sounding text-to-speech voice that runs on the CPU. Measured here: about 4 seconds of speech per 1.8 seconds of work. English only in this build - the bundled phonemiser reads the Latin alphabet, so the model's Hindi voices are refused rather than pronounced as English.",
         "capabilities": ["Audio"],
-        "benchmarks": {
-            "mmlu": 0.0,
-            "humaneval": 0.0,
-            "gsm8k": 0.0,
-            "math": 0.0,
-            "gpqa": 0.0,
-            "ifeval": 0.0
-        },
+        "benchmarks": {},
         "hf_repo": "hexgrad/Kokoro-82M",
         "ollama_tag": "",
         "is_default": False
@@ -2169,14 +2206,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
         "license": "MIT",
         "description": "Long-form expressive speech synthesis with multiple speakers, for narration and dialogue.",
         "capabilities": ["Audio", "Multilingual"],
-        "benchmarks": {
-            "mmlu": 0.0,
-            "humaneval": 0.0,
-            "gsm8k": 0.0,
-            "math": 0.0,
-            "gpqa": 0.0,
-            "ifeval": 0.0
-        },
+        "benchmarks": {},
         "hf_repo": "microsoft/VibeVoice-1.5B",
         "ollama_tag": "",
         "is_default": False
@@ -2206,6 +2236,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
             "gpqa": 51.2,
             "ifeval": 79.8
         },
+        "benchmark_sources": {"url": "https://qwen.ai/blog/qwen3"},
         "hf_repo": "Qwen/Qwen3-Omni-30B-A3B-Instruct",
         "ollama_tag": "",
         "is_default": False
@@ -2227,14 +2258,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
         "license": "OpenRAIL-M",
         "description": "Generates short video faster than real time on a consumer GPU. The most approachable open video model.",
         "capabilities": ["Video", "Vision"],
-        "benchmarks": {
-            "mmlu": 0.0,
-            "humaneval": 0.0,
-            "gsm8k": 0.0,
-            "math": 0.0,
-            "gpqa": 0.0,
-            "ifeval": 0.0
-        },
+        "benchmarks": {},
         "hf_repo": "Lightricks/LTX-Video",
         "ollama_tag": "",
         "is_default": False
@@ -2256,14 +2280,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
         "license": "Apache 2.0",
         "description": "Alibaba's compact video generator: 720p clips from a prompt or a still image on a single card.",
         "capabilities": ["Video", "Vision"],
-        "benchmarks": {
-            "mmlu": 0.0,
-            "humaneval": 0.0,
-            "gsm8k": 0.0,
-            "math": 0.0,
-            "gpqa": 0.0,
-            "ifeval": 0.0
-        },
+        "benchmarks": {},
         "hf_repo": "Wan-AI/Wan2.2-TI2V-5B",
         "ollama_tag": "",
         "is_default": False
@@ -2285,14 +2302,7 @@ MODELS_CATALOG: List[Dict[str, Any]] = [
         "license": "Apache 2.0",
         "description": "High fidelity open text-to-video with strong motion quality. Needs a 24GB card.",
         "capabilities": ["Video", "Vision"],
-        "benchmarks": {
-            "mmlu": 0.0,
-            "humaneval": 0.0,
-            "gsm8k": 0.0,
-            "math": 0.0,
-            "gpqa": 0.0,
-            "ifeval": 0.0
-        },
+        "benchmarks": {},
         "hf_repo": "genmo/mochi-1-preview",
         "ollama_tag": "",
         "is_default": False

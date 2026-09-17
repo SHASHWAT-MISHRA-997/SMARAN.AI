@@ -35,9 +35,10 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
   // Compute Overall Accuracy Average for each model
   const modelsWithAccuracy = models.map((m) => {
     const bm = m.benchmarks || {};
-    const scores = [bm.mmlu, bm.humaneval, bm.gsm8k, bm.math, bm.gpqa, bm.ifeval].filter((s) => typeof s === 'number');
-    const avgScore = scores.length > 0 ? parseFloat(safeToFixed(scores.reduce((a, b) => a + b, 0) / scores.length, 1) || "0") : 0;
-    return { ...m, overallAccuracy: parseFloat(avgScore) };
+    const scores = [bm.mmlu, bm.humaneval, bm.gsm8k, bm.math, bm.gpqa, bm.ifeval].filter((s) => typeof s === 'number' && s > 0);
+    const avgScore = scores.length > 0 ? parseFloat(safeToFixed(scores.reduce((a, b) => a + b, 0) / scores.length, 1) || "0") : null;
+    const hasBenchmarks = scores.length > 0;
+    return { ...m, overallAccuracy: avgScore, hasBenchmarks };
   });
 
   // Sort by overall accuracy desc to find rankings
@@ -116,13 +117,13 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
                     <div className="mt-4 p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-center space-y-1">
                       <div className="text-[10px] font-extrabold uppercase text-zinc-400">Overall Accuracy Score</div>
                       <div className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-indigo-400">
-                        {m.overallAccuracy}%
+                        {m.hasBenchmarks ? `${m.overallAccuracy}%` : 'N/A'}
                       </div>
                       {/* Overall Progress Bar */}
                       <div className="w-full h-2 rounded-full bg-zinc-800 overflow-hidden mt-2">
                         <div
                           className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-500"
-                          style={{ width: `${m.overallAccuracy}%` }}
+                          style={{ width: `${m.hasBenchmarks ? m.overallAccuracy : 0}%` }}
                         />
                       </div>
                     </div>
@@ -159,7 +160,9 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
 
                   <div className="space-y-2.5">
                     {modelsWithAccuracy.map((m) => {
-                      const score = m.benchmarks?.[key] || 0;
+                      const rawScore = m.benchmarks?.[key];
+                      const hasScore = typeof rawScore === 'number' && rawScore > 0;
+                      const score = hasScore ? rawScore : 0;
                       return (
                         <div key={m.id} className="space-y-1">
                           <div className="flex items-center justify-between text-xs">
@@ -167,14 +170,14 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
                               <span className="w-2 h-2 rounded-full bg-indigo-500" />
                               {m.name}
                             </span>
-                            <span className="font-black text-white bg-zinc-900 px-2 py-0.5 rounded-md border border-zinc-800">
-                              {score}%
+                            <span className={`font-black px-2 py-0.5 rounded-md border ${hasScore ? 'text-white bg-zinc-900 border-zinc-800' : 'text-zinc-500 bg-zinc-900/50 border-zinc-800/50'}`}>
+                              {hasScore ? `${score}%` : 'N/A'}
                             </span>
                           </div>
                           {/* Accuracy Graph Bar */}
                           <div className="w-full h-3 rounded-full bg-zinc-900 overflow-hidden border border-zinc-800/60 p-0.5">
                             <div
-                              className={`h-full rounded-full ${barColor} transition-all duration-500 shadow-sm`}
+                              className={`h-full rounded-full ${hasScore ? barColor : 'bg-zinc-800'} transition-all duration-500 shadow-sm`}
                               style={{ width: `${score}%` }}
                             />
                           </div>
@@ -194,7 +197,7 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
               Core Specifications & Quantization
             </h4>
             <div className="divide-y divide-zinc-800/60 text-xs">
-              <div className="py-3 grid items-center" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
+              <div className="py-3 grid items-center gap-x-4" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
                 <span className="font-bold text-zinc-400">Parameters</span>
                 {models.map((m) => (
                   <span key={m.id} className="font-black text-white text-sm">
@@ -202,7 +205,7 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
                   </span>
                 ))}
               </div>
-              <div className="py-3 grid items-center" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
+              <div className="py-3 grid items-center gap-x-4" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
                 <span className="font-bold text-zinc-400">Context Window</span>
                 {models.map((m) => (
                   <span key={m.id} className="font-semibold text-zinc-200">
@@ -210,7 +213,7 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
                   </span>
                 ))}
               </div>
-              <div className="py-3 grid items-center" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
+              <div className="py-3 grid items-center gap-x-4" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
                 <span className="font-bold text-zinc-400">Quantization</span>
                 {models.map((m) => (
                   <span key={m.id} className="font-medium text-indigo-300">
@@ -218,19 +221,19 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
                   </span>
                 ))}
               </div>
-              <div className="py-3 grid items-center" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
-                <span className="font-bold text-zinc-400">Req GPU Spec</span>
+              <div className="py-3 grid items-start gap-x-4" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
+                <span className="font-bold text-zinc-400 pt-0.5">Req GPU Spec</span>
                 {models.map((m) => (
-                  <span key={m.id} className="font-extrabold text-indigo-400">
+                  <span key={m.id} className="font-semibold text-indigo-400 text-[11px] leading-relaxed break-words">
                     {m.recommended_gpu_name || `${m.recommended_gpu_vram_gb}GB VRAM`}
                   </span>
                 ))}
               </div>
-              <div className="py-3 grid items-center" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
-                <span className="font-bold text-zinc-400">Hardware Suitability</span>
+              <div className="py-3 grid items-start gap-x-4" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
+                <span className="font-bold text-zinc-400 pt-0.5">Hardware Suitability</span>
                 {models.map((m) => (
                   <div key={m.id}>
-                    <span className="inline-flex items-center text-[11px] font-bold px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-200">
+                    <span className="inline-flex items-center text-[10px] font-bold leading-snug px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-200 break-words">
                       {m.hardware_fit?.label}
                     </span>
                   </div>
@@ -247,7 +250,7 @@ const ModelComparisonModal = ({ isOpen, onClose, models = [], userGpuVram = 6.0 
             </h4>
             <div className="divide-y divide-zinc-800/60 text-xs">
               {allCapabilities.map((cap) => (
-                <div key={cap} className="py-2.5 grid items-center" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
+                <div key={cap} className="py-2.5 grid items-center gap-x-4" style={{ gridTemplateColumns: `160px repeat(${models.length}, minmax(0, 1fr))` }}>
                   <div className="flex items-center gap-2 font-bold text-zinc-300">
                     {CAPABILITY_ICONS[cap]}
                     <span>{cap}</span>

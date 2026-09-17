@@ -61,11 +61,25 @@ class ModelCatalogTruthTests(unittest.TestCase):
 
     def test_uncited_benchmarks_are_not_returned_as_facts(self):
         rows = get_full_catalog()
-        self.assertTrue(all(not row["benchmarks"] for row in rows))
-        self.assertTrue(all(
-            row["benchmark_status"] == "unavailable_without_cited_primary_source"
-            for row in rows
-        ))
+        for row in rows:
+            has_sources = bool(row.get("benchmark_sources"))
+            if has_sources:
+                # Models with cited sources keep their benchmarks
+                self.assertEqual(
+                    row["benchmark_status"], "source_cited",
+                    f'{row["name"]} has benchmark_sources but wrong status',
+                )
+            else:
+                # Models without citations have benchmarks stripped
+                self.assertFalse(
+                    row["benchmarks"],
+                    f'{row["name"]} has benchmarks but no benchmark_sources',
+                )
+                self.assertEqual(
+                    row["benchmark_status"],
+                    "unavailable_without_cited_primary_source",
+                    f'{row["name"]} has wrong benchmark_status',
+                )
 
     def test_exact_repository_mismatch_is_rejected(self):
         self.assertEqual(

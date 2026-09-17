@@ -1833,10 +1833,10 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                   </div>
                 )}
 
-                {/* Installer downloads live only on the public download page. */}
-                <div className="hidden">
+                {/* Direct downloads and installers for all platforms */}
+                <div className="space-y-3 pt-2">
                   <h4 className="text-xs font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                    Direct Downloads & Installers
+                    Direct Downloads &amp; Installers
                   </h4>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1848,7 +1848,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                         </div>
                         <div>
                           <p className="text-xs font-black text-zinc-900 dark:text-white">Windows Desktop App</p>
-                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Windows 10 / 11 · 64-bit · 267 MB</p>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Windows 10 / 11 · 64-bit · 226 MB</p>
                         </div>
                       </div>
                       <a
@@ -1873,8 +1873,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                         </div>
                       </div>
                       <a
-                        href="https://smaran-ai.netlify.app/SMARAN.AI.apk"
-                        download="SMARAN.AI.apk"
+                        href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN-AI.apk"
+                        target="_blank"
+                        rel="noreferrer"
                         className="w-full py-2 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition shadow-md shadow-red-600/20"
                       >
                         <Download className="w-3.5 h-3.5" /> Download APK (.apk)
@@ -1893,8 +1894,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                         </div>
                       </div>
                       <a
-                        href="https://smaran-ai.netlify.app/smaran.exe"
-                        download="smaran.exe"
+                        href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran.exe"
+                        target="_blank"
+                        rel="noreferrer"
                         className="w-full py-2 px-3 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition shadow-md shadow-red-600/20"
                       >
                         <Download className="w-3.5 h-3.5" /> Download smaran.exe
