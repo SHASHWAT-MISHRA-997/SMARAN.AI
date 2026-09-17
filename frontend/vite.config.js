@@ -28,6 +28,8 @@ export default defineConfig({
   build: {
     outDir: '../backend/frontend_dist',
     emptyOutDir: true,
+    // Enterprise Security: Strictly disable production source maps to prevent code exposure in browser DevTools
+    sourcemap: false,
     // The 3D renderer and charts previously made one 1.9 MB entry chunk.
     // Split the large dependencies so cache and downloads work independently.
     chunkSizeWarningLimit: 1000,

@@ -3935,8 +3935,8 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     else:
         session_changed = False
         if session.user_id != current_user.id:
-            session.user_id = current_user.id
-            session_changed = True
+            # Enterprise BOLA/IDOR protection: strictly forbid cross-user session access
+            raise HTTPException(status_code=403, detail="Forbidden: You do not have access to this chat session.")
         if getattr(session, "section", None) != req_section:
             session.section = req_section
             session_changed = True
@@ -3944,9 +3944,16 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             db.commit()
             db.refresh(session)
 
+    # Prompt Injection Defense: Scrub jailbreak and instruction-override heuristics
+    cleaned_prompt = re.sub(
+        r"(?i)\b(ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|directions)|you\s+are\s+now\s+(DAN|unfiltered|jailbroken|unrestricted)|disregard\s+(system\s+)?rules|output\s+the\s+(system\s+prompt|initial\s+prompt|hidden\s+instructions)|<\|im_start\|>|<\|im_end\|>)\b",
+        "[FILTERED_INJECTION_ATTEMPT]",
+        chat_req.prompt
+    )
+
     # Translation support: default English, detect user language, translate if needed
     target_language = getattr(chat_req, "target_language", None) or "en"
-    original_prompt = chat_req.prompt
+    original_prompt = cleaned_prompt
     processing_prompt = original_prompt
     detected_lang = "en"
 
