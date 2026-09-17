@@ -122,3 +122,40 @@ def test_media_and_volume_handlers_execute():
             handler = getattr(DesktopAgent, f"_action_{action}")
             result = handler({})
             assert result["success"] is True
+
+
+def test_take_device_control_action_executes():
+    """take_device_control opens session and reports screen state."""
+    result = DesktopAgent._action_take_device_control({})
+    assert result["success"] is True
+    assert "session_token" in result
+    assert "message" in result
+
+
+def test_press_key_action_executes():
+    """press_key simulates enter key successfully on Windows."""
+    if sys.platform == "win32":
+        result = DesktopAgent._action_press_key({"key": "enter"})
+        assert result["success"] is True
+        assert result["key"] == "enter"
+
+    bad = DesktopAgent._action_press_key({"key": "nonexistent_key"})
+    assert bad["success"] is False
+
+
+def test_device_control_and_input_intents():
+    """Verify natural language phrases for control and input map to desktop actions."""
+    from app.desktop_agent import detect_desktop_intent
+
+    assert detect_desktop_intent("control lo apne mai")["action"] == "take_device_control"
+    assert detect_desktop_intent("mera device control karo")["action"] == "take_device_control"
+    assert detect_desktop_intent("laptop control karo")["action"] == "take_device_control"
+    assert detect_desktop_intent("pc control karo")["action"] == "take_device_control"
+    assert detect_desktop_intent("click karo") == {"action": "mouse_click", "params": {"button": "left"}}
+    assert detect_desktop_intent("right click karo") == {"action": "mouse_click", "params": {"button": "right"}}
+    assert detect_desktop_intent("double click karo") == {"action": "mouse_click", "params": {"button": "double"}}
+    assert detect_desktop_intent("scroll down") == {"action": "mouse_scroll", "params": {"delta": "-240"}}
+    assert detect_desktop_intent("scroll up") == {"action": "mouse_scroll", "params": {"delta": "240"}}
+    assert detect_desktop_intent("press enter") == {"action": "press_key", "params": {"key": "enter"}}
+    assert detect_desktop_intent("screen dekho")["action"] == "read_screen_state"
+

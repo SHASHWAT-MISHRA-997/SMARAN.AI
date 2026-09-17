@@ -480,6 +480,18 @@ DESKTOP_ACTION_CATALOG: Dict[str, Dict[str, Any]] = {
         "risk": "read_only", "changes_system": False, "requires_confirmation": False,
         "parameters": {}, "category": "system",
     },
+    "take_device_control": {
+        "title": "Take active device control",
+        "description": "Establish active OS and desktop control session, inspect display bounds, and prepare for user commands.",
+        "risk": "low", "changes_system": False, "requires_confirmation": False,
+        "parameters": {}, "category": "system",
+    },
+    "press_key": {
+        "title": "Press a keyboard key",
+        "description": "Press a specific key (enter, space, tab, esc, backspace, etc.) on the active window.",
+        "risk": "low", "changes_system": False, "requires_confirmation": False,
+        "parameters": {"key": "Key name (enter, esc, space, tab, backspace)"}, "category": "input",
+    },
     "get_time": {
         "title": "Current date and time",
         "description": "Report the machine's current date and time.",
@@ -1897,6 +1909,60 @@ class DesktopAgent:
         return {"success": False, "error": f"Screen state inspection not supported on {sys.platform}."}
 
     @staticmethod
+    def _action_take_device_control(params: Dict[str, Any]) -> Dict[str, Any]:
+        token = control_session.begin("User activated device control", actor="user")
+        screen_res = DesktopAgent._action_read_screen_state({})
+        state = screen_res.get("state") or {}
+        act_win = state.get("active_window") or {}
+        win_title = act_win.get("title") or "Active Desktop"
+        scr = state.get("screen_size") or {}
+        w = scr.get("width", "")
+        h = scr.get("height", "")
+        dims = f"{w}x{h}" if w and h else "Display Active"
+        return {
+            "success": True,
+            "session_token": token,
+            "state": state,
+            "message": f"Device control taken. I have active control of your system ({dims}, Active Window: '{win_title}'). I am ready for your commands: launch apps, click, scroll, type, browse, manage files, adjust volume, or execute system tasks.",
+        }
+
+    @staticmethod
+    def _action_press_key(params: Dict[str, Any]) -> Dict[str, Any]:
+        raw_key = str(params.get("key", "")).lower().strip()
+        VK_MAP = {
+            "enter": 0x0D,
+            "return": 0x0D,
+            "esc": 0x1B,
+            "escape": 0x1B,
+            "space": 0x20,
+            "tab": 0x09,
+            "backspace": 0x08,
+            "up": 0x26,
+            "down": 0x28,
+            "left": 0x25,
+            "right": 0x27,
+            "win": 0x5B,
+            "windows": 0x5B,
+        }
+        vk = VK_MAP.get(raw_key)
+        if not vk:
+            return {"success": False, "error": f"Unsupported or unspecified key: '{raw_key}'."}
+        if sys.platform == "win32":
+            user32 = ctypes.windll.user32
+            KEYEVENTF_KEYUP = 0x0002
+            user32.keybd_event(vk, 0, 0, 0)
+            time.sleep(0.04)
+            user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+            return {"success": True, "message": f"Pressed {raw_key} key.", "key": raw_key}
+        elif sys.platform.startswith("linux"):
+            tool = shutil.which("xdotool")
+            if tool and os.environ.get("DISPLAY"):
+                res = subprocess.run([tool, "key", raw_key], capture_output=True, timeout=5)
+                return {"success": res.returncode == 0, "message": f"Pressed {raw_key} via xdotool.", "key": raw_key}
+            return {"success": False, "error": "xdotool is required on Linux to simulate key press."}
+        return {"success": False, "error": f"Key press not supported on {sys.platform}."}
+
+    @staticmethod
     def _action_get_time(params: Dict[str, Any]) -> Dict[str, Any]:
         now = datetime.now()
         return {
@@ -2456,7 +2522,26 @@ INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
 
     # Windows
     (re.compile(r"\b(?:show|dikhao)\s+(?:the\s+)?desktop\b|\bminimi[sz]e\s+(?:all|everything)\b|\bsab\s+minimize\s+karo\b", re.I), "minimize_all_windows", {}),
-    (re.compile(r"\bswitch\s+(?:the\s+)?window\b|\bnext\s+window\b|\bwindow\s+badlo\b", re.I), "switch_window", {}),
+    # Device / System Control Session
+    (re.compile(
+        r"\b(?:control\s+lo\s+apne\s+m(?:ai|e)|apne\s+m(?:ai|e)\s+control\s+lo)\b"
+        r"|\b(?:mera\s+|my\s+)?(?:device|laptop|pc|computer|system)\s+(?:ko\s+)?(?:nahi\s+)?control\s*(?:karo|kar\s*do|lo|apne\s+control\s+m(?:ai|e)\s+lo|nahi\s+kar\s+raha|kar\s*raha)?\b"
+        r"|\b(?:take\s+)?control\s+(?:of\s+)?(?:my\s+)?(?:device|pc|computer|laptop|system)\b"
+        r"|\b(?:take\s+control|control\s*(?:lo|le\s*lo|lelo|karo|kar\s*do))\b"
+        r"|\b(?:device|system|pc|laptop)\s+control\b"
+        r"|\bkuch\s+control\b",
+        re.I), "take_device_control", {}),
+
+    # Mouse, screen and keyboard input
+    (re.compile(r"\b(?:double\s*click|do\s+baar\s+click)\s*(?:karo|kar\s*do)?\b", re.I), "mouse_click", {"button": "double"}),
+    (re.compile(r"\bright\s*click\s*(?:karo|kar\s*do)?\b", re.I), "mouse_click", {"button": "right"}),
+    (re.compile(r"\b(?:mouse\s+)?click\s*(?:karo|kar\s*do|here)?\b", re.I), "mouse_click", {"button": "left"}),
+    (re.compile(r"\b(?:scroll\s*down|niche\s+scroll|scroll\s+niche)\s*(?:karo|kar\s*do)?\b", re.I), "mouse_scroll", {"delta": "-240"}),
+    (re.compile(r"\b(?:scroll\s*up|upar\s+scroll|scroll\s+upar)\s*(?:karo|kar\s*do)?\b", re.I), "mouse_scroll", {"delta": "240"}),
+    (re.compile(r"\b(?:scroll|mouse\s+scroll)\s*(?:karo|kar\s*do)?\b", re.I), "mouse_scroll", {"delta": "-120"}),
+    (re.compile(r"\b(?:press|hit|dabao)\s+(?:the\s+)?(enter|esc|escape|space|tab|backspace|windows?)\s*(?:key|button)?\b", re.I), "press_key", {"key": "$1"}),
+    (re.compile(r"\b(enter|esc|escape|space|tab|backspace)\s+(?:dabao|press\s*karo)\b", re.I), "press_key", {"key": "$1"}),
+    (re.compile(r"\b(?:screen\s+dekho|screen\s+status|screen\s+state|what(?:'s|\s+is)\s+on\s+(?:the\s+|my\s+)?screen)\b", re.I), "read_screen_state", {}),
 
     # Typing
     (re.compile(r"(?:type|likho|likh do)\s+(?:this\s+)?(?:text\s+)?[\"']?(.+?)[\"']?$", re.I), "type_text", {"text": "$1"}),

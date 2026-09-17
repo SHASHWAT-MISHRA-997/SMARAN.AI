@@ -27,5 +27,5 @@ SMARAN.AI is an offline-capable, local-first artificial intelligence assistant. 
 ## Links & Official Resources
 - Website: https://smaran-ai.netlify.app/
 - Downloads: https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest
-- Latest Windows Installer: https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/download/v2.10.38/SMARAN.AI-Setup.exe
+- Latest Windows Installer: https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI-Setup.exe
 - Source Repository: https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI
