@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Documentation &amp; User Manual — SMARAN.AI</title>
+  <meta name="description" content="Comprehensive documentation, hardware requirements, model catalog, code studio instructions, and developer manual for SMARAN.AI sovereign private artificial intelligence platform." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #09090d;
+      --panel: rgba(18, 18, 26, 0.85);
+      --panel-hover: rgba(26, 26, 36, 0.95);
+      --card-border: rgba(255, 255, 255, 0.09);
+      --red: #ef4444;
+      --red-glow: rgba(239, 68, 68, 0.35);
+      --emerald: #10b981;
+      --cyan: #06b6d4;
+      --purple: #a855f7;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --dimmer: #6b7280;
+      --code-bg: #0c0d14;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      line-height: 1.65;
+      background-image: 
+        radial-gradient(circle at 15% 10%, rgba(239, 68, 68, 0.1) 0%, transparent 45%),
+        radial-gradient(circle at 85% 75%, rgba(6, 182, 212, 0.08) 0%, transparent 45%);
+      background-attachment: fixed;
+    }
+    a { color: var(--red); text-decoration: none; transition: color 0.2s; }
+    a:hover { color: #f87171; text-decoration: underline; text-underline-offset: 3px; }
+
+    /* Top Nav */
+    .nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(9, 9, 13, 0.92);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 14px 24px;
+    }
+    .nav-inner {
+      max-width: 1380px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 800; font-size: 1.15rem; color: #fff; text-decoration: none;
+    }
+    .brand img { width: 32px; height: 32px; border-radius: 8px; }
+    .brand span span { color: var(--red); }
+    .nav-links { display: flex; align-items: center; gap: 20px; font-size: 0.9rem; font-weight: 600; }
+    .nav-links a { color: var(--muted); }
+    .nav-links a:hover { color: #fff; text-decoration: none; }
+    .nav-badge {
+      background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fca5a5; font-size: 0.76rem; padding: 3px 9px; border-radius: 9999px; font-weight: 700;
+    }
+
+    /* Layout */
+    .docs-wrap {
+      max-width: 1380px; margin: 0 auto;
+      display: grid; grid-template-columns: 280px 1fr;
+      gap: 40px; padding: 40px 24px 80px;
+    }
+    @media (max-width: 992px) {
+      .docs-wrap { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+    }
+
+    /* Sidebar */
+    .sidebar {
+      position: sticky; top: 80px; height: calc(100vh - 100px);
+      overflow-y: auto; padding-right: 14px;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
+    .sidebar-group { margin-bottom: 24px; }
+    .sidebar-title {
+      font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--dimmer); font-weight: 700; margin-bottom: 10px;
+    }
+    .sidebar-links { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+    .sidebar-links a {
+      color: var(--muted); font-size: 0.88rem; font-weight: 500;
+      padding: 6px 12px; border-radius: 8px; display: block;
+      transition: all 0.15s ease;
+    }
+    .sidebar-links a:hover {
+      background: rgba(255, 255, 255, 0.06); color: #fff; text-decoration: none;
+    }
+
+    /* Content Area */
+    .content { min-width: 0; }
+    .doc-hero {
+      margin-bottom: 48px; border-bottom: 1px solid var(--card-border); padding-bottom: 32px;
+    }
+    .doc-hero h1 {
+      font-size: clamp(2.2rem, 3.5vw, 3rem); font-weight: 900; letter-spacing: -0.02em; margin-bottom: 12px;
+    }
+    .doc-hero p { font-size: 1.1rem; color: var(--muted); max-width: 800px; }
+
+    .doc-section {
+      margin-bottom: 56px; scroll-margin-top: 90px;
+    }
+    .doc-section h2 {
+      font-size: 1.65rem; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 16px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .doc-section h2 .sec-num {
+      font-size: 0.82rem; padding: 3px 8px; border-radius: 6px;
+      background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-family: 'Fira Code', monospace;
+    }
+    .doc-section p {
+      color: #d1d5db; font-size: 0.98rem; margin-bottom: 16px; line-height: 1.7;
+    }
+
+    /* Cards & Grids */
+    .doc-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px;
+      margin: 20px 0;
+    }
+    .doc-card {
+      background: var(--panel); border: 1px solid var(--card-border);
+      border-radius: 14px; padding: 22px; transition: transform 0.2s, border-color 0.2s;
+    }
+    .doc-card:hover {
+      border-color: rgba(239, 68, 68, 0.4); transform: translateY(-2px);
+    }
+    .doc-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 8px; color: #fff; }
+    .doc-card p { font-size: 0.9rem; color: var(--muted); margin: 0; }
+
+    /* Code Blocks */
+    .code-box {
+      background: var(--code-bg); border: 1px solid var(--card-border);
+      border-radius: 12px; overflow: hidden; margin: 20px 0;
+    }
+    .code-header {
+      background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid var(--card-border);
+      padding: 8px 16px; font-size: 0.78rem; font-family: 'Fira Code', monospace; color: var(--dimmer);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .code-box pre {
+      padding: 16px; overflow-x: auto; font-family: 'Fira Code', monospace; font-size: 0.88rem; color: #e5e7eb;
+      line-height: 1.55;
+    }
+
+    /* Callouts */
+    .callout {
+      border-radius: 12px; padding: 18px 22px; margin: 22px 0;
+      display: flex; gap: 14px; align-items: flex-start;
+    }
+    .callout-info { background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.25); }
+    .callout-info svg { color: var(--cyan); flex-shrink: 0; }
+    .callout-success { background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); }
+    .callout-success svg { color: var(--emerald); flex-shrink: 0; }
+    .callout-warn { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); }
+    .callout-warn svg { color: var(--red); flex-shrink: 0; }
+    .callout-body strong { display: block; font-size: 0.95rem; margin-bottom: 4px; color: #fff; }
+    .callout-body p { margin: 0; font-size: 0.9rem; color: #d1d5db; }
+
+    /* Tables */
+    .doc-table {
+      width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 0.9rem;
+      background: var(--panel); border-radius: 12px; overflow: hidden; border: 1px solid var(--card-border);
+    }
+    .doc-table th, .doc-table td {
+      padding: 12px 18px; text-align: left; border-bottom: 1px solid var(--card-border);
+    }
+    .doc-table th {
+      background: rgba(255, 255, 255, 0.04); font-size: 0.8rem; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); font-weight: 700;
+    }
+    .doc-table tr:last-child td { border-bottom: none; }
+
+    /* Footer */
+    .footer {
+      border-top: 1px solid var(--card-border); max-width: 1380px;
+      margin: 80px auto 0; padding: 36px 24px;
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;
+      font-size: 0.88rem; color: var(--dimmer);
+    }
+    .footer-links { display: flex; gap: 20px; }
+    .footer-links a { color: var(--muted); }
+  </style>
+</head>
+<body>
+
+  <!-- Top Nav -->
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="index.html">
+        <img src="assets/logo.png" alt="SMARAN.AI Logo" />
+        <span>SMARAN<span>.</span>AI</span>
+      </a>
+      <nav class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="showcase.html">Showcase</a>
+        <a href="terms.html">Terms</a>
+        <a href="index.html#download">Download</a>
+        <span class="nav-badge">v1.0.0 Stable</span>
+      </nav>
+    </div>
+  </header>
+
+  <div class="docs-wrap">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-group">
+        <div class="sidebar-title">Getting Started</div>
+        <ul class="sidebar-links">
+          <li><a href="#quickstart">Quickstart &amp; Setup</a></li>
+          <li><a href="#hardware">Hardware Requirements</a></li>
+          <li><a href="#downloads-install">Installation Steps</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title">Core Engines</div>
+        <ul class="sidebar-links">
+          <li><a href="#models">Model Catalog &amp; Quantization</a></li>
+          <li><a href="#code-mode">SMARAN Code Mode</a></li>
+          <li><a href="#voice">Voice &amp; Speech Engine</a></li>
+          <li><a href="#design-studio">Design &amp; Sites Studio</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title">Ecosystem</div>
+        <ul class="sidebar-links">
+          <li><a href="#vscode-ext">VS Code Extension</a></li>
+          <li><a href="#android">Android App &amp; LAN Pairing</a></li>
+          <li><a href="#database">Database &amp; Data Storage</a></li>
+          <li><a href="#security">Privacy &amp; Air-Gapped Security</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="content">
+      <div class="doc-hero">
+        <h1>SMARAN.AI Documentation</h1>
+        <p>
+          The authoritative developer manual and operations guide for running sovereign, private, and local artificial intelligence on Windows, Linux, and Android.
+        </p>
+      </div>
+
+      <!-- SECTION 1: QUICKSTART -->
+      <section class="doc-section" id="quickstart">
+        <h2><span class="sec-num">01</span> Quickstart Overview</h2>
+        <p>
+          SMARAN.AI is an autonomous workstation that runs local open-source Large Language Models (DeepSeek R1, Qwen 2.5 Coder, Llama 3.2, etc.) directly on your own GPU/CPU without sending any code, prompts, or conversation history to cloud servers.
+        </p>
+        <div class="callout callout-success">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          <div class="callout-body">
+            <strong>Zero Telemetry Guarantee</strong>
+            <p>Your chats, code, embeddings, and audio never leave your local machine. All processing happens through local GGUF quantizations or Ollama runtime.</p>
+          </div>
+        </div>
+
+        <div class="doc-grid">
+          <div class="doc-card">
+            <h3>🖥️ Desktop Autonomous App</h3>
+            <p>Native Windows installer (.exe) with high-performance GPU acceleration, integrated Python backend, and WebUI.</p>
+          </div>
+          <div class="doc-card">
+            <h3>📱 Android Companion</h3>
+            <p>Self-contained mobile APK with local mobile chat, speech synthesis, and local LAN sync with your PC.</p>
+          </div>
+          <div class="doc-card">
+            <h3>⚡ VS Code Extension</h3>
+            <p>Context-aware code completion, inline refactoring, and code generation integrated with your local SMARAN instance.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 2: HARDWARE -->
+      <section class="doc-section" id="hardware">
+        <h2><span class="sec-num">02</span> Hardware &amp; GPU Specifications</h2>
+        <p>
+          SMARAN.AI dynamically allocates layers between GPU VRAM and System RAM. Use the table below to determine which models your system can run with high token throughput:
+        </p>
+
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>Recommended Hardware</th>
+              <th>Supported Models</th>
+              <th>Expected Speed</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Lightweight (CPU)</strong></td>
+              <td>8GB RAM, Any modern 4-Core CPU</td>
+              <td>Llama 3.2 1B (Q4_K_M), Phi-3.5 Mini</td>
+              <td>18–35 tok/sec</td>
+            </tr>
+            <tr>
+              <td><strong>Mainstream (Entry GPU)</strong></td>
+              <td>GTX 1650 / RTX 3050 (4GB–6GB VRAM)</td>
+              <td>Qwen 2.5 3B, DeepSeek R1 1.5B</td>
+              <td>40–75 tok/sec</td>
+            </tr>
+            <tr>
+              <td><strong>Pro Developer (Recommended)</strong></td>
+              <td>RTX 3060 / 4060 (8GB–12GB VRAM)</td>
+              <td>Qwen 2.5 Coder 7B, DeepSeek R1 7B / 8B</td>
+              <td>50–110 tok/sec</td>
+            </tr>
+            <tr>
+              <td><strong>Workstation Enthusiast</strong></td>
+              <td>RTX 3090 / 4090 (16GB–24GB VRAM)</td>
+              <td>Qwen 2.5 14B / 32B, DeepSeek R1 14B</td>
+              <td>65–130 tok/sec</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- SECTION 3: INSTALLATION -->
+      <section class="doc-section" id="downloads-install">
+        <h2><span class="sec-num">03</span> Installation Steps</h2>
+        <p>Follow the simple step-by-step instructions for your operating system:</p>
+
+        <div class="code-box">
+          <div class="code-header">
+            <span>PowerShell (Windows One-Line Install)</span>
+            <span>cmd</span>
+          </div>
+          <pre><code>irm https://smaran-ai.netlify.app/install-smaran.ps1 | iex</code></pre>
+        </div>
+
+        <div class="code-box">
+          <div class="code-header">
+            <span>Linux / macOS Terminal</span>
+            <span>bash</span>
+          </div>
+          <pre><code>curl -fsSL https://smaran-ai.netlify.app/install-smaran.sh | bash</code></pre>
+        </div>
+      </section>
+
+      <!-- SECTION 4: MODELS -->
+      <section class="doc-section" id="models">
+        <h2><span class="sec-num">04</span> Model Catalog &amp; Verified Benchmarks</h2>
+        <p>
+          Every benchmark reported in SMARAN.AI is backed by official model cards and primary technical papers. No fabricated scores:
+        </p>
+
+        <div class="doc-grid">
+          <div class="doc-card">
+            <h3>DeepSeek R1 Distill Qwen 7B</h3>
+            <p><strong>MATH-500: 92.8% • GPQA Diamond: 49.1%</strong><br>Reasoning and step-by-step problem solver with reasoning traces.</p>
+          </div>
+          <div class="doc-card">
+            <h3>Qwen 2.5 Coder 7B</h3>
+            <p><strong>HumanEval: 88.4% • GSM8K: 86.7%</strong><br>Specialized coding powerhouse for Python, TypeScript, Rust, and Go.</p>
+          </div>
+          <div class="doc-card">
+            <h3>Llama 3.2 1B Instruct</h3>
+            <p><strong>MMLU: 32.2% • GSM8K: 44.4%</strong><br>Ultra-compact conversational model that runs on any laptop or phone.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 5: SMARAN CODE -->
+      <section class="doc-section" id="code-mode">
+        <h2><span class="sec-num">05</span> SMARAN Code Studio</h2>
+        <p>
+          SMARAN Code Mode is an isolated development environment inside the desktop app. It allows multi-file repository indexing, automated bug-fixing, terminal execution, and diff viewing.
+        </p>
+        <div class="callout callout-info">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          <div class="callout-body">
+            <strong>Isolated Session Context</strong>
+            <p>Code and Design generations never pollute regular Chat sessions. Each workspace retains its own memory, terminal state, and project files.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 6: VOICE -->
+      <section class="doc-section" id="voice">
+        <h2><span class="sec-num">06</span> Voice &amp; Speech Engine</h2>
+        <p>
+          SMARAN includes an ultra-fast offline speech pipeline:
+        </p>
+        <ul>
+          <li><strong>Whisper Local STT:</strong> Transcribes voice input in real-time with zero external cloud round-trips.</li>
+          <li><strong>Kokoro Neural TTS:</strong> High-fidelity, emotional voice synthesis running locally on CPU or GPU.</li>
+        </ul>
+      </section>
+
+      <!-- SECTION 7: ANDROID -->
+      <section class="doc-section" id="android">
+        <h2><span class="sec-num">07</span> Android App &amp; Device Pairing</h2>
+        <p>
+          The SMARAN Android application connects to your PC via local Wi-Fi / LAN:
+        </p>
+        <ol style="margin-left: 24px; color: #d1d5db; font-size: 0.95rem; line-height: 1.8;">
+          <li>Open SMARAN on your PC and click <strong>Host Telemetry / Pair Device</strong> in Settings.</li>
+          <li>Open SMARAN on your Android phone and scan the local network or enter the 4-digit pairing PIN.</li>
+          <li>Both devices now share synchronized memories, chat history, and can drive local models cooperatively.</li>
+        </ol>
+      </section>
+
+      <!-- SECTION 8: DATABASE & STORAGE -->
+      <section class="doc-section" id="database">
+        <h2><span class="sec-num">08</span> Database &amp; Data Storage</h2>
+        <p>
+          Understanding where user data lives and how to inspect it:
+        </p>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Location</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Local Chats &amp; Vectors</strong></td>
+              <td><code>backend/smaran.db</code> (SQLite)</td>
+              <td>User chat sessions, document chunks, and memory embeddings.</td>
+            </tr>
+            <tr>
+              <td><strong>Local Usage Analytics</strong></td>
+              <td><code>smaran-analytics/analytics.db</code> (SQLite)</td>
+              <td>Developer tracking of local installs, launches, and events.</td>
+            </tr>
+            <tr>
+              <td><strong>Cloud Analytics</strong></td>
+              <td>Netlify Blobs (Store: <code>installs</code>, <code>events-v2</code>)</td>
+              <td>Live counts of web visits, downloads, and Google sign-ins.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          To inspect your local database, run:
+        </p>
+        <div class="code-box">
+          <div class="code-header"><span>Terminal</span><span>bash</span></div>
+          <pre><code>python tools/view_database.py</code></pre>
+        </div>
+      </section>
+
+      <!-- SECTION 9: PRIVACY -->
+      <section class="doc-section" id="security">
+        <h2><span class="sec-num">09</span> Privacy &amp; Air-Gapped Security</h2>
+        <p>
+          SMARAN.AI was built to solve the corporate AI surveillance problem. Read our <a href="terms.html">Terms of Service</a> and <a href="index.html#privacy">Privacy Policy</a> to understand our contractual guarantees.
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div>
+      <strong>SMARAN.AI</strong> — Built by Shashwat Mishra
+    </div>
+    <div class="footer-links">
+      <a href="index.html">Home</a>
+      <a href="showcase.html">Showcase</a>
+      <a href="terms.html">Terms of Service</a>
+      <a href="index.html#download">Download</a>
+    </div>
+  </footer>
+
+</body>
+</html>

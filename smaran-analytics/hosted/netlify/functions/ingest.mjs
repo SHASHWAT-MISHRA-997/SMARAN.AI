@@ -81,12 +81,17 @@ export default async (req) => {
   );
 
   const existing = await installs.get(installId, { type: 'json' });
+  const userEmail = body.user_email ? String(body.user_email).slice(0, 128) : (existing?.user_email || '');
+  const userName = body.user_name ? String(body.user_name).slice(0, 128) : (existing?.user_name || '');
+
   if (existing) {
     await installs.setJSON(installId, {
       ...existing,
       platform,
       app_version: appVersion,
       os_version: osVersion,
+      user_email: userEmail,
+      user_name: userName,
       last_seen: now,
       launches: (existing.launches || 0) + (event === 'launch' ? 1 : 0),
     });
@@ -96,6 +101,8 @@ export default async (req) => {
       platform,
       app_version: appVersion,
       os_version: osVersion,
+      user_email: userEmail,
+      user_name: userName,
       first_seen: now,
       last_seen: now,
       launches: event === 'launch' ? 1 : 0,

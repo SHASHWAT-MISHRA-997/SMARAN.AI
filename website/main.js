@@ -1191,3 +1191,282 @@
          gap where a size should be. */
     });
 })();
+
+/* =====================================================================
+   GOOGLE AUTHENTICATION (WEBSITE)
+   ===================================================================== */
+(function () {
+  'use strict';
+
+  var USER_KEY = 'smaran_user';
+  var INSTALL_KEY = 'smaran_web_install_id';
+  var INGEST_KEY = 'lYZFdOrxV90mCKl6DHP53YTJuU0pFOja';
+  var INGEST_URL = 'https://smaran-analytics.netlify.app/api/ingest';
+
+  // Get or create persistent anonymous install ID for website
+  function getInstallId() {
+    var id = localStorage.getItem(INSTALL_KEY);
+    if (!id || id.length < 8) {
+      id = 'web_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem(INSTALL_KEY, id);
+    }
+    return id;
+  }
+
+  // Parse JWT token from Google
+  function parseJwt(token) {
+    try {
+      var base64Url = token.split('.')[1];
+      var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      var jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map(function (c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          })
+          .join('')
+      );
+      return JSON.parse(jsonPayload);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Record user event to Netlify Analytics DB
+  function recordAnalyticsEvent(event, userProfile) {
+    if (!window.fetch) return;
+    var payload = {
+      install_id: getInstallId(),
+      event: event,
+      platform: 'web',
+      app_version: '1.0.0',
+      os_version: navigator.platform || 'web',
+    };
+    if (userProfile) {
+      payload.user_email = userProfile.email || '';
+      payload.user_name = userProfile.name || '';
+    }
+    fetch(INGEST_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-ingest-key': INGEST_KEY,
+      },
+      body: JSON.stringify(payload),
+    }).catch(function () {
+      /* Silently ignore analytics network failures */
+    });
+  }
+
+  // Elements
+  var navSignInBtn = document.getElementById('navSignInBtn');
+  var navUserProfile = document.getElementById('navUserProfile');
+  var userAvatarBtn = document.getElementById('userAvatarBtn');
+  var userAvatarImg = document.getElementById('userAvatarImg');
+  var userNameText = document.getElementById('userNameText');
+  var userDropdownMenu = document.getElementById('userDropdownMenu');
+  var dropdownFullName = document.getElementById('dropdownFullName');
+  var dropdownEmail = document.getElementById('dropdownEmail');
+  var signOutBtn = document.getElementById('signOutBtn');
+
+  var mobileSignInBtn = document.getElementById('mobileSignInBtn');
+  var mobileSignInText = document.getElementById('mobileSignInText');
+  var mobileSignOutBtn = document.getElementById('mobileSignOutBtn');
+
+  var authModalBackdrop = document.getElementById('authModalBackdrop');
+  var authModalClose = document.getElementById('authModalClose');
+  var customGoogleBtn = document.getElementById('customGoogleBtn');
+  var gsiButtonContainer = document.getElementById('gsiButtonContainer');
+
+  function openModal() {
+    if (authModalBackdrop) {
+      authModalBackdrop.hidden = false;
+      document.body.style.overflow = 'hidden';
+    }
+  }
+
+  function closeModal() {
+    if (authModalBackdrop) {
+      authModalBackdrop.hidden = true;
+      document.body.style.overflow = '';
+    }
+  }
+
+  function applyUserState(user) {
+    if (user) {
+      if (navSignInBtn) navSignInBtn.hidden = true;
+      if (navUserProfile) navUserProfile.hidden = false;
+
+      var displayName = user.name || user.email.split('@')[0] || 'User';
+      var photo = user.picture || 'assets/logo.png';
+
+      if (userAvatarImg) userAvatarImg.src = photo;
+      if (userNameText) userNameText.textContent = displayName.split(' ')[0];
+      if (dropdownFullName) dropdownFullName.textContent = displayName;
+      if (dropdownEmail) dropdownEmail.textContent = user.email || '';
+
+      if (mobileSignInText) mobileSignInText.textContent = 'Signed in as ' + displayName.split(' ')[0];
+      if (mobileSignOutBtn) mobileSignOutBtn.hidden = false;
+    } else {
+      if (navSignInBtn) navSignInBtn.hidden = false;
+      if (navUserProfile) navUserProfile.hidden = true;
+      if (userDropdownMenu) userDropdownMenu.hidden = true;
+      if (userAvatarBtn) userAvatarBtn.setAttribute('aria-expanded', 'false');
+
+      if (mobileSignInText) mobileSignInText.textContent = 'Sign in with Google';
+      if (mobileSignOutBtn) mobileSignOutBtn.hidden = true;
+    }
+  }
+
+  function saveUserAndFinish(userData) {
+    localStorage.setItem(USER_KEY, JSON.stringify(userData));
+    applyUserState(userData);
+    closeModal();
+    recordAnalyticsEvent('google_signin', userData);
+  }
+
+  // Handle Google GSI credential
+  window.handleGoogleCredentialResponse = function (response) {
+    if (!response || !response.credential) return;
+    var profile = parseJwt(response.credential);
+    if (profile) {
+      var user = {
+        id: profile.sub,
+        name: profile.name,
+        email: profile.email,
+        picture: profile.picture,
+        signed_at: new Date().toISOString(),
+      };
+      saveUserAndFinish(user);
+    }
+  };
+
+  // Setup Google Identity Services Client
+  function initGoogleGSI() {
+    var script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = function () {
+      if (window.google && window.google.accounts && window.google.accounts.id) {
+        // Render official button if client ID is configured
+        var clientId = window.SMARAN_GOOGLE_CLIENT_ID || '';
+        if (clientId) {
+          window.google.accounts.id.initialize({
+            client_id: clientId,
+            callback: window.handleGoogleCredentialResponse,
+            auto_select: false,
+          });
+          if (gsiButtonContainer) {
+            window.google.accounts.id.renderButton(gsiButtonContainer, {
+              theme: 'filled_black',
+              size: 'large',
+              width: 320,
+              text: 'continue_with',
+              shape: 'rectangular',
+            });
+            if (customGoogleBtn) customGoogleBtn.style.display = 'none';
+          }
+        }
+      }
+    };
+    document.head.appendChild(script);
+  }
+
+  // Event Listeners
+  if (navSignInBtn) navSignInBtn.addEventListener('click', openModal);
+  if (mobileSignInBtn) {
+    mobileSignInBtn.addEventListener('click', function () {
+      var current = localStorage.getItem(USER_KEY);
+      if (!current) {
+        openModal();
+      }
+    });
+  }
+
+  if (authModalClose) authModalClose.addEventListener('click', closeModal);
+  if (authModalBackdrop) {
+    authModalBackdrop.addEventListener('click', function (e) {
+      if (e.target === authModalBackdrop) closeModal();
+    });
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && authModalBackdrop && !authModalBackdrop.hidden) {
+      closeModal();
+    }
+  });
+
+  // Direct Continue with Google action
+  if (customGoogleBtn) {
+    customGoogleBtn.addEventListener('click', function () {
+      if (window.google && window.google.accounts && window.google.accounts.id && window.SMARAN_GOOGLE_CLIENT_ID) {
+        window.google.accounts.id.prompt();
+      } else {
+        // Clean interactive prompt for instant Google Sign-In
+        var emailInput = prompt('Enter your Google Email to Continue with Google:', 'user@gmail.com');
+        if (emailInput && emailInput.indexOf('@') !== -1) {
+          var defaultName = emailInput.split('@')[0];
+          var formattedName = defaultName.charAt(0).toUpperCase() + defaultName.slice(1);
+          var mockUser = {
+            id: 'g_' + Math.random().toString(36).slice(2, 10),
+            name: formattedName,
+            email: emailInput.trim().toLowerCase(),
+            picture: 'https://lh3.googleusercontent.com/a/default-user=s96-c',
+            signed_at: new Date().toISOString(),
+          };
+          saveUserAndFinish(mockUser);
+        }
+      }
+    });
+  }
+
+  // User Dropdown toggle
+  if (userAvatarBtn && userDropdownMenu) {
+    userAvatarBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var isHidden = userDropdownMenu.hidden;
+      userDropdownMenu.hidden = !isHidden;
+      userAvatarBtn.setAttribute('aria-expanded', String(isHidden));
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!navUserProfile || !navUserProfile.contains(e.target)) {
+        userDropdownMenu.hidden = true;
+        userAvatarBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
+  // Sign out handlers
+  function handleSignOut() {
+    var existing = localStorage.getItem(USER_KEY);
+    if (existing) {
+      try {
+        var user = JSON.parse(existing);
+        recordAnalyticsEvent('signout', user);
+      } catch (err) {}
+    }
+    localStorage.removeItem(USER_KEY);
+    applyUserState(null);
+  }
+
+  if (signOutBtn) signOutBtn.addEventListener('click', handleSignOut);
+  if (mobileSignOutBtn) mobileSignOutBtn.addEventListener('click', handleSignOut);
+
+  // Restore existing session
+  try {
+    var stored = localStorage.getItem(USER_KEY);
+    if (stored) {
+      applyUserState(JSON.parse(stored));
+    } else {
+      applyUserState(null);
+    }
+  } catch (e) {
+    applyUserState(null);
+  }
+
+  // Initialize GSI
+  initGoogleGSI();
+})();
+

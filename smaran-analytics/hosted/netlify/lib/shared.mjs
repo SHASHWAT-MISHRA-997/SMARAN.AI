@@ -58,6 +58,7 @@ export const ALLOWED_PLATFORMS = [
   'android',                     // the phone app
   'cli',                         // smaran.exe
   'vscode',                      // the editor extension
+  'web',                         // website
   'unknown',
 ];
 

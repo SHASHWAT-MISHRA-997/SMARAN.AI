@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Terms of Service — SMARAN.AI</title>
+  <meta name="description" content="Production-grade Terms of Service and End-User Agreement for SMARAN.AI sovereign private artificial intelligence platform." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #09090d;
+      --panel: rgba(18, 18, 26, 0.85);
+      --card-border: rgba(255, 255, 255, 0.09);
+      --red: #ef4444;
+      --red-glow: rgba(239, 68, 68, 0.35);
+      --emerald: #10b981;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --dimmer: #6b7280;
+      --code-bg: #0d0e15;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      line-height: 1.65;
+      background-image: 
+        radial-gradient(circle at 10% 8%, rgba(239, 68, 68, 0.12) 0%, transparent 45%),
+        radial-gradient(circle at 90% 85%, rgba(99, 102, 241, 0.09) 0%, transparent 45%);
+      background-attachment: fixed;
+      padding-bottom: 80px;
+    }
+    a { color: var(--red); text-decoration: none; transition: color 0.2s; }
+    a:hover { color: #f87171; text-decoration: underline; text-underline-offset: 3px; }
+
+    .nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(9, 9, 13, 0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 24px;
+    }
+    .nav-inner {
+      max-width: 1100px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 800; font-size: 1.15rem; color: #fff; text-decoration: none;
+    }
+    .brand img { width: 32px; height: 32px; border-radius: 8px; }
+    .brand span span { color: var(--red); }
+    .nav-links { display: flex; gap: 20px; font-size: 0.9rem; font-weight: 600; }
+    .nav-links a { color: var(--muted); }
+    .nav-links a:hover { color: #fff; text-decoration: none; }
+
+    .header-hero {
+      max-width: 900px; margin: 60px auto 40px; padding: 0 24px; text-align: center;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 14px; border-radius: 9999px;
+      background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3);
+      font-size: 0.8rem; font-weight: 700; color: #fca5a5; margin-bottom: 18px;
+    }
+    .header-hero h1 {
+      font-size: clamp(2rem, 4vw, 2.9rem); font-weight: 900; letter-spacing: -0.02em; margin-bottom: 14px;
+    }
+    .header-hero p {
+      font-size: 1.05rem; color: var(--muted); max-width: 680px; margin: 0 auto;
+    }
+    .meta-bar {
+      display: flex; justify-content: center; gap: 24px; margin-top: 20px;
+      font-size: 0.85rem; color: var(--dimmer);
+    }
+
+    .container {
+      max-width: 900px; margin: 0 auto; padding: 0 24px;
+    }
+    .toc-card {
+      background: var(--panel); border: 1px solid var(--card-border);
+      border-radius: 16px; padding: 24px 28px; margin-bottom: 40px;
+    }
+    .toc-card h3 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 14px; }
+    .toc-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 24px;
+      list-style: none;
+    }
+    .toc-grid li a { color: var(--text); font-size: 0.92rem; display: flex; align-items: center; gap: 8px; }
+    .toc-grid li a:hover { color: var(--red); }
+    .toc-grid li span { color: var(--dimmer); font-size: 0.8rem; }
+
+    .terms-section {
+      background: var(--panel); border: 1px solid var(--card-border);
+      border-radius: 18px; padding: 32px 36px; margin-bottom: 30px;
+      position: relative;
+    }
+    .terms-section::before {
+      content: ''; position: absolute; left: 0; top: 32px; bottom: 32px; width: 3px;
+      background: var(--red); border-radius: 0 3px 3px 0; opacity: 0.8;
+    }
+    .terms-section h2 {
+      font-size: 1.35rem; font-weight: 800; margin-bottom: 16px; display: flex; align-items: center; gap: 10px;
+    }
+    .terms-section h2 span {
+      font-size: 0.85rem; padding: 2px 8px; border-radius: 6px;
+      background: rgba(255, 255, 255, 0.06); color: var(--muted); font-weight: 600;
+    }
+    .terms-section p {
+      color: #d1d5db; margin-bottom: 14px; font-size: 0.96rem;
+    }
+    .terms-section ul {
+      margin: 12px 0 16px 24px; color: #d1d5db; font-size: 0.95rem;
+    }
+    .terms-section ul li { margin-bottom: 8px; }
+    
+    .highlight-box {
+      background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25);
+      border-radius: 12px; padding: 16px 20px; margin: 18px 0;
+      display: flex; gap: 14px; align-items: flex-start;
+    }
+    .highlight-box svg { flex-shrink: 0; color: var(--emerald); margin-top: 2px; }
+    .highlight-box strong { color: #a7f3d0; display: block; margin-bottom: 4px; font-size: 0.95rem; }
+    .highlight-box p { color: #d1fae5; margin: 0; font-size: 0.9rem; }
+
+    .footer {
+      border-top: 1px solid var(--card-border); max-width: 1100px;
+      margin: 80px auto 0; padding: 40px 24px;
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;
+      font-size: 0.88rem; color: var(--dimmer);
+    }
+    .footer-links { display: flex; gap: 20px; }
+    .footer-links a { color: var(--muted); }
+  </style>
+</head>
+<body>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="index.html">
+        <img src="assets/logo.png" alt="SMARAN.AI Logo" />
+        <span>SMARAN<span>.</span>AI</span>
+      </a>
+      <nav class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="docs.html">Docs</a>
+        <a href="index.html#download">Download</a>
+        <a href="index.html#privacy">Privacy</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="header-hero">
+    <div class="badge">Legal &amp; Operating Agreement</div>
+    <h1>Terms of Service</h1>
+    <p>
+      Clear, transparent terms designed for high-performance sovereign software. Everything runs on your machine, under your ownership.
+    </p>
+    <div class="meta-bar">
+      <span>Effective Date: September 2026</span>
+      <span>•</span>
+      <span>Software Version: 1.0.0 Production</span>
+      <span>•</span>
+      <span>License: MIT Open Source</span>
+    </div>
+  </div>
+
+  <main class="container">
+    <nav class="toc-card" aria-label="Table of Contents">
+      <h3>Sections &amp; Articles</h3>
+      <ul class="toc-grid">
+        <li><a href="#acceptance"><span>01</span> Acceptance &amp; Scope</a></li>
+        <li><a href="#license"><span>02</span> License &amp; IP Ownership</a></li>
+        <li><a href="#local-guarantee"><span>03</span> 100% Local Privacy Guarantee</a></li>
+        <li><a href="#acceptable-use"><span>04</span> Acceptable Use Policy</a></li>
+        <li><a href="#ai-disclaimer"><span>05</span> AI &amp; Output Disclaimers</a></li>
+        <li><a href="#liability"><span>06</span> Limitation of Liability</a></li>
+        <li><a href="#third-party"><span>07</span> Third-Party Model Weights</a></li>
+        <li><a href="#governing-law"><span>08</span> Contact &amp; Governing Law</a></li>
+      </ul>
+    </nav>
+
+    <!-- SECTION 1 -->
+    <section class="terms-section" id="acceptance">
+      <h2>01. Acceptance of Terms <span>Binding Contract</span></h2>
+      <p>
+        By downloading, installing, accessing, or using <strong>SMARAN.AI</strong> (including the Windows desktop software, Linux build, Android application, VS Code extension, CLI, and website), you agree to be bound by these Terms of Service.
+      </p>
+      <p>
+        If you do not agree with these Terms, you may not download or operate the software. This software is created, maintained, and released by <strong>Shashwat Mishra</strong> ("Author", "Developer", "We").
+      </p>
+    </section>
+
+    <!-- SECTION 2 -->
+    <section class="terms-section" id="license">
+      <h2>02. Open-Source License &amp; User IP Ownership <span>Full Freedom</span></h2>
+      <p>
+        <strong>Software License:</strong> SMARAN.AI is released under the permissive <strong>MIT License</strong>. You are free to inspect, run, modify, bundle, and distribute the application according to standard MIT terms.
+      </p>
+      <div class="highlight-box">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+        <div>
+          <strong>You Own 100% of Your Prompts, Code &amp; Generations</strong>
+          <p>Unlike cloud AI corporations, SMARAN.AI claims zero rights, licenses, or ownership over anything you write, prompt, design, generate, or execute using the software. Your work belongs entirely to you.</p>
+        </div>
+      </div>
+      <p>
+        Neither the Developer nor any affiliate asserts copyright or intellectual property claims over your source code, conversation memories, document embeddings, or generated software artifacts created through SMARAN.AI.
+      </p>
+    </section>
+
+    <!-- SECTION 3 -->
+    <section class="terms-section" id="local-guarantee">
+      <h2>03. 100% Local Privacy &amp; Offline Guarantee <span>No Telemetry</span></h2>
+      <p>
+        SMARAN.AI is built on an uncompromising principle of user sovereignty:
+      </p>
+      <ul>
+        <li><strong>Zero Prompt Telemetry:</strong> Your prompts, chat logs, voice transcripts, and local vector embeddings are never transmitted to any server owned by the Author or third parties.</li>
+        <li><strong>Local File Persistence:</strong> All databases, documents, and chat records reside strictly in your local user directory on your personal machine.</li>
+        <li><strong>Offline Capability:</strong> Once model weights are downloaded, the software operates completely air-gapped without requiring an active internet connection.</li>
+      </ul>
+    </section>
+
+    <!-- SECTION 4 -->
+    <section class="terms-section" id="acceptable-use">
+      <h2>04. Acceptable Use Policy <span>Responsible Computing</span></h2>
+      <p>
+        When operating SMARAN.AI, you agree to:
+      </p>
+      <ul>
+        <li>Comply with all applicable local, national, and international laws and regulations.</li>
+        <li>Refrain from using the tool to generate malware, automated cyber-attacks, unlawful surveillance software, or sexually explicit content involving minors.</li>
+        <li>Comply with the specific community license agreements of any open-weight AI model downloaded through or paired with the app (such as Meta's Llama Community License or Qwen Community License).</li>
+      </ul>
+    </section>
+
+    <!-- SECTION 5 -->
+    <section class="terms-section" id="ai-disclaimer">
+      <h2>05. AI Output Disclaimers &amp; Hallucinations <span>Probabilistic Generation</span></h2>
+      <p>
+        Artificial intelligence models generate probabilistic predictions and may generate inaccurate, incomplete, or hallucinated responses:
+      </p>
+      <ul>
+        <li><strong>No Professional Advice:</strong> Code, medical, financial, or legal insights generated by SMARAN.AI do not constitute professional advice.</li>
+        <li><strong>Independent Verification Required:</strong> You are solely responsible for reviewing, testing, linting, and verifying any code, script, or system modification prior to running it in production or production-like environments.</li>
+      </ul>
+    </section>
+
+    <!-- SECTION 6 -->
+    <section class="terms-section" id="liability">
+      <h2>06. Limitation of Liability &amp; Disclaimer of Warranties <span>AS-IS</span></h2>
+      <p>
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+      </p>
+      <p>
+        IN NO EVENT SHALL THE AUTHOR, DEVELOPER, OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, LOSS OF DATA, HARDWARE MALFUNCTION, THERMAL DAMAGE, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+      </p>
+    </section>
+
+    <!-- SECTION 7 -->
+    <section class="terms-section" id="third-party">
+      <h2>07. Third-Party Model Weights &amp; Cloud Connectors <span>Integrations</span></h2>
+      <p>
+        SMARAN.AI supports both local offline models (GGUF, Ollama) and optional cloud AI providers (Google Gemini, Groq, OpenRouter). If you choose to configure external API keys:
+      </p>
+      <ul>
+        <li>Your interactions with cloud providers are governed directly by their respective Terms of Service and Privacy Policies.</li>
+        <li>SMARAN.AI does not proxy, store, or intercept your third-party API keys on any remote server.</li>
+      </ul>
+    </section>
+
+    <!-- SECTION 8 -->
+    <section class="terms-section" id="governing-law">
+      <h2>08. Contact &amp; Updates <span>Developer Relations</span></h2>
+      <p>
+        These Terms may be updated from time to time to reflect new features, capabilities, or statutory requirements. Continued use of the software after any modification constitutes your acceptance of the updated terms.
+      </p>
+      <p>
+        For inquiries, legal notices, or feedback, please contact the developer:
+      </p>
+      <ul>
+        <li><strong>Developer:</strong> Shashwat Mishra</li>
+        <li><strong>LinkedIn:</strong> <a href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener">linkedin.com/in/sm980</a></li>
+        <li><strong>YouTube:</strong> <a href="https://www.youtube.com/@ShashwatMishra-997" target="_blank" rel="noopener">@ShashwatMishra-997</a></li>
+        <li><strong>GitHub:</strong> <a href="https://github.com/SHASHWAT-MISHRA-997" target="_blank" rel="noopener">github.com/SHASHWAT-MISHRA-997</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div>
+      <strong>SMARAN.AI</strong> — Sovereign Artificial Intelligence by Shashwat Mishra
+    </div>
+    <div class="footer-links">
+      <a href="index.html">Home</a>
+      <a href="docs.html">Docs</a>
+      <a href="index.html#download">Download</a>
+      <a href="index.html#privacy">Privacy</a>
+    </div>
+  </footer>
+
+</body>
+</html>
