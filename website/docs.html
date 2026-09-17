@@ -400,9 +400,80 @@
         </ul>
       </section>
 
-      <!-- SECTION 7: ANDROID -->
+      <!-- SECTION 7: DESIGN & SITES STUDIO -->
+      <section class="doc-section" id="design-studio">
+        <h2><span class="sec-num">07</span> Design &amp; Sites Studio</h2>
+        <p>
+          SMARAN Design is a built-in visual generation workspace that lets you create UI components, landing pages, and complete websites using natural language — all processed locally through your AI models.
+        </p>
+
+        <div class="doc-grid">
+          <div class="doc-card">
+            <h3>🎨 AI-Powered Design</h3>
+            <p>Describe any UI in plain language and SMARAN generates production-ready HTML, CSS, and JavaScript with live preview.</p>
+          </div>
+          <div class="doc-card">
+            <h3>🌐 Sites Hub</h3>
+            <p>Browse, manage, and deploy generated websites. Each site is self-contained with its own assets, styles, and scripts.</p>
+          </div>
+          <div class="doc-card">
+            <h3>🔒 Isolated Sessions</h3>
+            <p>Design generations never pollute your regular chat or code sessions. Each design workspace has its own session context and history.</p>
+          </div>
+        </div>
+
+        <div class="callout callout-info">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          <div class="callout-body">
+            <strong>How to Access</strong>
+            <p>Click <strong>Design &amp; Sites Studio</strong> in the sidebar of the SMARAN desktop app. Use the prompt bar to describe what you want — "Create a dark mode pricing page" — and the design generates in-place with a live preview panel.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 8: VS CODE EXTENSION -->
+      <section class="doc-section" id="vscode-ext">
+        <h2><span class="sec-num">08</span> VS Code Extension</h2>
+        <p>
+          The SMARAN VS Code Extension connects your editor directly to your local SMARAN instance, enabling context-aware AI code completion and inline refactoring without sending code to any cloud service.
+        </p>
+
+        <div class="doc-grid">
+          <div class="doc-card">
+            <h3>⚡ Inline Completions</h3>
+            <p>Get real-time code suggestions from your local model as you type — powered by your own GPU, with zero latency to external servers.</p>
+          </div>
+          <div class="doc-card">
+            <h3>🛠️ Refactoring &amp; Fixes</h3>
+            <p>Select code and ask SMARAN to refactor, explain, optimize, or fix bugs. Results appear as inline diffs with one-click accept.</p>
+          </div>
+          <div class="doc-card">
+            <h3>📂 Workspace Context</h3>
+            <p>The extension indexes your open workspace and feeds relevant file context to the model, so suggestions are aware of your project structure.</p>
+          </div>
+        </div>
+
+        <div class="callout callout-success">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          <div class="callout-body">
+            <strong>Installation</strong>
+            <p>Search <strong>"SMARAN AI"</strong> in the Visual Studio Marketplace, or run: <code>ext install smaran.smaran-ai</code> from the VS Code command palette. Make sure SMARAN desktop is running on the same machine — the extension connects to <code>localhost:3003</code> by default.</p>
+          </div>
+        </div>
+
+        <div class="code-box">
+          <div class="code-header"><span>VS Code Settings (settings.json)</span><span>json</span></div>
+          <pre><code>{
+  "smaran.serverUrl": "http://localhost:3003",
+  "smaran.autoComplete": true,
+  "smaran.model": "auto"
+}</code></pre>
+        </div>
+      </section>
+
+      <!-- SECTION 9: ANDROID -->
       <section class="doc-section" id="android">
-        <h2><span class="sec-num">07</span> Android App &amp; Device Pairing</h2>
+        <h2><span class="sec-num">09</span> Android App &amp; Device Pairing</h2>
         <p>
           The SMARAN Android application connects to your PC via local Wi-Fi / LAN:
         </p>
@@ -413,9 +484,9 @@
         </ol>
       </section>
 
-      <!-- SECTION 8: DATABASE & STORAGE -->
+      <!-- SECTION 10: DATABASE & STORAGE -->
       <section class="doc-section" id="database">
-        <h2><span class="sec-num">08</span> Database &amp; Data Storage</h2>
+        <h2><span class="sec-num">10</span> Database &amp; Data Storage</h2>
         <p>
           Understanding where user data lives and how to inspect it:
         </p>
@@ -454,9 +525,9 @@
         </div>
       </section>
 
-      <!-- SECTION 9: PRIVACY -->
+      <!-- SECTION 11: PRIVACY -->
       <section class="doc-section" id="security">
-        <h2><span class="sec-num">09</span> Privacy &amp; Air-Gapped Security</h2>
+        <h2><span class="sec-num">11</span> Privacy &amp; Air-Gapped Security</h2>
         <p>
           SMARAN.AI was built to solve the corporate AI surveillance problem. Read our <a href="terms.html">Terms of Service</a> and <a href="index.html#privacy">Privacy Policy</a> to understand our contractual guarantees.
         </p>
