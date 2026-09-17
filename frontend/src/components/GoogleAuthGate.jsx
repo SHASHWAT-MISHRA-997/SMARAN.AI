@@ -59,7 +59,7 @@ const sendSignInAnalytics = (user) => {
         install_id: installId,
         event: 'desktop_app_signin',
         platform: 'desktop_app',
-        app_version: '1.0.0',
+        app_version: '1.0.1',
         user_email: user.email || '',
         user_name: user.name || '',
         signed_at: new Date().toISOString(),
