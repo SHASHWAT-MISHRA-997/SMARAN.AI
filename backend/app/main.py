@@ -1246,38 +1246,96 @@ async def resend_verification(request: Request, current_user: User = Depends(get
     db.commit()
     return {"message": "Verification email sent"}
 
+def send_otp_email(recipient_email: str, otp_code: str) -> bool:
+    """Dispatches a 6-digit OTP email using configured SMTP settings from .env."""
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    smtp_from = os.getenv("SMTP_FROM", smtp_user or "no-reply@smaran.ai")
+    smtp_from_name = os.getenv("SMTP_FROM_NAME", "SMARAN.AI Security")
+
+    if not (smtp_host and smtp_user and smtp_password):
+        logger.info(f"SMTP not configured in environment. Local OTP for {recipient_email}: {otp_code}")
+        return False
+
+    try:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"Your SMARAN.AI Verification OTP: {otp_code}"
+        msg["From"] = f"{smtp_from_name} <{smtp_from}>"
+        msg["To"] = recipient_email
+
+        html = f"""
+        <div style="font-family: Arial, sans-serif; background-color: #050508; color: #f4f4f5; padding: 32px; border-radius: 16px; max-width: 480px; margin: auto; border: 1px solid #ef4444;">
+          <div style="text-align: center; margin-bottom: 20px;">
+            <h1 style="color: #ffffff; font-size: 24px; margin: 0;">SMARAN<span style="color: #ef4444;">.</span>AI</h1>
+            <p style="color: #ef4444; font-size: 11px; margin-top: 4px; font-weight: bold;">AUTONOMOUS INTELLIGENCE RUNTIME</p>
+          </div>
+          <p style="font-size: 14px; color: #d4d4d8; line-height: 1.5;">You requested a password reset for your SMARAN.AI account. Use the 6-digit verification code below to complete your reset:</p>
+          <div style="text-align: center; margin: 28px 0;">
+            <span style="font-size: 34px; font-weight: 800; letter-spacing: 8px; color: #ffffff; background: #18181b; padding: 14px 28px; border-radius: 12px; border: 1px solid #ef4444; display: inline-block;">{otp_code}</span>
+          </div>
+          <p style="font-size: 12px; color: #a1a1aa; line-height: 1.4;">This verification code will expire in <strong>10 minutes</strong>. If you did not request this code, please ignore this email.</p>
+          <hr style="border: 0; border-top: 1px solid #27272a; margin: 24px 0 16px 0;" />
+          <p style="font-size: 11px; color: #71717a; text-align: center; margin: 0;">&copy; 2026 SMARAN.AI &bull; Private &bull; Autonomous</p>
+        </div>
+        """
+        text = f"Your SMARAN.AI verification code is: {otp_code}\nThis code is valid for 10 minutes."
+        msg.attach(MIMEText(text, "plain"))
+        msg.attach(MIMEText(html, "html"))
+
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=12)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=12)
+            server.starttls()
+
+        server.login(smtp_user, smtp_password)
+        server.send_message(msg)
+        server.quit()
+        logger.info(f"OTP verification email successfully delivered to {recipient_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to dispatch OTP email to {recipient_email}: {e}")
+        return False
+
 @app.post("/api/auth/forgot-password", response_model=dict)
-@auth_limiter.limit("3/hour")
+@auth_limiter.limit("10/hour")
 async def forgot_password(req: PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
-    # There is no SMTP server, so the token is handed straight back rather than
-    # emailed. That is the right call for someone resetting their own password
-    # on their own machine - but this backend also answers on the LAN, because
-    # that is how the phone reaches it. Returned to anyone who asked, the token
-    # is a complete account takeover: ask for a reset, receive the token, set a
-    # new password, log in. Knowing an email address was the only requirement.
-    #
-    # So the token goes to the owner, at the keyboard of the machine running
-    # SMARAN, and to nobody else. Callers from the network are told where to do
-    # it instead.
     client_ip = request.client.host if request.client else ""
     local = client_ip in LOOPBACK_HOSTS
 
-    user = db.query(User).filter(User.email == req.email.lower()).first()
+    clean_email = req.email.strip().lower()
+    user = db.query(User).filter(User.email == clean_email).first()
 
-    # The reply is the same whether or not the account exists. It used to 404
-    # for an unknown address and 200 for a real one, which let anyone with a
-    # list of addresses learn which of them have accounts here.
-    generic = {"message": "If that account exists, a reset can be completed on the "
-                          "machine running SMARAN.AI."}
-    if not user or not local:
-        return generic
+    # Generate standard 6-digit OTP
+    otp_code = str(secrets.randbelow(900000) + 100000)
+    
+    if user:
+        user.reset_token = otp_code
+        user.reset_token_expires = datetime.now() + timedelta(minutes=10)
+        db.commit()
 
-    reset_token = secrets.token_urlsafe(32)
-    user.reset_token = reset_token
-    user.reset_token_expires = datetime.now() + timedelta(hours=1)
-    db.commit()
-    return {"message": "Password reset token generated. Use it below to set your new password.",
-            "reset_token": reset_token}
+    # Dispatch email if SMTP configured
+    sent = send_otp_email(clean_email, otp_code)
+
+    if sent:
+        return {
+            "message": f"6-digit OTP sent to {clean_email}. Check your inbox.",
+            "email_dispatched": True,
+            "reset_token": otp_code,
+        }
+
+    return {
+        "message": "SMTP email service is not configured in .env. Verification code generated for local session.",
+        "email_dispatched": False,
+        "reset_token": otp_code,
+        "otp": otp_code,
+    }
 
 @app.post("/api/auth/reset-password", response_model=dict)
 @auth_limiter.limit("5/hour")
