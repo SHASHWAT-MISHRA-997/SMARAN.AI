@@ -1210,6 +1210,43 @@ async def logout(response: Response, current_user: User = Depends(get_current_us
     response.delete_cookie(key="session_token", path="/")
     return {"message": "Logged out successfully"}
 
+@app.delete("/api/auth/account")
+async def delete_account(
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Permanently delete current user account and all associated data."""
+    user_id = current_user.id
+    username = current_user.username
+    
+    # Delete associated data
+    user_sessions = db.query(ChatSession).filter(ChatSession.user_id == user_id).all()
+    session_ids = [s.id for s in user_sessions]
+    if session_ids:
+        db.query(ChatMessage).filter(ChatMessage.session_id.in_(session_ids)).delete(synchronize_session=False)
+    db.query(ChatSession).filter(ChatSession.user_id == user_id).delete(synchronize_session=False)
+    
+    db.query(DocumentChunk).filter(DocumentChunk.user_id == user_id).delete(synchronize_session=False)
+    db.query(Document).filter(Document.user_id == user_id).delete(synchronize_session=False)
+    db.query(Collection).filter(Collection.user_id == user_id).delete(synchronize_session=False)
+    
+    db.query(UserMemory).filter(UserMemory.user_id == user_id).delete(synchronize_session=False)
+    db.query(AuditLog).filter(AuditLog.user_id == user_id).delete(synchronize_session=False)
+    
+    try:
+        db.query(CustomPlugin).filter(CustomPlugin.user_id == user_id).delete(synchronize_session=False)
+    except Exception:
+        pass
+        
+    db.delete(current_user)
+    db.commit()
+    
+    response.delete_cookie(key="session_token", path="/")
+    logger.info(f"User account permanently deleted: {username} (id={user_id})")
+    return {"status": "ok", "message": "Account and all associated data permanently deleted"}
+
+
 @app.get("/api/auth/me", response_model=UserResponse)
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
     return UserResponse(

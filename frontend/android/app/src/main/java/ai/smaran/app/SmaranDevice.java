@@ -16,6 +16,10 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import android.accounts.AccountManager;
+import android.app.Activity;
+import androidx.activity.result.ActivityResult;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.text.Normalizer;
@@ -402,5 +406,50 @@ public class SmaranDevice extends Plugin {
                 call.resolve(new JSObject().put("floating", false).put("reason", "refused"));
             }
         });
+    }
+
+    /**
+     * Native Android Google account chooser.
+     * Pops up the system account picker with the device's Google accounts,
+     * avoiding WebView OAuth restrictions and white-screen issues.
+     */
+    @PluginMethod
+    public void chooseGoogleAccount(PluginCall call) {
+        try {
+            Intent intent = AccountManager.newChooseAccountIntent(
+                null,
+                null,
+                new String[]{"com.google"},
+                null,
+                null,
+                null,
+                null
+            );
+            startActivityForResult(call, intent, "onGoogleAccountChosen");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to launch Google account picker", e);
+            call.reject("Could not launch Google account picker: " + e.getMessage());
+        }
+    }
+
+    @ActivityCallback
+    private void onGoogleAccountChosen(PluginCall call, ActivityResult result) {
+        if (result == null) {
+            call.reject("No result received from account picker");
+            return;
+        }
+        if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+            String accountName = result.getData().getStringExtra(AccountManager.KEY_ACCOUNT_NAME);
+            if (accountName != null && !accountName.trim().isEmpty()) {
+                String cleanEmail = accountName.trim().toLowerCase(Locale.ROOT);
+                JSObject ret = new JSObject();
+                ret.put("email", cleanEmail);
+                String displayName = cleanEmail.contains("@") ? cleanEmail.split("@")[0] : cleanEmail;
+                ret.put("name", displayName);
+                call.resolve(ret);
+                return;
+            }
+        }
+        call.reject("User cancelled Google account selection");
     }
 }

@@ -93,6 +93,29 @@ const hashPassword = async (password) => {
 };
 
 /**
+ * Format auth errors from FastAPI / Pydantic responses into friendly messages
+ */
+const formatAuthError = (data, defaultMsg) => {
+  if (!data) return defaultMsg;
+  const detail = data.detail || data.message;
+  if (!detail) return defaultMsg;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => {
+        if (typeof d === 'string') return d;
+        if (d?.msg) return d.msg.replace(/^Value error,\s*/i, '');
+        return d?.message || JSON.stringify(d);
+      })
+      .join('; ');
+  }
+  if (typeof detail === 'object') {
+    return (detail.msg || detail.message || JSON.stringify(detail)).replace(/^Value error,\s*/i, '');
+  }
+  return String(detail);
+};
+
+/**
  * Load Google Identity Services script dynamically
  */
 const loadGoogleScript = () =>
@@ -147,7 +170,7 @@ const sendSignInAnalytics = (user) => {
         install_id: installId,
         event: 'desktop_app_signin',
         platform: 'desktop_app',
-        app_version: '1.0.1',
+        app_version: '1.0.2',
         auth_provider: user.provider || 'unknown',
         user_email: user.email || '',
         user_name: user.name || '',
@@ -295,6 +318,10 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     };
     try {
       localStorage.setItem(GOOGLE_STORAGE_KEY, JSON.stringify(user));
+      localStorage.removeItem('sm_auth_logged_out');
+      if (userData.access_token) {
+        localStorage.setItem('sm_session_token', userData.access_token);
+      }
     } catch {}
     setCurrentUser(user);
     onUserChange?.(user);
@@ -320,8 +347,29 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
           if (gsi?.accounts?.id) {
             gsi.accounts.id.initialize({
               client_id: activeId,
-              callback: (response) => {
+              callback: async (response) => {
                 if (response?.credential) {
+                  try {
+                    const bRes = await fetch(`${API_BASE || ''}/api/auth/google`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ credential: response.credential }),
+                    }).catch(() => null);
+
+                    if (bRes && bRes.ok) {
+                      const bData = await bRes.json();
+                      handleSignInSuccess({
+                        id: bData.user?.id || 'google_user',
+                        name: bData.user?.username,
+                        email: bData.user?.email,
+                        access_token: bData.access_token,
+                        provider: 'google',
+                      });
+                      return;
+                    }
+                  } catch {}
+
                   try {
                     const payload = JSON.parse(atob(response.credential.split('.')[1]));
                     handleSignInSuccess({
@@ -432,7 +480,63 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     );
 
     if (isNative) {
-      setIsGoogleConnecting(false);
+      // Use native Android AccountManager picker via SmaranDevice plugin
+      setIsGoogleConnecting(true);
+      try {
+        const { registerPlugin } = await import('@capacitor/core');
+        const smaranDevice = registerPlugin('SmaranDevice');
+        const result = await smaranDevice.chooseGoogleAccount();
+        if (result?.email) {
+          // Native picker returned a valid Google email
+          const cleanEmail = result.email.trim().toLowerCase();
+          const displayName = result.name || cleanEmail.split('@')[0];
+
+          // Try backend auth first
+          let backendSuccess = false;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 6000);
+            const bRes = await fetch(`${API_BASE || ''}/api/auth/google/native`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ email: cleanEmail, name: displayName, provider: 'google_native' }),
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+            if (bRes && bRes.ok) {
+              const bData = await bRes.json();
+              handleSignInSuccess({
+                id: bData.user?.id || 'g_native_' + Date.now(),
+                name: bData.user?.username || displayName,
+                email: cleanEmail,
+                access_token: bData.access_token,
+                provider: 'google',
+              });
+              backendSuccess = true;
+            }
+          } catch { /* backend unavailable, fall through to direct sign-in */ }
+
+          if (!backendSuccess) {
+            // Direct sign-in with native account info (offline-capable)
+            handleSignInSuccess({
+              id: 'g_' + Math.abs(cleanEmail.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0)),
+              email: cleanEmail,
+              name: displayName,
+              provider: 'google',
+              picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanEmail)}`,
+            });
+          }
+          return;
+        }
+      } catch (nativeErr) {
+        console.warn('Native Google account picker failed:', nativeErr);
+        // Fall back to manual Google email modal
+      } finally {
+        setIsGoogleConnecting(false);
+      }
+
+      // Fallback: show manual email modal if native picker was cancelled or unavailable
       if (email && email.includes('@')) {
         setGoogleEmail(email);
       }
@@ -557,10 +661,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     setIsSubmitting(true);
 
     try {
-      // 1. Try Backend Login API first if available
+      // 1. Try Backend Login API first
+      let networkError = false;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
         const res = await fetch(`${API_BASE || ''}/api/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -569,62 +674,62 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
-        const ct = res.headers.get('content-type') || '';
-        if (res.ok && ct.includes('application/json')) {
-          const data = await res.json();
+
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {}
+
+        if (res.ok && data) {
           handleSignInSuccess({
             id: data.user?.id || 'usr_' + Date.now(),
             name: data.user?.username || cleanEmail.split('@')[0],
             email: cleanEmail,
+            access_token: data.access_token,
             provider: 'email',
           });
           return;
-        }
-      } catch {}
-
-      // 2. Check local accounts registry
-      const accounts = getStoredAccounts();
-      const existingAccount = accounts.find((acc) => acc.email === cleanEmail);
-      const computedHash = await hashPassword(password);
-
-      if (existingAccount) {
-        if (existingAccount.passwordHash === computedHash) {
-          handleSignInSuccess({
-            id: existingAccount.id,
-            name: existingAccount.name || cleanEmail.split('@')[0],
-            email: existingAccount.email,
-            provider: 'email',
-          });
+        } else if (res.status === 401) {
+          setError('Invalid email or password. Please try again.');
+          setIsSubmitting(false);
           return;
-        } else {
-          setError('Incorrect password. Please try again or use "Forgot Password".');
+        } else if (res.status === 429) {
+          setError(data?.detail || 'Too many attempts. Please try again later.');
+          setIsSubmitting(false);
+          return;
+        } else if (data) {
+          setError(formatAuthError(data, 'Login failed. Please check your credentials.'));
           setIsSubmitting(false);
           return;
         }
+      } catch (fetchErr) {
+        networkError = true;
       }
 
-      // If user is signing in for the first time with this email & password,
-      // register them automatically or notify them
-      if (accounts.length === 0) {
-        // First user auto-registered as local owner
-        const newAcc = {
-          id: 'usr_' + Math.random().toString(36).slice(2, 10),
-          name: cleanEmail.split('@')[0],
-          email: cleanEmail,
-          passwordHash: computedHash,
-          createdAt: new Date().toISOString(),
-        };
-        saveStoredAccounts([newAcc]);
-        handleSignInSuccess({
-          id: newAcc.id,
-          name: newAcc.name,
-          email: newAcc.email,
-          provider: 'email',
-        });
-        return;
+      // 2. Offline / Local fallback ONLY if network failed
+      if (networkError) {
+        const accounts = getStoredAccounts();
+        const existingAccount = accounts.find((acc) => acc.email === cleanEmail);
+        const computedHash = await hashPassword(password);
+
+        if (existingAccount) {
+          if (existingAccount.passwordHash === computedHash) {
+            handleSignInSuccess({
+              id: existingAccount.id,
+              name: existingAccount.name || cleanEmail.split('@')[0],
+              email: existingAccount.email,
+              provider: 'email',
+            });
+            return;
+          } else {
+            setError('Incorrect password for local offline account.');
+            setIsSubmitting(false);
+            return;
+          }
+        }
       }
 
-      setError('No account found with this email. Click "Create Account" below.');
+      setError('Invalid email or password. Please try again or create an account.');
     } catch (err) {
       setError(err.message || 'Failed to sign in.');
     } finally {
@@ -657,11 +762,12 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     setIsSubmitting(true);
 
     try {
-      // 1. Try Backend Registration
+      // 1. Backend Registration
+      let networkError = false;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
-        await fetch(`${API_BASE || ''}/api/auth/register`, {
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch(`${API_BASE || ''}/api/auth/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -669,37 +775,84 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
-      } catch {}
 
-      // 2. Save in Local Accounts Registry
-      const accounts = getStoredAccounts();
-      if (accounts.some((acc) => acc.email === cleanEmail)) {
-        setError('An account with this email already exists. Please Sign In.');
-        setIsSubmitting(false);
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {}
+
+        if (res.ok && data) {
+          const userObj = {
+            id: data.user?.id || 'usr_' + Date.now(),
+            name: data.user?.username || cleanName,
+            email: cleanEmail,
+            access_token: data.access_token,
+            provider: 'email',
+          };
+          // Sync with local storage
+          const accounts = getStoredAccounts();
+          const computedHash = await hashPassword(password);
+          saveStoredAccounts([
+            ...accounts.filter((a) => a.email !== cleanEmail),
+            {
+              id: userObj.id,
+              name: userObj.name,
+              email: cleanEmail,
+              passwordHash: computedHash,
+              createdAt: new Date().toISOString(),
+            },
+          ]);
+
+          setSuccessMsg('Account created successfully! Signing in...');
+          setTimeout(() => {
+            handleSignInSuccess(userObj);
+          }, 500);
+          return;
+        } else if (data) {
+          const errDetail = formatAuthError(data, 'Registration failed. Please try again.');
+          setError(errDetail);
+          setIsSubmitting(false);
+          return;
+        }
+      } catch (fetchErr) {
+        networkError = true;
+      }
+
+      // 2. Offline Fallback if backend is not reachable
+      if (networkError) {
+        const accounts = getStoredAccounts();
+        if (accounts.some((acc) => acc.email === cleanEmail)) {
+          setError('An account with this email already exists locally. Please Sign In.');
+          setIsSubmitting(false);
+          return;
+        }
+
+        const computedHash = await hashPassword(password);
+        const newAcc = {
+          id: 'usr_' + Math.random().toString(36).slice(2, 10),
+          name: cleanName,
+          email: cleanEmail,
+          passwordHash: computedHash,
+          createdAt: new Date().toISOString(),
+        };
+        saveStoredAccounts([...accounts, newAcc]);
+
+        setSuccessMsg('Offline account created! Signing in...');
+        setTimeout(() => {
+          handleSignInSuccess({
+            id: newAcc.id,
+            name: newAcc.name,
+            email: newAcc.email,
+            provider: 'email',
+          });
+        }, 500);
         return;
       }
 
-      const computedHash = await hashPassword(password);
-      const newAcc = {
-        id: 'usr_' + Math.random().toString(36).slice(2, 10),
-        name: cleanName,
-        email: cleanEmail,
-        passwordHash: computedHash,
-        createdAt: new Date().toISOString(),
-      };
-      saveStoredAccounts([...accounts, newAcc]);
-
-      setSuccessMsg('Account created successfully! Signing in...');
-      setTimeout(() => {
-        handleSignInSuccess({
-          id: newAcc.id,
-          name: newAcc.name,
-          email: newAcc.email,
-          provider: 'email',
-        });
-      }, 700);
+      setError('Registration failed. Please check your details and try again.');
     } catch (err) {
       setError(err.message || 'Registration failed.');
+    } finally {
       setIsSubmitting(false);
     }
   };

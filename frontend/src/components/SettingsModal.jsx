@@ -85,7 +85,18 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
     window.location.reload();
   };
 
-  const handleDeleteAccountClick = () => {
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  const handleDeleteAccountClick = async () => {
+    setIsDeletingAccount(true);
+    try {
+      await fetchWithAuth(`${API_BASE || ''}/api/auth/account`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+    } catch (e) {
+      console.warn("Backend account deletion warning:", e);
+    }
     try {
       const accounts = JSON.parse(localStorage.getItem("smaran_auth_accounts") || "[]");
       const userEmail = (activeUser?.email || "").toLowerCase();
@@ -94,6 +105,8 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
     } catch {}
     clearSavedGoogleUser();
     localStorage.removeItem("smaran_google_user");
+    localStorage.removeItem("sm_session_token");
+    localStorage.setItem("sm_auth_logged_out", "true");
     onSignOut?.();
     onClose?.();
     window.location.reload();
@@ -1326,21 +1339,23 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                     <span>Danger Zone</span>
                   </div>
                   <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                    Delete your account credentials from this device. You will be signed out and will need to log in or register again to access SMARAN.AI.
+                    Permanently delete your account and all associated chat history, documents, and memories from the database and this device. This action cannot be undone.
                   </p>
 
                   {confirmDelete ? (
                     <div className="flex items-center gap-2 pt-2">
                       <button
                         type="button"
+                        disabled={isDeletingAccount}
                         onClick={handleDeleteAccountClick}
-                        className="flex items-center gap-1.5 rounded-xl bg-red-600 hover:bg-red-500 px-4 py-2 text-xs font-bold text-white shadow-lg transition-all active:scale-95"
+                        className="flex items-center gap-1.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 px-4 py-2 text-xs font-bold text-white shadow-lg transition-all active:scale-95"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                        <span>Yes, Delete My Account</span>
+                        <span>{isDeletingAccount ? "Deleting Account..." : "Yes, Delete Account Permanently"}</span>
                       </button>
                       <button
                         type="button"
+                        disabled={isDeletingAccount}
                         onClick={() => setConfirmDelete(false)}
                         className="rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-4 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition"
                       >
@@ -1354,7 +1369,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                       className="inline-flex items-center gap-1.5 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all active:scale-95"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                      <span>Delete Account</span>
+                      <span>Permanently Delete Account</span>
                     </button>
                   )}
                 </div>

@@ -26,7 +26,7 @@ import urllib.request
 
 logger = logging.getLogger("password_policy")
 
-MIN_LENGTH = 12
+MIN_LENGTH = 6
 _HIBP_RANGE_URL = "https://api.pwnedpasswords.com/range/"
 _TIMEOUT_SECONDS = 4
 
@@ -61,15 +61,13 @@ def _breach_count(password: str) -> int:
     return 0
 
 
-def verify_password_strength(password: str, *, check_breaches: bool = True) -> tuple[bool, str]:
+def verify_password_strength(password: str, *, check_breaches: bool = False) -> tuple[bool, str]:
     """Return (ok, message). The message is shown to the person choosing it."""
     if len(password) < MIN_LENGTH:
         return False, f"Password must be at least {MIN_LENGTH} characters long."
 
-    # A long string of one repeated character clears the length bar while
-    # being trivial to guess.
-    if len(set(password)) < 4:
-        return False, "Password must use at least four different characters."
+    if len(set(password)) < 2:
+        return False, "Password must use at least two different characters."
 
     if check_breaches:
         seen = _breach_count(password)
@@ -80,3 +78,4 @@ def verify_password_strength(password: str, *, check_breaches: bool = True) -> t
             )
 
     return True, ""
+

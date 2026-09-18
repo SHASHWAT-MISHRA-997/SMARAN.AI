@@ -55,13 +55,13 @@ export default defineConfig({
       '/api': {
         // Keep local development aligned with the combined Docker deployment.
         // Port 3001 is frequently occupied by unrelated local applications.
-        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8000',
+        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8080',
         changeOrigin: true,
         secure: false,
       },
       '/ws': {
         // WebSocket proxy for live telemetry stream (/ws/telemetry)
-        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8000',
+        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8080',
         changeOrigin: true,
         secure: false,
         ws: true,
