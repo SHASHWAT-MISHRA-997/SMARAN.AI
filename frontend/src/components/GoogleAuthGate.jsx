@@ -167,11 +167,6 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
   const googleBtnRef = useRef(null);
 
-  // Instant Google Account Modal for Mobile/Android and fail-safe auth
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [googleEmail, setGoogleEmail] = useState('');
-  const [googleName, setGoogleName] = useState('');
-
   // Mode: 'signin' | 'register' | 'forgot_password'
   const [authMode, setAuthMode] = useState('signin');
   // Forgot Password step: 'request_otp' | 'verify_otp'
@@ -184,7 +179,6 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     setIsGoogleConnecting(false);
     setIsSubmitting(false);
     setIsOtpSending(false);
-    setShowGoogleModal(false);
     if (mode === 'forgot_password') {
       setForgotStep('request_otp');
     }
@@ -204,6 +198,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   const [otpExpiry, setOtpExpiry] = useState(0);
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [emailDispatched, setEmailDispatched] = useState(false);
+
+  // Mobile & Fallback Google Sign-In Modal
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState('');
+  const [googleName, setGoogleName] = useState('');
 
   // OTP Countdown timer
   useEffect(() => {
@@ -361,6 +360,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               callback: async (tokenResponse) => {
                 if (tokenResponse.error) {
                   setIsGoogleConnecting(false);
+                  if (tokenResponse.error === 'popup_closed' || tokenResponse.error === 'popup_blocked_by_browser') {
+                    if (email && email.includes('@')) setGoogleEmail(email);
+                    setShowGoogleModal(true);
+                    return;
+                  }
                   if (tokenResponse.error !== 'user_cancelled') {
                     setError(tokenResponse.error_description || tokenResponse.error || 'Google sign-in was cancelled.');
                   }
@@ -391,6 +395,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               },
               error_callback: (nonOAuthErr) => {
                 setIsGoogleConnecting(false);
+                if (nonOAuthErr?.type === 'popup_closed' || nonOAuthErr?.message?.includes('closed') || nonOAuthErr?.message?.includes('popup')) {
+                  if (email && email.includes('@')) setGoogleEmail(email);
+                  setShowGoogleModal(true);
+                  return;
+                }
                 setError(nonOAuthErr?.message || 'Google Sign-In failed.');
               },
             });
@@ -422,11 +431,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       (typeof window !== 'undefined' && (window.location.protocol === 'capacitor:' || window.location.origin === 'https://localhost'))
     );
 
-    // On mobile / Android WebView, Google blocks OAuth inside WebViews (403 disallowed_useragent).
-    // Open the sleek, dedicated 1-tap Google Sign-In dialog so it NEVER hangs or gets stuck!
     if (isNative) {
-      setGoogleEmail(email || '');
-      setGoogleName(name || '');
+      setIsGoogleConnecting(false);
+      if (email && email.includes('@')) {
+        setGoogleEmail(email);
+      }
       setShowGoogleModal(true);
       return;
     }
@@ -466,6 +475,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             window.removeEventListener('focus', onWindowFocus);
             if (tokenResponse.error) {
               setIsGoogleConnecting(false);
+              if (tokenResponse.error === 'popup_closed' || tokenResponse.error === 'popup_blocked_by_browser') {
+                if (email && email.includes('@')) setGoogleEmail(email);
+                setShowGoogleModal(true);
+                return;
+              }
               if (tokenResponse.error !== 'user_cancelled') {
                 setError(tokenResponse.error_description || tokenResponse.error || 'Google sign-in was cancelled.');
               }
@@ -498,6 +512,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             clearTimeout(safetyTimer);
             window.removeEventListener('focus', onWindowFocus);
             setIsGoogleConnecting(false);
+            if (nonOAuthErr?.type === 'popup_closed' || nonOAuthErr?.message?.includes('closed') || nonOAuthErr?.message?.includes('popup')) {
+              if (email && email.includes('@')) setGoogleEmail(email);
+              setShowGoogleModal(true);
+              return;
+            }
             setError(nonOAuthErr?.message || 'Google Sign-In failed.');
           },
         });
@@ -506,13 +525,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
         return;
       }
 
-      // 3. Fallback: If Google scripts are blocked or unavailable, open instant Google modal
+      // 3. Fallback: If Google scripts are blocked or unavailable
       clearTimeout(safetyTimer);
       window.removeEventListener('focus', onWindowFocus);
       setIsGoogleConnecting(false);
-      setGoogleEmail(email || '');
-      setGoogleName(name || '');
-      setShowGoogleModal(true);
+      setError('Unable to load Google Identity Services. Please check your internet connection or use Email sign-in.');
     } catch (err) {
       clearTimeout(safetyTimer);
       window.removeEventListener('focus', onWindowFocus);
@@ -702,57 +719,29 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     setIsOtpSending(true);
 
     try {
-      // Guaranteed 6-digit OTP code
-      let generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(`${API_BASE || ''}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-      let backendToken = null;
-      let wasEmailDispatched = false;
-
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-        const res = await fetch(`${API_BASE || ''}/api/auth/forgot-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        const ct = res.headers.get('content-type') || '';
-        if (res.ok && ct.includes('application/json')) {
-          const data = await res.json();
-          if (data?.reset_token) {
-            backendToken = data.reset_token;
-            generatedOtp = data.reset_token;
-          } else if (data?.otp) {
-            generatedOtp = data.otp;
-          }
-          if (data?.email_dispatched) {
-            wasEmailDispatched = true;
-          }
-        }
-      } catch {}
-
-      setEmailDispatched(wasEmailDispatched);
-
-      const challenge = {
-        email: cleanEmail,
-        otp: generatedOtp,
-        expiry: expiresAt,
-        backendToken,
-      };
-      localStorage.setItem(OTP_STORAGE_PREFIX + cleanEmail, JSON.stringify(challenge));
-
-      setActiveOtpCode(generatedOtp);
-      setOtpExpiry(expiresAt);
-      setForgotStep('verify_otp');
-
-      if (wasEmailDispatched) {
-        setSuccessMsg(`OTP sent to ${cleanEmail}! Please check your email inbox (and Spam folder).`);
-      } else {
-        setSuccessMsg(`OTP generated! Since SMTP is offline, your verification code is displayed below:`);
+      const ct = res.headers.get('content-type') || '';
+      let data = {};
+      if (ct.includes('application/json')) {
+        data = await res.json();
       }
+
+      if (!res.ok || !data.email_dispatched) {
+        throw new Error(data.detail || 'Unable to send email: SMTP is not configured or failed to connect. Please configure free SMTP in .env.');
+      }
+
+      setEmailDispatched(true);
+      setForgotStep('verify_otp');
+      setSuccessMsg(`6-digit verification code sent to ${cleanEmail}! Please check your email inbox (and Spam folder).`);
     } catch (err) {
       setError(err.message || 'Failed to send OTP.');
     } finally {
@@ -785,35 +774,28 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     setIsSubmitting(true);
 
     try {
-      // Check OTP challenge
-      const rawChallenge = localStorage.getItem(OTP_STORAGE_PREFIX + cleanEmail);
-      if (!rawChallenge) {
-        throw new Error('OTP expired or not requested. Please request a new OTP.');
-      }
-      const challenge = JSON.parse(rawChallenge);
-      if (Date.now() > challenge.expiry) {
-        throw new Error('OTP has expired. Please request a new code.');
-      }
-      if (challenge.otp !== cleanOtp) {
-        throw new Error('Incorrect OTP verification code. Please check and re-try.');
+      // Verify OTP and reset password via Backend
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(`${API_BASE || ''}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: cleanOtp,
+          new_password: password,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const ct = res.headers.get('content-type') || '';
+      let data = {};
+      if (ct.includes('application/json')) {
+        data = await res.json();
       }
 
-      // Try Backend reset if token exists
-      if (challenge.backendToken) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
-          await fetch(`${API_BASE || ''}/api/auth/reset-password`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              token: challenge.backendToken,
-              new_password: password,
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-        } catch {}
+      if (!res.ok) {
+        throw new Error(data.detail || 'Invalid or expired OTP code. Please check your email and enter the latest 6-digit code.');
       }
 
       // Update Local Account
@@ -934,47 +916,6 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             </div>
           )}
 
-          {/* Active OTP Notification Toast Banner */}
-          {activeOtpCode && authMode === 'forgot_password' && (
-            <div
-              className={`mb-4 rounded-xl border p-3.5 text-xs shadow-lg transition-all ${
-                emailDispatched
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-                  : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-              }`}
-            >
-              <div className="flex items-center justify-between font-bold">
-                <span className="flex items-center gap-1.5">
-                  <Mail className="h-3.5 w-3.5" />
-                  <span>{emailDispatched ? 'OTP Sent to Email Inbox:' : 'Offline Verification Code:'}</span>
-                </span>
-                <span className="rounded bg-black/40 px-2.5 py-1 font-mono text-sm tracking-widest text-amber-300 font-extrabold border border-amber-500/30">
-                  {activeOtpCode}
-                </span>
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-zinc-300">
-                <span>
-                  {emailDispatched
-                    ? `Sent to ${email}. Check inbox & spam folder.`
-                    : 'SMTP not configured in .env. Click to insert code:'}
-                </span>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setOtpValue(activeOtpCode)}
-                    className="rounded-lg bg-amber-500/25 hover:bg-amber-500/40 border border-amber-500/40 px-2.5 py-1 text-[11px] font-bold text-amber-200 transition-colors cursor-pointer"
-                  >
-                    Auto-Fill Code
-                  </button>
-                  {secondsRemaining > 0 && (
-                    <span className="font-mono font-bold text-amber-300">
-                      {Math.floor(secondsRemaining / 60)}:{String(secondsRemaining % 60).padStart(2, '0')}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* SECTION 1: GOOGLE 1-CLICK AUTH */}
           <div className="space-y-3">
@@ -1366,7 +1307,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
         </div>
       </div>
 
-      {/* INSTANT GOOGLE MODAL FOR MOBILE & FAIL-SAFE SIGN IN */}
+      {/* DEDICATED GOOGLE SIGN-IN MODAL FOR MOBILE & WEB FALLBACK */}
       {showGoogleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm animate-in fade-in duration-150">
           <div className="w-full max-w-sm rounded-2xl border border-zinc-700/80 bg-zinc-900/95 p-6 shadow-2xl space-y-4">
@@ -1390,14 +1331,14 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             </div>
 
             <div className="space-y-1 text-xs text-zinc-400">
-              <p className="font-semibold text-zinc-200">Connect your Google Account</p>
-              <p>Enter your Google / Gmail address to sign in instantly with Google credentials.</p>
+              <p className="font-semibold text-zinc-200">Connect with Google Account</p>
+              <p>Enter your Google email to sign in directly with Google identity on this device.</p>
             </div>
 
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                const cleanEmail = (googleEmail || '').trim().toLowerCase();
+                const cleanEmail = (googleEmail || email || '').trim().toLowerCase();
                 if (!cleanEmail || !cleanEmail.includes('@')) {
                   setError('Please enter a valid Google email address.');
                   return;
@@ -1422,7 +1363,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                   <Mail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                   <input
                     type="email"
-                    value={googleEmail}
+                    value={googleEmail || email}
                     onChange={(e) => setGoogleEmail(e.target.value)}
                     placeholder="you@gmail.com"
                     required
@@ -1434,7 +1375,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
               <div className="space-y-1">
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                  Full Name (Optional)
+                  Display Name (Optional)
                 </label>
                 <div className="relative">
                   <User className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
@@ -1460,7 +1401,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                   type="submit"
                   className="flex-1 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 py-2.5 text-xs font-bold text-white shadow-lg flex items-center justify-center gap-1.5 transition-all"
                 >
-                  <span>Sign In</span>
+                  <span>Continue</span>
                   <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               </div>

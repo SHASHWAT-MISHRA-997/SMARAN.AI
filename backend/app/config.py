@@ -45,7 +45,7 @@ for _env_path in _env_candidates():
     except (OSError, UnicodeDecodeError):
         continue
     for _key, _value in _values.items():
-        if _key.startswith(_ENV_PREFIX) and _value is not None:
+        if (_key.startswith(_ENV_PREFIX) or _key.startswith("SMTP_")) and _value is not None:
             os.environ.setdefault(_key, _value)
 
 # ── Read auto-detected hardware config written by bootstrapper.py ─────────────

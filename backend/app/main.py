@@ -1248,15 +1248,15 @@ async def resend_verification(request: Request, current_user: User = Depends(get
 
 def send_otp_email(recipient_email: str, otp_code: str) -> bool:
     """Dispatches a 6-digit OTP email using configured SMTP settings from .env."""
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    smtp_from = os.getenv("SMTP_FROM", smtp_user or "no-reply@smaran.ai")
-    smtp_from_name = os.getenv("SMTP_FROM_NAME", "SMARAN.AI Security")
+    smtp_host = os.getenv("SMTP_HOST") or os.getenv("SMARAN_SMTP_HOST")
+    smtp_port = int(os.getenv("SMTP_PORT") or os.getenv("SMARAN_SMTP_PORT") or "587")
+    smtp_user = os.getenv("SMTP_USER") or os.getenv("SMARAN_SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD") or os.getenv("SMARAN_SMTP_PASSWORD")
+    smtp_from = os.getenv("SMTP_FROM") or os.getenv("SMARAN_SMTP_FROM") or smtp_user or "no-reply@smaran.ai"
+    smtp_from_name = os.getenv("SMTP_FROM_NAME") or os.getenv("SMARAN_SMTP_FROM_NAME") or "SMARAN.AI Security"
 
     if not (smtp_host and smtp_user and smtp_password):
-        logger.info(f"SMTP not configured in environment. Local OTP for {recipient_email}: {otp_code}")
+        logger.warning(f"SMTP not configured in environment. Cannot dispatch email to {recipient_email}")
         return False
 
     try:
@@ -1325,17 +1325,14 @@ async def forgot_password(req: PasswordResetRequest, request: Request, db: Sessi
 
     if sent:
         return {
-            "message": f"6-digit OTP sent to {clean_email}. Check your inbox.",
+            "message": f"6-digit verification OTP sent to {clean_email}. Check your email inbox.",
             "email_dispatched": True,
-            "reset_token": otp_code,
         }
 
-    return {
-        "message": "SMTP email service is not configured in .env. Verification code generated for local session.",
-        "email_dispatched": False,
-        "reset_token": otp_code,
-        "otp": otp_code,
-    }
+    raise HTTPException(
+        status_code=503,
+        detail="Unable to send email: SMTP is not configured or failed to connect. Please configure free SMTP in .env to receive verification codes via email.",
+    )
 
 @app.post("/api/auth/reset-password", response_model=dict)
 @auth_limiter.limit("5/hour")

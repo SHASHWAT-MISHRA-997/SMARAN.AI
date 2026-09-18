@@ -97,6 +97,19 @@ public class MainActivity extends BridgeActivity {
             return windowInsets;
         });
         ViewCompat.requestApplyInsets(content);
+
+        // Allow Google Identity & OAuth in WebView by stripping "; wv" marker
+        if (getBridge().getWebView() != null) {
+            android.webkit.WebSettings ws = getBridge().getWebView().getSettings();
+            String ua = ws.getUserAgentString();
+            if (ua != null) {
+                String cleanUa = ua.replace("; wv", "").replaceAll("Version\\/\\d+\\.\\d+\\s*", "");
+                ws.setUserAgentString(cleanUa);
+            }
+            ws.setJavaScriptCanOpenWindowsAutomatically(true);
+            ws.setSupportMultipleWindows(false);
+            ws.setDomStorageEnabled(true);
+        }
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             private boolean dispatching;
 
