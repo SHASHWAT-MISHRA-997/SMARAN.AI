@@ -13,7 +13,7 @@ import ModelHubModal from './components/ModelHubModal';
 import DeveloperModal from './components/DeveloperModal';
 import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
-import GoogleAuthGate, { getSavedGoogleUser } from './components/GoogleAuthGate';
+import GoogleAuthGate, { getSavedGoogleUser, clearSavedGoogleUser } from './components/GoogleAuthGate';
 import { couldBePinned, isPhone } from './utils/device';
 import AuthModal from './components/AuthModal';
 import UpdateNotice from './components/UpdateNotice';
@@ -519,6 +519,12 @@ const App = () => {
 
   const [settingsTab, setSettingsTab] = useState('general');
 
+  const handleSignOut = () => {
+    clearSavedGoogleUser();
+    setCurrentUser(null);
+    setIsSettingsOpen(false);
+  };
+
   // The views that actually have a branch in the render below. Kept next to
   // handleNavigate so the two cannot drift apart again.
   const RENDERABLE_VIEWS = new Set(['chat', 'collections', 'sites', 'plugins', 'design', 'scheduled', 'dispatch']);
@@ -696,6 +702,8 @@ const App = () => {
         <SettingsModal
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
+          currentUser={currentUser}
+          onSignOut={handleSignOut}
           initialTab={settingsTab}
           onModelChange={setSelectedModel}
           selectedModel={selectedModel}

@@ -5,13 +5,14 @@ import {
   Settings, Pencil, Check, Brain,
   ChevronDown, PanelLeftOpen, PanelLeftClose, Menu, Database,
   LogIn, Blocks, FolderOpen, Globe2, ArrowDownToLine, Terminal, Users,
-  Palette, Clock, Smartphone
+  Palette, Clock, Smartphone, LogOut
 } from 'lucide-react';
 import { isNativeApp } from '../utils/hostLink';
 import ModelHubModal from './ModelHubModal';
 import { SmaranLogo } from './SmaranLogo';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
+import { clearSavedGoogleUser } from './GoogleAuthGate';
 
 /* Tooltip uses a React Portal so parent overflow never clips it. */
 const Tip = ({ label, children }) => {
@@ -1005,9 +1006,13 @@ const Sidebar = ({
         </div>
 
         <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2 shrink-0 max-h-[55dvh] overflow-y-auto overscroll-contain sidebar-mobile-footer">
-          {/* User Profile & Voice Pill */}
+          {/* User Profile & Quick Actions */}
           <div className="flex w-full items-center justify-between gap-2 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 shadow-xs">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div
+              onClick={() => { onNavigate('account'); setMobileOpen(false); }}
+              className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer hover:opacity-80 transition"
+              title="Open Account & Profile Settings"
+            >
               <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
                 {profileInitials}
               </div>
@@ -1016,6 +1021,21 @@ const Sidebar = ({
               </span>
             </div>
 
+            {/* Quick Sign Out Button */}
+            <button
+              type="button"
+              onClick={() => {
+                clearSavedGoogleUser();
+                localStorage.removeItem('smaran_google_user');
+                setMobileOpen(false);
+                window.location.reload();
+              }}
+              className="p-1.5 rounded-lg text-zinc-500 hover:text-red-500 hover:bg-red-500/10 transition shrink-0 cursor-pointer"
+              title="Sign Out"
+              aria-label="Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-2">

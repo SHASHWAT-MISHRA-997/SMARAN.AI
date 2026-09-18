@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Lock, X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint, UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop, RefreshCw, CheckCircle2, ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe, Mic, Monitor, Keyboard, GitBranch, Search, Users } from "lucide-react";
+import { Lock, X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint, UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop, RefreshCw, CheckCircle2, ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe, Mic, Monitor, Keyboard, GitBranch, Search, Users, LogOut, Trash2, ShieldAlert, Mail } from "lucide-react";
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { companionHeaders } from "../utils/companionAuth";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
 import { useTheme } from "../context/ThemeContext";
+import { clearSavedGoogleUser, getSavedGoogleUser } from './GoogleAuthGate';
 import AppearancePreferences from './AppearancePreferences';
 import VoicePreferences from './VoicePreferences';
 import ComputerUsePreferences from './ComputerUsePreferences';
@@ -68,10 +69,35 @@ const ResourceBar = ({ percent, colour, label }) => {
   );
 };
 
-const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange, selectedModel = "", sidebarPosition = "left", onSidebarPositionChange, performancePosition = "right", onPerformancePositionChange, onOpenConnections, onOpenModels, onOpenAnalytics }) => {
+const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: propUser, onSignOut, onModelChange, selectedModel = "", sidebarPosition = "left", onSidebarPositionChange, performancePosition = "right", onPerformancePositionChange, onOpenConnections, onOpenModels, onOpenAnalytics }) => {
   const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState(initialTab || "general");
   const [settingsSearch, setSettingsSearch] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const activeUser = propUser || getSavedGoogleUser();
+
+  const handleSignOutClick = () => {
+    clearSavedGoogleUser();
+    localStorage.removeItem("smaran_google_user");
+    onSignOut?.();
+    onClose?.();
+    window.location.reload();
+  };
+
+  const handleDeleteAccountClick = () => {
+    try {
+      const accounts = JSON.parse(localStorage.getItem("smaran_auth_accounts") || "[]");
+      const userEmail = (activeUser?.email || "").toLowerCase();
+      const remaining = accounts.filter(a => (a.email || "").toLowerCase() !== userEmail);
+      localStorage.setItem("smaran_auth_accounts", JSON.stringify(remaining));
+    } catch {}
+    clearSavedGoogleUser();
+    localStorage.removeItem("smaran_google_user");
+    onSignOut?.();
+    onClose?.();
+    window.location.reload();
+  };
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -1192,36 +1218,89 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                     <UserRound className="w-5 h-5 text-indigo-500" /> Account & Developer Profile
                   </h3>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    User identity and workstation authentication.
+                    User identity, authentication gate, and session management.
                   </p>
                 </div>
 
-                  {/* "SHASHWAT MISHRA" and the initials "SM" were typed into
-                      this card, so every install showed one particular
-                      person as the account holder. Reading the name from the
-                      account record instead gave the generated device id -
-                      "device_device_mteo6v36…" - which is not a name either.
-                      There was nowhere to say what you are called. Now there
-                      is, and it stays on this machine. */}
-                  <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center gap-4">
-                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-lg font-black text-white shadow-lg shrink-0">
-                      {displayInitials}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <label className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400">Your name</label>
-                      <input
-                        value={displayName}
-                        onChange={(e) => setDisplayName(e.target.value)}
-                        placeholder={isMobile ? "Your name" : "What should SMARAN.AI call you?"}
-                        maxLength={60}
-                        className="mt-1 w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-extrabold text-zinc-900 dark:text-white outline-none focus:border-indigo-500"
+                {/* Authenticated Account Profile Card */}
+                <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
+                    {activeUser?.avatar ? (
+                      <img
+                        src={activeUser.avatar}
+                        alt="Profile Avatar"
+                        className="w-14 h-14 rounded-2xl object-cover ring-2 ring-indigo-500/30 shrink-0"
                       />
-                      <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-                        Shown in the sidebar. Kept on this machine and sent nowhere.
+                    ) : (
+                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-lg font-black text-white shadow-lg shrink-0">
+                        {displayInitials}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-extrabold text-zinc-900 dark:text-white truncate">
+                          {activeUser?.name || displayName || "SMARAN User"}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Authenticated
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
+                        {activeUser?.email || "Signed in locally"}
                       </p>
+                      <div className="mt-1 flex items-center gap-2">
+                        {activeUser?.provider === 'google' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
+                            <svg className="h-3 w-3" viewBox="0 0 48 48">
+                              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                            </svg>
+                            Google Account
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
+                            <Mail className="h-3 w-3 text-red-500" />
+                            Email & Password Account
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
+                  <button
+                    type="button"
+                    onClick={handleSignOutClick}
+                    className="flex items-center gap-1.5 rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all shrink-0 active:scale-95"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+
+                {/* Nickname & Display Name setting */}
+                <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center font-bold shrink-0">
+                    <UserRound className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <label className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400">Workspace Nickname</label>
+                    <input
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder={isMobile ? "Your name" : "What should SMARAN.AI call you?"}
+                      maxLength={60}
+                      className="mt-1 w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-extrabold text-zinc-900 dark:text-white outline-none focus:border-indigo-500"
+                    />
+                    <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      Shown in chats and sidebar. Kept on this machine and sent nowhere.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Security and Storage details */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
                     <div>
@@ -1238,6 +1317,46 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", onModelChange,
                     </div>
                     <span className="text-xs font-bold text-emerald-500">Active (100% Private)</span>
                   </div>
+                </div>
+
+                {/* Danger Zone: Delete Account */}
+                <div className="rounded-2xl border border-red-500/25 bg-red-500/5 p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-red-600 dark:text-red-400 font-bold text-sm">
+                    <ShieldAlert className="w-4 h-4" />
+                    <span>Danger Zone</span>
+                  </div>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                    Delete your account credentials from this device. You will be signed out and will need to log in or register again to access SMARAN.AI.
+                  </p>
+
+                  {confirmDelete ? (
+                    <div className="flex items-center gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={handleDeleteAccountClick}
+                        className="flex items-center gap-1.5 rounded-xl bg-red-600 hover:bg-red-500 px-4 py-2 text-xs font-bold text-white shadow-lg transition-all active:scale-95"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Yes, Delete My Account</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDelete(false)}
+                        className="rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-4 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(true)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all active:scale-95"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Delete Account</span>
+                    </button>
+                  )}
                 </div>
               </div>
             )}
