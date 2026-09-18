@@ -827,7 +827,7 @@ class UserResponse(BaseModel):
     username: str
     role: str
     is_approved: bool
-    device_id: Optional[str] = None
+    device_fingerprint: Optional[str] = None
     email: Optional[str] = None
     email_verified: bool = False
 
@@ -975,6 +975,7 @@ async def google_sign_in(req: GoogleSignInRequest, response: Response, request: 
             is_approved=user.is_approved,
             email=user.email,
             email_verified=bool(user.email_verified),
+            device_fingerprint=user.device_fingerprint,
         ),
     )
 
@@ -1148,7 +1149,8 @@ async def register(req: RegisterRequest, response: Response, request: Request, d
             role=user.role,
             is_approved=user.is_approved,
             email=user.email,
-            email_verified=user.email_verified
+            email_verified=user.email_verified,
+            device_fingerprint=user.device_fingerprint
         )
     )
 
@@ -1198,7 +1200,8 @@ async def login(req: LoginRequest, response: Response, request: Request, db: Ses
             role=user.role,
             is_approved=user.is_approved,
             email=user.email,
-            email_verified=user.email_verified
+            email_verified=user.email_verified,
+            device_fingerprint=user.device_fingerprint
         )
     )
 
@@ -1255,7 +1258,8 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         role=current_user.role,
         is_approved=current_user.is_approved,
         email=current_user.email,
-        email_verified=current_user.email_verified
+        email_verified=current_user.email_verified,
+        device_fingerprint=current_user.device_fingerprint
     )
 
 # Verification tokens are guessable if the endpoint is unlimited, so this
@@ -1357,23 +1361,32 @@ async def forgot_password(req: PasswordResetRequest, request: Request, db: Sessi
         user.reset_token_expires = datetime.now() + timedelta(minutes=10)
         db.commit()
 
-    # Dispatch email if SMTP configured
+    # Dispatch email if SMTP configured (best effort, don't fail the request)
     sent = send_otp_email(clean_email, otp_code)
 
-    if sent:
-        return {
-            "message": f"6-digit verification OTP sent to {clean_email}. Check your email inbox.",
-            "email_dispatched": True,
-        }
-
-    raise HTTPException(
-        status_code=503,
-        detail="Unable to send email: SMTP is not configured or failed to connect. Please configure free SMTP in .env to receive verification codes via email.",
-    )
+    # For local requests, return the token directly (no SMTP required)
+    # For network requests, never return the token to prevent takeover
+    response_body = {
+        "message": "If an account exists with this email, a verification code has been sent.",
+        "email_dispatched": sent,
+    }
+    
+    # Only local requests get the token back in the response
+    if local and user:
+        response_body["reset_token"] = otp_code
+    
+    return response_body
 
 @app.post("/api/auth/reset-password", response_model=dict)
 @auth_limiter.limit("5/hour")
 async def reset_password(req: PasswordResetConfirmRequest, request: Request, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else ""
+    local = client_ip in LOOPBACK_HOSTS
+    
+    # Reset tokens can only be used from the local machine to prevent account takeover
+    if not local:
+        raise HTTPException(status_code=403, detail="Password reset can only be completed from the local machine")
+    
     user = db.query(User).filter(User.reset_token == req.token).first()
     if not user or not user.reset_token_expires or user.reset_token_expires < datetime.now():
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
@@ -1424,7 +1437,8 @@ async def device_login(req: DeviceRequest, request: Request, db: Session = Depen
         role=user.role, 
         is_approved=user.is_approved,
         email=user.email,
-        email_verified=user.email_verified
+        email_verified=user.email_verified,
+        device_fingerprint=user.device_fingerprint
     )
 
 def _clean_response_text(text: str) -> str:
