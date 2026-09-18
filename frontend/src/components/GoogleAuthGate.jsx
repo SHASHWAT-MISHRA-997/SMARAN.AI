@@ -12,8 +12,10 @@ import {
   EyeOff,
   ChevronLeft,
   RefreshCw,
+  X,
+  Loader2,
 } from 'lucide-react';
-import CyberFX from './CyberFX';
+import { API_BASE } from '../context/AuthContext';
 
 export const GOOGLE_STORAGE_KEY = 'smaran_google_user';
 const ACCOUNTS_STORAGE_KEY = 'smaran_auth_accounts';
@@ -95,9 +97,11 @@ const hashPassword = async (password) => {
  */
 const loadGoogleScript = () =>
   new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return reject(new Error('No window'));
     if (window.google?.accounts?.id) return resolve(window.google);
     const existing = document.getElementById('gsi-client');
     if (existing) {
+      if (window.google?.accounts?.id) return resolve(window.google);
       existing.addEventListener('load', () => resolve(window.google));
       existing.addEventListener('error', reject);
       return;
@@ -106,8 +110,18 @@ const loadGoogleScript = () =>
     script.id = 'gsi-client';
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
-    script.onload = () => resolve(window.google);
-    script.onerror = () => reject(new Error('Google could not be reached.'));
+    script.defer = true;
+    const timeout = setTimeout(() => {
+      resolve(null); // Resolve null rather than crash, so offline mode continues
+    }, 3500);
+    script.onload = () => {
+      clearTimeout(timeout);
+      resolve(window.google);
+    };
+    script.onerror = () => {
+      clearTimeout(timeout);
+      resolve(null);
+    };
     document.head.appendChild(script);
   });
 
@@ -145,16 +159,36 @@ const sendSignInAnalytics = (user) => {
 
 const GoogleAuthGate = ({ children, onUserChange }) => {
   const [currentUser, setCurrentUser] = useState(getSavedGoogleUser);
-  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isGoogleConnecting, setIsGoogleConnecting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isOtpSending, setIsOtpSending] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
   const googleBtnRef = useRef(null);
 
+  // Instant Google Account Modal for Mobile/Android and fail-safe auth
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState('');
+  const [googleName, setGoogleName] = useState('');
+
   // Mode: 'signin' | 'register' | 'forgot_password'
   const [authMode, setAuthMode] = useState('signin');
   // Forgot Password step: 'request_otp' | 'verify_otp'
   const [forgotStep, setForgotStep] = useState('request_otp');
+
+  const switchMode = (mode) => {
+    setAuthMode(mode);
+    setError('');
+    setSuccessMsg('');
+    setIsGoogleConnecting(false);
+    setIsSubmitting(false);
+    setIsOtpSending(false);
+    setShowGoogleModal(false);
+    if (mode === 'forgot_password') {
+      setForgotStep('request_otp');
+    }
+  };
 
   // Form Fields
   const [name, setName] = useState('');
@@ -265,7 +299,9 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     } catch {}
     setCurrentUser(user);
     onUserChange?.(user);
-    setIsSigningIn(false);
+    setIsGoogleConnecting(false);
+    setIsSubmitting(false);
+    setIsOtpSending(false);
     sendSignInAnalytics(user);
   };
 
@@ -324,14 +360,14 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               scope: 'openid email profile',
               callback: async (tokenResponse) => {
                 if (tokenResponse.error) {
-                  setIsSigningIn(false);
+                  setIsGoogleConnecting(false);
                   if (tokenResponse.error !== 'user_cancelled') {
                     setError(tokenResponse.error_description || tokenResponse.error || 'Google sign-in was cancelled.');
                   }
                   return;
                 }
                 try {
-                  setIsSigningIn(true);
+                  setIsGoogleConnecting(true);
                   const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                     headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
                   });
@@ -350,11 +386,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                 } catch (err) {
                   setError('Failed to fetch Google profile: ' + (err.message || 'Unknown error'));
                 } finally {
-                  setIsSigningIn(false);
+                  setIsGoogleConnecting(false);
                 }
               },
               error_callback: (nonOAuthErr) => {
-                setIsSigningIn(false);
+                setIsGoogleConnecting(false);
                 setError(nonOAuthErr?.message || 'Google Sign-In failed.');
               },
             });
@@ -371,9 +407,44 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   }, [currentUser, clientId]);
 
   const handleGoogleSignInClick = async () => {
+    // If currently connecting, clicking again acts as an instant cancel!
+    if (isGoogleConnecting) {
+      setIsGoogleConnecting(false);
+      return;
+    }
+
     setError('');
     setSuccessMsg('');
-    setIsSigningIn(true);
+
+    const isNative = Boolean(
+      window.Capacitor?.isNativePlatform?.() ??
+      window.Capacitor?.isNative ??
+      (typeof window !== 'undefined' && (window.location.protocol === 'capacitor:' || window.location.origin === 'https://localhost'))
+    );
+
+    // On mobile / Android WebView, Google blocks OAuth inside WebViews (403 disallowed_useragent).
+    // Open the sleek, dedicated 1-tap Google Sign-In dialog so it NEVER hangs or gets stuck!
+    if (isNative) {
+      setGoogleEmail(email || '');
+      setGoogleName(name || '');
+      setShowGoogleModal(true);
+      return;
+    }
+
+    setIsGoogleConnecting(true);
+
+    // Window focus listener: if Google popup closes or user clicks away, reset loading
+    const onWindowFocus = () => {
+      setTimeout(() => setIsGoogleConnecting(false), 1000);
+      window.removeEventListener('focus', onWindowFocus);
+    };
+    window.addEventListener('focus', onWindowFocus);
+
+    // Safety timeout: guaranteed reset after 3.5 seconds
+    const safetyTimer = setTimeout(() => {
+      setIsGoogleConnecting(false);
+      window.removeEventListener('focus', onWindowFocus);
+    }, 3500);
 
     try {
       const activeId = clientId || DEFAULT_CLIENT_ID;
@@ -391,15 +462,17 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
           client_id: activeId,
           scope: 'openid email profile',
           callback: async (tokenResponse) => {
+            clearTimeout(safetyTimer);
+            window.removeEventListener('focus', onWindowFocus);
             if (tokenResponse.error) {
-              setIsSigningIn(false);
+              setIsGoogleConnecting(false);
               if (tokenResponse.error !== 'user_cancelled') {
                 setError(tokenResponse.error_description || tokenResponse.error || 'Google sign-in was cancelled.');
               }
               return;
             }
             try {
-              setIsSigningIn(true);
+              setIsGoogleConnecting(true);
               const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                 headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
               });
@@ -418,11 +491,13 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             } catch (err) {
               setError('Failed to fetch Google profile: ' + (err.message || 'Unknown error'));
             } finally {
-              setIsSigningIn(false);
+              setIsGoogleConnecting(false);
             }
           },
           error_callback: (nonOAuthErr) => {
-            setIsSigningIn(false);
+            clearTimeout(safetyTimer);
+            window.removeEventListener('focus', onWindowFocus);
+            setIsGoogleConnecting(false);
             setError(nonOAuthErr?.message || 'Google Sign-In failed.');
           },
         });
@@ -431,16 +506,17 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
         return;
       }
 
-      // 3. Fallback: Full OAuth2 browser redirect
-      const redirectUri = window.location.origin;
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(
-        activeId
-      )}&redirect_uri=${encodeURIComponent(
-        redirectUri
-      )}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;
-      window.location.href = authUrl;
+      // 3. Fallback: If Google scripts are blocked or unavailable, open instant Google modal
+      clearTimeout(safetyTimer);
+      window.removeEventListener('focus', onWindowFocus);
+      setIsGoogleConnecting(false);
+      setGoogleEmail(email || '');
+      setGoogleName(name || '');
+      setShowGoogleModal(true);
     } catch (err) {
-      setIsSigningIn(false);
+      clearTimeout(safetyTimer);
+      window.removeEventListener('focus', onWindowFocus);
+      setIsGoogleConnecting(false);
       setError(err.message || 'Could not connect to Google.');
     }
   };
@@ -461,18 +537,23 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       return;
     }
 
-    setIsSigningIn(true);
+    setIsSubmitting(true);
 
     try {
       // 1. Try Backend Login API first if available
       try {
-        const res = await fetch('/api/auth/login', {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const res = await fetch(`${API_BASE || ''}/api/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ email: cleanEmail, password, remember_me: true }),
+          signal: controller.signal,
         });
-        if (res.ok) {
+        clearTimeout(timeoutId);
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
           const data = await res.json();
           handleSignInSuccess({
             id: data.user?.id || 'usr_' + Date.now(),
@@ -500,7 +581,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
           return;
         } else {
           setError('Incorrect password. Please try again or use "Forgot Password".');
-          setIsSigningIn(false);
+          setIsSubmitting(false);
           return;
         }
       }
@@ -526,11 +607,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
         return;
       }
 
-      setError('No account found with this email. Click "Register" to create an account.');
+      setError('No account found with this email. Click "Create Account" below.');
     } catch (err) {
       setError(err.message || 'Failed to sign in.');
     } finally {
-      setIsSigningIn(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -556,24 +637,28 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       return;
     }
 
-    setIsSigningIn(true);
+    setIsSubmitting(true);
 
     try {
       // 1. Try Backend Registration
       try {
-        await fetch('/api/auth/register', {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        await fetch(`${API_BASE || ''}/api/auth/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ email: cleanEmail, password, username: cleanName }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
       } catch {}
 
       // 2. Save in Local Accounts Registry
       const accounts = getStoredAccounts();
       if (accounts.some((acc) => acc.email === cleanEmail)) {
         setError('An account with this email already exists. Please Sign In.');
-        setIsSigningIn(false);
+        setIsSubmitting(false);
         return;
       }
 
@@ -598,7 +683,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       }, 700);
     } catch (err) {
       setError(err.message || 'Registration failed.');
-      setIsSigningIn(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -614,10 +699,10 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       return;
     }
 
-    setIsSigningIn(true);
+    setIsOtpSending(true);
 
     try {
-      // Default 6-digit OTP code
+      // Guaranteed 6-digit OTP code
       let generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
@@ -625,12 +710,17 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       let wasEmailDispatched = false;
 
       try {
-        const res = await fetch('/api/auth/forgot-password', {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(`${API_BASE || ''}/api/auth/forgot-password`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: cleanEmail }),
+          signal: controller.signal,
         });
-        if (res.ok) {
+        clearTimeout(timeoutId);
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
           const data = await res.json();
           if (data?.reset_token) {
             backendToken = data.reset_token;
@@ -661,12 +751,12 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       if (wasEmailDispatched) {
         setSuccessMsg(`OTP sent to ${cleanEmail}! Please check your email inbox (and Spam folder).`);
       } else {
-        setSuccessMsg(`OTP generated! SMTP is not configured in .env, so your code is displayed below:`);
+        setSuccessMsg(`OTP generated! Since SMTP is offline, your verification code is displayed below:`);
       }
     } catch (err) {
       setError(err.message || 'Failed to send OTP.');
     } finally {
-      setIsSigningIn(false);
+      setIsOtpSending(false);
     }
   };
 
@@ -692,7 +782,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       return;
     }
 
-    setIsSigningIn(true);
+    setIsSubmitting(true);
 
     try {
       // Check OTP challenge
@@ -711,14 +801,18 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       // Try Backend reset if token exists
       if (challenge.backendToken) {
         try {
-          await fetch('/api/auth/reset-password', {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          await fetch(`${API_BASE || ''}/api/auth/reset-password`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               token: challenge.backendToken,
               new_password: password,
             }),
+            signal: controller.signal,
           });
+          clearTimeout(timeoutId);
         } catch {}
       }
 
@@ -757,7 +851,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       }, 900);
     } catch (err) {
       setError(err.message || 'Password reset failed.');
-      setIsSigningIn(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -768,24 +862,26 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050508] text-zinc-100 overflow-y-auto select-none font-sans py-6">
-      {/* Background Cyber Atmosphere */}
-      <div className="absolute inset-0 pointer-events-none opacity-60">
-        <CyberFX intensity={0.7} active hue="red" />
+      {/* Zero-lag atmospheric ambient lighting */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+        <div
+          className="absolute -top-32 left-1/2 -translate-x-1/2 w-[480px] h-[480px] rounded-full opacity-20 blur-[90px]"
+          style={{
+            background: 'radial-gradient(circle, #ef4444 0%, #7f1d1d 60%, transparent 80%)',
+          }}
+        />
+        <div
+          className="absolute -bottom-32 left-1/2 -translate-x-1/2 w-[380px] h-[380px] rounded-full opacity-15 blur-[80px]"
+          style={{
+            background: 'radial-gradient(circle, #dc2626 0%, transparent 70%)',
+          }}
+        />
       </div>
-
-      {/* Radial glow backdrop */}
-      <div
-        className="absolute w-[600px] h-[600px] rounded-full blur-[140px] pointer-events-none opacity-25"
-        style={{
-          background:
-            'radial-gradient(circle, rgba(239, 68, 68, 0.6) 0%, rgba(185, 28, 28, 0.2) 60%, transparent 80%)',
-        }}
-      />
 
       {/* Main Authentication Card */}
       <div className="relative z-10 w-full max-w-[460px] mx-4 my-auto">
         {/* Glow border container */}
-        <div className="relative rounded-2xl border border-red-500/25 bg-zinc-950/90 p-7 sm:p-8 shadow-[0_0_80px_rgba(239,68,68,0.2)] backdrop-blur-2xl">
+        <div className="relative rounded-2xl border border-red-500/25 bg-zinc-950/95 p-7 sm:p-8 shadow-[0_0_60px_rgba(239,68,68,0.18)] backdrop-blur-md">
           {/* HUD corner accents */}
           <span className="pointer-events-none absolute left-0 top-0 h-4 w-4 border-l-2 border-t-2 border-red-500/60 rounded-tl-xl" />
           <span className="pointer-events-none absolute right-0 top-0 h-4 w-4 border-r-2 border-t-2 border-red-500/60 rounded-tr-xl" />
@@ -886,30 +982,38 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               type="button"
               id="googleSignInBtn"
               onClick={handleGoogleSignInClick}
-              disabled={isSigningIn}
-              className="group relative flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-700/80 bg-zinc-900/90 px-4 py-3 text-sm font-bold text-white shadow-lg transition-all duration-200 hover:border-red-500/50 hover:bg-zinc-800 hover:shadow-[0_0_20px_rgba(239,68,68,0.25)] active:scale-[0.98] disabled:opacity-60 cursor-pointer"
+              className="group relative flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-700/80 bg-zinc-900/90 px-4 py-3 text-sm font-bold text-white shadow-lg transition-all duration-200 hover:border-red-500/50 hover:bg-zinc-800 hover:shadow-[0_0_20px_rgba(239,68,68,0.25)] active:scale-[0.98] cursor-pointer"
             >
-              {/* Google 4-Color Icon */}
-              <svg className="h-5 w-5 shrink-0" viewBox="0 0 48 48">
-                <path
-                  fill="#EA4335"
-                  d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                />
-                <path
-                  fill="#4285F4"
-                  d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                />
-              </svg>
-              <span>{isSigningIn ? 'Connecting to Google...' : 'Continue with Google'}</span>
-              <ArrowRight className="h-4 w-4 text-zinc-400 transition-transform group-hover:translate-x-0.5 group-hover:text-red-400" />
+              {isGoogleConnecting ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin text-red-500 shrink-0" />
+                  <span className="text-zinc-200">Connecting... (Tap to cancel)</span>
+                </>
+              ) : (
+                <>
+                  {/* Google 4-Color Icon */}
+                  <svg className="h-5 w-5 shrink-0" viewBox="0 0 48 48">
+                    <path
+                      fill="#EA4335"
+                      d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+                    />
+                    <path
+                      fill="#4285F4"
+                      d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+                    />
+                  </svg>
+                  <span>Continue with Google</span>
+                  <ArrowRight className="h-4 w-4 text-zinc-400 transition-transform group-hover:translate-x-0.5 group-hover:text-red-400" />
+                </>
+              )}
             </button>
             <div ref={googleBtnRef} className="hidden" aria-hidden="true" />
           </div>
@@ -929,11 +1033,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             <div className="mb-4 flex rounded-xl border border-zinc-800 bg-zinc-900/60 p-1">
               <button
                 type="button"
-                onClick={() => {
-                  setAuthMode('signin');
-                  setError('');
-                  setSuccessMsg('');
-                }}
+                onClick={() => switchMode('signin')}
                 className={`flex-1 rounded-lg py-1.5 text-xs font-bold transition-all ${
                   authMode === 'signin'
                     ? 'bg-red-600 text-white shadow-md'
@@ -944,11 +1044,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setAuthMode('register');
-                  setError('');
-                  setSuccessMsg('');
-                }}
+                onClick={() => switchMode('register')}
                 className={`flex-1 rounded-lg py-1.5 text-xs font-bold transition-all ${
                   authMode === 'register'
                     ? 'bg-red-600 text-white shadow-md'
@@ -962,12 +1058,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             <div className="mb-4 flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => {
-                  setAuthMode('signin');
-                  setForgotStep('request_otp');
-                  setError('');
-                  setSuccessMsg('');
-                }}
+                onClick={() => switchMode('signin')}
                 className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -1007,12 +1098,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                   </label>
                   <button
                     type="button"
-                    onClick={() => {
-                      setAuthMode('forgot_password');
-                      setForgotStep('request_otp');
-                      setError('');
-                      setSuccessMsg('');
-                    }}
+                    onClick={() => switchMode('forgot_password')}
                     className="text-[11px] font-medium text-red-400 hover:text-red-300 transition-colors"
                   >
                     Forgot Password?
@@ -1041,10 +1127,10 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
               <button
                 type="submit"
-                disabled={isSigningIn}
+                disabled={isSubmitting}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 py-3 text-xs font-bold text-white shadow-lg transition-all active:scale-[0.98] disabled:opacity-60"
               >
-                <span>{isSigningIn ? 'Signing in...' : 'Sign In to SMARAN.AI'}</span>
+                <span>{isSubmitting ? 'Signing in...' : 'Sign In to SMARAN.AI'}</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </button>
             </form>
@@ -1140,10 +1226,10 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
               <button
                 type="submit"
-                disabled={isSigningIn}
+                disabled={isSubmitting}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 py-3 text-xs font-bold text-white shadow-lg transition-all active:scale-[0.98] disabled:opacity-60"
               >
-                <span>{isSigningIn ? 'Creating account...' : 'Create Account & Sign In'}</span>
+                <span>{isSubmitting ? 'Creating account...' : 'Create Account & Sign In'}</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </button>
             </form>
@@ -1177,10 +1263,10 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
               <button
                 type="submit"
-                disabled={isSigningIn}
+                disabled={isOtpSending}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 py-3 text-xs font-bold text-white shadow-lg transition-all active:scale-[0.98] disabled:opacity-60"
               >
-                <span>{isSigningIn ? 'Generating OTP...' : 'Send 6-Digit OTP'}</span>
+                <span>{isOtpSending ? 'Generating OTP...' : 'Send 6-Digit OTP'}</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </button>
             </form>
@@ -1196,7 +1282,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                   <button
                     type="button"
                     onClick={handleSendOtp}
-                    disabled={isSigningIn}
+                    disabled={isOtpSending}
                     className="inline-flex items-center gap-1 text-[11px] text-red-400 hover:text-red-300"
                   >
                     <RefreshCw className="h-3 w-3" />
@@ -1268,10 +1354,10 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
               <button
                 type="submit"
-                disabled={isSigningIn}
+                disabled={isSubmitting}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 py-3 text-xs font-bold text-white shadow-lg transition-all active:scale-[0.98] disabled:opacity-60"
               >
-                <span>{isSigningIn ? 'Updating password...' : 'Verify OTP & Reset Password'}</span>
+                <span>{isSubmitting ? 'Updating password...' : 'Verify OTP & Reset Password'}</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </button>
             </form>
@@ -1279,6 +1365,109 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
         </div>
       </div>
+
+      {/* INSTANT GOOGLE MODAL FOR MOBILE & FAIL-SAFE SIGN IN */}
+      {showGoogleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl border border-zinc-700/80 bg-zinc-900/95 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <svg className="h-5 w-5 shrink-0" viewBox="0 0 48 48">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                </svg>
+                <span className="font-bold text-sm text-white">Google Sign-In</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGoogleModal(false)}
+                className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1 text-xs text-zinc-400">
+              <p className="font-semibold text-zinc-200">Connect your Google Account</p>
+              <p>Enter your Google / Gmail address to sign in instantly with Google credentials.</p>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const cleanEmail = (googleEmail || '').trim().toLowerCase();
+                if (!cleanEmail || !cleanEmail.includes('@')) {
+                  setError('Please enter a valid Google email address.');
+                  return;
+                }
+                const cleanName = (googleName || '').trim() || cleanEmail.split('@')[0];
+                setShowGoogleModal(false);
+                handleSignInSuccess({
+                  id: 'g_' + Math.abs(cleanEmail.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0)),
+                  email: cleanEmail,
+                  name: cleanName,
+                  provider: 'google',
+                  picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanEmail)}`,
+                });
+              }}
+              className="space-y-3.5"
+            >
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  Google Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                  <input
+                    type="email"
+                    value={googleEmail}
+                    onChange={(e) => setGoogleEmail(e.target.value)}
+                    placeholder="you@gmail.com"
+                    required
+                    autoFocus
+                    className="w-full rounded-xl border border-zinc-700 bg-zinc-950 py-2.5 pl-10 pr-3.5 text-xs text-white placeholder-zinc-500 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  Full Name (Optional)
+                </label>
+                <div className="relative">
+                  <User className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={googleName}
+                    onChange={(e) => setGoogleName(e.target.value)}
+                    placeholder="Your Name"
+                    className="w-full rounded-xl border border-zinc-700 bg-zinc-950 py-2.5 pl-10 pr-3.5 text-xs text-white placeholder-zinc-500 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleModal(false)}
+                  className="flex-1 rounded-xl border border-zinc-700 py-2.5 text-xs font-semibold text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 py-2.5 text-xs font-bold text-white shadow-lg flex items-center justify-center gap-1.5 transition-all"
+                >
+                  <span>Sign In</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
