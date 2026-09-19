@@ -96,8 +96,11 @@ def test_the_network_cannot_complete_the_takeover():
     assert handed is None
 
     # Without a token there is nothing to present, and a guess must not work.
+    # The email goes with it so this exercises the token check rather than
+    # stopping at schema validation: reset-password scopes the lookup to an
+    # address, because a six-digit code is not unique across accounts.
     res = network.post("/api/auth/reset-password", json={
-        "token": "guessed-token-value", "new_password": "Attack3r!-Own3d-99"})
+        "email": VICTIM, "token": "123456", "new_password": "Attack3r!-Own3d-99"})
     assert res.status_code >= 400
 
     res = network.post("/api/auth/login", json={
@@ -143,7 +146,7 @@ def test_the_owner_can_still_reset_their_own_password():
     assert token, "the owner can no longer reset a password on their own machine"
 
     res = owner.post("/api/auth/reset-password", json={
-        "token": token, "new_password": "N3w!-Owner-Pass-77"})
+        "email": VICTIM, "token": token, "new_password": "N3w!-Owner-Pass-77"})
     assert res.status_code == 200, res.text
 
     res = owner.post("/api/auth/login", json={

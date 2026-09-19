@@ -12,9 +12,9 @@ import {
   EyeOff,
   ChevronLeft,
   RefreshCw,
-  X,
   Loader2,
 } from 'lucide-react';
+import { registerPlugin } from '@capacitor/core';
 import { API_BASE } from '../context/AuthContext';
 
 export const GOOGLE_STORAGE_KEY = 'smaran_google_user';
@@ -118,40 +118,62 @@ const formatAuthError = (data, defaultMsg) => {
 /**
  * Load Google Identity Services script dynamically
  */
-const loadGoogleScript = () =>
-  new Promise((resolve, reject) => {
-    if (typeof window === 'undefined') return reject(new Error('No window'));
-    if (window.google?.accounts?.id) return resolve(window.google);
-    const existing = document.getElementById('gsi-client');
-    if (existing) {
-      if (window.google?.accounts?.id) return resolve(window.google);
-      existing.addEventListener('load', () => resolve(window.google));
-      existing.addEventListener('error', reject);
-      return;
+let googleScriptPromise;
+const loadGoogleScript = () => {
+  if (window.google?.accounts?.oauth2) return Promise.resolve(window.google);
+  if (googleScriptPromise) return googleScriptPromise;
+  googleScriptPromise = new Promise((resolve, reject) => {
+    let script = document.getElementById('gsi-client');
+    const finish = (error) => {
+      clearTimeout(timer);
+      script.removeEventListener('load', onLoad);
+      script.removeEventListener('error', onError);
+      if (error) {
+        script.remove();
+        googleScriptPromise = null;
+        reject(error);
+      } else resolve(window.google);
+    };
+    const onLoad = () => window.google?.accounts?.oauth2
+      ? finish() : onError();
+    const onError = () => finish(new Error('Google could not load. Check your connection and try again.'));
+    const timer = setTimeout(onError, 12000);
+    if (!script) {
+      script = document.createElement('script');
+      script.id = 'gsi-client';
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      document.head.appendChild(script);
     }
-    const script = document.createElement('script');
-    script.id = 'gsi-client';
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    const timeout = setTimeout(() => {
-      resolve(null); // Resolve null rather than crash, so offline mode continues
-    }, 3500);
-    script.onload = () => {
-      clearTimeout(timeout);
-      resolve(window.google);
-    };
-    script.onerror = () => {
-      clearTimeout(timeout);
-      resolve(null);
-    };
-    document.head.appendChild(script);
+    script.addEventListener('load', onLoad, { once: true });
+    script.addEventListener('error', onError, { once: true });
   });
+  return googleScriptPromise;
+};
 
 // Client ID populated from .env SMARAN_GOOGLE_CLIENT_ID
 const DEFAULT_CLIENT_ID = '656427300466-jqr94suucdutmjerm0i096i87p1cpctf.apps.googleusercontent.com';
-const INGEST_URL = 'https://smaran-analytics.netlify.app/api/ingest';
+/* /ingest, not /api/ingest. Everything under /api/ is the dashboard's own
+   reader: it demands the dashboard key, which is deliberately never shipped,
+   and answers no CORS preflight - so this POST was rejected by the browser
+   before it left the machine and not one sign-in was ever recorded. The
+   backend's own reporter has always used /ingest; only this call was wrong. */
+const INGEST_URL = 'https://smaran-analytics.netlify.app/ingest';
 const INGEST_KEY = 'lYZFdOrxV90mCKl6DHP53YTJuU0pFOja';
+
+/* The collector accepts a fixed vocabulary and answers anything else with
+   400. This used to send event "desktop_app_signin" on platform
+   "desktop_app", neither of which is in it, so even once the address was
+   right the event would have been thrown away on arrival. */
+const analyticsPlatform = () => {
+  if (window.Capacitor?.isNativePlatform?.()) return 'android';
+  const ua = navigator.userAgent || '';
+  if (/Android/i.test(ua)) return 'android';
+  if (/Windows/i.test(ua)) return 'windows';
+  if (/Mac OS X|Macintosh/i.test(ua)) return 'macos';
+  if (/Linux|X11/i.test(ua)) return 'linux';
+  return 'unknown';
+};
 
 const sendSignInAnalytics = (user) => {
   if (!window.fetch) return;
@@ -168,13 +190,11 @@ const sendSignInAnalytics = (user) => {
       },
       body: JSON.stringify({
         install_id: installId,
-        event: 'desktop_app_signin',
-        platform: 'desktop_app',
-        app_version: '1.0.2',
-        auth_provider: user.provider || 'unknown',
+        event: user.provider === 'google' ? 'google_signin' : 'login',
+        platform: analyticsPlatform(),
+        app_version: import.meta.env.VITE_APP_VERSION,
         user_email: user.email || '',
         user_name: user.name || '',
-        signed_at: new Date().toISOString(),
       }),
     }).catch(() => {});
   } catch {}
@@ -188,7 +208,8 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [clientId, setClientId] = useState(DEFAULT_CLIENT_ID);
-  const googleBtnRef = useRef(null);
+  const googleAttempt = useRef(0);
+  const [googleLoadAttempt, setGoogleLoadAttempt] = useState(0);
 
   // Mode: 'signin' | 'register' | 'forgot_password'
   const [authMode, setAuthMode] = useState('signin');
@@ -217,32 +238,10 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
   // OTP Fields
   const [otpValue, setOtpValue] = useState('');
-  const [activeOtpCode, setActiveOtpCode] = useState('');
-  const [otpExpiry, setOtpExpiry] = useState(0);
-  const [secondsRemaining, setSecondsRemaining] = useState(0);
-  const [emailDispatched, setEmailDispatched] = useState(false);
-
-  // Mobile & Fallback Google Sign-In Modal
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [googleEmail, setGoogleEmail] = useState('');
-  const [googleName, setGoogleName] = useState('');
-
-  // OTP Countdown timer
-  useEffect(() => {
-    if (!otpExpiry || authMode !== 'forgot_password') return;
-    const updateCountdown = () => {
-      const remaining = Math.max(0, Math.floor((otpExpiry - Date.now()) / 1000));
-      setSecondsRemaining(remaining);
-    };
-    updateCountdown();
-    const interval = setInterval(updateCountdown, 1000);
-    return () => clearInterval(interval);
-  }, [otpExpiry, authMode]);
-
   // Fetch configured Google client ID from backend if available
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/auth/google/config')
+    fetch(`${API_BASE}/api/auth/google/config`, { signal: AbortSignal.timeout(10000) })
       .then((r) => r.json())
       .then((cfg) => {
         if (!cancelled && cfg?.client_id) {
@@ -253,50 +252,6 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  // Check URL hash for OAuth 2.0 response tokens (id_token / access_token)
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.location.hash) return;
-    try {
-      const hashStr = window.location.hash.substring(1);
-      const params = new URLSearchParams(hashStr);
-      const idToken = params.get('id_token');
-      if (idToken) {
-        const payload = JSON.parse(atob(idToken.split('.')[1]));
-        if (payload?.email) {
-          handleSignInSuccess({
-            id: payload.sub,
-            name: payload.name || payload.given_name || payload.email.split('@')[0],
-            email: payload.email,
-            picture: payload.picture,
-            provider: 'google',
-          });
-          window.history.replaceState(null, '', window.location.pathname);
-          return;
-        }
-      }
-      const accessToken = params.get('access_token');
-      if (accessToken) {
-        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        })
-          .then((r) => r.json())
-          .then((info) => {
-            if (info?.email) {
-              handleSignInSuccess({
-                id: info.sub,
-                name: info.name || info.email.split('@')[0],
-                email: info.email,
-                picture: info.picture,
-                provider: 'google',
-              });
-              window.history.replaceState(null, '', window.location.pathname);
-            }
-          })
-          .catch(() => {});
-      }
-    } catch {}
   }, []);
 
   // Notify parent on mount or change
@@ -331,314 +286,99 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     sendSignInAnalytics(user);
   };
 
-  // Setup Google Identity Services (GSI)
   const tokenClientRef = useRef(null);
+  const nativeGoogle = Boolean(window.Capacitor?.isNativePlatform?.());
+
+  const completeGoogleSignIn = async (credential, accessToken, nativeProfile) => {
+    const response = await fetch(`${API_BASE}/api/auth/google`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credential ? { credential } : { access_token: accessToken }),
+      signal: AbortSignal.timeout(15000),
+    }).catch((err) => {
+      if (API_BASE || !nativeGoogle) throw err;
+      return null;
+    });
+    if (response?.headers.get('content-type')?.includes('application/json')) {
+      const data = await response.json();
+      if (!response.ok) throw new Error(formatAuthError(data, 'Google sign-in could not be verified.'));
+      handleSignInSuccess({ ...data.user, name: data.user?.username,
+        access_token: data.access_token, provider: 'google' });
+      return;
+    }
+    // An unpaired Android app has no Python server. Credential Manager has
+    // authenticated this profile; it grants only this device's local session.
+    if (nativeGoogle && !API_BASE && credential && nativeProfile?.email) {
+      handleSignInSuccess({ ...nativeProfile, provider: 'google' });
+      return;
+    }
+    throw new Error('The sign-in server is unavailable. Check the desktop connection and retry.');
+  };
 
   useEffect(() => {
-    if (currentUser) return;
+    if (currentUser || nativeGoogle) return;
     let cancelled = false;
+    loadGoogleScript().then((gsi) => {
+      if (cancelled) return;
+      tokenClientRef.current = gsi.accounts.oauth2.initTokenClient({
+        client_id: clientId || DEFAULT_CLIENT_ID,
+        scope: 'openid email profile',
+        callback: async (response) => {
+          try {
+            if (response.error || !response.access_token) throw new Error(response.error_description || 'Google sign-in was cancelled.');
+            await completeGoogleSignIn(null, response.access_token);
+          } catch (err) { setError(err.message || 'Google sign-in failed.'); }
+          finally { setIsGoogleConnecting(false); }
+        },
+        error_callback: (error) => {
+          setIsGoogleConnecting(false);
+          setError(error.type === 'popup_closed'
+            ? 'Google sign-in was cancelled. Tap Continue with Google to retry.'
+            : 'Allow the Google sign-in popup in your browser, then retry.');
+        },
+      });
+    }).catch((err) => { if (!cancelled) setError(err.message); });
+    return () => { cancelled = true; tokenClientRef.current = null; };
+  }, [currentUser, clientId, nativeGoogle, googleLoadAttempt]);
 
-    loadGoogleScript()
-      .then((gsi) => {
-        if (cancelled) return;
-        const activeId = clientId || DEFAULT_CLIENT_ID;
-
-        try {
-          if (gsi?.accounts?.id) {
-            gsi.accounts.id.initialize({
-              client_id: activeId,
-              callback: async (response) => {
-                if (response?.credential) {
-                  try {
-                    const bRes = await fetch(`${API_BASE || ''}/api/auth/google`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      credentials: 'include',
-                      body: JSON.stringify({ credential: response.credential }),
-                    }).catch(() => null);
-
-                    if (bRes && bRes.ok) {
-                      const bData = await bRes.json();
-                      handleSignInSuccess({
-                        id: bData.user?.id || 'google_user',
-                        name: bData.user?.username,
-                        email: bData.user?.email,
-                        access_token: bData.access_token,
-                        provider: 'google',
-                      });
-                      return;
-                    }
-                  } catch {}
-
-                  try {
-                    const payload = JSON.parse(atob(response.credential.split('.')[1]));
-                    handleSignInSuccess({
-                      id: payload.sub,
-                      name: payload.name || payload.given_name,
-                      email: payload.email,
-                      picture: payload.picture,
-                      provider: 'google',
-                    });
-                  } catch {
-                    handleSignInSuccess({
-                      email: 'user@gmail.com',
-                      name: 'Google User',
-                      provider: 'google',
-                    });
-                  }
-                }
-              },
-            });
-
-            if (googleBtnRef.current) {
-              gsi.accounts.id.renderButton(googleBtnRef.current, {
-                theme: 'filled_black',
-                size: 'large',
-                shape: 'pill',
-                text: 'continue_with',
-                width: 320,
-              });
-            }
-          }
-
-          if (gsi?.accounts?.oauth2) {
-            tokenClientRef.current = gsi.accounts.oauth2.initTokenClient({
-              client_id: activeId,
-              scope: 'openid email profile',
-              callback: async (tokenResponse) => {
-                if (tokenResponse.error) {
-                  setIsGoogleConnecting(false);
-                  if (tokenResponse.error === 'popup_closed' || tokenResponse.error === 'popup_blocked_by_browser') {
-                    if (email && email.includes('@')) setGoogleEmail(email);
-                    setShowGoogleModal(true);
-                    return;
-                  }
-                  if (tokenResponse.error !== 'user_cancelled') {
-                    setError(tokenResponse.error_description || tokenResponse.error || 'Google sign-in was cancelled.');
-                  }
-                  return;
-                }
-                try {
-                  setIsGoogleConnecting(true);
-                  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                    headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-                  });
-                  const info = await res.json();
-                  if (info?.email) {
-                    handleSignInSuccess({
-                      id: info.sub,
-                      name: info.name || info.email.split('@')[0],
-                      email: info.email,
-                      picture: info.picture,
-                      provider: 'google',
-                    });
-                  } else {
-                    throw new Error('Google did not return user details.');
-                  }
-                } catch (err) {
-                  setError('Failed to fetch Google profile: ' + (err.message || 'Unknown error'));
-                } finally {
-                  setIsGoogleConnecting(false);
-                }
-              },
-              error_callback: (nonOAuthErr) => {
-                setIsGoogleConnecting(false);
-                if (nonOAuthErr?.type === 'popup_closed' || nonOAuthErr?.message?.includes('closed') || nonOAuthErr?.message?.includes('popup')) {
-                  if (email && email.includes('@')) setGoogleEmail(email);
-                  setShowGoogleModal(true);
-                  return;
-                }
-                setError(nonOAuthErr?.message || 'Google Sign-In failed.');
-              },
-            });
-          }
-        } catch (e) {
-          console.error('Google init error:', e);
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUser, clientId]);
+  useEffect(() => {
+    if (!isGoogleConnecting) return;
+    const timer = setTimeout(() => {
+      googleAttempt.current += 1;
+      setIsGoogleConnecting(false);
+      setError('Google sign-in timed out. Please try again.');
+    }, 120000);
+    return () => clearTimeout(timer);
+  }, [isGoogleConnecting]);
 
   const handleGoogleSignInClick = async () => {
-    // If currently connecting, clicking again acts as an instant cancel!
-    if (isGoogleConnecting) {
-      setIsGoogleConnecting(false);
-      return;
-    }
-
+    if (isGoogleConnecting) return;
     setError('');
     setSuccessMsg('');
-
-    const isNative = Boolean(
-      window.Capacitor?.isNativePlatform?.() ??
-      window.Capacitor?.isNative ??
-      (typeof window !== 'undefined' && (window.location.protocol === 'capacitor:' || window.location.origin === 'https://localhost'))
-    );
-
-    if (isNative) {
-      // Use native Android AccountManager picker via SmaranDevice plugin
+    const attempt = ++googleAttempt.current;
+    if (nativeGoogle) {
       setIsGoogleConnecting(true);
       try {
-        const { registerPlugin } = await import('@capacitor/core');
-        const smaranDevice = registerPlugin('SmaranDevice');
-        const result = await smaranDevice.chooseGoogleAccount();
-        if (result?.email) {
-          // Native picker returned a valid Google email
-          const cleanEmail = result.email.trim().toLowerCase();
-          const displayName = result.name || cleanEmail.split('@')[0];
-
-          // Try backend auth first
-          let backendSuccess = false;
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 6000);
-            const bRes = await fetch(`${API_BASE || ''}/api/auth/google/native`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({ email: cleanEmail, name: displayName, provider: 'google_native' }),
-              signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
-            if (bRes && bRes.ok) {
-              const bData = await bRes.json();
-              handleSignInSuccess({
-                id: bData.user?.id || 'g_native_' + Date.now(),
-                name: bData.user?.username || displayName,
-                email: cleanEmail,
-                access_token: bData.access_token,
-                provider: 'google',
-              });
-              backendSuccess = true;
-            }
-          } catch { /* backend unavailable, fall through to direct sign-in */ }
-
-          if (!backendSuccess) {
-            // Direct sign-in with native account info (offline-capable)
-            handleSignInSuccess({
-              id: 'g_' + Math.abs(cleanEmail.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0)),
-              email: cleanEmail,
-              name: displayName,
-              provider: 'google',
-              picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanEmail)}`,
-            });
-          }
-          return;
-        }
-      } catch (nativeErr) {
-        console.warn('Native Google account picker failed:', nativeErr);
-        // Fall back to manual Google email modal
-      } finally {
-        setIsGoogleConnecting(false);
-      }
-
-      // Fallback: show manual email modal if native picker was cancelled or unavailable
-      if (email && email.includes('@')) {
-        setGoogleEmail(email);
-      }
-      setShowGoogleModal(true);
+        const result = await registerPlugin('SmaranDevice').chooseGoogleAccount({ clientId });
+        if (attempt !== googleAttempt.current) return;
+        if (!result?.credential) throw new Error('Google did not return a verified sign-in credential.');
+        await completeGoogleSignIn(result.credential, null, result);
+      } catch (err) { setError(err.message || 'Google sign-in was cancelled.'); }
+      finally { if (attempt === googleAttempt.current) setIsGoogleConnecting(false); }
       return;
     }
-
-    setIsGoogleConnecting(true);
-
-    // Window focus listener: if Google popup closes or user clicks away, reset loading
-    const onWindowFocus = () => {
-      setTimeout(() => setIsGoogleConnecting(false), 1000);
-      window.removeEventListener('focus', onWindowFocus);
-    };
-    window.addEventListener('focus', onWindowFocus);
-
-    // Safety timeout: guaranteed reset after 3.5 seconds
-    const safetyTimer = setTimeout(() => {
-      setIsGoogleConnecting(false);
-      window.removeEventListener('focus', onWindowFocus);
-    }, 3500);
-
+    if (!tokenClientRef.current) {
+      setError('Google sign-in is still loading. Check your connection and tap again.');
+      // Retry a previously failed script without losing the next click gesture.
+      setGoogleLoadAttempt((value) => value + 1);
+      return;
+    }
     try {
-      const activeId = clientId || DEFAULT_CLIENT_ID;
-
-      // 1. If Token Client is available, launch Google's authentic account picker popup
-      if (tokenClientRef.current) {
-        tokenClientRef.current.requestAccessToken({ prompt: 'select_account' });
-        return;
-      }
-
-      // 2. Load on-the-fly and launch
-      const gsi = await loadGoogleScript();
-      if (gsi?.accounts?.oauth2) {
-        const client = gsi.accounts.oauth2.initTokenClient({
-          client_id: activeId,
-          scope: 'openid email profile',
-          callback: async (tokenResponse) => {
-            clearTimeout(safetyTimer);
-            window.removeEventListener('focus', onWindowFocus);
-            if (tokenResponse.error) {
-              setIsGoogleConnecting(false);
-              if (tokenResponse.error === 'popup_closed' || tokenResponse.error === 'popup_blocked_by_browser') {
-                if (email && email.includes('@')) setGoogleEmail(email);
-                setShowGoogleModal(true);
-                return;
-              }
-              if (tokenResponse.error !== 'user_cancelled') {
-                setError(tokenResponse.error_description || tokenResponse.error || 'Google sign-in was cancelled.');
-              }
-              return;
-            }
-            try {
-              setIsGoogleConnecting(true);
-              const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-              });
-              const info = await res.json();
-              if (info?.email) {
-                handleSignInSuccess({
-                  id: info.sub,
-                  name: info.name || info.email.split('@')[0],
-                  email: info.email,
-                  picture: info.picture,
-                  provider: 'google',
-                });
-              } else {
-                throw new Error('Google did not return user details.');
-              }
-            } catch (err) {
-              setError('Failed to fetch Google profile: ' + (err.message || 'Unknown error'));
-            } finally {
-              setIsGoogleConnecting(false);
-            }
-          },
-          error_callback: (nonOAuthErr) => {
-            clearTimeout(safetyTimer);
-            window.removeEventListener('focus', onWindowFocus);
-            setIsGoogleConnecting(false);
-            if (nonOAuthErr?.type === 'popup_closed' || nonOAuthErr?.message?.includes('closed') || nonOAuthErr?.message?.includes('popup')) {
-              if (email && email.includes('@')) setGoogleEmail(email);
-              setShowGoogleModal(true);
-              return;
-            }
-            setError(nonOAuthErr?.message || 'Google Sign-In failed.');
-          },
-        });
-        tokenClientRef.current = client;
-        client.requestAccessToken({ prompt: 'select_account' });
-        return;
-      }
-
-      // 3. Fallback: If Google scripts are blocked or unavailable
-      clearTimeout(safetyTimer);
-      window.removeEventListener('focus', onWindowFocus);
-      setIsGoogleConnecting(false);
-      setError('Unable to load Google Identity Services. Please check your internet connection or use Email sign-in.');
+      setIsGoogleConnecting(true);
+      tokenClientRef.current.requestAccessToken({ prompt: 'select_account' });
     } catch (err) {
-      clearTimeout(safetyTimer);
-      window.removeEventListener('focus', onWindowFocus);
       setIsGoogleConnecting(false);
-      setError(err.message || 'Could not connect to Google.');
+      setError(err.message || 'Google sign-in could not open.');
     }
   };
 
@@ -665,7 +405,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       let networkError = false;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
         const res = await fetch(`${API_BASE || ''}/api/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -702,7 +442,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
           setIsSubmitting(false);
           return;
         }
-      } catch (fetchErr) {
+      } catch {
         networkError = true;
       }
 
@@ -766,7 +506,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       let networkError = false;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
         const res = await fetch(`${API_BASE || ''}/api/auth/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -814,7 +554,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
           setIsSubmitting(false);
           return;
         }
-      } catch (fetchErr) {
+      } catch {
         networkError = true;
       }
 
@@ -873,7 +613,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
       const res = await fetch(`${API_BASE || ''}/api/auth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -888,13 +628,32 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
         data = await res.json();
       }
 
-      if (!res.ok || !data.email_dispatched) {
-        throw new Error(data.detail || 'Unable to send email: SMTP is not configured or failed to connect. Please configure free SMTP in .env.');
+      if (!res.ok) {
+        throw new Error(data.detail || 'The verification code could not be sent. Open Settings > Account > Email delivery (SMTP) and add a mail server, then try again.');
       }
 
-      setEmailDispatched(true);
-      setForgotStep('verify_otp');
-      setSuccessMsg(`6-digit verification code sent to ${cleanEmail}! Please check your email inbox (and Spam folder).`);
+      if (data.email_dispatched) {
+        setForgotStep('verify_otp');
+        setSuccessMsg(`6-digit verification code sent to ${cleanEmail}! Please check your email inbox (and Spam folder).`);
+        return;
+      }
+
+      /* No mail server. The backend hands the code straight back only when
+         the request came from the machine SMARAN is running on - the person
+         at that keyboard already owns the database - so filling it in here
+         strands nobody and reveals nothing. A request from the phone over
+         the LAN gets no code, and lands in the branch below instead. */
+      if (data.reset_token) {
+        setOtpValue(String(data.reset_token));
+        setForgotStep('verify_otp');
+        setSuccessMsg(
+          'No mail server is set up, so the code is filled in below because you '
+          + 'are on this machine. Choose a new password to finish.',
+        );
+        return;
+      }
+
+      throw new Error(data.delivery_error || 'The verification code could not be sent. Open Settings > Account > Email delivery (SMTP) and add a mail server, then try again.');
     } catch (err) {
       setError(err.message || 'Failed to send OTP.');
     } finally {
@@ -929,12 +688,13 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     try {
       // Verify OTP and reset password via Backend
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
       const res = await fetch(`${API_BASE || ''}/api/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: cleanOtp,
+          email: cleanEmail,
           new_password: password,
         }),
         signal: controller.signal,
@@ -1028,8 +788,11 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             <div className="relative mb-3 flex items-center justify-center">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-red-600 via-red-700 to-zinc-900 p-[1.5px] shadow-[0_0_25px_rgba(239,68,68,0.4)]">
                 <div className="w-full h-full rounded-[14px] bg-zinc-950 flex items-center justify-center overflow-hidden">
+                  {/* There is no logo.png - the file shipped in public/ is
+                      smaran-logo.png - so the sign-in screen 404'd on every
+                      load and fell back to the plain "S" behind it. */}
                   <img
-                    src="./logo.png"
+                    src="/smaran-logo.png"
                     alt="SMARAN.AI Logo"
                     className="w-10 h-10 object-contain drop-shadow-[0_0_10px_rgba(239,68,68,0.6)]"
                     onError={(e) => {
@@ -1076,6 +839,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               type="button"
               id="googleSignInBtn"
               onClick={handleGoogleSignInClick}
+              disabled={isGoogleConnecting}
               className="group relative flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-700/80 bg-zinc-900/90 px-4 py-3 text-sm font-bold text-white shadow-lg transition-all duration-200 hover:border-red-500/50 hover:bg-zinc-800 hover:shadow-[0_0_20px_rgba(239,68,68,0.25)] active:scale-[0.98] cursor-pointer"
             >
               {isGoogleConnecting ? (
@@ -1109,7 +873,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                 </>
               )}
             </button>
-            <div ref={googleBtnRef} className="hidden" aria-hidden="true" />
+
           </div>
 
           {/* SECTION 2: DIVIDER */}
@@ -1460,108 +1224,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
         </div>
       </div>
 
-      {/* DEDICATED GOOGLE SIGN-IN MODAL FOR MOBILE & WEB FALLBACK */}
-      {showGoogleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-sm rounded-2xl border border-zinc-700/80 bg-zinc-900/95 p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <div className="flex items-center gap-2.5">
-                <svg className="h-5 w-5 shrink-0" viewBox="0 0 48 48">
-                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                </svg>
-                <span className="font-bold text-sm text-white">Google Sign-In</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowGoogleModal(false)}
-                className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
 
-            <div className="space-y-1 text-xs text-zinc-400">
-              <p className="font-semibold text-zinc-200">Connect with Google Account</p>
-              <p>Enter your Google email to sign in directly with Google identity on this device.</p>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const cleanEmail = (googleEmail || email || '').trim().toLowerCase();
-                if (!cleanEmail || !cleanEmail.includes('@')) {
-                  setError('Please enter a valid Google email address.');
-                  return;
-                }
-                const cleanName = (googleName || '').trim() || cleanEmail.split('@')[0];
-                setShowGoogleModal(false);
-                handleSignInSuccess({
-                  id: 'g_' + Math.abs(cleanEmail.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0)),
-                  email: cleanEmail,
-                  name: cleanName,
-                  provider: 'google',
-                  picture: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanEmail)}`,
-                });
-              }}
-              className="space-y-3.5"
-            >
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                  Google Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                  <input
-                    type="email"
-                    value={googleEmail || email}
-                    onChange={(e) => setGoogleEmail(e.target.value)}
-                    placeholder="you@gmail.com"
-                    required
-                    autoFocus
-                    className="w-full rounded-xl border border-zinc-700 bg-zinc-950 py-2.5 pl-10 pr-3.5 text-xs text-white placeholder-zinc-500 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                  Display Name (Optional)
-                </label>
-                <div className="relative">
-                  <User className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                  <input
-                    type="text"
-                    value={googleName}
-                    onChange={(e) => setGoogleName(e.target.value)}
-                    placeholder="Your Name"
-                    className="w-full rounded-xl border border-zinc-700 bg-zinc-950 py-2.5 pl-10 pr-3.5 text-xs text-white placeholder-zinc-500 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowGoogleModal(false)}
-                  className="flex-1 rounded-xl border border-zinc-700 py-2.5 text-xs font-semibold text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 py-2.5 text-xs font-bold text-white shadow-lg flex items-center justify-center gap-1.5 transition-all"
-                >
-                  <span>Continue</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

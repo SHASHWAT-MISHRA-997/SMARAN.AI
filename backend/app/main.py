@@ -744,16 +744,45 @@ app.add_middleware(
 _GOOGLE_CONFIG_FILE = os.path.join(settings.DATA_DIR, "google_oauth.json")
 
 
+# The project's own OAuth client, the one the sign-in screen has always used.
+#
+# A client id is public by design - it is handed to every browser that loads
+# the button, and Google's own docs say so - which is why it can sit here while
+# the client *secret* never enters this repository at all. The id alone cannot
+# mint a token: Google will only issue one to an origin listed on the client,
+# and this backend still verifies every token it is given against Google.
+#
+# It is a default rather than a hardcoding because it fixes a sign-in that was
+# broken on every fresh install. The frontend shipped this same id inline, so
+# the button worked and Google returned a real token - but the backend, which
+# only knew ids from an environment variable or a file written by Settings, saw
+# an unconfigured install and answered the token with 503 "Google Sign-In is
+# not configured on this installation." The same emptiness also kept
+# accounts.google.com out of the Content-Security-Policy below, so on a strict
+# browser the Google script never loaded and the button reported that it was
+# "still loading" forever. Nobody could sign in with Google until they found
+# Settings and pasted in an id they had no way of knowing.
+DEFAULT_GOOGLE_CLIENT_ID = (
+    "656427300466-jqr94suucdutmjerm0i096i87p1cpctf.apps.googleusercontent.com"
+)
+
+
 def google_client_id() -> str:
-    """The OAuth client id, or empty when Google Sign-In is not set up.
+    """The OAuth client id to verify Google sign-ins against.
 
     Read on each call rather than captured at import: this used to come
     from an environment variable only, which meant setting a system
     variable and restarting the app to change it. Now it can be pasted
     into Settings and takes effect immediately.
 
-    The environment variable still wins where one is set, so a packaged
-    build can ship with an id baked in.
+    Precedence is most-specific-first. The environment variable wins, so a
+    packaged build or a self-hoster can bake in their own id; then whatever
+    Settings last saved; then the project's own client, so a fresh install
+    can sign in with Google without configuring anything.
+
+    Settings can still turn Google Sign-In off: saving an empty id writes
+    `{"client_id": ""}`, and that recorded choice is honoured over the
+    default. Only an absent or unreadable file falls through to it.
     """
     from_env = os.getenv("SMARAN_GOOGLE_CLIENT_ID", "").strip()
     if from_env:
@@ -762,7 +791,7 @@ def google_client_id() -> str:
         with open(_GOOGLE_CONFIG_FILE, "r", encoding="utf-8") as handle:
             return str(json.load(handle).get("client_id") or "").strip()
     except (OSError, ValueError):
-        return ""
+        return DEFAULT_GOOGLE_CLIENT_ID
 
 
 def set_google_client_id(client_id: str) -> None:
@@ -787,13 +816,23 @@ async def add_security_headers(request: Request, call_next):
     # an iframe, so it needs an explicit hole in the policy. The hole only
     # opens when Google Sign-In is actually configured; a build without a
     # client id keeps the tighter policy.
+    #
+    # gstatic is here because accounts.google.com/gsi/client is a loader: it
+    # pulls its real implementation from www.gstatic.com, and a policy naming
+    # only accounts.google.com blocks that second request. The symptom was a
+    # button that never became clickable, reporting "Google sign-in is still
+    # loading" no matter how many times it was tapped.
     _google_on = bool(google_client_id())
-    google_script = " https://accounts.google.com https://apis.google.com" if _google_on else ""
+    google_script = (
+        " https://accounts.google.com https://apis.google.com https://www.gstatic.com"
+        if _google_on else ""
+    )
+    google_style = " https://accounts.google.com" if _google_on else ""
     google_frame = "frame-src 'self' https://accounts.google.com; " if _google_on else ""
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         f"script-src 'self' 'unsafe-inline' 'unsafe-eval'{google_script}; "
-        "style-src 'self' 'unsafe-inline'; "
+        f"style-src 'self' 'unsafe-inline'{google_style}; "
         "img-src 'self' data: blob: https:; "
         "media-src 'self' blob: data:; "
         "worker-src 'self' blob:; "
@@ -827,7 +866,7 @@ class UserResponse(BaseModel):
     username: str
     role: str
     is_approved: bool
-    device_fingerprint: Optional[str] = None
+    device_id: Optional[str] = None
     email: Optional[str] = None
     email_verified: bool = False
 
@@ -835,7 +874,8 @@ class GoogleSignInRequest(BaseModel):
     # The ID token issued by Google Identity Services. The email is read out
     # of the verified token, never taken from the caller: a client that could
     # name its own email address could sign in as anybody.
-    credential: str
+    credential: Optional[str] = None
+    access_token: Optional[str] = None
 
 class GoogleSignInResponse(BaseModel):
     access_token: str
@@ -873,6 +913,7 @@ class PasswordResetRequest(BaseModel):
     email: EmailStr
 
 class PasswordResetConfirmRequest(BaseModel):
+    email: EmailStr
     token: str
     new_password: str
     
@@ -925,10 +966,36 @@ def _verify_google_credential(credential: str) -> dict:
     return claims
 
 
+def _verify_google_access_token(access_token: str) -> dict:
+    configured = google_client_id()
+    if not configured:
+        raise HTTPException(status_code=503, detail="Google Sign-In is not configured.")
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            token = client.get("https://oauth2.googleapis.com/tokeninfo", params={"access_token": access_token})
+            if token.status_code != 200 or token.json().get("aud") != configured:
+                raise HTTPException(status_code=401, detail="Google sign-in was not issued for this app.")
+            profile = client.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+            if profile.status_code != 200:
+                raise HTTPException(status_code=401, detail="Google sign-in could not be verified.")
+            claims = profile.json()
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Could not reach Google. Please retry.")
+    if not claims.get("sub") or claims.get("email_verified") not in (True, "true") or not claims.get("email"):
+        raise HTTPException(status_code=401, detail="Google did not return a verified email.")
+    claims["email"] = claims["email"].strip().lower()
+    return claims
+
+
 @app.post("/api/auth/google", response_model=GoogleSignInResponse)
 @auth_limiter.limit("30/minute")
 async def google_sign_in(req: GoogleSignInRequest, response: Response, request: Request, db: Session = Depends(get_db)):
-    claims = _verify_google_credential(req.credential)
+    if req.credential:
+        claims = await asyncio.to_thread(_verify_google_credential, req.credential)
+    elif req.access_token:
+        claims = await asyncio.to_thread(_verify_google_access_token, req.access_token)
+    else:
+        raise HTTPException(status_code=400, detail="A Google credential is required.")
     email = claims["email"]
 
     # Match on the email, so signing in with Google reaches the same account as
@@ -975,7 +1042,6 @@ async def google_sign_in(req: GoogleSignInRequest, response: Response, request: 
             is_approved=user.is_approved,
             email=user.email,
             email_verified=bool(user.email_verified),
-            device_fingerprint=user.device_fingerprint,
         ),
     )
 
@@ -1149,8 +1215,7 @@ async def register(req: RegisterRequest, response: Response, request: Request, d
             role=user.role,
             is_approved=user.is_approved,
             email=user.email,
-            email_verified=user.email_verified,
-            device_fingerprint=user.device_fingerprint
+            email_verified=user.email_verified
         )
     )
 
@@ -1200,8 +1265,7 @@ async def login(req: LoginRequest, response: Response, request: Request, db: Ses
             role=user.role,
             is_approved=user.is_approved,
             email=user.email,
-            email_verified=user.email_verified,
-            device_fingerprint=user.device_fingerprint
+            email_verified=user.email_verified
         )
     )
 
@@ -1258,8 +1322,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         role=current_user.role,
         is_approved=current_user.is_approved,
         email=current_user.email,
-        email_verified=current_user.email_verified,
-        device_fingerprint=current_user.device_fingerprint
+        email_verified=current_user.email_verified
     )
 
 # Verification tokens are guessable if the endpoint is unlimited, so this
@@ -1287,17 +1350,76 @@ async def resend_verification(request: Request, current_user: User = Depends(get
     db.commit()
     return {"message": "Verification email sent"}
 
-def send_otp_email(recipient_email: str, otp_code: str) -> bool:
-    """Dispatches a 6-digit OTP email using configured SMTP settings from .env."""
-    smtp_host = os.getenv("SMTP_HOST") or os.getenv("SMARAN_SMTP_HOST")
-    smtp_port = int(os.getenv("SMTP_PORT") or os.getenv("SMARAN_SMTP_PORT") or "587")
-    smtp_user = os.getenv("SMTP_USER") or os.getenv("SMARAN_SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD") or os.getenv("SMARAN_SMTP_PASSWORD")
-    smtp_from = os.getenv("SMTP_FROM") or os.getenv("SMARAN_SMTP_FROM") or smtp_user or "no-reply@smaran.ai"
-    smtp_from_name = os.getenv("SMTP_FROM_NAME") or os.getenv("SMARAN_SMTP_FROM_NAME") or "SMARAN.AI Security"
+_SMTP_CONFIG_FILE = os.path.join(settings.DATA_DIR, "smtp.json")
 
-    if not (smtp_host and smtp_user and smtp_password):
-        logger.warning(f"SMTP not configured in environment. Cannot dispatch email to {recipient_email}")
+
+def smtp_settings() -> dict:
+    """The mail server to send verification codes through.
+
+    Environment variables win, so a packaged build or a server deployment can
+    bake them in. What is missing there is filled from a file this app writes
+    itself, because the only way to switch password recovery on used to be
+    editing a .env next to the backend - which a phone cannot do at all, and a
+    desktop user has no reason to know about. The error on screen even said
+    "configure free SMTP in .env", which is not an instruction anyone holding a
+    phone can follow. Settings > Account can write this file instead.
+
+    The password is stored on this machine in DATA_DIR, owner-readable, beside
+    the provider keys that already live there.
+    """
+    stored = {}
+    try:
+        with open(_SMTP_CONFIG_FILE, "r", encoding="utf-8") as handle:
+            stored = json.load(handle) or {}
+    except (OSError, ValueError):
+        stored = {}
+
+    def pick(*env_names, key, default=""):
+        for name in env_names:
+            value = (os.getenv(name) or "").strip()
+            if value:
+                return value
+        return str(stored.get(key) or "").strip() or default
+
+    host = pick("SMTP_HOST", "SMARAN_SMTP_HOST", key="host")
+    user = pick("SMTP_USER", "SMARAN_SMTP_USER", key="user")
+    password = pick("SMTP_PASSWORD", "SMARAN_SMTP_PASSWORD", key="password")
+    raw_port = pick("SMTP_PORT", "SMARAN_SMTP_PORT", key="port", default="587")
+    try:
+        port = int(raw_port)
+    except ValueError:
+        # A port that is not a number used to raise straight out of the send
+        # path, which surfaced as a 500 rather than "check your settings".
+        logger.warning(f"SMTP port {raw_port!r} is not a number; using 587.")
+        port = 587
+    return {
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "from_address": pick("SMTP_FROM", "SMARAN_SMTP_FROM", key="from_address")
+        or user
+        or "no-reply@smaran.ai",
+        "from_name": pick(
+            "SMTP_FROM_NAME", "SMARAN_SMTP_FROM_NAME", key="from_name"
+        )
+        or "SMARAN.AI Security",
+        "configured": bool(host and user and password),
+    }
+
+
+def send_otp_email(recipient_email: str, otp_code: str) -> bool:
+    """Dispatches a 6-digit OTP email using the configured SMTP settings."""
+    config = smtp_settings()
+    smtp_host = config["host"]
+    smtp_port = config["port"]
+    smtp_user = config["user"]
+    smtp_password = config["password"]
+    smtp_from = config["from_address"]
+    smtp_from_name = config["from_name"]
+
+    if not config["configured"]:
+        logger.warning(f"SMTP not configured. Cannot dispatch email to {recipient_email}")
         return False
 
     try:
@@ -1347,9 +1469,6 @@ def send_otp_email(recipient_email: str, otp_code: str) -> bool:
 @app.post("/api/auth/forgot-password", response_model=dict)
 @auth_limiter.limit("10/hour")
 async def forgot_password(req: PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
-    client_ip = request.client.host if request.client else ""
-    local = client_ip in LOOPBACK_HOSTS
-
     clean_email = req.email.strip().lower()
     user = db.query(User).filter(User.email == clean_email).first()
 
@@ -1361,33 +1480,138 @@ async def forgot_password(req: PasswordResetRequest, request: Request, db: Sessi
         user.reset_token_expires = datetime.now() + timedelta(minutes=10)
         db.commit()
 
-    # Dispatch email if SMTP configured (best effort, don't fail the request)
-    sent = send_otp_email(clean_email, otp_code)
+    # Dispatch email if SMTP configured
+    sent = await asyncio.to_thread(send_otp_email, clean_email, otp_code)
 
-    # For local requests, return the token directly (no SMTP required)
-    # For network requests, never return the token to prevent takeover
-    response_body = {
+    if sent:
+        return {
+            "message": "If an account exists with this email, a verification code has been sent.",
+            "email_dispatched": True,
+        }
+
+    # No mail server, or it refused the message. Two different callers are
+    # standing here and they must not be answered the same way.
+    #
+    # Someone at the keyboard of the machine SMARAN runs on already owns the
+    # database; handing them the code costs nothing they could not read
+    # anyway, and without it a desktop install with no SMTP has no route back
+    # into a forgotten account at all. That is the state this app shipped in,
+    # and "configure free SMTP in .env" was the only thing on screen.
+    #
+    # A caller from the LAN - which is how the paired phone reaches this, and
+    # this endpoint needs no authentication - is a different person entirely.
+    # Handing that caller the code would be the account takeover described in
+    # test_password_reset_is_not_a_takeover.py: know an address, get a token,
+    # set a password, sign in.
+    #
+    # Both get the same 200 and the same neutral sentence whether or not the
+    # address has an account, so neither can use this as a directory. Only the
+    # extra field differs, and only for the owner of the machine.
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    reply = {
         "message": "If an account exists with this email, a verification code has been sent.",
-        "email_dispatched": sent,
+        "email_dispatched": False,
+        # Why nothing arrived, so the screen can say something true rather
+        # than leaving the person waiting for an email that is not coming.
+        "delivery_error": (
+            "Email delivery is not set up on this installation. Open "
+            "Settings > Account > Email delivery (SMTP) and add a mail server "
+            "- a free Gmail app password works."
+            if not smtp_settings()["configured"]
+            else "The mail server refused the message. Check the host, port, "
+                 "username and password in Settings > Account > Email delivery (SMTP)."
+        ),
     }
-    
-    # Only local requests get the token back in the response
-    if local and user:
-        response_body["reset_token"] = otp_code
-    
-    return response_body
+    if user and client_ip in LOOPBACK_HOSTS:
+        reply["reset_token"] = otp_code
+        reply["local_owner"] = True
+    return reply
+
+
+class SmtpConfigRequest(BaseModel):
+    host: str = ""
+    port: int = 587
+    user: str = ""
+    # Left unset to keep the password already saved; sent empty to clear it.
+    password: Optional[str] = None
+    from_address: str = ""
+    from_name: str = ""
+
+
+@app.get("/api/auth/smtp/config")
+def get_smtp_config(current_user: User = Depends(get_current_user)):
+    """What the Settings screen shows. The password is never sent back."""
+    config = smtp_settings()
+    return {
+        "configured": config["configured"],
+        "host": config["host"],
+        "port": config["port"],
+        "user": config["user"],
+        "from_address": config["from_address"],
+        "from_name": config["from_name"],
+        "has_password": bool(config["password"]),
+        # Which fields an environment variable is currently deciding, so the
+        # screen can say precisely what editing here will not change. Named
+        # per field rather than as one flag: a .env that sets the host and
+        # leaves SMTP_PASSWORD empty - which is the state that breaks
+        # password recovery most often - is exactly the case where the
+        # password field here does still work, and a blanket "environment
+        # wins" warning would have talked the user out of the one edit that
+        # would have fixed it.
+        "from_environment": [
+            name
+            for name, variables in (
+                ("host", ("SMTP_HOST", "SMARAN_SMTP_HOST")),
+                ("port", ("SMTP_PORT", "SMARAN_SMTP_PORT")),
+                ("user", ("SMTP_USER", "SMARAN_SMTP_USER")),
+                ("password", ("SMTP_PASSWORD", "SMARAN_SMTP_PASSWORD")),
+                ("from_address", ("SMTP_FROM", "SMARAN_SMTP_FROM")),
+                ("from_name", ("SMTP_FROM_NAME", "SMARAN_SMTP_FROM_NAME")),
+            )
+            if any((os.getenv(v) or "").strip() for v in variables)
+        ],
+    }
+
+
+@app.post("/api/auth/smtp/config")
+def save_smtp_config(req: SmtpConfigRequest, current_user: User = Depends(get_current_user)):
+    """Save the mail server so password recovery can send its codes."""
+    if req.port < 1 or req.port > 65535:
+        raise HTTPException(status_code=400, detail="Port must be between 1 and 65535.")
+
+    existing = {}
+    try:
+        with open(_SMTP_CONFIG_FILE, "r", encoding="utf-8") as handle:
+            existing = json.load(handle) or {}
+    except (OSError, ValueError):
+        existing = {}
+
+    # None means "leave it alone", so the screen can show the other fields
+    # without ever having to hold the password to re-send it.
+    password = existing.get("password", "") if req.password is None else req.password
+
+    saved = {
+        "host": req.host.strip(),
+        "port": req.port,
+        "user": req.user.strip(),
+        "password": password,
+        "from_address": req.from_address.strip(),
+        "from_name": req.from_name.strip(),
+    }
+    os.makedirs(settings.DATA_DIR, exist_ok=True)
+    with open(_SMTP_CONFIG_FILE, "w", encoding="utf-8") as handle:
+        json.dump(saved, handle, indent=2)
+    try:
+        os.chmod(_SMTP_CONFIG_FILE, 0o600)  # owner-only where supported
+    except OSError:
+        pass
+
+    return get_smtp_config(current_user)
 
 @app.post("/api/auth/reset-password", response_model=dict)
 @auth_limiter.limit("5/hour")
 async def reset_password(req: PasswordResetConfirmRequest, request: Request, db: Session = Depends(get_db)):
-    client_ip = request.client.host if request.client else ""
-    local = client_ip in LOOPBACK_HOSTS
-    
-    # Reset tokens can only be used from the local machine to prevent account takeover
-    if not local:
-        raise HTTPException(status_code=403, detail="Password reset can only be completed from the local machine")
-    
-    user = db.query(User).filter(User.reset_token == req.token).first()
+    user = db.query(User).filter(User.email == req.email.strip().lower(), User.reset_token == req.token).first()
     if not user or not user.reset_token_expires or user.reset_token_expires < datetime.now():
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
     
@@ -1437,8 +1661,7 @@ async def device_login(req: DeviceRequest, request: Request, db: Session = Depen
         role=user.role, 
         is_approved=user.is_approved,
         email=user.email,
-        email_verified=user.email_verified,
-        device_fingerprint=user.device_fingerprint
+        email_verified=user.email_verified
     )
 
 def _clean_response_text(text: str) -> str:

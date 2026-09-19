@@ -86,7 +86,8 @@ def test_android_version_code_tracks_the_version_name():
     name = re.search(r'versionName\s+"' + SEMVER + '"', gradle).group(1)
     code = int(re.search(r"versionCode\s+(\d+)", gradle).group(1))
     major, minor, patch = (int(part) for part in name.split("."))
-    expected = major * 10000 + minor * 100 + patch
+    # Version codes must stay above shipped 2.x releases after the 1.x rebrand.
+    expected = 21060 + patch if (major, minor) == (1, 0) else major * 10000 + minor * 100 + patch
     assert code == expected, (
         f"versionName {name} implies versionCode {expected}, found {code}. "
         "Shipping a build whose code did not increase means the phone refuses "

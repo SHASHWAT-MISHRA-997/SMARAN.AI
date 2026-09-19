@@ -14,6 +14,12 @@
       "port": 3003
     },
     {
+      "name": "website",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "website"],
+      "port": 4173
+    },
+    {
       "name": "energy-core-bench",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--port", "5183", "--strictPort"],

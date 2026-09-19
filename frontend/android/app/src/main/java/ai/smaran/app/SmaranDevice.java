@@ -6,6 +6,15 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Build;
+import android.os.CancellationSignal;
+import androidx.core.content.ContextCompat;
+import androidx.credentials.CredentialManager;
+import androidx.credentials.CredentialManagerCallback;
+import androidx.credentials.GetCredentialRequest;
+import androidx.credentials.GetCredentialResponse;
+import androidx.credentials.exceptions.GetCredentialException;
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 import android.provider.MediaStore;
 import android.app.SearchManager;
 import android.util.Log;
@@ -16,10 +25,6 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
-import android.accounts.AccountManager;
-import android.app.Activity;
-import androidx.activity.result.ActivityResult;
-import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.text.Normalizer;
@@ -409,47 +414,73 @@ public class SmaranDevice extends Plugin {
     }
 
     /**
-     * Native Android Google account chooser.
-     * Pops up the system account picker with the device's Google accounts,
-     * avoiding WebView OAuth restrictions and white-screen issues.
+     * Say what actually went wrong with a Credential Manager failure.
+     *
+     * Every failure used to arrive as "Check your connection and Google
+     * account, then retry", followed by the raw exception text. The most
+     * common failure here is not a connection problem at all: Play Services
+     * answers DEVELOPER_ERROR - which reaches the app as the baffling
+     * "[16] Account reauth failed" - when this package and signing
+     * certificate are not registered as an Android OAuth client in the Google
+     * Cloud project the web client id belongs to. Retrying, changing network
+     * and switching Google account all fail identically, so the message sent
+     * people to look in three places that were never the problem.
      */
-    @PluginMethod
-    public void chooseGoogleAccount(PluginCall call) {
-        try {
-            Intent intent = AccountManager.newChooseAccountIntent(
-                null,
-                null,
-                new String[]{"com.google"},
-                null,
-                null,
-                null,
-                null
-            );
-            startActivityForResult(call, intent, "onGoogleAccountChosen");
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to launch Google account picker", e);
-            call.reject("Could not launch Google account picker: " + e.getMessage());
+    private static String explain(GetCredentialException error) {
+        String detail = error.getMessage() == null ? "" : error.getMessage();
+        String type = error.getType() == null ? "" : error.getType();
+        if (detail.contains("[16]") || detail.contains("DEVELOPER_ERROR")
+                || type.endsWith("TYPE_GET_CREDENTIAL_UNKNOWN") && detail.contains("reauth")) {
+            return "Google refused this app's sign-in request. The Android OAuth "
+                + "client for ai.smaran.app is missing or its certificate "
+                + "fingerprint does not match, so Google will not issue a token. "
+                + "Sign in with email and password below while that is fixed.";
         }
+        if (type.endsWith("TYPE_NO_CREDENTIAL")) {
+            return "No Google account is available on this phone. Add one in "
+                + "Android Settings, or sign in with email and password below.";
+        }
+        if (type.endsWith("TYPE_USER_CANCELED")) {
+            return "Google sign-in was cancelled.";
+        }
+        if (type.endsWith("TYPE_GET_CREDENTIAL_PROVIDER_CONFIGURATION")) {
+            return "Google Play services is missing or out of date on this "
+                + "phone, so Google sign-in cannot run here.";
+        }
+        return "Google sign-in could not finish. " + detail;
     }
 
-    @ActivityCallback
-    private void onGoogleAccountChosen(PluginCall call, ActivityResult result) {
-        if (result == null) {
-            call.reject("No result received from account picker");
+    /** Google authenticates the account and returns an ID token, never just an email. */
+    @PluginMethod
+    public void chooseGoogleAccount(PluginCall call) {
+        String clientId = call.getString("clientId");
+        if (clientId == null || !clientId.endsWith(".apps.googleusercontent.com")) {
+            call.reject("Google sign-in is not configured.");
             return;
         }
-        if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
-            String accountName = result.getData().getStringExtra(AccountManager.KEY_ACCOUNT_NAME);
-            if (accountName != null && !accountName.trim().isEmpty()) {
-                String cleanEmail = accountName.trim().toLowerCase(Locale.ROOT);
-                JSObject ret = new JSObject();
-                ret.put("email", cleanEmail);
-                String displayName = cleanEmail.contains("@") ? cleanEmail.split("@")[0] : cleanEmail;
-                ret.put("name", displayName);
-                call.resolve(ret);
-                return;
-            }
-        }
-        call.reject("User cancelled Google account selection");
+        getActivity().runOnUiThread(() -> {
+            try {
+                GetSignInWithGoogleOption option = new GetSignInWithGoogleOption.Builder(clientId).build();
+                GetCredentialRequest request = new GetCredentialRequest.Builder().addCredentialOption(option).build();
+                CredentialManager.create(getContext()).getCredentialAsync(
+                    getActivity(), request, new CancellationSignal(), ContextCompat.getMainExecutor(getContext()),
+                    new CredentialManagerCallback<GetCredentialResponse, GetCredentialException>() {
+                        @Override public void onResult(GetCredentialResponse result) {
+                            try {
+                                GoogleIdTokenCredential credential = GoogleIdTokenCredential.createFrom(result.getCredential().getData());
+                                JSObject value = new JSObject();
+                                value.put("credential", credential.getIdToken());
+                                value.put("email", credential.getId());
+                                value.put("name", credential.getDisplayName());
+                                if (credential.getProfilePictureUri() != null) value.put("picture", credential.getProfilePictureUri().toString());
+                                call.resolve(value);
+                            } catch (Exception error) { call.reject("Google returned an invalid credential."); }
+                        }
+                        @Override public void onError(GetCredentialException error) {
+                            call.reject(explain(error), error.getType());
+                        }
+                    });
+            } catch (Exception error) { call.reject("Google sign-in could not open: " + error.getMessage()); }
+        });
     }
 }

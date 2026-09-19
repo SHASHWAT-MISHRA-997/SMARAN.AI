@@ -81,6 +81,15 @@
 
   .empty { color:var(--dimmer); text-align:center; padding:28px 0; font-size:12px; }
   .note { color:var(--dimmer); font-size:11px; line-height:1.75; border-left:2px solid rgba(239,68,68,.35); padding-left:14px; margin-top:24px; }
+  .wrap, .grid > *, .panel { min-width:0; }
+  .panel { overflow-x:auto; }
+  .controls input, .controls select { max-width:100%; }
+  @media(max-width:480px) {
+    body { padding:16px 12px 40px; }
+    .panel { padding:14px 12px; }
+    .cards { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .controls { margin-left:0; width:100%; }
+  }
 </style>
 </head>
 <body>
@@ -226,7 +235,7 @@ async function api(path) {
     askForKey('This page needs the key to read the statistics.');
     throw new Error('no key');
   }
-  const response = await fetch(path, { headers: { 'x-dashboard-key': key } });
+  const response = await fetch(path, { headers: { 'x-dashboard-key': key }, signal: AbortSignal.timeout(15000) });
   if (response.status === 401) {
     // A wrong key should not be remembered, or every reload fails silently.
     // The form comes straight back rather than a dead end that says reload.
@@ -470,7 +479,7 @@ document.querySelectorAll('.controls button[data-days]').forEach(b => {
     document.getElementById('to').value = '';
     document.getElementById('month').value = '';
     query = { days: Number(b.dataset.days) };
-    load();
+    refresh();
   };
 });
 
@@ -495,7 +504,7 @@ document.querySelectorAll('.controls button[data-days]').forEach(b => {
     document.getElementById('from').value = start;
     document.getElementById('to').value = end;
     query = { start, end };
-    load();
+    refresh();
   };
 })();
 
@@ -505,13 +514,19 @@ document.getElementById('apply').onclick = () => {
   if (!start) return;
   document.querySelectorAll('.controls button[data-days]').forEach(x => x.classList.remove('on'));
   query = { start, end: end || start };
-  load();
+  refresh();
 };
 
 // The no-key and wrong-key paths throw so the rest of load() stops, which is
 // deliberate - but an unhandled rejection reads as a fault in the console
 // when nothing is actually wrong. Caught here, where it is expected.
-const refresh = () => load().catch(() => {});
+let refreshing = false;
+const refresh = async () => {
+  if (refreshing || document.hidden) return;
+  refreshing = true;
+  try { await load(); } catch { /* The key form and status handle failures. */ }
+  finally { refreshing = false; }
+};
 refresh();
 // Every five seconds. The number here and the number written on
 // the page are the same number, so the page cannot claim a

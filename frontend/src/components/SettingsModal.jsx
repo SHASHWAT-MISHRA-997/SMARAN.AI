@@ -16,6 +16,7 @@ import MemoryPreferences from './MemoryPreferences';
 import SchedulerView from './SchedulerView';
 import GatewayPreferences from './GatewayPreferences';
 import SandboxPreferences from './SandboxPreferences';
+import SmtpPreferences from './SmtpPreferences';
 
 import { detectClientDevice } from './RightPanel';
 import { isPhone } from '../utils/device';
@@ -1331,6 +1332,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                     <span className="text-xs font-bold text-emerald-500">Active (100% Private)</span>
                   </div>
                 </div>
+
+                {/* Where "Forgot password" sends its code */}
+                <SmtpPreferences />
 
                 {/* Danger Zone: Delete Account */}
                 <div className="rounded-2xl border border-red-500/25 bg-red-500/5 p-5 space-y-3">
