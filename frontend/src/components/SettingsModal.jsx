@@ -581,9 +581,26 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
     window.dispatchEvent(new CustomEvent('smaran:display-name', { detail: { name: displayName } }));
   }, [displayName]);
 
-  const displayInitials = (displayName.trim() || 'You')
+  /* The avatar spells the person's initials, and it was reading only the
+     workspace nickname - a field almost nobody fills in. With it empty the
+     expression fell through to the literal word "You", so a signed-in
+     Shashwat Mishra was greeted by a circle marked "Y", directly beside a
+     card printing his real name and email. It looked like the app had
+     mistaken who he was.
+
+     Read the same identity the card does, most specific first: the nickname
+     if he chose one, then the account name, then the local part of the email
+     ("shashwat.mishra@..." -> SM). Only a session with none of the three
+     falls back, and then to a neutral dot rather than an initial belonging
+     to nobody. */
+  const initialsSource =
+    displayName.trim()
+    || (activeUser?.name || '').trim()
+    || (activeUser?.email || '').split('@')[0].trim();
+
+  const displayInitials = initialsSource
     .split(/[\s._-]+/).filter(Boolean).slice(0, 2)
-    .map((part) => part[0].toUpperCase()).join('') || 'Y';
+    .map((part) => part[0].toUpperCase()).join('') || '·';
 
   const [pairedDevices, setPairedDevices] = useState([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
@@ -1252,8 +1269,19 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                     )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
+                        {/* "SMARAN User" was printed whenever the session
+                            carried no name - which is also exactly when it
+                            carries no email - so a session the app could say
+                            nothing true about was shown as a confidently
+                            named, green-ticked account. Better to name the
+                            thing that is actually known: the address, or the
+                            nickname, and otherwise say plainly that this
+                            session has no profile attached. */}
                         <span className="text-sm font-extrabold text-zinc-900 dark:text-white truncate">
-                          {activeUser?.name || displayName || "SMARAN User"}
+                          {activeUser?.name
+                            || displayName
+                            || activeUser?.email
+                            || "Session without a profile"}
                         </span>
                         <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -1261,7 +1289,11 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                         </span>
                       </div>
                       <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
-                        {activeUser?.email || "Signed in locally"}
+                        {/* "Signed in locally" read as a statement about where
+                            the account lives. It was only ever shown when the
+                            email was missing, so it described a gap as though
+                            it were a feature. */}
+                        {activeUser?.email || "No email address on this session — sign out and back in to attach one"}
                       </p>
                       <div className="mt-1 flex items-center gap-2">
                         {activeUser?.provider === 'google' ? (

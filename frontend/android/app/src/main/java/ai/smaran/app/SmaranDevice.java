@@ -417,24 +417,44 @@ public class SmaranDevice extends Plugin {
      * Say what actually went wrong with a Credential Manager failure.
      *
      * Every failure used to arrive as "Check your connection and Google
-     * account, then retry", followed by the raw exception text. The most
-     * common failure here is not a connection problem at all: Play Services
-     * answers DEVELOPER_ERROR - which reaches the app as the baffling
-     * "[16] Account reauth failed" - when this package and signing
-     * certificate are not registered as an Android OAuth client in the Google
-     * Cloud project the web client id belongs to. Retrying, changing network
-     * and switching Google account all fail identically, so the message sent
-     * people to look in three places that were never the problem.
+     * account, then retry", followed by the raw exception text - which sent
+     * people to look at a network and a Google account that were both fine.
+     *
+     * The failure that matters here is "[16] Account reauth failed", which
+     * Play services reports as TYPE_USER_CANCELED even though nobody
+     * cancelled anything. It means Google's servers refused to mint a token
+     * for this app: the account chooser appears, an account is picked, GMS
+     * calls googleapis.com, and the answer is no. Observed identically on two
+     * different Google accounts on the same device, so it is about the app,
+     * not the account.
+     *
+     * The message below deliberately stops short of naming one cause. An
+     * earlier version asserted the Android OAuth client was missing; that was
+     * true at the time - Play services was logging DEVELOPER_ERROR then - but
+     * once a client was registered the DEVELOPER_ERROR stopped and this error
+     * did not, and a message that keeps insisting on a fix already applied is
+     * worse than one that says what it knows. A mismatched fingerprint, a
+     * client in the wrong project and a client that simply has not propagated
+     * yet are indistinguishable from inside the app, and Google's own console
+     * warns that changes take "five minutes to a few hours" to take effect.
      */
     private static String explain(GetCredentialException error) {
         String detail = error.getMessage() == null ? "" : error.getMessage();
         String type = error.getType() == null ? "" : error.getType();
+        // The mapping below is a guess made from two strings, and a wrong guess
+        // here is worse than no message: it sends someone to fix a thing that
+        // was never broken. Play services does not log the cause under a tag
+        // anyone would think to look for, so the raw pair is recorded here
+        // where `adb logcat -s SmaranDevice` will show it.
+        Log.w(TAG, "Google sign-in failed. type=" + type + " message=" + detail);
         if (detail.contains("[16]") || detail.contains("DEVELOPER_ERROR")
-                || type.endsWith("TYPE_GET_CREDENTIAL_UNKNOWN") && detail.contains("reauth")) {
-            return "Google refused this app's sign-in request. The Android OAuth "
-                + "client for ai.smaran.app is missing or its certificate "
-                + "fingerprint does not match, so Google will not issue a token. "
-                + "Sign in with email and password below while that is fixed.";
+                || detail.contains("reauth")) {
+            return "Google would not issue a sign-in token for this app. Its "
+                + "Android OAuth client must list package ai.smaran.app with "
+                + "this build's certificate fingerprint, in the same Google "
+                + "Cloud project as the web client - and a change there can "
+                + "take up to a few hours to take effect. Sign in with email "
+                + "and password below meanwhile.";
         }
         if (type.endsWith("TYPE_NO_CREDENTIAL")) {
             return "No Google account is available on this phone. Add one in "
@@ -458,6 +478,10 @@ public class SmaranDevice extends Plugin {
             call.reject("Google sign-in is not configured.");
             return;
         }
+        // Which client id actually reached Google. It can come from the paired
+        // backend rather than the built-in default, so "the id is right" is an
+        // assumption worth being able to check rather than argue about.
+        Log.i(TAG, "Google sign-in requested with client id " + clientId);
         getActivity().runOnUiThread(() -> {
             try {
                 GetSignInWithGoogleOption option = new GetSignInWithGoogleOption.Builder(clientId).build();
