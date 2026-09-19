@@ -1508,21 +1508,42 @@ async def forgot_password(req: PasswordResetRequest, request: Request, db: Sessi
     # address has an account, so neither can use this as a directory. Only the
     # extra field differs, and only for the owner of the machine.
     client_ip = request.client.host if request.client else "127.0.0.1"
-    reply = {
-        "message": "If an account exists with this email, a verification code has been sent.",
-        "email_dispatched": False,
-        # Why nothing arrived, so the screen can say something true rather
-        # than leaving the person waiting for an email that is not coming.
-        "delivery_error": (
+    is_owner = client_ip in LOOPBACK_HOSTS
+    configured = smtp_settings()["configured"]
+
+    # Why nothing arrived, said to the person who is actually reading it.
+    #
+    # Both audiences were previously told to open Settings > Account > Email
+    # delivery, which for the phone is advice it cannot take: Settings is
+    # behind the sign-in screen, and the person reading this is locked out of
+    # exactly that. It named the one door they could not open. The desktop can
+    # reset any account on its own, with no mail server at all, so that is
+    # what the phone is pointed at instead.
+    if not configured and not is_owner:
+        delivery_error = (
+            "A code can only reach this phone by email, and email delivery is "
+            "not set up yet. Reset the password in SMARAN on your computer - "
+            "it can do it without a mail server - or set one up there under "
+            "Settings > Account > Email delivery (SMTP)."
+        )
+    elif not configured:
+        delivery_error = (
             "Email delivery is not set up on this installation. Open "
             "Settings > Account > Email delivery (SMTP) and add a mail server "
             "- a free Gmail app password works."
-            if not smtp_settings()["configured"]
-            else "The mail server refused the message. Check the host, port, "
-                 "username and password in Settings > Account > Email delivery (SMTP)."
-        ),
+        )
+    else:
+        delivery_error = (
+            "The mail server refused the message. Check the host, port, "
+            "username and password in Settings > Account > Email delivery (SMTP)."
+        )
+
+    reply = {
+        "message": "If an account exists with this email, a verification code has been sent.",
+        "email_dispatched": False,
+        "delivery_error": delivery_error,
     }
-    if user and client_ip in LOOPBACK_HOSTS:
+    if user and is_owner:
         reply["reset_token"] = otp_code
         reply["local_owner"] = True
     return reply
