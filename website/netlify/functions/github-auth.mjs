@@ -160,9 +160,19 @@ async function identify(code, origin) {
   };
 }
 
-/** A page whose only job is to step back into the app that opened it. */
-function handBack(redirect, fragment) {
-  const target = `${redirect}#${fragment}`;
+/**
+ * A page whose only job is to step back into the app that opened it.
+ *
+ * A fragment for the packaged app, because a fragment is not sent to any
+ * server and the phone's browser is the only thing that needs to read it. A
+ * query for a desktop build, because there the reader *is* a server - a
+ * listener on loopback - and a fragment would never reach it. That is the same
+ * split Google's own loopback flow makes.
+ */
+function handBack(redirect, answer) {
+  const target = redirect.startsWith('http')
+    ? `${redirect}${redirect.includes('?') ? '&' : '?'}${answer}`
+    : `${redirect}#${answer}`;
   const escaped = target.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8">`

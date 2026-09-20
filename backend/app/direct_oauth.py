@@ -48,6 +48,38 @@ async def github_identity(client, token):
             "picture": user.get("avatar_url"), "sub": str(user["id"]), "provider": "github"}
 
 
+SITE = os.getenv("SMARAN_SITE_ORIGIN", "https://smaran-ai.netlify.app").rstrip("/")
+
+# Asked once and remembered, because it is the same answer every time for a
+# given deployment and this sits in front of a button someone is waiting on.
+_site_github: dict = {}
+
+
+async def site_holds_github_secret():
+    """Can the site finish a GitHub sign-in for us?
+
+    If it can, GitHub is one tap - open the browser, authorise, done. If it
+    cannot, the device-code flow still works with no secret anywhere, so the
+    fallback is a working sign-in rather than a broken one, and that is why
+    this is a question rather than an assumption.
+    """
+    if "answer" in _site_github and time.monotonic() < _site_github["until"]:
+        return _site_github["answer"]
+    answer = False
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            reply = await client.get(f"{SITE}/api/github/config")
+            answer = bool(reply.status_code == 200 and reply.json().get("configured"))
+    except Exception:
+        # Offline, or the site is down. The device flow needs github.com and
+        # nothing else, so it is the better bet from here.
+        answer = False
+    # A "no" is rechecked sooner: it is the answer that changes the moment the
+    # secret is configured, and nobody should have to restart the app for it.
+    _site_github.update(answer=answer, until=time.monotonic() + (3600 if answer else 120))
+    return answer
+
+
 class PollRequest(BaseModel):
     ticket: str = Field(min_length=32, max_length=200)
 
@@ -102,6 +134,23 @@ def make_router(get_db, finish_login, web_client_id):
                 "client_id": flow["client_id"], "redirect_uri": redirect, "response_type": "code",
                 "scope": "openid email profile", "state": state, "code_challenge": challenge,
                 "code_challenge_method": "S256", "prompt": "select_account"})
+        elif await site_holds_github_secret():
+            # The same one-tap path the phone takes. GitHub OAuth Apps have no
+            # PKCE, so the token exchange needs a secret and cannot happen
+            # here; the site does it and hands back an identity sealed against
+            # the challenge below. Only this process holds the verifier that
+            # opens it, so the answer is useless to anything else that sees it
+            # go past on loopback.
+            if request.url.hostname not in LOOPBACK or not request.client or request.client.host not in LOOPBACK:
+                raise HTTPException(400, "Open SMARAN.AI on this computer using localhost to sign in with GitHub.")
+            verifier = secrets.token_urlsafe(48)
+            state = secrets.token_urlsafe(32)
+            challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+            redirect = (str(request.base_url).rstrip("/")
+                        + "/api/auth/direct/github/callback?state=" + quote(state))
+            flow.update(verifier=verifier, state=state)
+            result["url"] = f"{SITE}/api/github/start?" + urlencode({
+                "challenge": challenge, "redirect": redirect})
         else:
             if not github_client_id():
                 raise HTTPException(503, "GitHub sign-in is not configured.")
@@ -164,6 +213,48 @@ def make_router(get_db, finish_login, web_client_id):
         return HTMLResponse("<!doctype html><html><title>SMARAN.AI sign-in</title><body><h1>SMARAN.AI</h1><p>" + message + "</p></body></html>",
                             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
+    @router.get("/github/callback", response_class=HTMLResponse)
+    async def github_callback(state: str = "", result: str = "", error: str = ""):
+        """The site hands the sealed identity back here, on loopback.
+
+        The seal is opened by presenting the verifier, which never left this
+        process - so anything that reads this URL off the machine still cannot
+        turn it into a sign-in.
+        """
+        prune()
+        flow = next((f for f in pending.values()
+                     if f.get("state") == state and state and f["provider"] == "github"), None)
+        if flow is None:
+            raise HTTPException(400, "Invalid or expired sign-in state.")
+        async with flow["lock"]:
+            if flow["status"] != "pending":
+                raise HTTPException(400, "This sign-in callback was already used.")
+            flow["status"] = "processing"
+            try:
+                if error or not result:
+                    raise HTTPException(401, "GitHub sign-in was cancelled. Please try again.")
+                async with httpx.AsyncClient(timeout=15) as client:
+                    identity = await provider_json(client, "POST", f"{SITE}/api/github/exchange",
+                                                   json={"sealed": result, "verifier": flow["verifier"]})
+                user = identity.get("user") or {}
+                if not user.get("email") or not str(user.get("id", "")).startswith("github_"):
+                    raise HTTPException(401, "GitHub did not return a verified email address.")
+                flow.update(status="complete", claims={
+                    "email": user["email"].strip().lower(), "name": user.get("username"),
+                    "picture": user.get("avatar"), "sub": user["id"][len("github_"):],
+                    "provider": "github"})
+            except (HTTPException, TypeError, ValueError, KeyError) as exc:
+                flow.update(status="error",
+                            error=getattr(exc, "detail", "GitHub returned an invalid identity."))
+            finally:
+                flow.pop("verifier", None)
+        message = ("Sign-in completed. Return to SMARAN.AI." if flow["status"] == "complete"
+                   else "Sign-in could not finish. Return to SMARAN.AI and try again.")
+        return HTMLResponse(
+            "<!doctype html><html><title>SMARAN.AI sign-in</title><body><h1>SMARAN.AI</h1><p>"
+            + message + "</p></body></html>",
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
     @router.post("/poll")
     async def poll(body: PollRequest, response: Response, request: Request, db=Depends(get_db)):
         flow = entry(body.ticket)
@@ -171,7 +262,12 @@ def make_router(get_db, finish_login, web_client_id):
         async with flow["lock"]:
             if body.ticket not in pending:
                 raise HTTPException(410, "This sign-in has already completed.")
-            if flow["provider"] == "github" and flow["status"] == "pending" and time.monotonic() >= flow["next_poll"]:
+            # Only the device-code flow is polled from here. The browser flow
+            # is finished by /github/callback, and has no device code to ask
+            # about - reading next_poll on one of those raised a KeyError that
+            # surfaced as a 500 on the first poll after the button was pressed.
+            if ("device_code" in flow and flow["status"] == "pending"
+                    and time.monotonic() >= flow["next_poll"]):
                 flow["next_poll"] = time.monotonic() + flow["interval"]
                 async with httpx.AsyncClient(timeout=15) as client:
                     data = await provider_json(client, "POST", "https://github.com/login/oauth/access_token",
@@ -194,6 +290,10 @@ def make_router(get_db, finish_login, web_client_id):
                 return {"status": "pending", "interval": flow.get("interval", 2)}
             pending.pop(body.ticket, None)
             return {"status": "complete", **finish_login(flow["claims"], response, request, db)}
+
+    # Sign-ins in flight. Exposed so tests can read one without reaching into a
+    # closure; it is never mutated from outside.
+    router.pending = pending
 
     @router.post("/cancel")
     async def cancel(body: PollRequest):

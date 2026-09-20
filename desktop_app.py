@@ -528,6 +528,11 @@ class _SignInBrowser:
         if parsed.scheme != "https" or (parsed.hostname, parsed.path) not in {
             ("accounts.google.com", "/o/oauth2/v2/auth"),
             ("github.com", "/login/device"),
+            # GitHub cannot be finished without a secret, so the site does that
+            # half and this is where it starts. It answers with a redirect to
+            # github.com; the allowlist covers what this opens, not where the
+            # browser goes afterwards, which is the browser's business.
+            ("smaran-ai.netlify.app", "/api/github/start"),
         } or parsed.username or parsed.password or parsed.port not in (None, 443):
             raise ValueError("Unsupported sign-in URL")
         return webbrowser.open(url)
