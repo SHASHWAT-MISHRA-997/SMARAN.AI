@@ -18,7 +18,7 @@ import GatewayPreferences from './GatewayPreferences';
 import SandboxPreferences from './SandboxPreferences';
 
 import { detectClientDevice } from './RightPanel';
-import { isPhone } from '../utils/device';
+import { isPhone, isHandheld } from '../utils/device';
 import { isNativeApp, loadLink } from '../utils/hostLink';
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
@@ -605,8 +605,11 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
    * Re-asked on resize, so the tabs come back the moment the window widens
    * rather than on the next time something else happens to redraw. */
   const [isMobile, setIsMobile] = useState(() => isPhone());
+  /* Tablets too, for the three screens that need a machine rather than a
+     window: see isHandheld. */
+  const [onHandheld, setOnHandheld] = useState(() => isHandheld());
   useEffect(() => {
-    const recheck = () => setIsMobile(isPhone());
+    const recheck = () => { setIsMobile(isPhone()); setOnHandheld(isHandheld()); };
     window.addEventListener('resize', recheck);
     // Not only width: a tablet switching between a keyboard and a finger
     // changes the answer without changing a single pixel.
@@ -628,7 +631,8 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
      tapped Settings. */
   useEffect(() => {
     if (isMobile && ["updates", "shortcuts", "computer_use", "git"].includes(activeTab)) setActiveTab("general");
-  }, [isMobile, activeTab]);
+    if (onHandheld && ["scheduler", "gateway", "sandbox"].includes(activeTab)) setActiveTab("general");
+  }, [isMobile, onHandheld, activeTab]);
 
   // Hooks MUST stay above the early return below so React's hook count
   // remains invariant whether the modal is open or closed.
@@ -657,9 +661,13 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
     // Customize Category (Screenshot 4)
     ...(noBackend() ? [{ id: "provider", label: "AI Provider", category: "Customize", icon: Boxes }] : []),
     { id: "memory", label: "Memory", category: "Customize", icon: Brain },
-    { id: "scheduler", label: "Automations (Cron)", category: "Customize", icon: Terminal },
-    { id: "gateway", label: "Gateway & Bots", category: "Customize", icon: Globe },
-    { id: "sandbox", label: "Sandbox & Security", category: "Customize", icon: Lock },
+    // Cron, the gateway and the sandbox all drive the machine running SMARAN
+    // as a server. A phone or tablet is a client of that machine, so these
+    // three opened there and did nothing at all; they are gone rather than
+    // disabled, because a dead control is worse than an absent one.
+    ...(onHandheld ? [] : [{ id: "scheduler", label: "Automations (Cron)", category: "Customize", icon: Terminal }]),
+    ...(onHandheld ? [] : [{ id: "gateway", label: "Gateway & Bots", category: "Customize", icon: Globe }]),
+    ...(onHandheld ? [] : [{ id: "sandbox", label: "Sandbox & Security", category: "Customize", icon: Lock }]),
     { id: "connections", label: "Connectors & Devices", category: "Customize", icon: Wifi },
     { id: "pets", label: isMobile ? "Mobile Pets" : "Desktop Pets", category: "Customize", icon: PawPrint },
   ];
@@ -778,9 +786,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
             {activeTab === 'cowork' && <CoworkPreferences />}
             {activeTab === 'desktop_general' && <DesktopGeneralPreferences />}
             {activeTab === 'memory' && <MemoryPreferences />}
-            {activeTab === 'scheduler' && <SchedulerView />}
-            {activeTab === 'gateway' && <GatewayPreferences />}
-            {activeTab === 'sandbox' && <SandboxPreferences />}
+            {activeTab === 'scheduler' && !onHandheld && <SchedulerView />}
+            {activeTab === 'gateway' && !onHandheld && <GatewayPreferences />}
+            {activeTab === 'sandbox' && !onHandheld && <SandboxPreferences />}
             {activeTab === "general" && (
               <div className="space-y-6">
                 <div>

@@ -40,6 +40,11 @@ const INTENTIONALLY_WIDE_ONLY = new Map([
     + 'already reachable at any width.'],
   ['updates', 'Not a view either - the same settings modal on its "updates" '
     + 'tab, reached through the Settings entry the drawer already has.'],
+  ['scheduled', 'Cron runs on the machine hosting SMARAN, and a phone or a '
+    + 'tablet is a client of that machine rather than the machine. The screen '
+    + 'loaded there and did nothing, which is why it is absent rather than '
+    + 'merely narrow: the desktop entry is itself behind !isHandheld(), so '
+    + 'below 768px on a handset there is no destination to mirror.'],
 ]);
 
 function targets(pattern) {
@@ -70,8 +75,10 @@ test('every destination the desktop nav offers is in the narrow drawer too', () 
   );
 });
 
-test('the three that were missing are specifically present', () => {
-  for (const view of ['design', 'terminal', 'scheduled']) {
+test('the ones that were missing are specifically present', () => {
+  // Scheduled was the third of these. It is now desktop-only in substance,
+  // not just in layout, and INTENTIONALLY_WIDE_ONLY carries the reason.
+  for (const view of ['design', 'terminal']) {
     assert.match(
       source,
       new RegExp(`onNavigate\\('${view}'\\);\\s*setMobileOpen\\(false\\)`),

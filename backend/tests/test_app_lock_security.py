@@ -16,12 +16,17 @@ needs the current PIN, and the password reset is not a back door.
 """
 
 import json
+import secrets
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
@@ -51,6 +56,46 @@ def locked(client):
     res = client.post("/api/lock/set", json={"pin": PIN})
     assert res.status_code == 200, res.text
     return client
+
+
+@pytest.fixture
+def signed_in(monkeypatch):
+    """Mint a session token as though someone had signed in N minutes ago.
+
+    Against a throwaway sqlite file, never the owner's database: these cases
+    write user rows, and a test has no business doing that to real data.
+
+    Only `session_expires` is stored against a session, so the age of a
+    sign-in is expressed the way the endpoint reads it - a full term minus
+    however long ago it was issued.
+    """
+    from app import database, models
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    models.Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr(database, "SessionLocal", Session)
+
+    def mint(minutes_ago):
+        token = f"token-{minutes_ago}-{secrets.token_hex(4)}"
+        db = Session()
+        try:
+            db.add(models.User(
+                username=f"google_{secrets.token_hex(6)}",
+                email=f"{secrets.token_hex(6)}@example.invalid",
+                role="user", is_approved=True, email_verified=True,
+                session_token=token,
+                session_expires=datetime.now()
+                + timedelta(days=app_lock.SESSION_DAYS)
+                - timedelta(minutes=minutes_ago),
+            ))
+            db.commit()
+        finally:
+            db.close()
+        return token
+
+    return mint
 
 
 # ---------------------------------------------------------------------------
@@ -180,38 +225,84 @@ def test_a_wrong_pin_at_disable_counts_toward_the_lockout(locked):
 # Reset is deliberately not a back door
 # ---------------------------------------------------------------------------
 
-def test_reset_without_the_account_password_does_nothing(locked):
-    res = locked.post("/api/lock/reset", json={
-        "email": "nobody@smaran.ai", "password": "not-the-password",
-        "new_pin": "111111"})
+def test_reset_without_any_proof_does_nothing(locked):
+    res = locked.post("/api/lock/reset", json={"new_pin": "111111"})
     assert res.status_code == 401
     assert locked.post("/api/lock/verify", json={"pin": PIN}).status_code == 200
 
 
-def test_reset_does_not_reveal_which_accounts_exist(locked):
-    """The same failure this project already had on forgot-password."""
-    missing = locked.post("/api/lock/reset", json={
-        "email": "definitely-nobody@smaran.ai", "password": "x" * 12,
-        "new_pin": "111111"})
+def test_reset_refuses_a_token_that_was_never_issued(locked, signed_in):
+    res = locked.post("/api/lock/reset",
+                      json={"new_pin": "111111", "session_token": "made-up-token"})
+    assert res.status_code == 401
+    assert locked.post("/api/lock/verify", json={"pin": PIN}).status_code == 200
+
+
+def test_a_sign_in_that_just_happened_sets_the_new_pin(locked, signed_in):
+    """The whole point: forgetting the PIN must not shut the app for good.
+
+    Before this, reset took an email and an account password. Sign-in became
+    Google and GitHub only, no user row kept a password hash, and so the
+    branch could not be satisfied by anybody - the lock had no way out.
+    """
+    token = signed_in(minutes_ago=0)
+    res = locked.post("/api/lock/reset",
+                      json={"new_pin": "111111", "session_token": token})
+    assert res.status_code == 200, res.text
+    assert locked.post("/api/lock/verify", json={"pin": "111111"}).status_code == 200
+    # And the old PIN is genuinely gone, not merely shadowed.
     app_lock._attempts.clear()
-    real = locked.post("/api/lock/reset", json={
-        "email": "local@smaran.ai", "password": "x" * 12, "new_pin": "111111"})
-    assert missing.status_code == real.status_code
-    assert missing.json() == real.json()
+    assert locked.post("/api/lock/verify", json={"pin": PIN}).status_code == 401
+
+
+def test_a_session_saved_on_this_machine_is_not_proof(locked, signed_in):
+    """Whoever is sitting at the PIN screen already has the saved session.
+
+    If an old token were accepted, the lock would protect nothing from the
+    one person it is meant to stop - the passer-by at an unattended machine.
+    """
+    stale = signed_in(minutes_ago=int(app_lock.RECENT_SIGN_IN.total_seconds() // 60) + 5)
+    res = locked.post("/api/lock/reset",
+                      json={"new_pin": "111111", "session_token": stale})
+    assert res.status_code == 401
+    assert locked.post("/api/lock/verify", json={"pin": PIN}).status_code == 200
+
+
+def test_an_expired_session_is_not_proof_either(locked, signed_in):
+    res = locked.post("/api/lock/reset",
+                      json={"new_pin": "111111", "session_token": signed_in(minutes_ago=60 * 24 * 40)})
+    assert res.status_code == 401
+
+
+def test_the_cookie_counts_as_well_as_the_body(locked, signed_in):
+    """The packaged app has the httpOnly cookie; a bare fetch has the token."""
+    locked.cookies.set("session_token", signed_in(minutes_ago=1))
+    res = locked.post("/api/lock/reset", json={"new_pin": "222222"})
+    locked.cookies.clear()
+    assert res.status_code == 200, res.text
+    assert locked.post("/api/lock/verify", json={"pin": "222222"}).status_code == 200
+
+
+def test_reset_says_the_same_thing_however_the_proof_falls_short(locked, signed_in):
+    """So it cannot be used to find out whether a token is real."""
+    missing = locked.post("/api/lock/reset",
+                          json={"new_pin": "111111", "session_token": "not-a-token"})
+    app_lock._attempts.clear()
+    stale = locked.post("/api/lock/reset",
+                        json={"new_pin": "111111", "session_token": signed_in(minutes_ago=60)})
+    assert missing.status_code == stale.status_code
+    assert missing.json() == stale.json()
 
 
 def test_reset_is_throttled_on_the_same_counter_as_guesses(locked):
-    """So it cannot be used to brute-force the password instead of the PIN."""
+    """So it cannot be used to brute-force tokens instead of the PIN."""
     for _ in range(app_lock._MAX_ATTEMPTS):
-        locked.post("/api/lock/reset", json={
-            "email": "nobody@smaran.ai", "password": "wrong",
-            "new_pin": "111111"})
-    res = locked.post("/api/lock/reset", json={
-        "email": "nobody@smaran.ai", "password": "wrong", "new_pin": "111111"})
+        locked.post("/api/lock/reset", json={"new_pin": "111111", "session_token": "wrong"})
+    res = locked.post("/api/lock/reset", json={"new_pin": "111111", "session_token": "wrong"})
     assert res.status_code == 429
 
 
-def test_reset_requires_a_digit_pin_like_every_other_route(locked):
+def test_reset_requires_a_digit_pin_like_every_other_route(locked, signed_in):
     assert locked.post("/api/lock/reset", json={
-        "email": "nobody@smaran.ai", "password": "x", "new_pin": "abcdef"
+        "new_pin": "abcdef", "session_token": signed_in(minutes_ago=0)
     }).status_code == 400

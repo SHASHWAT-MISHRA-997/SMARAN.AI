@@ -14,7 +14,7 @@ import DeveloperModal from './components/DeveloperModal';
 import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
 import GoogleAuthGate, { getSavedGoogleUser, signOutEverywhere } from './components/GoogleAuthGate';
-import { couldBePinned, isPhone } from './utils/device';
+import { couldBePinned, isPhone, isHandheld } from './utils/device';
 import UpdateNotice from './components/UpdateNotice';
 import ExtensionsHub from './components/ExtensionsHub';
 import SitesHub from './components/SitesHub';
@@ -544,7 +544,11 @@ const App = () => {
 
   // The views that actually have a branch in the render below. Kept next to
   // handleNavigate so the two cannot drift apart again.
-  const RENDERABLE_VIEWS = new Set(['chat', 'collections', 'sites', 'plugins', 'design', 'scheduled', 'dispatch']);
+  // 'scheduled' is absent on a phone or tablet: cron belongs to the machine
+  // hosting SMARAN, and the sidebar no longer offers it there. Listed here too
+  // so a saved view, or a link, cannot land on a screen with nothing in it.
+  const RENDERABLE_VIEWS = new Set(['chat', 'collections', 'sites', 'plugins', 'design', 'dispatch',
+    ...(isHandheld() ? [] : ['scheduled'])]);
 
   const handleNavigate = (view) => {
     if (view === 'settings') {
@@ -691,7 +695,7 @@ const App = () => {
         )}
         {activeView === 'sites' && <SitesHub />}
         {activeView === 'plugins' && <ExtensionsHub embedded />}
-        {activeView === 'scheduled' && (
+        {activeView === 'scheduled' && !isHandheld() && (
           <ScheduledTasksView
             onNavigate={handleNavigate}
             onEnsureSession={handleCreateSession}

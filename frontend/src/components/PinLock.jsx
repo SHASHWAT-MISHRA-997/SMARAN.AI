@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Delete, Loader2, Lock, ShieldCheck } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { isNativeApp, loadLink } from '../utils/hostLink';
+import { PROVIDERS, startOAuth } from '../utils/directAuth';
 
 /**
  * The launch screen lock.
@@ -37,13 +38,17 @@ const PinLock = ({ children }) => {
   const [cooldown, setCooldown] = useState(0);
 
   /* Forgetting the PIN used to mean the app was shut for good. Recovery asks
-     for the account password rather than an email link: it proves the owner
-     is the one asking without involving anybody else, and it works offline. */
+     the owner to sign in again, which proves who is asking without involving
+     anybody else - no email link, no support address.
+
+     It asked for an account password until the accounts stopped having one.
+     Sign-in is Google or GitHub now, so no user row carries a password hash
+     and that form could not succeed for anyone: the lock had quietly become
+     unopenable for anybody who forgot their PIN. */
   const [recovering, setRecovering] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [newPin, setNewPin] = useState('');
   const [recoverError, setRecoverError] = useState('');
+  const [proving, setProving] = useState('');
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -175,22 +180,30 @@ const PinLock = ({ children }) => {
     }
   }, [busy, cooldown]);
 
-  const recover = async (event) => {
-    event.preventDefault();
+  /* Prove it is the account holder by signing in at the provider right now,
+     then set the new PIN with the token that sign-in issues. The backend only
+     accepts a token minted in the last few minutes, so the session already
+     saved on this machine - which whoever is sitting here already has - is
+     not enough on its own. */
+  const recover = async (provider) => {
+    if (busy) return;
     setBusy(true);
+    setProving(provider);
     setRecoverError('');
     try {
+      const signedIn = await startOAuth(provider);
       await request('/api/lock/reset', {
         method: 'POST',
-        body: JSON.stringify({ email, password, new_pin: newPin }),
+        body: JSON.stringify({ new_pin: newPin, session_token: signedIn.access_token }),
       });
       // Straight in, rather than making someone type the PIN they just chose.
       setLockEnabled(true);
       setState('open');
     } catch (err) {
-      setRecoverError(err.message);
+      setRecoverError(err.name === 'AbortError' ? 'Sign-in was cancelled.' : err.message);
     } finally {
       setBusy(false);
+      setProving('');
     }
   };
 
@@ -321,37 +334,18 @@ const PinLock = ({ children }) => {
 
       {recovering && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-veil p-6 backdrop-blur-sm">
-          <form
-            onSubmit={recover}
+          <div
             className="w-full max-w-sm overflow-hidden rounded-2xl border border-line bg-raised shadow-2xl"
           >
             <div className="border-b border-line px-5 py-4">
               <h2 className="text-sm font-black text-ink">Set a new PIN</h2>
               <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-                Sign in with your account to choose a new one. Nobody else can do
-                this for you, and nothing is sent anywhere.
+                Choose a new PIN, then sign in to confirm it is you. Nobody else
+                can do this for you, and nothing is sent anywhere.
               </p>
             </div>
 
             <div className="space-y-3 p-5">
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                autoComplete="email"
-                className="w-full rounded-xl border border-line bg-sunken px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-red-400/60"
-              />
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Account password"
-                autoComplete="current-password"
-                className="w-full rounded-xl border border-line bg-sunken px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-red-400/60"
-              />
               <input
                 type="text"
                 required
@@ -371,24 +365,29 @@ const PinLock = ({ children }) => {
                 </p>
               )}
 
-              <button
-                type="submit"
-                disabled={busy || newPin.length < 4}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-sm font-black text-white transition hover:bg-red-500 disabled:opacity-50"
-              >
-                {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-                Set new PIN
-              </button>
+              {PROVIDERS.map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => recover(id)}
+                  disabled={busy || newPin.length < 4}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-sm font-black text-white transition hover:bg-red-500 disabled:opacity-50"
+                >
+                  {proving === id && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {label}
+                </button>
+              ))}
 
               <button
                 type="button"
                 onClick={() => setRecovering(false)}
-                className="w-full rounded-xl border border-line py-2 text-[11px] font-bold text-ink-muted transition hover:bg-sunken hover:text-ink"
+                disabled={busy}
+                className="w-full rounded-xl border border-line py-2 text-[11px] font-bold text-ink-muted transition hover:bg-sunken hover:text-ink disabled:opacity-50"
               >
                 Back
               </button>
             </div>
-          </form>
+          </div>
         </div>
       )}
     </div>

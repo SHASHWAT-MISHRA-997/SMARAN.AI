@@ -453,12 +453,12 @@ public class SmaranDevice extends Plugin {
                 + "Android OAuth client must list package ai.smaran.app with "
                 + "this build's certificate fingerprint, in the same Google "
                 + "Cloud project as the web client - and a change there can "
-                + "take up to a few hours to take effect. Sign in with email "
-                + "and password below meanwhile.";
+                + "take up to a few hours to take effect. Continue with GitHub "
+                + "meanwhile.";
         }
         if (type.endsWith("TYPE_NO_CREDENTIAL")) {
             return "No Google account is available on this phone. Add one in "
-                + "Android Settings, or sign in with email and password below.";
+                + "Android Settings, or continue with GitHub.";
         }
         if (type.endsWith("TYPE_USER_CANCELED")) {
             return "Google sign-in was cancelled.";

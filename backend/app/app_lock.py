@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -38,6 +38,22 @@ _attempts: Dict[str, Dict[str, Any]] = {}
 
 PIN_MIN = 4
 PIN_MAX = 12
+
+# How long a sign-in lasts, matching _finish_provider_login in main. Used to
+# work out how recently a session token was issued, since the only timestamp
+# stored against a session is when it expires.
+SESSION_DAYS = 30
+# A sign-in older than this is not proof for a PIN reset: see reset_pin. Long
+# enough to cover the round trip through Google or GitHub on a slow phone, and
+# a device-flow code typed by hand.
+RECENT_SIGN_IN = timedelta(minutes=15)
+
+# One message whichever way the proof falls short, so this cannot be used to
+# learn whether a given token is real.
+SIGN_IN_AGAIN = (
+    "Sign in with Google or GitHub to choose a new PIN. The sign-in has to be "
+    "done now - an earlier one does not count."
+)
 
 
 def _state_path() -> str:
@@ -113,10 +129,21 @@ class PinCheck(BaseModel):
 
 
 class PinReset(BaseModel):
-    """Proving it is the account holder, not just whoever is sitting here."""
-    email: str
-    password: str
+    """Proving it is the account holder, not just whoever is sitting here.
+
+    This used to take an email and an account password. Email-and-password
+    sign-in has since been removed - accounts are Google or GitHub now, and no
+    user row carries a password_hash any more - so that check could no longer
+    succeed for anybody. With the lock enabled and the PIN forgotten, there was
+    no way back into the app at all.
+
+    The proof is now a sign-in that has just happened: the caller completes the
+    ordinary Google or GitHub flow and passes the session token it issues.
+    """
     new_pin: str = Field(..., min_length=PIN_MIN, max_length=PIN_MAX)
+    # Optional in the body because the same flow also leaves an httpOnly
+    # cookie, and the packaged app has one where a bare fetch does not.
+    session_token: Optional[str] = None
 
 
 @router.get("/status")
@@ -210,16 +237,20 @@ def disable_pin(payload: PinCheck, request: Request):
 
 @router.post("/reset")
 def reset_pin(payload: PinReset, request: Request):
-    """Set a new PIN after proving the account password.
+    """Set a new PIN after signing in again with Google or GitHub.
 
-    Deliberately not a back door: without the account password this does
-    nothing, so someone who finds the machine unlocked-but-PIN-locked
-    cannot clear the lock. Equally deliberately, it involves nobody else -
-    no email, no support address, no recovery service. The person who owns
-    the account is the only one who can do this, and they can do it offline.
+    Deliberately not a back door. Someone who finds the machine sitting at the
+    PIN screen cannot clear the lock: they would have to complete a sign-in at
+    Google or GitHub as the account holder first. Equally deliberately it
+    involves nobody else - no support address, no recovery service, nothing
+    sent anywhere by this app.
 
-    Throttled on the same counter as PIN guesses, so it cannot be used to
-    brute-force the password either.
+    The sign-in has to be a new one. A session already saved on this machine
+    is exactly what the person at the PIN screen would have, so an old token is
+    no proof of anything; only a token minted in the last few minutes is
+    accepted, which means going through the provider there and then.
+
+    Throttled on the same counter as PIN guesses.
     """
     if not payload.new_pin.isdigit():
         raise HTTPException(status_code=400, detail="The PIN must be digits only.")
@@ -232,21 +263,33 @@ def reset_pin(payload: PinReset, request: Request):
     # Imported here rather than at module load: app_lock is imported by
     # main during startup, and importing main back would be circular.
     from app.database import SessionLocal
-    from app.main import verify_password
     from app.models import User
 
-    identifier = (payload.email or '').strip().lower()
+    token = payload.session_token or request.cookies.get("session_token") or ""
+    auth = request.headers.get("authorization") or ""
+    if not token and auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+
+    if not token:
+        _record_failure(key)
+        raise HTTPException(status_code=401, detail=SIGN_IN_AGAIN)
+
     db: Session = SessionLocal()
     try:
-        user = db.query(User).filter(
-            (User.email == identifier) | (User.username == identifier)
-        ).first()
-
-        # One message for a missing account and a wrong password, so this
-        # cannot be used to find out which addresses have accounts.
-        if not user or not user.password_hash or not verify_password(payload.password, user.password_hash):
+        user = db.query(User).filter(User.session_token == token).first()
+        now = datetime.now()
+        # Sessions are issued for SESSION_DAYS, so what is left on the clock
+        # says how long ago this one was minted. Anything older than the
+        # window below was not created by the sign-in just performed.
+        fresh = (
+            user is not None
+            and user.session_expires is not None
+            and user.session_expires > now
+            and user.session_expires > now + timedelta(days=SESSION_DAYS) - RECENT_SIGN_IN
+        )
+        if not fresh:
             _record_failure(key)
-            raise HTTPException(status_code=401, detail="That email and password do not match an account.")
+            raise HTTPException(status_code=401, detail=SIGN_IN_AGAIN)
     finally:
         db.close()
 

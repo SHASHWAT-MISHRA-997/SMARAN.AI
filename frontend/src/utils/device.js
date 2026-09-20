@@ -15,7 +15,7 @@
  * fine and small. Neither is a phone.
  */
 
-import { isNativeApp } from './hostLink';
+import { isNativeApp } from './hostLink.js';
 
 const query = (text) => (typeof window !== 'undefined' && window.matchMedia
   ? window.matchMedia(text).matches
@@ -34,6 +34,38 @@ export const isPhone = () => {
   const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent || '';
   const mobileUserAgent = /Android|webOS|iPhone|iPad|iPod|Mobile/i.test(userAgent);
   return mobileUserAgent || (window.innerWidth <= 900 && query('(pointer: coarse)'));
+};
+
+/**
+ * Is this a phone or a tablet - anything held rather than sat at?
+ *
+ * `isPhone` deliberately means small. This means touch, at any size, and it
+ * exists because three features are desktop-only in substance rather than in
+ * layout: cron automations, the gateway and its bots, and the sandbox's
+ * security controls all act on a machine that is running SMARAN as a server.
+ * A handset or a tablet is a client of that machine, never the machine, so
+ * those screens loaded there and then did nothing - which is the report that
+ * prompted this.
+ *
+ * iPadOS is the awkward one. Safari on iPad has claimed to be a Macintosh
+ * since iPadOS 13, so the user-agent test `isPhone` relies on is answered
+ * "desktop" by the most common tablet there is. `maxTouchPoints` is how that
+ * lie is caught: a real Mac reports 0, an iPad reports 5.
+ */
+export const isHandheld = () => {
+  if (typeof window === 'undefined') return false;
+  if (isPhone()) return true;
+  const touchPoints = typeof navigator === 'undefined' ? 0 : navigator.maxTouchPoints || 0;
+  const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent || '';
+  // iPad in desktop mode, then Android tablets, which drop "Mobile" from the
+  // user-agent string but keep "Android".
+  if (/Macintosh/.test(userAgent) && touchPoints > 1) return true;
+  return /Android|iPad|Tablet|PlayBook|Silk/i.test(userAgent);
+  // Deliberately no "touch plus a coarse pointer" fallback beyond this. It
+  // read true on a touchscreen Windows laptop, which is a machine that runs
+  // SMARAN as a server and must keep all three screens. A Windows tablet is
+  // indistinguishable from that laptop from in here, and of the two wrong
+  // answers, showing a desktop the controls it can use is the better one.
 };
 
 /**

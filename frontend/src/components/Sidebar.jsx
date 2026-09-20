@@ -13,6 +13,7 @@ import { SmaranLogo } from './SmaranLogo';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { clearSavedGoogleUser } from './GoogleAuthGate';
+import { isHandheld } from '../utils/device';
 
 /* Tooltip uses a React Portal so parent overflow never clips it. */
 const Tip = ({ label, children }) => {
@@ -112,6 +113,9 @@ const Sidebar = ({
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Scheduled runs cron on the machine hosting SMARAN, which a phone or tablet
+  // is not. The way in is removed there rather than left to open an empty page.
+  const handheld = isHandheld();
   const [showUtilityMenu, setShowUtilityMenu] = useState(false);
   // The profile row had "SHASHWAT MISHRA" and the initials "SM" written into
   // it, so every install of SMARAN.AI showed one particular person's name as
@@ -568,7 +572,7 @@ const Sidebar = ({
           <button onClick={() => onNavigate('design')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'design' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Palette className="h-4 w-4"/> Design</button>
           <button onClick={() => onNavigate('plugins')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'plugins' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Blocks className="h-4 w-4"/> Plugins</button>
           <button onClick={() => onNavigate('terminal')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Terminal className="h-4 w-4"/> Terminal</button>
-          <button onClick={() => onNavigate('scheduled')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Clock className="h-4 w-4"/> Scheduled</button>
+          {!handheld && <button onClick={() => onNavigate('scheduled')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Clock className="h-4 w-4"/> Scheduled</button>}
           <button onClick={() => onNavigate('dispatch')} className="nav-neon sheen w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><span className="flex items-center gap-3"><Smartphone className="h-4 w-4"/> Dispatch</span><span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400">Beta</span></button>
           {openProject && (
             <>
@@ -593,7 +597,7 @@ const Sidebar = ({
           <RailBtn icon={<Globe2 className="h-5 w-5"/>} label="Sites" active={activeView === 'sites'} onClick={() => onNavigate('sites')}/>
           <RailBtn icon={<Blocks className="h-5 w-5"/>} label="Plugins & Skills" active={activeView === 'plugins'} onClick={() => onNavigate('plugins')}/>
           <RailBtn icon={<Terminal className="h-5 w-5"/>} label="Terminal" onClick={() => onNavigate('terminal')}/>
-          <RailBtn icon={<Clock className="h-5 w-5"/>} label="Scheduled" onClick={() => onNavigate('scheduled')}/>
+          {!handheld && <RailBtn icon={<Clock className="h-5 w-5"/>} label="Scheduled" onClick={() => onNavigate('scheduled')}/>}
         </>}
       </div>
 
@@ -897,7 +901,6 @@ const Sidebar = ({
               just been using. */}
           <button onClick={() => { onNavigate('design'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'design' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Palette className="h-4 w-4"/> Design Studio</button>
           <button onClick={() => { onNavigate('terminal'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'terminal' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Terminal className="h-4 w-4"/> Terminal</button>
-          <button onClick={() => { onNavigate('scheduled'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'scheduled' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Clock className="h-4 w-4"/> Scheduled</button>
           <button onClick={() => { onNavigate('dispatch'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'dispatch' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Smartphone className="h-4 w-4"/> Dispatch</button>
         </nav>
         )}
