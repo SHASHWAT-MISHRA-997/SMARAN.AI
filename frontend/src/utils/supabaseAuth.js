@@ -24,10 +24,9 @@ const DEFAULT_ANON_KEY = 'sb_publishable_FpdKwtY3FBYbZPFYREMA8w_0WP8UfQZ';
 export const PROVIDERS = [
   { id: 'google', label: 'Continue with Google' },
   { id: 'github', label: 'Continue with GitHub' },
-  // Supabase calls LinkedIn's current OpenID Connect integration
-  // `linkedin_oidc`; the older `linkedin` provider is deprecated and rejects
-  // apps created today.
-  { id: 'linkedin_oidc', label: 'Continue with LinkedIn' },
+  // LinkedIn was here and is deliberately gone. Its app cannot be created
+  // without a LinkedIn Company Page, which is a company registration errand
+  // rather than a configuration step, and nothing in this app needs it.
 ];
 
 export const isNative = () => Boolean(window.Capacitor?.isNativePlatform?.());
@@ -88,8 +87,7 @@ export const getSupabase = () => {
   return clientPromise;
 };
 
-export const providerLabel = (id) =>
-  (id === 'linkedin_oidc' ? 'LinkedIn' : id === 'github' ? 'GitHub' : 'Google');
+export const providerLabel = (id) => (id === 'github' ? 'GitHub' : 'Google');
 
 /**
  * Which providers the project actually has switched on.
@@ -166,8 +164,7 @@ export const redirectError = () => {
 export const friendlyProviderError = (error, provider) => {
   const text = String(error?.message || error || '');
   if (/not enabled|unsupported provider/i.test(text)) {
-    const name = provider === 'linkedin_oidc' ? 'LinkedIn'
-      : provider === 'github' ? 'GitHub' : 'Google';
+    const name = providerLabel(provider);
     return `${name} sign-in is not switched on for this installation yet. `
       + 'Enable it under Authentication > Providers in the Supabase project.';
   }

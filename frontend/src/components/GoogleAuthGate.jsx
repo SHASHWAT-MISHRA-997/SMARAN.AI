@@ -184,6 +184,13 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
         provider: session.user?.app_metadata?.provider || 'supabase',
         access_token: data.access_token,
       });
+      /* The authorization code stays in the address bar otherwise. It is
+         spent the moment it is exchanged, so it is litter rather than a
+         secret - but it survives a reload, a bookmark and a screenshot, and
+         it makes a finished sign-in look like it is still mid-flight. */
+      if (window.location.search || window.location.hash) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
     } catch (err) {
       setError(err.message || 'That sign-in could not be completed.');
       setFinishing(false);

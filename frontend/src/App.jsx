@@ -154,7 +154,20 @@ const App = () => {
     };
   }, []);
 
-  // Refine user from the backend only if already authenticated via Google
+  /* Fill in anything the backend knows and the stored session does not.
+
+     This used to spread the whole reply over the signed-in user, and on the
+     desktop that quietly erased them. /api/auth/me resolves a loopback caller
+     to the machine's own device account - `{id: 1, username:
+     "device_local_default_user", email: null}` - by design, because the
+     person at that keyboard owns the install. Spreading it put `email: null`
+     and a generated username on top of a real identity, so a successful
+     sign-in showed "No email address on this session" in Settings and "You"
+     in the sidebar, seconds after the backend had logged the real address.
+
+     Two rules now. Only truthy values are taken, so nothing known is
+     replaced by nothing. And a reply that is the generated device account is
+     ignored outright - it is not a person, and it must never overwrite one. */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -162,9 +175,14 @@ const App = () => {
         const saved = getSavedGoogleUser();
         if (!saved) return;
         const user = await getCurrentUser();
-        if (!cancelled && user && (user.id || user.email || user.username)) {
-          setCurrentUser((prev) => ({ ...(prev || saved), ...user }));
-        }
+        if (cancelled || !user) return;
+        const generated = /^(device[_-]|local[_-])/i.test(user.username || '');
+        if (generated) return;
+        const known = Object.fromEntries(
+          Object.entries(user).filter(([, value]) => value !== null && value !== undefined && value !== ''),
+        );
+        if (!Object.keys(known).length) return;
+        setCurrentUser((prev) => ({ ...(prev || saved), ...known }));
       } catch {
         /* keep current authenticated user */
       }
