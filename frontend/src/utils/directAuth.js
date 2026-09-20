@@ -1,4 +1,5 @@
 import { CapacitorHttp, registerPlugin } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import { API_BASE } from '../context/AuthContext';
 
 export const PROVIDERS = [
@@ -69,7 +70,80 @@ async function nativeGoogle(signal) {
     username: claims.name, avatar: claims.picture } };
 }
 
+/**
+ * "Continue with GitHub" in one tap, the way Google already is.
+ *
+ * GitHub OAuth Apps have no PKCE, so an app with no secret cannot finish a
+ * sign-in by itself - which is why this used to be the device-code flow, with
+ * eight characters carried from one screen to another. The site holds the
+ * secret instead (website/netlify/functions/github-auth.mjs) and hands back an
+ * identity rather than a token.
+ *
+ * The verifier below is what makes that safe. Any app on the phone may claim
+ * ai.smaran.app://, so what comes back through the browser is sealed against
+ * the SHA-256 sent at the start, and opening it needs the verifier that never
+ * left here. An app that intercepts the redirect catches something it cannot
+ * read.
+ */
+const SITE = 'https://smaran-ai.netlify.app';
+const APP_REDIRECT = 'ai.smaran.app://auth-callback';
+
+const base64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function makeVerifier() {
+  const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return { verifier, challenge: base64url(digest) };
+}
+
+/** Resolve when the browser steps back into the app, or when it never does. */
+function waitForAppReturn(signal) {
+  return new Promise((resolve, reject) => {
+    let handle;
+    const finish = (outcome, error) => {
+      handle?.remove?.();
+      signal?.removeEventListener('abort', cancel);
+      if (error) reject(error); else resolve(outcome);
+    };
+    const cancel = () => finish(null, new DOMException('Sign-in cancelled.', 'AbortError'));
+
+    if (signal?.aborted) return cancel();
+    signal?.addEventListener('abort', cancel, { once: true });
+
+    CapacitorApp.addListener('appUrlOpen', ({ url }) => {
+      if (!url || !url.startsWith(APP_REDIRECT)) return;
+      const params = new URLSearchParams(url.slice(url.indexOf('#') + 1));
+      finish({ sealed: params.get('result'), error: params.get('error') });
+    }).then((listener) => { handle = listener; if (signal?.aborted) cancel(); });
+  });
+}
+
+async function nativeGitHubDirect(signal) {
+  const { verifier, challenge } = await makeVerifier();
+  const returned = waitForAppReturn(signal);
+  await device.openUrl({
+    url: `${SITE}/api/github/start?challenge=${challenge}&redirect=${encodeURIComponent(APP_REDIRECT)}`,
+  });
+
+  const { sealed, error } = await returned;
+  if (error === 'denied') throw new Error('GitHub sign-in was cancelled.');
+  if (error || !sealed) throw new Error('GitHub did not return a verified email address.');
+
+  signal.throwIfAborted();
+  const { user } = await nativeRequest(`${SITE}/api/github/exchange`, 'POST', { sealed, verifier },
+    { 'Content-Type': 'application/json' });
+  if (!user?.id || !user.email) throw new Error('GitHub sign-in could not be confirmed. Please start again.');
+  return { provider: 'github', user };
+}
+
 async function nativeGitHub(signal, onProgress) {
+  // The device-code flow stays as the fallback, not as the path. It needs no
+  // secret anywhere, so it still works if the site has none configured, or is
+  // simply unreachable from wherever this phone is.
+  const ready = await nativeRequest(`${SITE}/api/github/config`).catch(() => null);
+  if (ready?.configured) return nativeGitHubDirect(signal);
+
   const flow = await nativeForm('https://github.com/login/device/code',
     { client_id: GITHUB_CLIENT_ID, scope: 'read:user user:email' });
   if (flow.error || !flow.device_code) throw new Error('GitHub Device Flow is unavailable.');
