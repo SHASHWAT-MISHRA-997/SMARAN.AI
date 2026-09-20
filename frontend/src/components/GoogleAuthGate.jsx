@@ -1,15 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sparkles, ArrowRight, Lock, AlertCircle, Loader2 } from 'lucide-react';
-import {
-  PROVIDERS,
-  enabledProviders,
-  exchangeForLocalSession,
-  getSupabase,
-  isNative,
-  providerLabel,
-  redirectError,
-  startOAuth,
-} from '../utils/supabaseAuth';
+import { PROVIDERS, enabledProviders, isNative, providerLabel, startOAuth } from '../utils/directAuth';
 
 export const GOOGLE_STORAGE_KEY = 'smaran_google_user';
 
@@ -43,10 +34,7 @@ export const clearSavedGoogleUser = () => {
   try {
     localStorage.removeItem(GOOGLE_STORAGE_KEY);
   } catch {}
-  // The Supabase session outlives localStorage being cleared, and a stale one
-  // signs the person straight back in on the next load, which reads as "sign
-  // out does nothing".
-  getSupabase().then((supabase) => supabase?.auth.signOut()).catch(() => {});
+
 };
 
 const INGEST_URL = 'https://smaran-analytics.netlify.app/ingest';
@@ -119,23 +107,13 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   const [finishing, setFinishing] = useState(false);
   // null means "not known yet, or could not ask" - every button stays live.
   const [available, setAvailable] = useState(null);
-  const exchanging = useRef(false);
+  const attempt = useRef(null);
+  const [progress, setProgress] = useState(null);
+  useEffect(() => () => attempt.current?.abort(), []);
 
   useEffect(() => {
     if (currentUser) onUserChange?.(currentUser);
   }, [currentUser, onUserChange]);
-
-  // A redirect that came back refusing rather than signing in.
-  useEffect(() => {
-    if (currentUser) return;
-    const reason = redirectError();
-    if (reason) {
-      setError(reason);
-      // Clear it out of the address bar so a reload is a fresh start rather
-      // than the same complaint again.
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-  }, [currentUser]);
 
   useEffect(() => {
     if (currentUser) return undefined;
@@ -150,7 +128,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       name: userData.name || 'SMARAN User',
       email: (userData.email || '').toLowerCase().trim(),
       avatar: userData.avatar || null,
-      provider: userData.provider || 'supabase',
+      provider: userData.provider,
       signedInAt: new Date().toISOString(),
     };
     try {
@@ -165,118 +143,33 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     sendSignInAnalytics(user);
   }, [onUserChange]);
 
-  /* One Supabase session turns into one local session, once.
-     onAuthStateChange can fire more than once for the same session - on the
-     redirect landing and again on a token refresh - and each call would mint
-     another server-side session and overwrite the last. */
-  const adoptSession = useCallback(async (session) => {
-    if (!session?.access_token || exchanging.current) return;
-    exchanging.current = true;
-    setFinishing(true);
-    try {
-      const data = await exchangeForLocalSession(session.access_token);
-      const meta = session.user?.user_metadata || {};
-      handleSignInSuccess({
-        id: data.user?.id,
-        name: data.user?.username || meta.full_name || meta.name,
-        email: data.user?.email || session.user?.email,
-        avatar: meta.avatar_url || meta.picture || null,
-        provider: session.user?.app_metadata?.provider || 'supabase',
-        access_token: data.access_token,
-      });
-      /* The authorization code stays in the address bar otherwise. It is
-         spent the moment it is exchanged, so it is litter rather than a
-         secret - but it survives a reload, a bookmark and a screenshot, and
-         it makes a finished sign-in look like it is still mid-flight. */
-      if (window.location.search || window.location.hash) {
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-    } catch (err) {
-      setError(err.message || 'That sign-in could not be completed.');
-      setFinishing(false);
-      setBusyProvider('');
-      // Leaving the Supabase session in place would retry this on every
-      // reload and never succeed.
-      getSupabase().then((s) => s?.auth.signOut()).catch(() => {});
-    } finally {
-      exchanging.current = false;
-    }
-  }, [handleSignInSuccess]);
-
-  // Pick up a session that already exists, or one arriving from a redirect.
-  useEffect(() => {
-    if (currentUser) return undefined;
-    let cancelled = false;
-    let subscription;
-
-    getSupabase().then((supabase) => {
-      if (!supabase || cancelled) {
-        if (!supabase && !cancelled) {
-          setError('Sign-in is switched off on this installation.');
-        }
-        return;
-      }
-      supabase.auth.getSession().then(({ data }) => {
-        if (!cancelled && data?.session) adoptSession(data.session);
-      });
-      subscription = supabase.auth.onAuthStateChange((event, session) => {
-        if (!cancelled && event === 'SIGNED_IN' && session) adoptSession(session);
-      }).data?.subscription;
-    });
-
-    return () => { cancelled = true; subscription?.unsubscribe(); };
-  }, [currentUser, adoptSession]);
-
-  /* Android comes back through a custom scheme rather than by navigating
-     this page, so the callback URL arrives as an app link and has to be fed
-     to Supabase by hand. Imported lazily: the plugin only exists in the
-     native build, and loading it in a browser throws. */
-  useEffect(() => {
-    if (!isNative() || currentUser) return undefined;
-    let cancelled = false;
-    let handle;
-    import('@capacitor/app').then(({ App }) => {
-      if (cancelled) return;
-      App.addListener('appUrlOpen', async ({ url }) => {
-        if (!url || !url.startsWith('ai.smaran.app://')) return;
-        try {
-          const code = new URL(url).searchParams.get('code');
-          if (!code) return;
-          const supabase = await getSupabase();
-          const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          if (exchangeError) throw exchangeError;
-          if (data?.session) await adoptSession(data.session);
-        } catch (err) {
-          setError(err.message || 'Sign-in did not come back correctly.');
-          setBusyProvider('');
-        }
-      }).then((listener) => { handle = listener; });
-    }).catch(() => {});
-    return () => { cancelled = true; handle?.remove?.(); };
-  }, [currentUser, adoptSession]);
-
   const onProviderClick = async (provider) => {
-    if (busyProvider) return;
+    if (attempt.current) return;
     setError('');
-    /* Refused here rather than at Supabase, which answers a disabled
-       provider with a JSON body rendered as the whole window and no way
-       back. */
     if (available && !available.includes(provider)) {
-      setError(
-        `${providerLabel(provider)} sign-in is not switched on for this `
-        + 'installation yet. Enable it under Authentication > Providers in '
-        + 'the Supabase project.',
-      );
+      setError(`${providerLabel(provider)} sign-in is not configured on this installation.`);
       return;
     }
+    const controller = new AbortController();
+    attempt.current = controller;
     setBusyProvider(provider);
+    setProgress(null);
     try {
-      await startOAuth(provider);
-      // On the web this navigates away, so nothing after it runs. On native
-      // the browser opens beside the app and the deep link finishes it.
+      const data = await startOAuth(provider, { signal: controller.signal, onProgress: setProgress });
+      if (controller.signal.aborted) return;
+      setFinishing(true);
+      handleSignInSuccess({ id: data.user?.id, name: data.user?.username,
+        email: data.user?.email, avatar: data.user?.avatar,
+        provider, access_token: data.access_token });
     } catch (err) {
-      setError(err.message || 'Sign-in could not start.');
-      setBusyProvider('');
+      if (err.name !== 'AbortError') setError(err.message || 'Sign-in could not finish.');
+    } finally {
+      if (attempt.current === controller) {
+        attempt.current = null;
+        setBusyProvider('');
+        setFinishing(false);
+        setProgress(null);
+      }
     }
   };
 
@@ -374,9 +267,17 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             </div>
           )}
 
+          {busyProvider && (
+            <div className="mt-4 space-y-3 text-center text-sm text-zinc-300" role="status">
+              {progress?.user_code && <p>Enter this code on GitHub: <strong className="block select-text text-xl tracking-widest text-white">{progress.user_code}</strong></p>}
+              {progress?.url && <a className="block text-red-300 underline" href={progress.url} target="_blank" rel="noreferrer">Open {providerLabel(busyProvider)} sign-in</a>}
+              <p>Complete sign-in, then return here.</p>
+              <button type="button" className="text-zinc-300 underline" onClick={() => attempt.current?.abort()}>Cancel sign-in</button>
+            </div>
+          )}
           <p className="mt-6 text-center text-[11px] leading-relaxed text-zinc-500">
             SMARAN.AI has no password of its own. Signing in happens at Google,
-            GitHub or LinkedIn, and only your name, email and picture come back.
+            or GitHub, and only your profile and verified email are requested.
           </p>
         </div>
       </div>

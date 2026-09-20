@@ -519,6 +519,20 @@ def _grant_webview2_media_permissions(trusted_url: str) -> None:
     _media_log("patch installed")
 
 
+class _SignInBrowser:
+    def open_sign_in(self, url):
+        """OAuth must run in the system browser, never an embedded WebView."""
+        from urllib.parse import urlsplit
+        import webbrowser
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or (parsed.hostname, parsed.path) not in {
+            ("accounts.google.com", "/o/oauth2/v2/auth"),
+            ("github.com", "/login/device"),
+        } or parsed.username or parsed.password or parsed.port not in (None, 443):
+            raise ValueError("Unsupported sign-in URL")
+        return webbrowser.open(url)
+
+
 def _open_window(url: str) -> bool:
     """Open a real app window. Returns True if it blocked until closed."""
     if sys.platform.startswith("linux"):
@@ -530,7 +544,8 @@ def _open_window(url: str) -> bool:
 
         _grant_webview2_media_permissions(url)
         window = webview.create_window(APP_NAME, url, width=1440, height=900,
-                                       min_size=(260, 340), confirm_close=False)
+                                       min_size=(260, 340), confirm_close=False,
+                                       js_api=_SignInBrowser())
         # Hand the window to the backend, which runs in this same process, so
         # picture-in-picture can shrink and pin the real window rather than
         # only shrinking a panel inside the page. A panel floats over the page;

@@ -801,68 +801,6 @@ def set_google_client_id(client_id: str) -> None:
         json.dump({"client_id": client_id.strip()}, handle)
 
 
-# Supabase Auth, which is where Google, GitHub and LinkedIn sign-in now go.
-#
-# Only two values are needed and neither is a secret: the project URL and the
-# anon (publishable) key, which Supabase designs to be shipped inside client
-# applications and which grants nothing on its own - every table it can reach
-# is behind row level security. The service_role key, which is a secret, is
-# never used here and must never be put in this file.
-#
-# The token this app receives is still verified against Supabase before any
-# account is created, exactly as the Google path verifies against Google. A
-# client that could name its own email address could sign in as anybody.
-_SUPABASE_CONFIG_FILE = os.path.join(settings.DATA_DIR, "supabase.json")
-
-# The project this app ships against, so a fresh install can sign in without
-# configuring anything - the same reasoning as DEFAULT_GOOGLE_CLIENT_ID above.
-# A publishable key is meant to be in the client; it authorises nothing that
-# row level security does not already allow, and Supabase rotates it
-# independently of the secret half, which never appears here.
-DEFAULT_SUPABASE_URL = "https://abwzfxlyzwcnetogifwb.supabase.co"
-DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_FpdKwtY3FBYbZPFYREMA8w_0WP8UfQZ"
-
-
-def supabase_config() -> dict:
-    """Project URL and anon key, or empties when sign-in is not set up."""
-    url = (os.getenv("SUPABASE_URL") or os.getenv("SMARAN_SUPABASE_URL") or "").strip()
-    key = (
-        os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("SMARAN_SUPABASE_ANON_KEY")
-        or ""
-    ).strip()
-    if not (url and key):
-        stored = None
-        try:
-            with open(_SUPABASE_CONFIG_FILE, "r", encoding="utf-8") as handle:
-                stored = json.load(handle) or {}
-        except (OSError, ValueError):
-            stored = None
-        if stored is not None:
-            # A saved file is a deliberate choice, including a deliberate
-            # empty one, so it is honoured over the built-in default.
-            url = url or str(stored.get("url") or "").strip()
-            key = key or str(stored.get("anon_key") or "").strip()
-        else:
-            url = url or DEFAULT_SUPABASE_URL
-            key = key or DEFAULT_SUPABASE_ANON_KEY
-    return {
-        "url": url.rstrip("/"),
-        "anon_key": key,
-        "configured": bool(url and key),
-    }
-
-
-def set_supabase_config(url: str, anon_key: str) -> None:
-    os.makedirs(settings.DATA_DIR, exist_ok=True)
-    with open(_SUPABASE_CONFIG_FILE, "w", encoding="utf-8") as handle:
-        json.dump({"url": url.strip().rstrip("/"), "anon_key": anon_key.strip()}, handle)
-    try:
-        os.chmod(_SUPABASE_CONFIG_FILE, 0o600)
-    except OSError:
-        pass
-
-
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -1024,54 +962,7 @@ async def google_sign_in(req: GoogleSignInRequest, response: Response, request: 
         claims = await asyncio.to_thread(_verify_google_access_token, req.access_token)
     else:
         raise HTTPException(status_code=400, detail="A Google credential is required.")
-    email = claims["email"]
-
-    # Match on the email, so signing in with Google reaches the same account as
-    # a password sign-in with that address rather than quietly making a second.
-    user = db.query(User).filter(
-        (User.email == email) | (User.username == f"google_{email}")
-    ).first()
-    is_new = user is None
-    if is_new:
-        user = User(
-            username=claims.get("name") or email.split("@")[0],
-            email=email,
-            role="user",
-            is_approved=True,
-            email_verified=True,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-    user.last_login = datetime.now()
-    session_token = generate_session_token()
-    user.session_token = session_token
-    user.session_expires = datetime.now() + timedelta(days=30)
-    db.commit()
-
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=30 * 24 * 60 * 60,
-        path="/",
-    )
-
-    return GoogleSignInResponse(
-        access_token=session_token,
-        is_new_user=is_new,
-        user=UserResponse(
-            id=user.id,
-            username=user.username,
-            role=user.role,
-            is_approved=user.is_approved,
-            email=user.email,
-            email_verified=bool(user.email_verified),
-        ),
-    )
+    return _finish_provider_login({**claims, "provider": "google"}, response, request, db)
 
 
 @app.post("/api/auth/google/config")
@@ -1083,6 +974,8 @@ async def save_google_client_id(request: Request):
     API already has. The secret half never touches this app: the token
     Google returns is verified against Google, not decrypted here.
     """
+    if not request.client or request.client.host not in LOOPBACK_HOSTS:
+        raise HTTPException(403, "Sign-in can only be configured on this computer.")
     body = await request.json()
     client_id = str(body.get("client_id") or "").strip()
 
@@ -1105,179 +998,33 @@ def google_sign_in_config():
     return {"configured": bool(current), "client_id": current or None}
 
 
-class SupabaseSignInRequest(BaseModel):
-    # The access token Supabase issued after the provider authenticated the
-    # person. Read for its identity only after Supabase confirms it; nothing
-    # the caller says about itself is believed.
-    access_token: str
-
-
-class SupabaseConfigRequest(BaseModel):
-    url: str = ""
-    anon_key: str = ""
-
-
-def _verify_supabase_token(access_token: str) -> dict:
-    """Ask Supabase who this token belongs to.
-
-    Supabase signs its own JWTs, so this could verify the signature locally -
-    but that means tracking a signing key that rotates, and getting it wrong
-    fails open. Asking the issuer costs one request on sign-in only, cannot
-    drift, and is the same shape as the Google path directly above.
-    """
-    config = supabase_config()
-    if not config["configured"]:
-        raise HTTPException(
-            status_code=503,
-            detail="Sign-in is not set up on this installation: no Supabase project is configured.",
-        )
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            reply = client.get(
-                f"{config['url']}/auth/v1/user",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "apikey": config["anon_key"],
-                },
-            )
-    except httpx.HTTPError:
-        raise HTTPException(status_code=502, detail="Could not reach Supabase to check your sign-in.")
-
-    if reply.status_code != 200:
-        raise HTTPException(status_code=401, detail="That sign-in could not be verified.")
-
-    claims = reply.json()
-    email = (claims.get("email") or "").strip().lower()
-    if not email:
-        raise HTTPException(status_code=401, detail="That sign-in carried no email address.")
-
-    # GitHub lets an account keep its address private, and LinkedIn only
-    # returns one it has confirmed. An unverified address must not match an
-    # existing account by email, or signing up with somebody else's address
-    # at a provider that never checked it would hand over their account.
-    verified = claims.get("email_confirmed_at") or claims.get("confirmed_at")
-    if not verified:
-        raise HTTPException(
-            status_code=401,
-            detail="That account's email address is not confirmed with the provider.",
-        )
-    claims["email"] = email
-    return claims
-
-
-@app.post("/api/auth/supabase", response_model=GoogleSignInResponse)
-@auth_limiter.limit("30/minute")
-async def supabase_sign_in(
-    req: SupabaseSignInRequest,
-    response: Response,
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    """Turn a verified Supabase identity into this installation's session.
-
-    The local session token is still what every other endpoint authorises
-    against, so moving sign-in to Supabase changes who vouches for the person
-    and nothing about what they can then do.
-    """
-    claims = await asyncio.to_thread(_verify_supabase_token, req.access_token)
-    email = claims["email"]
-    metadata = claims.get("user_metadata") or {}
-    provider = (claims.get("app_metadata") or {}).get("provider") or "supabase"
-
-    # Matched on the email so the same person arriving through Google one day
-    # and GitHub the next reaches one account rather than accumulating three.
-    user = db.query(User).filter(
-        (User.email == email) | (User.username == f"google_{email}")
-    ).first()
+def _finish_provider_login(claims, response, request, db):
+    email = claims["email"].strip().lower()
+    user = db.query(User).filter(User.email == email).first()
     is_new = user is None
     if is_new:
-        user = User(
-            username=metadata.get("full_name") or metadata.get("name") or email.split("@")[0],
-            email=email,
-            role="user",
-            is_approved=True,
-            email_verified=True,
-        )
+        # Names are not unique; two people called Alex must both be able to sign in.
+        user = User(username=f"{claims.get('provider', 'google')}_{secrets.token_hex(12)}",
+                    email=email, role="user", is_approved=True, email_verified=True)
         db.add(user)
-        db.commit()
-        db.refresh(user)
-
+        db.flush()
+    user.email_verified = True
     user.last_login = datetime.now()
-    session_token = generate_session_token()
-    user.session_token = session_token
+    token = generate_session_token()
+    user.session_token = token
     user.session_expires = datetime.now() + timedelta(days=30)
     db.commit()
-
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=30 * 24 * 60 * 60,
-        path="/",
-    )
-
-    logger.info(f"Signed in {email} via {provider}")
-    return GoogleSignInResponse(
-        access_token=session_token,
-        is_new_user=is_new,
-        user=UserResponse(
-            id=user.id,
-            username=user.username,
-            role=user.role,
-            is_approved=user.is_approved,
-            email=user.email,
-            email_verified=True,
-        ),
-    )
+    response.set_cookie("session_token", token, httponly=True,
+                        secure=request.url.scheme == "https", samesite="lax",
+                        max_age=30 * 24 * 60 * 60, path="/")
+    return {"access_token": token, "token_type": "bearer", "is_new_user": is_new,
+            "user": {"id": user.id, "username": claims.get("name") or user.username,
+                     "email": email, "avatar": claims.get("picture"), "role": user.role,
+                     "is_approved": user.is_approved, "email_verified": True}}
 
 
-@app.get("/api/auth/supabase/config")
-def get_supabase_config():
-    """What the sign-in screen needs to talk to Supabase directly.
-
-    Both values are public by design; the anon key is meant to ship inside
-    clients. Returned unauthenticated because the sign-in screen needs them
-    before anyone is signed in.
-    """
-    config = supabase_config()
-    return {
-        "configured": config["configured"],
-        "url": config["url"] or None,
-        "anon_key": config["anon_key"] or None,
-    }
-
-
-@app.post("/api/auth/supabase/config")
-def save_supabase_config(req: SupabaseConfigRequest, request: Request):
-    """Point this installation at a Supabase project.
-
-    Guarded by being on the machine itself rather than by a session, because
-    a session is the one thing that cannot exist yet: nobody can sign in
-    until this is configured, and requiring a sign-in to configure it is a
-    deadlock with no way out. Whoever is at that keyboard already owns the
-    database this would protect.
-    """
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    if client_ip not in LOOPBACK_HOSTS:
-        raise HTTPException(
-            status_code=403,
-            detail="Sign-in can only be configured from the machine SMARAN runs on.",
-        )
-    url = req.url.strip().rstrip("/")
-    if url and not url.startswith("https://"):
-        raise HTTPException(status_code=400, detail="The Supabase URL must start with https://.")
-    # The service_role key bypasses row level security entirely. It is a
-    # secret, it is never needed here, and pasting it into a file the client
-    # reads would publish it - so refuse it rather than store it.
-    if "service_role" in req.anon_key:
-        raise HTTPException(
-            status_code=400,
-            detail="That looks like the service_role key. Use the anon (publishable) key.",
-        )
-    set_supabase_config(url, req.anon_key)
-    return get_supabase_config()
+from app.direct_oauth import make_router as _direct_oauth_router
+app.include_router(_direct_oauth_router(get_db, _finish_provider_login, google_client_id))
 
 
 # Hosts that mean "this request came from the machine the backend runs on".
@@ -1361,8 +1108,7 @@ def require_verified_email(current_user: User = Depends(get_current_user)) -> Us
 
 # Email and password sign-in is gone, deliberately and completely.
 #
-# Every way into this app now goes through Supabase Auth and an identity
-# provider - see /api/auth/supabase above. The endpoints that used to live
+# Sign-in now goes directly to Google or GitHub through /api/auth/direct. The endpoints that used to live
 # here (register, login, forgot-password, reset-password, change-password and
 # the SMTP settings that existed only to deliver reset codes) are removed
 # rather than hidden, because an unused login endpoint is still a login
@@ -1370,8 +1116,7 @@ def require_verified_email(current_user: User = Depends(get_current_user)) -> Us
 # LAN, and it was the whole surface behind the account-takeover this
 # repository already has a test file about.
 #
-# The cost is real and was accepted knowingly: an offline install, or a phone
-# not paired to the desktop, now has no way to sign in at all.
+# A standalone phone verifies its identity directly with the provider.
 
 # Auth Endpoints
 @app.post("/api/auth/logout")
