@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Lock, X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint, UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop, RefreshCw, CheckCircle2, ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe, Mic, Monitor, Keyboard, GitBranch, Search, Users, LogOut, Trash2, ShieldAlert, Mail } from "lucide-react";
+import { Lock, X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint, UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop, RefreshCw, CheckCircle2, ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe, Mic, Monitor, Keyboard, GitBranch, Search, Users, LogOut, Mail } from "lucide-react";
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { companionHeaders } from "../utils/companionAuth";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
@@ -74,40 +74,12 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
   const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState(initialTab || "general");
   const [settingsSearch, setSettingsSearch] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const activeUser = propUser || getSavedGoogleUser();
 
   const handleSignOutClick = () => {
     clearSavedGoogleUser();
     localStorage.removeItem("smaran_google_user");
-    onSignOut?.();
-    onClose?.();
-    window.location.reload();
-  };
-
-  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-
-  const handleDeleteAccountClick = async () => {
-    setIsDeletingAccount(true);
-    try {
-      await fetchWithAuth(`${API_BASE || ''}/api/auth/account`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-    } catch (e) {
-      console.warn("Backend account deletion warning:", e);
-    }
-    try {
-      const accounts = JSON.parse(localStorage.getItem("smaran_auth_accounts") || "[]");
-      const userEmail = (activeUser?.email || "").toLowerCase();
-      const remaining = accounts.filter(a => (a.email || "").toLowerCase() !== userEmail);
-      localStorage.setItem("smaran_auth_accounts", JSON.stringify(remaining));
-    } catch {}
-    clearSavedGoogleUser();
-    localStorage.removeItem("smaran_google_user");
-    localStorage.removeItem("sm_session_token");
-    localStorage.setItem("sm_auth_logged_out", "true");
     onSignOut?.();
     onClose?.();
     window.location.reload();
@@ -568,33 +540,20 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
     return () => { cancelled = true; };
   }, [isOpen]);
 
-  // What you want to be called. There was nowhere to say it, so the sidebar
-  // fell back to the generated account id. Local to this machine.
-  // Above the early return, like the two hooks before it.
-  const [displayName, setDisplayName] = useState(
-    () => localStorage.getItem('sm_display_name') || '',
-  );
-  useEffect(() => {
-    localStorage.setItem('sm_display_name', displayName);
-    // The sidebar is a sibling, not a child, so it is told rather than
-    // re-rendered by a shared parent.
-    window.dispatchEvent(new CustomEvent('smaran:display-name', { detail: { name: displayName } }));
-  }, [displayName]);
-
   /* The avatar spells the person's initials, and it was reading only the
-     workspace nickname - a field almost nobody fills in. With it empty the
-     expression fell through to the literal word "You", so a signed-in
-     Shashwat Mishra was greeted by a circle marked "Y", directly beside a
-     card printing his real name and email. It looked like the app had
-     mistaken who he was.
+     workspace nickname - a field almost nobody filled in, and now not a
+     field at all. With it empty the expression fell through to the literal
+     word "You", so a signed-in Shashwat Mishra was greeted by a circle
+     marked "Y", directly beside a card printing his real name and email. It
+     looked like the app had mistaken who he was.
 
-     Read the same identity the card does, most specific first: the nickname
-     if he chose one, then the account name, then the local part of the email
-     ("shashwat.mishra@..." -> SM). Only a session with none of the three
-     falls back, and then to a neutral dot rather than an initial belonging
-     to nobody. */
+     Read the same identity the card does: the account name, then the local
+     part of the email ("shashwat.mishra@..." -> SM). A nickname saved by an
+     older build still leads, so nobody loses one they chose. Only a session
+     with none of the three falls back, and then to a neutral dot rather than
+     an initial belonging to nobody. */
   const initialsSource =
-    displayName.trim()
+    (localStorage.getItem('sm_display_name') || '').trim()
     || (activeUser?.name || '').trim()
     || (activeUser?.email || '').split('@')[0].trim();
 
@@ -1279,7 +1238,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                             session has no profile attached. */}
                         <span className="text-sm font-extrabold text-zinc-900 dark:text-white truncate">
                           {activeUser?.name
-                            || displayName
+                            || initialsSource
                             || activeUser?.email
                             || "Session without a profile"}
                         </span>
@@ -1326,89 +1285,31 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                   </button>
                 </div>
 
-                {/* Nickname & Display Name setting */}
-                <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center font-bold shrink-0">
-                    <UserRound className="w-5 h-5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <label className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400">Workspace Nickname</label>
-                    <input
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder={isMobile ? "Your name" : "What should SMARAN.AI call you?"}
-                      maxLength={60}
-                      className="mt-1 w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-extrabold text-zinc-900 dark:text-white outline-none focus:border-indigo-500"
-                    />
-                    <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-                      Shown in chats and sidebar. Kept on this machine and sent nowhere.
-                    </p>
-                  </div>
-                </div>
+                {/* Four blocks used to sit here and are deliberately gone.
+                    Two of them were not settings at all: "Workspace Storage
+                    Engine — Encrypted Local" and "Zero Telemetry Leak —
+                    Active (100% Private)" were fixed strings that never
+                    changed, never reflected anything measured, and could not
+                    be acted on. They are claims about the product, and a
+                    settings screen is not where a product argues for itself.
 
-                {/* Security and Storage details */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-                    <div>
-                      <span className="block text-xs font-bold text-zinc-900 dark:text-white">Workspace Storage Engine</span>
-                      <span className="block text-[11px] text-zinc-500">Local SQLite & ChromaDB Vector Store</span>
-                    </div>
-                    <span className="text-xs font-mono text-indigo-500 font-bold">Encrypted Local</span>
-                  </div>
+                    "Workspace Nickname" was a second place to say who you
+                    are. The card above now shows the real name and email off
+                    the signed-in account, and the sidebar already falls back
+                    to that same account when no nickname is set, so the field
+                    only created two answers to one question. An existing
+                    nickname in localStorage is still honoured everywhere it
+                    was before; there is simply no longer a second control
+                    competing with the account for the same job.
 
-                  <div className="flex items-center justify-between p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-                    <div>
-                      <span className="block text-xs font-bold text-zinc-900 dark:text-white">Zero Telemetry Leak</span>
-                      <span className="block text-[11px] text-zinc-500">Prompts & code never leave your computer</span>
-                    </div>
-                    <span className="text-xs font-bold text-emerald-500">Active (100% Private)</span>
-                  </div>
-                </div>
+                    "Danger Zone" held Permanently Delete Account. On a phone
+                    it was a destructive, irreversible button two taps from a
+                    screen people open to change the theme. Removing it does
+                    remove the in-app route to deleting an account -
+                    DELETE /api/auth/account still exists and is unchanged. */}
 
                 {/* Where "Forgot password" sends its code */}
                 <SmtpPreferences />
-
-                {/* Danger Zone: Delete Account */}
-                <div className="rounded-2xl border border-red-500/25 bg-red-500/5 p-5 space-y-3">
-                  <div className="flex items-center gap-2 text-red-600 dark:text-red-400 font-bold text-sm">
-                    <ShieldAlert className="w-4 h-4" />
-                    <span>Danger Zone</span>
-                  </div>
-                  <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                    Permanently delete your account and all associated chat history, documents, and memories from the database and this device. This action cannot be undone.
-                  </p>
-
-                  {confirmDelete ? (
-                    <div className="flex items-center gap-2 pt-2">
-                      <button
-                        type="button"
-                        disabled={isDeletingAccount}
-                        onClick={handleDeleteAccountClick}
-                        className="flex items-center gap-1.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 px-4 py-2 text-xs font-bold text-white shadow-lg transition-all active:scale-95"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>{isDeletingAccount ? "Deleting Account..." : "Yes, Delete Account Permanently"}</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isDeletingAccount}
-                        onClick={() => setConfirmDelete(false)}
-                        className="rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-4 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDelete(true)}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all active:scale-95"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      <span>Permanently Delete Account</span>
-                    </button>
-                  )}
-                </div>
               </div>
             )}
 

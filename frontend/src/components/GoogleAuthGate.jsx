@@ -609,6 +609,22 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       return;
     }
 
+    /* An Android build that has not been paired has no backend at all:
+       API_BASE is empty, so this POST goes to the Capacitor server that
+       serves the page, which answers 404 with HTML. That fell through to the
+       generic failure below and told the person to open a Settings screen
+       they cannot reach and configure a mail server on a machine this app is
+       not talking to. Nothing about that was true. There is no account to
+       recover here, because accounts live on the computer. */
+    if (nativeGoogle && !API_BASE) {
+      setError(
+        'This phone is not connected to SMARAN on your computer, so there is '
+        + 'no account here to recover. Pair it from Settings > Connectors & '
+        + 'Devices, or reset the password on the computer itself.',
+      );
+      return;
+    }
+
     setIsOtpSending(true);
 
     try {
