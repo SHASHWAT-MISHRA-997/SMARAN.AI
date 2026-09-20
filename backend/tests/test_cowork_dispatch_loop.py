@@ -252,12 +252,28 @@ def test_another_account_cannot_dispatch_to_this_phone(phone):
     device_id, _ = phone
 
     import secrets as _secrets
+    from datetime import datetime, timedelta
+
+    # Built directly rather than through /api/auth/register, which no longer
+    # exists: sign-in is Supabase and an identity provider now. What this test
+    # actually needs is a second account holding a valid session, and that is
+    # what a session token is, however it was obtained.
     mark = "cowork_other_%s" % _secrets.token_hex(3)
-    registered = owner.post("/api/auth/register", json={
-        "username": mark, "email": "%s@smaran.ai" % mark,
-        "password": "Str0ng!-Other-Pass-42"})
-    assert registered.status_code == 200, registered.text
-    other_token = registered.json()["access_token"]
+    other_token = _secrets.token_urlsafe(32)
+    db = SessionLocal()
+    try:
+        db.add(User(
+            username=mark,
+            email="%s@smaran.ai" % mark,
+            role="user",
+            is_approved=True,
+            email_verified=True,
+            session_token=other_token,
+            session_expires=datetime.now() + timedelta(days=1),
+        ))
+        db.commit()
+    finally:
+        db.close()
 
     try:
         # A real session, but a different account's - and from off the machine,

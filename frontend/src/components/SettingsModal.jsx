@@ -16,7 +16,6 @@ import MemoryPreferences from './MemoryPreferences';
 import SchedulerView from './SchedulerView';
 import GatewayPreferences from './GatewayPreferences';
 import SandboxPreferences from './SandboxPreferences';
-import SmtpPreferences from './SmtpPreferences';
 
 import { detectClientDevice } from './RightPanel';
 import { isPhone } from '../utils/device';
@@ -1308,8 +1307,11 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                     remove the in-app route to deleting an account -
                     DELETE /api/auth/account still exists and is unchanged. */}
 
-                {/* Where "Forgot password" sends its code */}
-                <SmtpPreferences />
+                {/* The SMTP card went with the feature it existed for.
+                    It configured delivery of the "Forgot password" code, and
+                    there is no forgot password any more - SMARAN.AI holds no
+                    password to forget. Sign-in is Google, GitHub or LinkedIn
+                    through Supabase. */}
               </div>
             )}
 

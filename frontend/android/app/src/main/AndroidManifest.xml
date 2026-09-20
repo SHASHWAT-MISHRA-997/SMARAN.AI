@@ -102,6 +102,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- How an OAuth sign-in gets back into the app.
+                 The flow leaves for the system browser, so the provider
+                 cannot return to https://localhost - in that browser
+                 localhost is the browser's own, not this app, and the person
+                 would land on an error page while the app waited forever. A
+                 custom scheme comes back here instead.
+
+                 launchMode is already singleTask above, which is what makes
+                 the callback reach the running activity through
+                 onNewIntent rather than starting a second copy of the app on
+                 top of the one that is mid-sign-in. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="ai.smaran.app" android:host="auth-callback" />
+            </intent-filter>
+
         </activity>
 
         <provider

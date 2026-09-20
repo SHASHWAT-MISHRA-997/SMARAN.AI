@@ -15,7 +15,6 @@ import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
 import GoogleAuthGate, { getSavedGoogleUser, clearSavedGoogleUser } from './components/GoogleAuthGate';
 import { couldBePinned, isPhone } from './utils/device';
-import AuthModal from './components/AuthModal';
 import UpdateNotice from './components/UpdateNotice';
 import ExtensionsHub from './components/ExtensionsHub';
 import SitesHub from './components/SitesHub';
@@ -80,7 +79,6 @@ const App = () => {
     window.addEventListener('resize', updatePhoneLayout);
     return () => window.removeEventListener('resize', updatePhoneLayout);
   }, []);
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const sessionRetryRef = useRef(null);
@@ -506,7 +504,6 @@ const App = () => {
      the thing underneath everything else. */
   useBackClose([
     { open: isPairingOpen, close: () => setIsPairingOpen(false) },
-    { open: isAuthOpen, close: () => setIsAuthOpen(false) },
     { open: isDeveloperOpen, close: () => setIsDeveloperOpen(false) },
     { open: isAnalyticsOpen, close: () => setIsAnalyticsOpen(false) },
     { open: isModelHubOpen, close: () => setIsModelHubOpen(false) },
@@ -608,7 +605,6 @@ const App = () => {
         onOpenAnalytics={() => setIsAnalyticsOpen(true)}
         onOpenDeveloper={() => setIsDeveloperOpen(true)}
         onOpenPairing={() => setIsPairingOpen(true)}
-        onOpenAuth={() => setIsAuthOpen(true)}
         token={currentUser?.session_token}
         user={currentUser}
         activeSection={activeSection}
@@ -712,7 +708,6 @@ const App = () => {
           performancePosition={performancePosition}
           onPerformancePositionChange={(value) => { setPerformancePosition(value); if (value !== 'hidden') setShowRightPanel(true); }}
           onOpenConnections={() => { setIsSettingsOpen(false); setIsPairingOpen(true); }}
-          onOpenAccount={() => { setIsSettingsOpen(false); setIsAuthOpen(true); }}
           onOpenModels={() => { setIsSettingsOpen(false); setIsModelHubOpen(true); }}
           onOpenAnalytics={() => { setIsSettingsOpen(false); setIsAnalyticsOpen(true); }}
           onOpenMemory={() => { setIsSettingsOpen(false); window.dispatchEvent(new CustomEvent('smaran:open-memory')); }}
@@ -745,13 +740,10 @@ const App = () => {
         <UpdateNotice />
       </ErrorBoundary>
 
-      {/* Sign in or create an account, including the Google route. */}
-      <ErrorBoundary>
-        <AuthModal
-          isOpen={isAuthOpen}
-          onClose={() => setIsAuthOpen(false)}
-        />
-      </ErrorBoundary>
+      {/* The second sign-in panel is gone. It was a full email and
+          password screen - the thing being removed - and a duplicate of the
+          gate that already stands in front of the whole app. The sidebar
+          entry that opened it falls back to the account screen on its own. */}
 
       {/* Pairing a phone with this computer, and the devices already linked. */}
       <ErrorBoundary>

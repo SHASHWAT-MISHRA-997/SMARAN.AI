@@ -814,6 +814,14 @@ def set_google_client_id(client_id: str) -> None:
 # client that could name its own email address could sign in as anybody.
 _SUPABASE_CONFIG_FILE = os.path.join(settings.DATA_DIR, "supabase.json")
 
+# The project this app ships against, so a fresh install can sign in without
+# configuring anything - the same reasoning as DEFAULT_GOOGLE_CLIENT_ID above.
+# A publishable key is meant to be in the client; it authorises nothing that
+# row level security does not already allow, and Supabase rotates it
+# independently of the secret half, which never appears here.
+DEFAULT_SUPABASE_URL = "https://abwzfxlyzwcnetogifwb.supabase.co"
+DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_FpdKwtY3FBYbZPFYREMA8w_0WP8UfQZ"
+
 
 def supabase_config() -> dict:
     """Project URL and anon key, or empties when sign-in is not set up."""
@@ -824,13 +832,20 @@ def supabase_config() -> dict:
         or ""
     ).strip()
     if not (url and key):
+        stored = None
         try:
             with open(_SUPABASE_CONFIG_FILE, "r", encoding="utf-8") as handle:
                 stored = json.load(handle) or {}
+        except (OSError, ValueError):
+            stored = None
+        if stored is not None:
+            # A saved file is a deliberate choice, including a deliberate
+            # empty one, so it is honoured over the built-in default.
             url = url or str(stored.get("url") or "").strip()
             key = key or str(stored.get("anon_key") or "").strip()
-        except (OSError, ValueError):
-            pass
+        else:
+            url = url or DEFAULT_SUPABASE_URL
+            key = key or DEFAULT_SUPABASE_ANON_KEY
     return {
         "url": url.rstrip("/"),
         "anon_key": key,
@@ -930,47 +945,13 @@ class GoogleSignInResponse(BaseModel):
     is_new_user: bool
     user: "UserResponse"
 
-class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    username: Optional[str] = None
-    
-    @field_validator('password')
-    @classmethod
-    def validate_password_strength(cls, v):
-        is_valid, error = verify_password_strength(v)
-        if not is_valid:
-            raise ValueError(error)
-        return v
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-    remember_me: bool = False
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: UserResponse
+# RegisterRequest, LoginRequest, TokenResponse, PasswordResetRequest and
+# PasswordResetConfirmRequest went with the endpoints that were their only
+# callers. A request model for a route nobody can reach is a description of
+# a feature that no longer exists.
 
 class EmailVerificationRequest(BaseModel):
     token: str
-
-class PasswordResetRequest(BaseModel):
-    email: EmailStr
-
-class PasswordResetConfirmRequest(BaseModel):
-    email: EmailStr
-    token: str
-    new_password: str
-    
-    @field_validator('new_password')
-    @classmethod
-    def validate_password_strength(cls, v):
-        is_valid, error = verify_password_strength(v)
-        if not is_valid:
-            raise ValueError(error)
-        return v
 
 
 def _verify_google_credential(credential: str) -> dict:
@@ -1378,119 +1359,21 @@ def require_verified_email(current_user: User = Depends(get_current_user)) -> Us
         raise HTTPException(status_code=403, detail="Email verification required")
     return current_user
 
+# Email and password sign-in is gone, deliberately and completely.
+#
+# Every way into this app now goes through Supabase Auth and an identity
+# provider - see /api/auth/supabase above. The endpoints that used to live
+# here (register, login, forgot-password, reset-password, change-password and
+# the SMTP settings that existed only to deliver reset codes) are removed
+# rather than hidden, because an unused login endpoint is still a login
+# endpoint: it accepts passwords, it is rate-limited but reachable over the
+# LAN, and it was the whole surface behind the account-takeover this
+# repository already has a test file about.
+#
+# The cost is real and was accepted knowingly: an offline install, or a phone
+# not paired to the desktop, now has no way to sign in at all.
+
 # Auth Endpoints
-@app.post("/api/auth/register", response_model=TokenResponse)
-@auth_limiter.limit("60/minute")
-async def register(req: RegisterRequest, response: Response, request: Request, db: Session = Depends(get_db)):
-    email_clean = req.email.strip().lower()
-    raw_user = req.username.strip() if req.username else email_clean.split('@')[0]
-    
-    existing = db.query(User).filter(
-        (User.email == email_clean) | (User.username == raw_user)
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Account with this email or username already exists. Please sign in.")
-    
-    username = raw_user
-    counter = 1
-    while db.query(User).filter(User.username == username).first():
-        username = f"{raw_user}{counter}"
-        counter += 1
-    
-    password_hash = hash_password(req.password)
-    user = User(
-        username=username,
-        email=email_clean if '@' in email_clean else f"{email_clean}@smaran.ai",
-        password_hash=password_hash,
-        role="user",
-        is_approved=True,
-        email_verified=True
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    
-    session_token = generate_session_token()
-    user.session_token = session_token
-    user.session_expires = datetime.now() + timedelta(days=30)
-    db.commit()
-    
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=30 * 24 * 60 * 60,
-        path="/"
-    )
-    
-    verification_token = secrets.token_urlsafe(32)
-    user.verification_token = verification_token
-    db.commit()
-    
-    return TokenResponse(
-        access_token=session_token,
-        user=UserResponse(
-            id=user.id,
-            username=user.username,
-            role=user.role,
-            is_approved=user.is_approved,
-            email=user.email,
-            email_verified=user.email_verified
-        )
-    )
-
-@app.post("/api/auth/login", response_model=TokenResponse)
-@auth_limiter.limit("30/minute")
-async def login(req: LoginRequest, response: Response, request: Request, db: Session = Depends(get_db)):
-    identifier = req.email.lower().strip()
-    user = db.query(User).filter((User.email == identifier) | (User.username == identifier)).first()
-    
-    if not user or not user.password_hash:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    if user.locked_until and user.locked_until > datetime.now():
-        raise HTTPException(status_code=429, detail="Account temporarily locked. Try again later.")
-    
-    if not verify_password(req.password, user.password_hash):
-        user.failed_login_attempts += 1
-        if user.failed_login_attempts >= 5:
-            user.locked_until = datetime.now() + timedelta(minutes=15)
-        db.commit()
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    user.failed_login_attempts = 0
-    user.locked_until = None
-    user.last_login = datetime.now()
-    
-    session_token = generate_session_token()
-    user.session_token = session_token
-    user.session_expires = datetime.now() + timedelta(days=30 if req.remember_me else 1)
-    db.commit()
-    
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=30 * 24 * 60 * 60 if req.remember_me else 24 * 60 * 60,
-        path="/"
-    )
-    
-    return TokenResponse(
-        access_token=session_token,
-        user=UserResponse(
-            id=user.id,
-            username=user.username,
-            role=user.role,
-            is_approved=user.is_approved,
-            email=user.email,
-            email_verified=user.email_verified
-        )
-    )
-
 @app.post("/api/auth/logout")
 async def logout(response: Response, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     current_user.session_token = None
@@ -1571,316 +1454,6 @@ async def resend_verification(request: Request, current_user: User = Depends(get
     current_user.verification_token = verification_token
     db.commit()
     return {"message": "Verification email sent"}
-
-_SMTP_CONFIG_FILE = os.path.join(settings.DATA_DIR, "smtp.json")
-
-
-def smtp_settings() -> dict:
-    """The mail server to send verification codes through.
-
-    Environment variables win, so a packaged build or a server deployment can
-    bake them in. What is missing there is filled from a file this app writes
-    itself, because the only way to switch password recovery on used to be
-    editing a .env next to the backend - which a phone cannot do at all, and a
-    desktop user has no reason to know about. The error on screen even said
-    "configure free SMTP in .env", which is not an instruction anyone holding a
-    phone can follow. Settings > Account can write this file instead.
-
-    The password is stored on this machine in DATA_DIR, owner-readable, beside
-    the provider keys that already live there.
-    """
-    stored = {}
-    try:
-        with open(_SMTP_CONFIG_FILE, "r", encoding="utf-8") as handle:
-            stored = json.load(handle) or {}
-    except (OSError, ValueError):
-        stored = {}
-
-    def pick(*env_names, key, default=""):
-        for name in env_names:
-            value = (os.getenv(name) or "").strip()
-            if value:
-                return value
-        return str(stored.get(key) or "").strip() or default
-
-    host = pick("SMTP_HOST", "SMARAN_SMTP_HOST", key="host")
-    user = pick("SMTP_USER", "SMARAN_SMTP_USER", key="user")
-    password = pick("SMTP_PASSWORD", "SMARAN_SMTP_PASSWORD", key="password")
-    raw_port = pick("SMTP_PORT", "SMARAN_SMTP_PORT", key="port", default="587")
-    try:
-        port = int(raw_port)
-    except ValueError:
-        # A port that is not a number used to raise straight out of the send
-        # path, which surfaced as a 500 rather than "check your settings".
-        logger.warning(f"SMTP port {raw_port!r} is not a number; using 587.")
-        port = 587
-    return {
-        "host": host,
-        "port": port,
-        "user": user,
-        "password": password,
-        "from_address": pick("SMTP_FROM", "SMARAN_SMTP_FROM", key="from_address")
-        or user
-        or "no-reply@smaran.ai",
-        "from_name": pick(
-            "SMTP_FROM_NAME", "SMARAN_SMTP_FROM_NAME", key="from_name"
-        )
-        or "SMARAN.AI Security",
-        "configured": bool(host and user and password),
-    }
-
-
-def send_otp_email(recipient_email: str, otp_code: str) -> bool:
-    """Dispatches a 6-digit OTP email using the configured SMTP settings."""
-    config = smtp_settings()
-    smtp_host = config["host"]
-    smtp_port = config["port"]
-    smtp_user = config["user"]
-    smtp_password = config["password"]
-    smtp_from = config["from_address"]
-    smtp_from_name = config["from_name"]
-
-    if not config["configured"]:
-        logger.warning(f"SMTP not configured. Cannot dispatch email to {recipient_email}")
-        return False
-
-    try:
-        import smtplib
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"Your SMARAN.AI Verification OTP: {otp_code}"
-        msg["From"] = f"{smtp_from_name} <{smtp_from}>"
-        msg["To"] = recipient_email
-
-        html = f"""
-        <div style="font-family: Arial, sans-serif; background-color: #050508; color: #f4f4f5; padding: 32px; border-radius: 16px; max-width: 480px; margin: auto; border: 1px solid #ef4444;">
-          <div style="text-align: center; margin-bottom: 20px;">
-            <h1 style="color: #ffffff; font-size: 24px; margin: 0;">SMARAN<span style="color: #ef4444;">.</span>AI</h1>
-            <p style="color: #ef4444; font-size: 11px; margin-top: 4px; font-weight: bold;">AUTONOMOUS INTELLIGENCE RUNTIME</p>
-          </div>
-          <p style="font-size: 14px; color: #d4d4d8; line-height: 1.5;">You requested a password reset for your SMARAN.AI account. Use the 6-digit verification code below to complete your reset:</p>
-          <div style="text-align: center; margin: 28px 0;">
-            <span style="font-size: 34px; font-weight: 800; letter-spacing: 8px; color: #ffffff; background: #18181b; padding: 14px 28px; border-radius: 12px; border: 1px solid #ef4444; display: inline-block;">{otp_code}</span>
-          </div>
-          <p style="font-size: 12px; color: #a1a1aa; line-height: 1.4;">This verification code will expire in <strong>10 minutes</strong>. If you did not request this code, please ignore this email.</p>
-          <hr style="border: 0; border-top: 1px solid #27272a; margin: 24px 0 16px 0;" />
-          <p style="font-size: 11px; color: #71717a; text-align: center; margin: 0;">&copy; 2026 SMARAN.AI &bull; Private &bull; Autonomous</p>
-        </div>
-        """
-        text = f"Your SMARAN.AI verification code is: {otp_code}\nThis code is valid for 10 minutes."
-        msg.attach(MIMEText(text, "plain"))
-        msg.attach(MIMEText(html, "html"))
-
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=12)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=12)
-            server.starttls()
-
-        server.login(smtp_user, smtp_password)
-        server.send_message(msg)
-        server.quit()
-        logger.info(f"OTP verification email successfully delivered to {recipient_email}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to dispatch OTP email to {recipient_email}: {e}")
-        return False
-
-@app.post("/api/auth/forgot-password", response_model=dict)
-@auth_limiter.limit("10/hour")
-async def forgot_password(req: PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
-    clean_email = req.email.strip().lower()
-    user = db.query(User).filter(User.email == clean_email).first()
-
-    # Generate standard 6-digit OTP
-    otp_code = str(secrets.randbelow(900000) + 100000)
-    
-    if user:
-        user.reset_token = otp_code
-        user.reset_token_expires = datetime.now() + timedelta(minutes=10)
-        db.commit()
-
-    # Dispatch email if SMTP configured
-    sent = await asyncio.to_thread(send_otp_email, clean_email, otp_code)
-
-    if sent:
-        return {
-            "message": "If an account exists with this email, a verification code has been sent.",
-            "email_dispatched": True,
-        }
-
-    # No mail server, or it refused the message. Two different callers are
-    # standing here and they must not be answered the same way.
-    #
-    # Someone at the keyboard of the machine SMARAN runs on already owns the
-    # database; handing them the code costs nothing they could not read
-    # anyway, and without it a desktop install with no SMTP has no route back
-    # into a forgotten account at all. That is the state this app shipped in,
-    # and "configure free SMTP in .env" was the only thing on screen.
-    #
-    # A caller from the LAN - which is how the paired phone reaches this, and
-    # this endpoint needs no authentication - is a different person entirely.
-    # Handing that caller the code would be the account takeover described in
-    # test_password_reset_is_not_a_takeover.py: know an address, get a token,
-    # set a password, sign in.
-    #
-    # Both get the same 200 and the same neutral sentence whether or not the
-    # address has an account, so neither can use this as a directory. Only the
-    # extra field differs, and only for the owner of the machine.
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    is_owner = client_ip in LOOPBACK_HOSTS
-    configured = smtp_settings()["configured"]
-
-    # Why nothing arrived, said to the person who is actually reading it.
-    #
-    # Both audiences were previously told to open Settings > Account > Email
-    # delivery, which for the phone is advice it cannot take: Settings is
-    # behind the sign-in screen, and the person reading this is locked out of
-    # exactly that. It named the one door they could not open. The desktop can
-    # reset any account on its own, with no mail server at all, so that is
-    # what the phone is pointed at instead.
-    if not configured and not is_owner:
-        delivery_error = (
-            "A code can only reach this phone by email, and email delivery is "
-            "not set up yet. Reset the password in SMARAN on your computer - "
-            "it can do it without a mail server - or set one up there under "
-            "Settings > Account > Email delivery (SMTP)."
-        )
-    elif not configured:
-        delivery_error = (
-            "Email delivery is not set up on this installation. Open "
-            "Settings > Account > Email delivery (SMTP) and add a mail server "
-            "- a free Gmail app password works."
-        )
-    else:
-        delivery_error = (
-            "The mail server refused the message. Check the host, port, "
-            "username and password in Settings > Account > Email delivery (SMTP)."
-        )
-
-    reply = {
-        "message": "If an account exists with this email, a verification code has been sent.",
-        "email_dispatched": False,
-        "delivery_error": delivery_error,
-    }
-    if user and is_owner:
-        reply["reset_token"] = otp_code
-        reply["local_owner"] = True
-    return reply
-
-
-class SmtpConfigRequest(BaseModel):
-    host: str = ""
-    port: int = 587
-    user: str = ""
-    # Left unset to keep the password already saved; sent empty to clear it.
-    password: Optional[str] = None
-    from_address: str = ""
-    from_name: str = ""
-
-
-@app.get("/api/auth/smtp/config")
-def get_smtp_config(current_user: User = Depends(get_current_user)):
-    """What the Settings screen shows. The password is never sent back."""
-    config = smtp_settings()
-    return {
-        "configured": config["configured"],
-        "host": config["host"],
-        "port": config["port"],
-        "user": config["user"],
-        "from_address": config["from_address"],
-        "from_name": config["from_name"],
-        "has_password": bool(config["password"]),
-        # Which fields an environment variable is currently deciding, so the
-        # screen can say precisely what editing here will not change. Named
-        # per field rather than as one flag: a .env that sets the host and
-        # leaves SMTP_PASSWORD empty - which is the state that breaks
-        # password recovery most often - is exactly the case where the
-        # password field here does still work, and a blanket "environment
-        # wins" warning would have talked the user out of the one edit that
-        # would have fixed it.
-        "from_environment": [
-            name
-            for name, variables in (
-                ("host", ("SMTP_HOST", "SMARAN_SMTP_HOST")),
-                ("port", ("SMTP_PORT", "SMARAN_SMTP_PORT")),
-                ("user", ("SMTP_USER", "SMARAN_SMTP_USER")),
-                ("password", ("SMTP_PASSWORD", "SMARAN_SMTP_PASSWORD")),
-                ("from_address", ("SMTP_FROM", "SMARAN_SMTP_FROM")),
-                ("from_name", ("SMTP_FROM_NAME", "SMARAN_SMTP_FROM_NAME")),
-            )
-            if any((os.getenv(v) or "").strip() for v in variables)
-        ],
-    }
-
-
-@app.post("/api/auth/smtp/config")
-def save_smtp_config(req: SmtpConfigRequest, current_user: User = Depends(get_current_user)):
-    """Save the mail server so password recovery can send its codes."""
-    if req.port < 1 or req.port > 65535:
-        raise HTTPException(status_code=400, detail="Port must be between 1 and 65535.")
-
-    existing = {}
-    try:
-        with open(_SMTP_CONFIG_FILE, "r", encoding="utf-8") as handle:
-            existing = json.load(handle) or {}
-    except (OSError, ValueError):
-        existing = {}
-
-    # None means "leave it alone", so the screen can show the other fields
-    # without ever having to hold the password to re-send it.
-    password = existing.get("password", "") if req.password is None else req.password
-
-    saved = {
-        "host": req.host.strip(),
-        "port": req.port,
-        "user": req.user.strip(),
-        "password": password,
-        "from_address": req.from_address.strip(),
-        "from_name": req.from_name.strip(),
-    }
-    os.makedirs(settings.DATA_DIR, exist_ok=True)
-    with open(_SMTP_CONFIG_FILE, "w", encoding="utf-8") as handle:
-        json.dump(saved, handle, indent=2)
-    try:
-        os.chmod(_SMTP_CONFIG_FILE, 0o600)  # owner-only where supported
-    except OSError:
-        pass
-
-    return get_smtp_config(current_user)
-
-@app.post("/api/auth/reset-password", response_model=dict)
-@auth_limiter.limit("5/hour")
-async def reset_password(req: PasswordResetConfirmRequest, request: Request, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == req.email.strip().lower(), User.reset_token == req.token).first()
-    if not user or not user.reset_token_expires or user.reset_token_expires < datetime.now():
-        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
-    
-    user.password_hash = hash_password(req.new_password)
-    user.reset_token = None
-    user.reset_token_expires = None
-    user.failed_login_attempts = 0
-    user.locked_until = None
-    db.commit()
-    
-    return {"message": "Password reset successfully"}
-
-@app.post("/api/auth/change-password", response_model=dict)
-@auth_limiter.limit("10/hour")
-async def change_password(current_password: str, new_password: str, request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not current_user.password_hash or not verify_password(current_password, current_user.password_hash):
-        raise HTTPException(status_code=401, detail="Current password is incorrect")
-    
-    is_valid, error = verify_password_strength(new_password)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=error)
-    
-    current_user.password_hash = hash_password(new_password)
-    db.commit()
-    
-    return {"message": "Password changed successfully"}
 
 # Device login (legacy support)
 @app.post("/api/auth/device-login", response_model=UserResponse)

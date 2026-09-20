@@ -90,50 +90,10 @@ export async function ensureDeviceUser() {
   return { device_id: deviceId };
 }
 
-function formatAuthError(data, defaultMsg) {
-  if (!data) return defaultMsg;
-  const detail = data.detail || data.message;
-  if (!detail) return defaultMsg;
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail)) {
-    return detail.map(d => d.msg || d.message || JSON.stringify(d)).join(', ');
-  }
-  if (typeof detail === 'object') {
-    return detail.msg || detail.message || JSON.stringify(detail);
-  }
-  return String(detail);
-}
-
-// Cookie-based & API auth helpers
-export async function registerUser(email, password, username) {
-  const res = await fetch(`${API_BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ email, password, username }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(formatAuthError(data, 'Registration failed'));
-  }
-  localStorage.removeItem('sm_auth_logged_out');
-  return data;
-}
-
-export async function loginUser(email, password, rememberMe) {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ email, password, remember_me: rememberMe }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(formatAuthError(data, 'Invalid email or password'));
-  }
-  localStorage.removeItem('sm_auth_logged_out');
-  return data;
-}
+/* registerUser and loginUser are gone with /api/auth/register and
+   /api/auth/login. SMARAN.AI holds no password: signing in happens at
+   Google, GitHub or LinkedIn through Supabase, and the only thing that
+   reaches this backend is a token it verifies with Supabase. */
 
 export async function logoutUser() {
   localStorage.setItem('sm_auth_logged_out', 'true');
