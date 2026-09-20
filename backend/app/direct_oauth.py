@@ -5,7 +5,7 @@ import hashlib
 import os
 import secrets
 import time
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -116,7 +116,13 @@ def make_router(get_db, finish_login, web_client_id):
             flow.update(device_code=data["device_code"], client_id=github_client_id(),
                         interval=interval, next_poll=time.monotonic() + interval,
                         expires=time.monotonic() + expiry)
-            result.update(url="https://github.com/login/device", user_code=data["user_code"],
+            # GitHub does not send verification_uri_complete, but its device
+            # page reads ?code= - so the person taps once and confirms, rather
+            # than copying eight characters between two apps by hand. The bare
+            # URL is still shown as the fallback if the prefill is ignored.
+            verify = data.get("verification_uri") or "https://github.com/login/device"
+            result.update(url=f"{verify}?code={quote(data['user_code'])}",
+                          plain_url=verify, user_code=data["user_code"],
                           interval=interval, expires_in=expiry)
         pending[ticket] = flow
         response.headers["Cache-Control"] = "no-store"

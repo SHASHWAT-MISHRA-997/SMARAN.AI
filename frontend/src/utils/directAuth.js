@@ -73,8 +73,12 @@ async function nativeGitHub(signal, onProgress) {
   const flow = await nativeForm('https://github.com/login/device/code',
     { client_id: GITHUB_CLIENT_ID, scope: 'read:user user:email' });
   if (flow.error || !flow.device_code) throw new Error('GitHub Device Flow is unavailable.');
-  onProgress({ url: 'https://github.com/login/device', user_code: flow.user_code });
-  await device.openUrl({ url: 'https://github.com/login/device' });
+  const verify = flow.verification_uri || 'https://github.com/login/device';
+  // ?code= prefills GitHub's device page, so this is one confirm rather than
+  // eight characters retyped from one app into another.
+  const prefilled = `${verify}?code=${encodeURIComponent(flow.user_code)}`;
+  onProgress({ url: prefilled, plain_url: verify, user_code: flow.user_code });
+  await device.openUrl({ url: prefilled });
   let interval = Math.max(5, Number(flow.interval) || 5);
   const deadline = Date.now() + Math.min(900, Number(flow.expires_in) || 900) * 1000;
   while (Date.now() < deadline) {

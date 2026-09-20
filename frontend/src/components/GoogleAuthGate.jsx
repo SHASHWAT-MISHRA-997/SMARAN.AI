@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sparkles, ArrowRight, Lock, AlertCircle, Loader2 } from 'lucide-react';
 import { PROVIDERS, enabledProviders, isNative, providerLabel, startOAuth } from '../utils/directAuth';
+import { API_BASE } from '../context/AuthContext';
 
 export const GOOGLE_STORAGE_KEY = 'smaran_google_user';
 
@@ -30,11 +31,52 @@ export const getSavedGoogleUser = () => {
   }
 };
 
+/** The event the gate listens for, so signing out does not need a reload. */
+const SIGNED_OUT = 'smaran:signed-out';
+
 export const clearSavedGoogleUser = () => {
   try {
     localStorage.removeItem(GOOGLE_STORAGE_KEY);
+    // Written on sign-in and, until now, never taken back. It is a live
+    // bearer token: leaving it behind meant "sign out" removed the name on
+    // screen and kept the credential underneath it.
+    localStorage.removeItem('sm_session_token');
   } catch {}
+  window.dispatchEvent(new CustomEvent(SIGNED_OUT));
+};
 
+/**
+ * Sign out of the session, not just out of the screen.
+ *
+ * What this used to do was clear one localStorage key and call
+ * `window.location.reload()`, and everything depended on that reload: the
+ * gate keeps its own `currentUser`, and nothing else ever cleared it. On
+ * Android the reload does not take effect, so the app stayed open on a
+ * session with no profile - "Session without a profile", still authenticated,
+ * still usable. Sign out did not sign anyone out.
+ *
+ * Two things were also simply missing. The backend was never told, so the
+ * session row and its http-only cookie stayed valid for their full thirty
+ * days - `logoutUser` existed in AuthContext and had no callers at all. And
+ * `sm_session_token`, a bearer token for that same session, was left in
+ * localStorage.
+ *
+ * Now the server is told first, the local copies go, the gate is told
+ * directly rather than through a page load, and the reload is a last tidy-up
+ * that nothing depends on.
+ */
+export const signOutEverywhere = async () => {
+  try {
+    await fetch(`${API_BASE || ''}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    /* Offline, or no backend to tell. The local session still goes. */
+  }
+  clearSavedGoogleUser();
 };
 
 const INGEST_URL = 'https://smaran-analytics.netlify.app/ingest';
@@ -109,11 +151,55 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   const [available, setAvailable] = useState(null);
   const attempt = useRef(null);
   const [progress, setProgress] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  /* Put the code on the clipboard the moment it exists, and again on tap.
+     navigator.clipboard needs a secure context, which the packaged app has
+     (https://localhost) and a plain-http LAN page does not - hence the
+     fallback, rather than a silent no-op. */
+  const copyCode = useCallback((code) => {
+    if (!code) return;
+    const done = () => { setCopied(true); window.setTimeout(() => setCopied(false), 2000); };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(code).then(done).catch(() => {});
+      return;
+    }
+    try {
+      const field = document.createElement('textarea');
+      field.value = code;
+      field.setAttribute('readonly', '');
+      field.style.cssText = 'position:fixed;top:-1000px';
+      document.body.appendChild(field);
+      field.select();
+      document.execCommand('copy');
+      field.remove();
+      done();
+    } catch { /* the code is on screen either way */ }
+  }, []);
+
+  useEffect(() => { if (progress?.user_code) copyCode(progress.user_code); }, [progress, copyCode]);
   useEffect(() => () => attempt.current?.abort(), []);
 
   useEffect(() => {
     if (currentUser) onUserChange?.(currentUser);
   }, [currentUser, onUserChange]);
+
+  /* The gate holds the only copy of "who is signed in" that decides whether
+     the app renders at all. Sign-out used to reset it by reloading the page,
+     which does not happen on Android - so the app stayed open on a cleared
+     session. Told directly now; the reload is no longer load-bearing. */
+  useEffect(() => {
+    const onSignedOut = () => {
+      setCurrentUser(null);
+      setError('');
+      setProgress(null);
+      setBusyProvider('');
+      setFinishing(false);
+      attempt.current?.abort();
+    };
+    window.addEventListener(SIGNED_OUT, onSignedOut);
+    return () => window.removeEventListener(SIGNED_OUT, onSignedOut);
+  }, []);
 
   useEffect(() => {
     if (currentUser) return undefined;
@@ -269,7 +355,25 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
 
           {busyProvider && (
             <div className="mt-4 space-y-3 text-center text-sm text-zinc-300" role="status">
-              {progress?.user_code && <p>Enter this code on GitHub: <strong className="block select-text text-xl tracking-widest text-white">{progress.user_code}</strong></p>}
+              {progress?.user_code && (
+                <div>
+                  <p>Confirm this code on GitHub:</p>
+                  {/* Tappable, because the prefill in the link can be ignored
+                      - if a browser drops the query, or GitHub sends the
+                      person through a login first - and retyping eight
+                      characters between two apps is the worst part of a
+                      device flow. */}
+                  <button
+                    type="button"
+                    onClick={() => copyCode(progress.user_code)}
+                    title="Copy the code"
+                    className="mt-1 block w-full select-text text-xl font-bold tracking-widest text-white"
+                  >
+                    {progress.user_code}
+                  </button>
+                  <span className="text-[11px] text-zinc-400">{copied ? 'Copied' : 'Tap the code to copy'}</span>
+                </div>
+              )}
               {progress?.url && <a className="block text-red-300 underline" href={progress.url} target="_blank" rel="noreferrer">Open {providerLabel(busyProvider)} sign-in</a>}
               <p>Complete sign-in, then return here.</p>
               <button type="button" className="text-zinc-300 underline" onClick={() => attempt.current?.abort()}>Cancel sign-in</button>

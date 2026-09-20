@@ -13,7 +13,7 @@ import ModelHubModal from './components/ModelHubModal';
 import DeveloperModal from './components/DeveloperModal';
 import DevicePairing from './components/DevicePairing';
 import PinLock from './components/PinLock';
-import GoogleAuthGate, { getSavedGoogleUser, clearSavedGoogleUser } from './components/GoogleAuthGate';
+import GoogleAuthGate, { getSavedGoogleUser, signOutEverywhere } from './components/GoogleAuthGate';
 import { couldBePinned, isPhone } from './utils/device';
 import UpdateNotice from './components/UpdateNotice';
 import ExtensionsHub from './components/ExtensionsHub';
@@ -535,7 +535,9 @@ const App = () => {
   const [settingsTab, setSettingsTab] = useState('general');
 
   const handleSignOut = () => {
-    clearSavedGoogleUser();
+    // Fire and forget: the gate is reset by the event signOutEverywhere
+    // dispatches, so the screen does not wait on the network to respond.
+    signOutEverywhere();
     setCurrentUser(null);
     setIsSettingsOpen(false);
   };

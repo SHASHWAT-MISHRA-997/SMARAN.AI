@@ -4,7 +4,7 @@ import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { companionHeaders } from "../utils/companionAuth";
 import { PET_FORMS, PetAvatar } from "./DesktopPet";
 import { useTheme } from "../context/ThemeContext";
-import { clearSavedGoogleUser, getSavedGoogleUser } from './GoogleAuthGate';
+import { getSavedGoogleUser, signOutEverywhere } from './GoogleAuthGate';
 import AppearancePreferences from './AppearancePreferences';
 import VoicePreferences from './VoicePreferences';
 import ComputerUsePreferences from './ComputerUsePreferences';
@@ -76,9 +76,15 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
 
   const activeUser = propUser || getSavedGoogleUser();
 
-  const handleSignOutClick = () => {
-    clearSavedGoogleUser();
-    localStorage.removeItem("smaran_google_user");
+  const [signingOut, setSigningOut] = useState(false);
+
+  const handleSignOutClick = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    // Tells the backend first, then clears the local copies, then the gate.
+    // The reload is last and nothing depends on it - it used to be the only
+    // thing doing the work, which is why sign-out did nothing on Android.
+    await signOutEverywhere();
     onSignOut?.();
     onClose?.();
     window.location.reload();
@@ -1289,7 +1295,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                     className="flex items-center gap-1.5 rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-all shrink-0 active:scale-95"
                   >
                     <LogOut className="h-3.5 w-3.5" />
-                    <span>Sign Out</span>
+                    <span>{signingOut ? "Signing out…" : "Sign Out"}</span>
                   </button>
                 </div>
 
