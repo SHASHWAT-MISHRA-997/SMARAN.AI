@@ -2171,7 +2171,10 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                   </div>
 
                   {/* Connect / Portfolio Links */}
-                  <div className="pt-2 flex flex-wrap items-center gap-3 relative z-10">
+                  {/* One row wherever there is room. Kept wrapping below sm because
+                      three nowrap buttons cannot fit a phone, and a row that
+                      scrolls sideways is worse than a row that stacks. */}
+                  <div className="pt-2 flex flex-wrap sm:flex-nowrap items-center gap-2.5 relative z-10">
                     <a
                       href="https://shashwatmishra-portfolio.netlify.app/"
                       target="_blank"
