@@ -20,7 +20,10 @@
       --muted: #9ca3af;
       --dimmer: #6b7280;
       --code-bg: #0d0e15;
-    }
+          --text-bright: #ffffff;
+      --body-text: #d1d5db;
+      --mint-pale: #d1fae5;
+}
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       background-color: var(--bg);
@@ -50,13 +53,13 @@
     }
     .brand {
       display: flex; align-items: center; gap: 10px;
-      font-weight: 800; font-size: 1.15rem; color: #fff; text-decoration: none;
+      font-weight: 800; font-size: 1.15rem; color: var(--text-bright); text-decoration: none;
     }
     .brand img { width: 32px; height: 32px; border-radius: 8px; }
     .brand span span { color: var(--red); }
     .nav-links { display: flex; gap: 20px; font-size: 0.9rem; font-weight: 600; }
     .nav-links a { color: var(--muted); }
-    .nav-links a:hover { color: #fff; text-decoration: none; }
+    .nav-links a:hover { color: var(--text-bright); text-decoration: none; }
 
     .header-hero {
       max-width: 900px; margin: 60px auto 40px; padding: 0 24px; text-align: center;
@@ -111,10 +114,10 @@
       background: rgba(255, 255, 255, 0.06); color: var(--muted); font-weight: 600;
     }
     .terms-section p {
-      color: #d1d5db; margin-bottom: 14px; font-size: 0.96rem;
+      color: var(--body-text); margin-bottom: 14px; font-size: 0.96rem;
     }
     .terms-section ul {
-      margin: 12px 0 16px 24px; color: #d1d5db; font-size: 0.95rem;
+      margin: 12px 0 16px 24px; color: var(--body-text); font-size: 0.95rem;
     }
     .terms-section ul li { margin-bottom: 8px; }
     
@@ -125,7 +128,7 @@
     }
     .highlight-box svg { flex-shrink: 0; color: var(--emerald); margin-top: 2px; }
     .highlight-box strong { color: #a7f3d0; display: block; margin-bottom: 4px; font-size: 0.95rem; }
-    .highlight-box p { color: #d1fae5; margin: 0; font-size: 0.9rem; }
+    .highlight-box p { color: var(--mint-pale); margin: 0; font-size: 0.9rem; }
 
     .footer {
       border-top: 1px solid var(--card-border); max-width: 1100px;
@@ -136,6 +139,8 @@
     .footer-links { display: flex; gap: 20px; }
     .footer-links a { color: var(--muted); }
   </style>
+  <link rel="stylesheet" href="page-theme.css" />
+  <script src="page-theme.js"></script>
 </head>
 <body>
 
@@ -145,11 +150,16 @@
         <img src="assets/logo.png" alt="SMARAN.AI Logo" />
         <span>SMARAN<span>.</span>AI</span>
       </a>
-      <nav class="nav-links">
+      <nav class="nav-links site-nav-links">
         <a href="index.html">Home</a>
         <a href="docs.html">Docs</a>
+        <a href="showcase.html">Showcase</a>
+        <a href="terms.html" aria-current="page">Terms</a>
         <a href="index.html#download">Download</a>
-        <a href="index.html#privacy">Privacy</a>
+        <button type="button" class="theme-toggle" aria-label="Switch to light">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        </button>
       </nav>
     </div>
   </header>

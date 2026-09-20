@@ -1,0 +1,163 @@
+/* Light mode, and the mobile sizing, for the pages that are not index.html.
+ *
+ * docs, showcase and terms were each written standalone: their own <style>
+ * block, their own nav, their own palette, and no link to styles.css or
+ * main.js. The theme switch lives in those two files, so on three of the
+ * four pages on this site the switch simply did not exist - the toggle was
+ * absent from the nav and the colours were hardcoded dark. Anyone who chose
+ * light on the home page got it for exactly one page.
+ *
+ * Rather than pull those pages into the whole of styles.css - which is built
+ * around the home page's markup and would fight their own rules - this file
+ * only re-points the CSS variables each of them already uses, so one class
+ * on <html> repaints all three. Their own :root blocks stay as the dark
+ * definition; these are the light ones.
+ */
+
+/* ------------------------------------------------------------------ docs
+   and terms share a palette: --bg, --panel, --text, --muted, --dimmer,
+   --card-border, --code-bg. */
+html.light {
+  --bg: #f7f7f9;
+  --panel: rgba(255, 255, 255, 0.92);
+  --panel-hover: rgba(255, 255, 255, 1);
+  --card-border: rgba(9, 9, 13, 0.12);
+  --red: #dc2626;
+  --red-glow: rgba(220, 38, 38, 0.18);
+  --emerald: #047857;
+  --cyan: #0e7490;
+  --purple: #7e22ce;
+  --text: #0f1115;
+  --muted: #4b5563;
+  --dimmer: #6b7280;
+  --code-bg: #f1f2f6;
+
+  /* showcase.html names everything differently. */
+  --bg-dark: #f7f7f9;
+  --bg-card: rgba(255, 255, 255, 0.92);
+  --border-color: rgba(9, 9, 13, 0.12);
+  --border-active: rgba(79, 70, 229, 0.5);
+  --primary: #4f46e5;
+  --primary-glow: rgba(79, 70, 229, 0.18);
+  --accent-emerald: #047857;
+  --accent-cyan: #0e7490;
+  --accent-amber: #b45309;
+  --accent-rose: #be123c;
+  --accent-purple: #7e22ce;
+  --text-main: #0f1115;
+  --text-muted: #4b5563;
+  --text-dim: #6b7280;
+
+  /* showcase.html painted most of itself with literal colours, which is why
+     it stayed dark while its text followed the theme and became unreadable.
+     Those literals are now these variables; the dark values above the fold
+     in that file are byte-for-byte what they replaced, so dark mode cannot
+     have shifted. These are their light counterparts.
+
+     The accents are darkened rather than reused: #34d399 on white is 1.8:1,
+     which is not text, it is a suggestion of text. */
+  --surface-1: #ffffff;
+  --surface-2: #eceef2;
+  --surface-sunken: rgba(236, 238, 242, 0.9);
+  --surface-raised: rgba(255, 255, 255, 0.95);
+  --overlay-soft: rgba(9, 9, 13, 0.03);
+  --overlay: rgba(9, 9, 13, 0.05);
+  --overlay-strong: rgba(9, 9, 13, 0.07);
+  --text-bright: #0f1115;
+  --text-soft: #374151;
+  --text-faint: #52606d;
+  --accent-sky: #0369a1;
+  --accent-indigo: #4338ca;
+  --accent-indigo-soft: #4f46e5;
+  --accent-indigo-pale: #4338ca;
+  --accent-violet: #7e22ce;
+  --accent-violet-pale: #6b21a8;
+  --accent-mint: #047857;
+  --accent-gold: #a16207;
+  --accent-coral: #be123c;
+  --accent-teal: #0e7490;
+}
+
+/* Dark stays exactly as it was. Spelled out rather than left to the page's
+   own :root so that nothing here can leak into it. */
+html:not(.light) {
+  --text-bright: #ffffff;
+  --text-soft: #d4d4d8;
+  --text-faint: #94a3b8;
+}
+
+/* The page background is painted with radial gradients tuned for a black
+   canvas; on white they read as dirty smears. */
+html.light body {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(circle at 15% 10%, rgba(220, 38, 38, 0.06) 0%, transparent 45%),
+    radial-gradient(circle at 85% 75%, rgba(14, 116, 144, 0.05) 0%, transparent 45%);
+  color: var(--text);
+}
+
+/* Colours written literally rather than as variables, which is most of
+   showcase.html. Scoped to light so dark is untouched. */
+html.light .nav,
+html.light header.nav { background: rgba(247, 247, 249, 0.92); }
+html.light [style*="#fff"],
+html.light h1, html.light h2, html.light h3, html.light h4 { color: var(--text); }
+html.light pre, html.light code { color: #111318; }
+html.light .doc-section p,
+html.light .callout-body p { color: #374151; }
+
+/* ------------------------------------------------------------- the toggle */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; flex: 0 0 auto;
+  border-radius: 9999px; cursor: pointer;
+  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.12));
+  background: transparent; color: inherit;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.theme-toggle:hover { background: rgba(127, 127, 127, 0.14); }
+.theme-toggle svg { width: 16px; height: 16px; }
+/* One button, two icons; the class on <html> decides which is drawn. */
+.theme-toggle .icon-sun { display: none; }
+html.light .theme-toggle .icon-sun { display: block; }
+html.light .theme-toggle .icon-moon { display: none; }
+
+/* --------------------------------------------------------------- mobile
+   These pages were laid out for a desktop nav and never revisited. The
+   header is the part that breaks first: a brand plus four links plus a
+   badge in one non-wrapping row runs off a 375px screen and takes the
+   horizontal scrollbar - and the rest of the page - with it. */
+.site-nav-links {
+  display: flex; align-items: center; gap: 18px;
+  font-size: 0.9rem; font-weight: 600; flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+  .nav, header.nav { padding: 12px 16px; }
+  .nav-inner, .site-nav-links { flex-wrap: wrap; gap: 10px 14px; }
+  .site-nav-links { font-size: 0.82rem; width: 100%; }
+}
+
+/* Nothing on a phone should be reachable only by scrolling sideways. */
+@media (max-width: 760px) {
+  html, body { max-width: 100%; overflow-x: hidden; }
+  img, svg, video, canvas, table { max-width: 100%; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+/* showcase.html's nav links carried their colour inline; the shared rule has
+   to win over that, and over docs/terms which style .nav-links a themselves. */
+.site-nav-links a { color: var(--muted, var(--text-muted, #9ca3af)); text-decoration: none; }
+.site-nav-links a:hover { color: var(--text, var(--text-main, #fff)); }
+.site-nav-links a[aria-current="page"] { color: var(--red, var(--primary, #ef4444)); }
+
+/* docs.html and terms.html kept a few literals of their own: the brand
+   wordmark, the version pill, the Copy button, and - the one that mattered -
+   every paragraph of the Terms, set to #d1d5db and therefore near-invisible
+   on white. */
+html.light {
+  --badge-text: #b91c1c;
+  --btn-text: #374151;
+  --body-text: #374151;
+  --mint-pale: #065f46;
+}

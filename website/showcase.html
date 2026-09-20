@@ -25,6 +25,26 @@
       --text-muted: #a1a1aa;
       --text-dim: #71717a;
       --code-bg: #0c0d14;
+      --surface-1: #18181b;
+      --surface-2: #27272a;
+      --surface-sunken: rgba(9, 9, 11, 0.9);
+      --surface-raised: rgba(39, 39, 42, 0.9);
+      --overlay-soft: rgba(255, 255, 255, 0.035);
+      --overlay: rgba(255, 255, 255, 0.05);
+      --overlay-strong: rgba(255, 255, 255, 0.06);
+      --text-bright: #ffffff;
+      --text-soft: #d4d4d8;
+      --text-faint: #94a3b8;
+      --accent-sky: #38bdf8;
+      --accent-indigo: #818cf8;
+      --accent-indigo-soft: #a5b4fc;
+      --accent-indigo-pale: #c7d2fe;
+      --accent-violet: #c084fc;
+      --accent-violet-pale: #e9d5ff;
+      --accent-mint: #34d399;
+      --accent-gold: #fbbf24;
+      --accent-coral: #fb7185;
+      --accent-teal: #22d3ee;
     }
 
     * {
@@ -54,7 +74,7 @@
       background: #09090b;
     }
     ::-webkit-scrollbar-thumb {
-      background: #27272a;
+      background: var(--surface-2);
       border-radius: 4px;
     }
     ::-webkit-scrollbar-thumb:hover {
@@ -94,13 +114,13 @@
       text-transform: uppercase;
       background: rgba(99, 102, 241, 0.15);
       border: 1px solid rgba(99, 102, 241, 0.3);
-      color: #818cf8;
+      color: var(--accent-indigo);
     }
 
     .badge-pill.green {
       background: rgba(16, 185, 129, 0.15);
       border-color: rgba(16, 185, 129, 0.3);
-      color: #34d399;
+      color: var(--accent-mint);
     }
 
     .hero-title {
@@ -108,7 +128,7 @@
       font-weight: 900;
       letter-spacing: -0.03em;
       line-height: 1.15;
-      background: linear-gradient(135deg, #ffffff 40%, #a5b4fc 100%);
+      background: linear-gradient(135deg, var(--text-bright) 40%, var(--accent-indigo-soft) 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       margin-bottom: 12px;
@@ -167,7 +187,7 @@
       height: 62px;
       border-radius: 18px;
       background: linear-gradient(135deg, #4f46e5, #ec4899);
-      color: #fff;
+      color: var(--text-bright);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -181,7 +201,7 @@
       font-size: 1.35rem;
       font-weight: 900;
       letter-spacing: -0.01em;
-      color: #ffffff;
+      color: var(--text-bright);
       display: flex;
       align-items: center;
       gap: 10px;
@@ -189,7 +209,7 @@
 
     .arch-title-wrap p {
       font-size: 0.88rem;
-      color: #a5b4fc;
+      color: var(--accent-indigo-soft);
       font-weight: 700;
     }
 
@@ -202,7 +222,7 @@
       letter-spacing: 0.05em;
       background: rgba(16, 185, 129, 0.15);
       border: 1px solid rgba(16, 185, 129, 0.3);
-      color: #34d399;
+      color: var(--accent-mint);
     }
 
     .arch-links {
@@ -221,7 +241,7 @@
       font-size: 12px;
       font-weight: 700;
       text-decoration: none;
-      color: #fff;
+      color: var(--text-bright);
       position: relative;
       overflow: hidden;
       backdrop-filter: blur(12px);
@@ -267,7 +287,7 @@
     }
 
     .btn-link.github {
-      background: linear-gradient(135deg, rgba(39, 39, 42, 0.9), rgba(24, 24, 27, 0.7));
+      background: linear-gradient(135deg, var(--surface-raised), rgba(24, 24, 27, 0.7));
       border: 1px solid rgba(228, 228, 231, 0.3);
       box-shadow: 0 0 18px rgba(161, 161, 170, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25);
     }
@@ -295,7 +315,7 @@
       border-radius: 6px;
       background: rgba(0, 0, 0, 0.4);
       border: 1px solid rgba(255, 255, 255, 0.08);
-      color: #cbd5e1;
+      color: var(--text-soft);
       font-weight: 600;
     }
 
@@ -316,7 +336,7 @@
     .video-creator-text h4 {
       font-size: 0.95rem;
       font-weight: 800;
-      color: #fbbf24;
+      color: var(--accent-gold);
       display: flex;
       align-items: center;
       gap: 8px;
@@ -324,7 +344,7 @@
 
     .video-creator-text p {
       font-size: 0.82rem;
-      color: #d4d4d8;
+      color: var(--text-soft);
       margin-top: 2px;
     }
 
@@ -339,9 +359,9 @@
       border-radius: 8px;
       font-size: 11px;
       font-weight: 700;
-      background: rgba(255, 255, 255, 0.05);
+      background: var(--overlay);
       border: 1px solid rgba(255, 255, 255, 0.1);
-      color: #e4e4e7;
+      color: var(--text-main);
     }
 
     /* Sticky Controls: Search & Filter Tabs */
@@ -349,7 +369,7 @@
       position: sticky;
       top: 0;
       z-index: 50;
-      background: rgba(9, 9, 11, 0.9);
+      background: var(--surface-sunken);
       backdrop-filter: blur(18px);
       padding: 16px 0;
       border-bottom: 1px solid var(--border-color);
@@ -370,12 +390,12 @@
 
     .search-input {
       width: 100%;
-      background: #18181b;
-      border: 1px solid #27272a;
+      background: var(--surface-1);
+      border: 1px solid var(--surface-2);
       border-radius: 12px;
       padding: 12px 16px 12px 42px;
       font-size: 14px;
-      color: #fff;
+      color: var(--text-bright);
       font-family: inherit;
       outline: none;
       transition: all 0.2s ease;
@@ -391,7 +411,7 @@
       left: 14px;
       top: 50%;
       transform: translateY(-50%);
-      color: #71717a;
+      color: var(--text-dim);
       pointer-events: none;
     }
 
@@ -412,8 +432,8 @@
       border-radius: 10px;
       font-size: 12px;
       font-weight: 700;
-      background: #18181b;
-      border: 1px solid #27272a;
+      background: var(--surface-1);
+      border: 1px solid var(--surface-2);
       color: var(--text-muted);
       cursor: pointer;
       transition: all 0.2s ease;
@@ -423,14 +443,14 @@
     }
 
     .tab-btn:hover {
-      background: #27272a;
-      color: #fff;
+      background: var(--surface-2);
+      color: var(--text-bright);
     }
 
     .tab-btn.active {
       background: #4f46e5;
       border-color: #6366f1;
-      color: #fff;
+      color: var(--text-bright);
       box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
     }
 
@@ -466,7 +486,7 @@
       gap: 16px;
       margin-bottom: 22px;
       padding-bottom: 16px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom: 1px solid var(--overlay-strong);
     }
 
     .mod-title-area {
@@ -485,20 +505,20 @@
       font-size: 24px;
       background: rgba(99, 102, 241, 0.15);
       border: 1px solid rgba(99, 102, 241, 0.3);
-      color: #818cf8;
+      color: var(--accent-indigo);
       shrink: 0;
     }
 
-    .mod-icon.emerald { background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); color: #34d399; }
-    .mod-icon.cyan { background: rgba(6, 182, 212, 0.15); border-color: rgba(6, 182, 212, 0.3); color: #22d3ee; }
-    .mod-icon.amber { background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24; }
-    .mod-icon.purple { background: rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.3); color: #c084fc; }
-    .mod-icon.rose { background: rgba(244, 63, 94, 0.15); border-color: rgba(244, 63, 94, 0.3); color: #fb7185; }
+    .mod-icon.emerald { background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); color: var(--accent-mint); }
+    .mod-icon.cyan { background: rgba(6, 182, 212, 0.15); border-color: rgba(6, 182, 212, 0.3); color: var(--accent-teal); }
+    .mod-icon.amber { background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.3); color: var(--accent-gold); }
+    .mod-icon.purple { background: rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.3); color: var(--accent-violet); }
+    .mod-icon.rose { background: rgba(244, 63, 94, 0.15); border-color: rgba(244, 63, 94, 0.3); color: var(--accent-coral); }
 
     .mod-title-area h3 {
       font-size: 1.45rem;
       font-weight: 800;
-      color: #fff;
+      color: var(--text-bright);
     }
 
     .mod-location {
@@ -519,7 +539,7 @@
 
     .pillar-box {
       background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--overlay-strong);
       border-radius: 16px;
       padding: 20px;
     }
@@ -535,14 +555,14 @@
       gap: 6px;
     }
 
-    .pillar-box.kya h5 { color: #818cf8; }
-    .pillar-box.kaise h5 { color: #34d399; }
-    .pillar-box.outcome h5 { color: #fbbf24; }
+    .pillar-box.kya h5 { color: var(--accent-indigo); }
+    .pillar-box.kaise h5 { color: var(--accent-mint); }
+    .pillar-box.outcome h5 { color: var(--accent-gold); }
 
     .pillar-box ul, .pillar-box ol {
       padding-left: 20px;
       font-size: 0.86rem;
-      color: #d4d4d8;
+      color: var(--text-soft);
     }
 
     .pillar-box li {
@@ -563,7 +583,7 @@
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: #a5b4fc;
+      color: var(--accent-indigo-soft);
       margin-bottom: 16px;
       display: flex;
       align-items: center;
@@ -571,8 +591,8 @@
     }
 
     .prompt-item {
-      background: rgba(255, 255, 255, 0.035);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: var(--overlay-soft);
+      border: 1px solid var(--overlay-strong);
       border-radius: 12px;
       padding: 16px;
       margin-bottom: 12px;
@@ -584,7 +604,7 @@
     }
 
     .prompt-item:hover {
-      background: rgba(255, 255, 255, 0.06);
+      background: var(--overlay-strong);
       border-color: rgba(99, 102, 241, 0.4);
     }
 
@@ -595,7 +615,7 @@
     .prompt-label {
       font-size: 11px;
       font-weight: 800;
-      color: #38bdf8;
+      color: var(--accent-sky);
       text-transform: uppercase;
       letter-spacing: 0.05em;
       margin-bottom: 5px;
@@ -604,21 +624,21 @@
     .prompt-code {
       font-family: 'Fira Code', monospace;
       font-size: 0.84rem;
-      color: #f8fafc;
+      color: var(--text-main);
       line-height: 1.55;
       word-break: break-word;
     }
 
     .prompt-expected {
       font-size: 11px;
-      color: #94a3b8;
+      color: var(--text-faint);
       margin-top: 8px;
     }
 
     .copy-btn {
       background: rgba(99, 102, 241, 0.18);
       border: 1px solid rgba(99, 102, 241, 0.4);
-      color: #c7d2fe;
+      color: var(--accent-indigo-pale);
       padding: 8px 14px;
       border-radius: 8px;
       font-size: 11px;
@@ -633,14 +653,14 @@
 
     .copy-btn:hover {
       background: #4f46e5;
-      color: #fff;
+      color: var(--text-bright);
       transform: translateY(-1px);
     }
 
     .copy-btn.copied {
       background: #059669;
       border-color: #10b981;
-      color: #fff;
+      color: var(--text-bright);
     }
 
     .video-tip-bar {
@@ -650,7 +670,7 @@
       background: rgba(168, 85, 247, 0.09);
       border: 1px dashed rgba(168, 85, 247, 0.35);
       font-size: 0.82rem;
-      color: #e9d5ff;
+      color: var(--accent-violet-pale);
       display: flex;
       align-items: center;
       gap: 10px;
@@ -665,7 +685,7 @@
     }
 
     footer a {
-      color: #818cf8;
+      color: var(--accent-indigo);
       text-decoration: none;
     }
 
@@ -676,23 +696,30 @@
       .copy-btn { align-self: flex-start; }
     }
   </style>
+  <link rel="stylesheet" href="page-theme.css" />
+  <script src="page-theme.js"></script>
 </head>
 <body>
 
   <!-- Top Hero Navigation Header -->
   <header>
     <div class="container">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.08);">
-        <a href="index.html" style="display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.1rem; color: #fff; text-decoration: none;">
+      <div class="nav-inner" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid var(--border-color);">
+        <a href="index.html" style="display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.1rem; color: var(--text-main); text-decoration: none;">
           <img src="assets/logo.png" alt="SMARAN.AI Logo" style="width: 28px; height: 28px; border-radius: 6px;" />
           <span>SMARAN<span style="color: #ef4444;">.</span>AI</span>
         </a>
-        <div style="display: flex; gap: 18px; font-size: 0.9rem; font-weight: 600;">
-          <a href="index.html" style="color: #9ca3af; text-decoration: none;">Home</a>
-          <a href="docs.html" style="color: #9ca3af; text-decoration: none;">Docs</a>
-          <a href="terms.html" style="color: #9ca3af; text-decoration: none;">Terms</a>
-          <a href="index.html#download" style="color: #ef4444; text-decoration: none;">Downloads</a>
-        </div>
+        <nav class="site-nav-links">
+        <a href="index.html">Home</a>
+        <a href="docs.html">Docs</a>
+        <a href="showcase.html" aria-current="page">Showcase</a>
+        <a href="terms.html">Terms</a>
+        <a href="index.html#download">Download</a>
+        <button type="button" class="theme-toggle" aria-label="Switch to light">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        </button>
+        </nav>
       </div>
 
       <div class="top-badge-row">
@@ -736,7 +763,7 @@
             Shashwat Mishra is the <strong>Developer of SMARAN.AI</strong>. Conceived and engineered as a sovereign, local-first autonomous AI coding workstation, SMARAN.AI provides developers with an intelligent on-device environment running completely without cloud telemetry.
           </p>
           <p style="margin-top: 10px;">
-            Built specifically for software engineers, researchers, and creators, <strong>SMARAN.AI</strong> unifies autonomous software development (<span style="color:#34d399; font-weight:700;">SMARAN Code</span>), native OS desktop automation, multi-agent collaboration (<span style="color:#c084fc; font-weight:700;">Cowork</span>), long-term persistent memory vaults, background automations, and neural voice intelligence (<span style="color:#38bdf8; font-weight:700;">J.A.R.V.I.S.</span>) — running 100% locally on your machine with absolute privacy.
+            Built specifically for software engineers, researchers, and creators, <strong>SMARAN.AI</strong> unifies autonomous software development (<span style="color:var(--accent-mint); font-weight:700;">SMARAN Code</span>), native OS desktop automation, multi-agent collaboration (<span style="color:var(--accent-violet); font-weight:700;">Cowork</span>), long-term persistent memory vaults, background automations, and neural voice intelligence (<span style="color:var(--accent-sky); font-weight:700;">J.A.R.V.I.S.</span>) — running 100% locally on your machine with absolute privacy.
           </p>
           <div class="skills-pills">
             <span class="skill-tag">⚡ SMARAN Code Autonomous Agent</span>

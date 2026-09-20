@@ -23,7 +23,10 @@
       --muted: #9ca3af;
       --dimmer: #6b7280;
       --code-bg: #0c0d14;
-    }
+          --text-bright: #ffffff;
+      --badge-text: #fca5a5;
+      --btn-text: #cbd5e1;
+}
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
     body {
@@ -53,16 +56,16 @@
     }
     .brand {
       display: flex; align-items: center; gap: 10px;
-      font-weight: 800; font-size: 1.15rem; color: #fff; text-decoration: none;
+      font-weight: 800; font-size: 1.15rem; color: var(--text-bright); text-decoration: none;
     }
     .brand img { width: 32px; height: 32px; border-radius: 8px; }
     .brand span span { color: var(--red); }
     .nav-links { display: flex; align-items: center; gap: 20px; font-size: 0.9rem; font-weight: 600; }
     .nav-links a { color: var(--muted); }
-    .nav-links a:hover { color: #fff; text-decoration: none; }
+    .nav-links a:hover { color: var(--text-bright); text-decoration: none; }
     .nav-badge {
       background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4);
-      color: #fca5a5; font-size: 0.76rem; padding: 3px 9px; border-radius: 9999px; font-weight: 700;
+      color: var(--badge-text); font-size: 0.76rem; padding: 3px 9px; border-radius: 9999px; font-weight: 700;
     }
 
     /* Layout */
@@ -95,7 +98,7 @@
       transition: all 0.15s ease;
     }
     .sidebar-links a:hover {
-      background: rgba(255, 255, 255, 0.06); color: #fff; text-decoration: none;
+      background: rgba(255, 255, 255, 0.06); color: var(--text-bright); text-decoration: none;
     }
     .sidebar-links a.active {
       background: rgba(239, 68, 68, 0.15);
@@ -128,7 +131,7 @@
     }
     .doc-section h2 .sec-num {
       font-size: 0.82rem; padding: 3px 8px; border-radius: 6px;
-      background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-family: 'Fira Code', monospace;
+      background: rgba(239, 68, 68, 0.15); color: var(--badge-text); font-family: 'Fira Code', monospace;
     }
     .doc-section p {
       color: #d1d5db; font-size: 0.98rem; margin-bottom: 16px; line-height: 1.7;
@@ -146,7 +149,7 @@
     .doc-card:hover {
       border-color: rgba(239, 68, 68, 0.4); transform: translateY(-2px);
     }
-    .doc-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 8px; color: #fff; }
+    .doc-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 8px; color: var(--text-bright); }
     .doc-card p { font-size: 0.9rem; color: var(--muted); margin: 0; }
 
     /* Code Blocks */
@@ -167,7 +170,7 @@
       background: rgba(255, 255, 255, 0.08);
       border: 1px solid rgba(255, 255, 255, 0.16);
       border-radius: 6px;
-      color: #cbd5e1;
+      color: var(--btn-text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 0.75rem;
       font-weight: 600;
@@ -182,7 +185,7 @@
     }
     .copy-btn:hover {
       background: rgba(255, 255, 255, 0.18);
-      color: #ffffff;
+      color: var(--text-bright);
       border-color: rgba(255, 255, 255, 0.35);
       transform: translateY(-1px);
     }
@@ -216,7 +219,7 @@
     .callout-success svg { color: var(--emerald); flex-shrink: 0; }
     .callout-warn { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); }
     .callout-warn svg { color: var(--red); flex-shrink: 0; }
-    .callout-body strong { display: block; font-size: 0.95rem; margin-bottom: 4px; color: #fff; }
+    .callout-body strong { display: block; font-size: 0.95rem; margin-bottom: 4px; color: var(--text-bright); }
     .callout-body p { margin: 0; font-size: 0.9rem; color: #d1d5db; }
 
     /* Tables */
@@ -260,7 +263,7 @@
       }
       .toc-mobile > summary {
         cursor: pointer; list-style: none; padding: 14px 18px;
-        font-size: 0.9rem; font-weight: 700; color: #fff;
+        font-size: 0.9rem; font-weight: 700; color: var(--text-bright);
         display: flex; align-items: center; justify-content: space-between; gap: 10px;
       }
       .toc-mobile > summary::-webkit-details-marker { display: none; }
@@ -298,6 +301,8 @@
       .code-header { flex-wrap: wrap; gap: 8px; }
     }
   </style>
+  <link rel="stylesheet" href="page-theme.css" />
+  <script src="page-theme.js"></script>
 </head>
 <body>
 
@@ -308,12 +313,17 @@
         <img src="assets/logo.png" alt="SMARAN.AI Logo" />
         <span>SMARAN<span>.</span>AI</span>
       </a>
-      <nav class="nav-links">
+      <nav class="nav-links site-nav-links">
         <a href="index.html">Home</a>
+        <a href="docs.html" aria-current="page">Docs</a>
         <a href="showcase.html">Showcase</a>
         <a href="terms.html">Terms</a>
         <a href="index.html#download">Download</a>
         <span class="nav-badge">v1.0.6 Stable</span>
+        <button type="button" class="theme-toggle" aria-label="Switch to light">
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        </button>
       </nav>
     </div>
   </header>
