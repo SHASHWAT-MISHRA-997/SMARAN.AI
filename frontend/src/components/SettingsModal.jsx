@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Lock, X, Cpu, Sparkles, SlidersHorizontal, Wifi, PawPrint, UserRound, Boxes, ChartNoAxesCombined, Brain, UserCheck, Moon, Sun, Laptop, RefreshCw, CheckCircle2, ExternalLink, Smartphone, ArrowDownToLine, Terminal, Download, AlertCircle, Globe, Mic, Monitor, Keyboard, GitBranch, Search, Users, LogOut } from "lucide-react";
 import { API_BASE, fetchWithAuth } from "../context/AuthContext";
 import { companionHeaders } from "../utils/companionAuth";
@@ -23,6 +23,7 @@ import { isNativeApp, loadLink } from '../utils/hostLink';
 import * as standalone from '../utils/standalone';
 import * as localChat from '../utils/localChat';
 import { usagePercent } from '../utils/usageBar';
+import { avatarFor, clearAvatar, loadAvatar, setAvatarFromFile } from '../utils/profileAvatar';
 
 /* Written in at build time, from package.json. It used to be the string
    "2.8.6" typed into the markup, so a phone that could not check for
@@ -565,6 +566,13 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
   const displayInitials = initialsSource
     .split(/[\s._-]+/).filter(Boolean).slice(0, 2)
     .map((part) => part[0].toUpperCase()).join('') || '·';
+
+  /* A picture the person chose beats the one the provider supplied, and an
+     account made here has no provider picture at all. */
+  const avatarInputRef = useRef(null);
+  const [chosenAvatar, setChosenAvatar] = useState(() => avatarFor(activeUser));
+  const [avatarError, setAvatarError] = useState('');
+  useEffect(() => { setChosenAvatar(avatarFor(activeUser)); }, [activeUser]);
 
   const [pairedDevices, setPairedDevices] = useState([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
@@ -1228,17 +1236,57 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                 {/* Authenticated Account Profile Card */}
                 <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                   <div className="flex items-center gap-4 min-w-0">
-                    {activeUser?.avatar ? (
-                      <img
-                        src={activeUser.avatar}
-                        alt="Profile Avatar"
-                        className="w-14 h-14 rounded-2xl object-cover ring-2 ring-indigo-500/30 shrink-0"
+                    {/* The picture is the button. A separate "change avatar"
+                        control beside it would be a second thing doing one
+                        job, and the picture is what people aim at anyway. */}
+                    <div className="shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => avatarInputRef.current?.click()}
+                        title="Choose a profile picture"
+                        aria-label="Choose a profile picture"
+                        className="group relative block w-14 h-14 rounded-2xl overflow-hidden ring-2 ring-indigo-500/30 transition hover:ring-indigo-400/70 focus:outline-none focus-visible:ring-indigo-400"
+                      >
+                        {chosenAvatar ? (
+                          <img src={chosenAvatar} alt="Profile" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="flex h-full w-full items-center justify-center bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 text-lg font-black text-white">
+                            {displayInitials}
+                          </span>
+                        )}
+                        <span className="absolute inset-x-0 bottom-0 bg-black/65 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white opacity-0 transition group-hover:opacity-100">
+                          Change
+                        </span>
+                      </button>
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0];
+                          // Cleared immediately so choosing the same file
+                          // twice in a row still fires a change event.
+                          event.target.value = '';
+                          if (!file) return;
+                          setAvatarError('');
+                          try {
+                            setChosenAvatar(await setAvatarFromFile(file));
+                          } catch (err) {
+                            setAvatarError(err.message);
+                          }
+                        }}
                       />
-                    ) : (
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-lg font-black text-white shadow-lg shrink-0">
-                        {displayInitials}
-                      </div>
-                    )}
+                      {loadAvatar() && (
+                        <button
+                          type="button"
+                          onClick={() => { clearAvatar(); setChosenAvatar(activeUser?.avatar || null); setAvatarError(''); }}
+                          className="mt-1 w-14 text-[10px] font-semibold text-zinc-500 underline hover:text-zinc-800 dark:hover:text-zinc-200"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         {/* "SMARAN User" was printed whenever the session
@@ -1267,6 +1315,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                             it were a feature. */}
                         {activeUser?.email || "No email address on this session — sign out and back in to attach one"}
                       </p>
+                      {avatarError && (
+                        <p role="alert" className="mt-1 text-xs text-red-500 dark:text-red-400">{avatarError}</p>
+                      )}
                       <div className="mt-1 flex items-center gap-2">
                         {/* Names what actually vouched for this session:
                             Google, or an account held on this machine. */}

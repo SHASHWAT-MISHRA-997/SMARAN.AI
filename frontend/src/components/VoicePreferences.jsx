@@ -214,15 +214,13 @@ export default function VoicePreferences() {
             Test Voice
           </button>
         </div>
-        {/* "0 voices available" on its own tells you nothing you can act on.
-            The usual cause is a device with a TTS engine installed but none
-            selected as the default, which leaves getVoices() empty. */}
-        {!voices.length && (
-          <p role="alert" className="text-xs leading-relaxed text-amber-600 dark:text-amber-300">
-            {noVoicesHelp}
-          </p>
-        )}
-        {testNotice && <p className="text-xs text-indigo-400 mt-1">{testNotice}</p>}
+        {/* No standing warning here. A block of amber text sat under this
+            dropdown on every install with no system voices, which is most
+            phones, and it was shouting instructions at people who had not
+            asked for anything. The dropdown already reads "No voices
+            installed", and the same explanation still appears - once, and
+            only if somebody presses Test Voice and nothing happens. */}
+        {testNotice && <p className="text-xs leading-relaxed text-indigo-400 mt-1">{testNotice}</p>}
       </div>
 
       {/* Dictation Settings */}

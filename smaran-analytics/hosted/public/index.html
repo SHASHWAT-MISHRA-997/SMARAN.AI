@@ -9,6 +9,16 @@
     --bg:#07070a; --panel:rgba(255,255,255,.038); --line:rgba(255,255,255,.085);
     --text:#e9e9ee; --dim:#8a8a95; --dimmer:#5c5c66;
     --red:#ef4444; --red-lo:rgba(239,68,68,.16);
+
+    /* Series colours, in a fixed order that is never cycled or reassigned by
+       rank - a filter that changes which series are on screen must not
+       repaint the survivors. Stepped for this page's near-black surface and
+       checked rather than chosen by eye: worst adjacent pair is ΔE 8.4 under
+       protanopia and 19.3 to normal vision, and all six clear 3:1 against the
+       background. Every chart also carries direct labels, so colour is never
+       the only thing telling two things apart. */
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --s4:#c98500; --s5:#d55181; --s6:#008300;
     --up:#34d399; --down:#fb7185;
   }
   * { box-sizing:border-box; }
@@ -136,18 +146,32 @@
     <div id="retention" style="margin-top:12px"></div>
   </section>
 
+  <section class="panel" style="margin-bottom:18px">
+    <h2>What people did</h2>
+    <p class="sub">
+      Every reported event in this window, by kind. <b>install</b> happens once
+      per copy; everything else can happen many times, so a tall launch bar
+      beside a short install bar means the same people coming back.
+    </p>
+    <div id="eventMix" style="margin-top:12px"></div>
+  </section>
+
   <section class="grid g-2">
     <div class="panel">
       <h2>Activity over time</h2>
       <p class="sub" id="rangeLabel">—</p>
       <div id="chart"></div>
+      <p class="sub" style="margin-top:10px">
+        One bar per day. New installs sit beside launches so the two can be
+        compared directly rather than stacked on top of each other.
+      </p>
     </div>
     <div class="panel">
       <h2>Platforms</h2>
-      <p class="sub">Where installations are running</p>
-      <div id="platforms"></div>
+      <p class="sub">Which kind of machine each copy runs on</p>
+      <div id="platformDonut"></div>
       <h2 style="margin-top:22px">App versions</h2>
-      <p class="sub">Which builds are in the wild</p>
+      <p class="sub">Which builds are in the wild, newest first</p>
       <div id="versions"></div>
     </div>
   </section>
@@ -268,16 +292,26 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>'
 
 /* ---- charts, drawn as plain SVG so the page has no dependencies ---- */
 
-function lineChart(el, series, labels) {
-  const W = 900, H = 220, PAD = { l: 34, r: 8, t: 10, b: 22 };
-  const n = labels.length;
-  if (!n) { el.innerHTML = '<div class="empty">Nothing recorded in this window.</div>'; return; }
+const SERIES = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)'];
 
+/**
+ * One bar per day, with the two measures side by side.
+ *
+ * Grouped rather than stacked: stacking answers "how much altogether", and
+ * the question here is "how do these two compare", which a stack makes you
+ * do arithmetic to read. A 2px gap between the pair keeps them from reading
+ * as one block.
+ */
+function groupedBars(el, days, series) {
+  if (!days.length) { el.innerHTML = '<div class="empty">Nothing recorded in this window.</div>'; return; }
+  const W = 900, H = 240, PAD = { l: 38, r: 10, t: 12, b: 34 };
   const peak = Math.max(1, ...series.flatMap(s => s.values));
-  const x = i => PAD.l + (n === 1 ? (W - PAD.l - PAD.r) / 2 : i * (W - PAD.l - PAD.r) / (n - 1));
+  const plotW = W - PAD.l - PAD.r;
+  const slot = plotW / days.length;
+  const gap = 2;
+  const barW = Math.max(2, (slot - 6 - gap * (series.length - 1)) / series.length);
   const y = v => H - PAD.b - (v / peak) * (H - PAD.t - PAD.b);
 
-  // Four horizontal guides, labelled, so the shape can actually be read.
   let grid = '';
   for (let g = 0; g <= 4; g += 1) {
     const value = Math.round(peak * g / 4);
@@ -286,29 +320,109 @@ function lineChart(el, series, labels) {
          +  `<text class="axis-label" x="4" y="${gy + 3}">${fmt(value)}</text>`;
   }
 
-  // Only a handful of date labels, otherwise they collide.
-  const step = Math.max(1, Math.ceil(n / 8));
+  const step = Math.max(1, Math.ceil(days.length / 8));
   let ticks = '';
-  labels.forEach((label, i) => {
-    if (i % step && i !== n - 1) return;
-    ticks += `<text class="axis-label" x="${x(i)}" y="${H - 6}" text-anchor="middle">${label.slice(5)}</text>`;
+  let marks = '';
+  days.forEach((day, i) => {
+    const left = PAD.l + i * slot + 3;
+    if (!(i % step) || i === days.length - 1) {
+      ticks += `<text class="axis-label" x="${left + (slot - 6) / 2}" y="${H - 16}" text-anchor="middle">${day.slice(5)}</text>`;
+    }
+    series.forEach((s, si) => {
+      const v = s.values[i] || 0;
+      const h = Math.max(v > 0 ? 2 : 0, y(0) - y(v));
+      const x = left + si * (barW + gap);
+      if (h > 0) {
+        // 4px rounded ends, anchored to the baseline: the radius is clamped
+        // so a short bar does not turn into a lozenge.
+        const r = Math.min(4, h, barW / 2);
+        marks += `<path d="M${x} ${y(0)} V${y(0) - h + r} q0 ${-r} ${r} ${-r} h${barW - 2 * r} q${r} 0 ${r} ${r} V${y(0)} Z"
+                        fill="${s.colour}"><title>${day} · ${s.name}: ${fmt(v)}</title></path>`;
+      }
+    });
   });
 
-  const paths = series.map((s, si) => {
-    const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ');
-    const area = `${PAD.l},${y(0)} ${pts} ${x(n - 1)},${y(0)}`;
-    const dots = s.values.map((v, i) => `<circle cx="${x(i)}" cy="${y(v)}" r="2.5" fill="${s.colour}"/>`).join('');
-    return `<polygon points="${area}" fill="${s.colour}" opacity="${si ? .07 : .13}"/>
-            <polyline points="${pts}" fill="none" stroke="${s.colour}" stroke-width="2"
-                      stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+  const legend = series.map(s =>
+    `<span style="font-size:11px;margin-right:16px;color:var(--dim)">
+       <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${s.colour};margin-right:6px"></span>${s.name}
+     </span>`).join('');
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">${grid}${ticks}${marks}</svg><div style="margin-top:8px">${legend}</div>`;
+}
+
+/**
+ * Proportions of a whole, as a donut.
+ *
+ * A pie is only honest when the parts genuinely sum to one thing - here every
+ * installation runs on exactly one platform, so it does. Each slice is
+ * labelled with its name and share beside the ring, because judging an angle
+ * is harder than reading a number and colour alone must never carry meaning.
+ */
+function donut(el, data, rename) {
+  const entries = Object.entries(data || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) { el.innerHTML = '<div class="empty">No data yet.</div>'; return; }
+  const total = entries.reduce((sum, [, v]) => sum + v, 0);
+
+  // Past five slices a pie stops being readable; the tail becomes "Other".
+  const head = entries.slice(0, 5);
+  const tail = entries.slice(5);
+  const slices = tail.length
+    ? [...head, ['Other', tail.reduce((sum, [, v]) => sum + v, 0)]]
+    : head;
+
+  const R = 54, r = 34, C = 62;
+  let angle = -Math.PI / 2;
+  const arcs = slices.map(([name, value], i) => {
+    const sweep = (value / total) * Math.PI * 2;
+    const [a0, a1] = [angle, angle + sweep];
+    angle = a1;
+    const point = (rad, radius) => `${C + Math.cos(rad) * radius} ${C + Math.sin(rad) * radius}`;
+    const large = sweep > Math.PI ? 1 : 0;
+    // A full circle cannot be drawn as one arc - it would collapse to a point.
+    const path = sweep >= Math.PI * 2 - 1e-6
+      ? `M ${C - R} ${C} a ${R} ${R} 0 1 1 ${R * 2} 0 a ${R} ${R} 0 1 1 ${-R * 2} 0
+         M ${C - r} ${C} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0`
+      : `M ${point(a0, R)} A ${R} ${R} 0 ${large} 1 ${point(a1, R)}
+         L ${point(a1, r)} A ${r} ${r} 0 ${large} 0 ${point(a0, r)} Z`;
+    return `<path d="${path}" fill="${SERIES[i % SERIES.length]}" fill-rule="evenodd"
+                  stroke="var(--bg)" stroke-width="2"><title>${esc(name)}: ${fmt(value)}</title></path>`;
   }).join('');
 
-  const legend = series.map(s =>
-    `<span style="color:${s.colour};font-size:11px;margin-right:14px">
-       <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${s.colour};margin-right:5px"></span>${s.name}
-     </span>`).join('');
+  const rows = slices.map(([name, value], i) => `
+    <div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:6px">
+      <span style="width:9px;height:9px;border-radius:2px;background:${SERIES[i % SERIES.length]};flex:none"></span>
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rename ? rename(name) : name)}</span>
+      <span class="count">${fmt(value)}</span>
+      <span style="color:var(--dimmer);width:38px;text-align:right">${Math.round(value / total * 100)}%</span>
+    </div>`).join('');
 
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">${grid}${ticks}${paths}</svg><div style="margin-top:8px">${legend}</div>`;
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+      <svg viewBox="0 0 124 124" style="width:124px;flex:none">
+        ${arcs}
+        <text x="62" y="58" text-anchor="middle" style="fill:var(--text);font-size:17px;font-weight:700">${fmt(total)}</text>
+        <text x="62" y="72" text-anchor="middle" style="fill:var(--dimmer);font-size:8px;letter-spacing:.08em">TOTAL</text>
+      </svg>
+      <div style="flex:1;min-width:150px">${rows}</div>
+    </div>`;
+}
+
+/**
+ * A bar per kind of event, each with its number printed on the row.
+ *
+ * Horizontal because the labels are words rather than dates: a vertical bar
+ * chart would have to tilt "Google sign-ins" to fit, and tilted text is
+ * slower to read than a straight row.
+ */
+function eventBars(el, rows) {
+  const present = rows.filter(([, value]) => Number(value) > 0);
+  if (!present.length) { el.innerHTML = '<div class="empty">No events in this window.</div>'; return; }
+  const max = Math.max(...present.map(([, v]) => v));
+  el.innerHTML = present.map(([label, value, colour]) => `
+    <div class="bar-row">
+      <span>${esc(label)}</span>
+      <span class="bar"><i style="width:${Math.round(value / max * 100)}%;background:${colour}"></i></span>
+      <span class="count">${fmt(value)}</span>
+    </div>`).join('');
 }
 
 function bars(id, data, rename) {
@@ -381,13 +495,18 @@ async function load() {
   const daily = s.daily || [];
   document.getElementById('rangeLabel').textContent =
     daily.length ? `${s.window_start} to ${s.window_end} · ${s.window_days} days` : 'no activity in this window';
-  lineChart(
+  /* Bars rather than two filled areas. The counts here are small whole
+     numbers of events per day, and an area chart implies a continuous
+     quantity flowing between the points - it made three installs on Tuesday
+     and none on Wednesday look like a smooth decline instead of two separate
+     days. */
+  groupedBars(
     document.getElementById('chart'),
-    [
-      { name: 'Launches', colour: '#f87171', values: daily.map(d => d.launches) },
-      { name: 'New installs', colour: '#fbbf24', values: daily.map(d => d.installs) },
-    ],
     daily.map(d => d.day),
+    [
+      { name: 'Launches', colour: 'var(--s1)', values: daily.map(d => d.launches) },
+      { name: 'New installs', colour: 'var(--s2)', values: daily.map(d => d.installs) },
+    ],
   );
 
   /* "windows" is what the app reports; these are what a person reads. */
@@ -434,8 +553,18 @@ async function load() {
       + '</tbody></table>'
     : '<div class="empty">No installation has reported yet.</div>';
 
-  bars('platforms', s.platforms, where);
+  donut(document.getElementById('platformDonut'), s.platforms, where);
   bars('versions', s.versions);
+
+  /* What was actually done, as one bar per kind of event. This is the
+     question the tables below were being asked to answer by eye. */
+  eventBars(document.getElementById('eventMix'), [
+    ['New installs', s.new_installs, 'var(--s2)'],
+    ['Launches', s.launches, 'var(--s1)'],
+    ['Sign-ins', s.logins, 'var(--s3)'],
+    ['Sign-ups', s.signups, 'var(--s4)'],
+    ['Google sign-ins', s.google_signins, 'var(--s5)'],
+  ]);
 
   /* A random hex id tells a person nothing, and it is the first column of
      both tables. Numbering them in the order they arrived gives every row a

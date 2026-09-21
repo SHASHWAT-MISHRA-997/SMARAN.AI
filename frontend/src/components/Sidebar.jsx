@@ -14,6 +14,7 @@ import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { asList, parseJsonResponse } from '../utils/api';
 import { clearSavedGoogleUser } from './GoogleAuthGate';
 import { isHandheld } from '../utils/device';
+import { AVATAR_CHANGED, avatarFor } from '../utils/profileAvatar';
 
 /* Tooltip uses a React Portal so parent overflow never clips it. */
 const Tip = ({ label, children }) => {
@@ -145,6 +146,16 @@ const Sidebar = ({
     .slice(0, 2)
     .map((part) => part[0].toUpperCase())
     .join('') || 'Y';
+
+  /* Kept in step with the Account panel by event rather than by reload: the
+     picture is chosen in a modal above this sidebar, and nothing reloads. */
+  const [profilePicture, setProfilePicture] = useState(() => avatarFor(user));
+  useEffect(() => {
+    const refresh = () => setProfilePicture(avatarFor(user));
+    refresh();
+    window.addEventListener(AVATAR_CHANGED, refresh);
+    return () => window.removeEventListener(AVATAR_CHANGED, refresh);
+  }, [user]);
 
   const [dictationError, setDictationError] = useState('');
   /* The folder actually open, or null. Read rather than assumed: the list
@@ -721,9 +732,16 @@ const Sidebar = ({
                 onClick={() => setShowUtilityMenu((v) => !v)}
                 className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer group"
               >
-                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
-                  {profileInitials}
-                </div>
+                {/* The same picture the Account panel shows, or the initials
+                    when there is none. Two avatars for one person that
+                    disagree is worse than having no picture at all. */}
+                {profilePicture ? (
+                  <img src={profilePicture} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
+                    {profileInitials}
+                  </div>
+                )}
                 <div className="min-w-0 flex-1 truncate">
                   <span className="block text-xs font-extrabold text-zinc-900 dark:text-white tracking-wide truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
                     {profileName}
@@ -1016,9 +1034,13 @@ const Sidebar = ({
               className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer hover:opacity-80 transition"
               title="Open Account & Profile Settings"
             >
-              <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
-                {profileInitials}
-              </div>
+              {profilePicture ? (
+                <img src={profilePicture} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
+                  {profileInitials}
+                </div>
+              )}
               <span className="text-xs font-black text-zinc-900 dark:text-white truncate">
                 {profileName}
               </span>
