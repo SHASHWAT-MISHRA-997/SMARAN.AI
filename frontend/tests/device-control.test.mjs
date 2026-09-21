@@ -18,7 +18,7 @@ async function setup({ floating = false, refused = false } = {}) {
   };
   const context = vm.createContext({ setTimeout: cb => { cb(); }, console });
   const values = {
-    registerPlugin: () => plugin,
+    device: plugin,
     isNativeApp: () => true,
     detectDeviceCommand: () => null,
     describeOutcome: () => 'App opened',

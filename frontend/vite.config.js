@@ -37,6 +37,7 @@ export default defineConfig({
       output: {
         codeSplitting: {
           groups: [
+            { name: 'react', test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/ },
             { name: 'three', test: /node_modules[\\/](?:three|@pixiv)[\\/]/ },
             { name: 'charts', test: /node_modules[\\/](?:recharts|recharts-scale|d3-[^\\/]+)[\\/]/ },
           ],

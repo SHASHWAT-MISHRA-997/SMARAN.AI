@@ -1325,7 +1325,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                 {/* The SMTP card went with the feature it existed for: it
                     configured delivery of a "Forgot password" code by email.
                     Forgetting a password is recoverable again, but without
-                    any mail - a recovery code issued at registration, or a
+                    any mail - your security questions, or a
                     Google sign-in on the same address. Neither needs a mail
                     server to be reachable, which is the point on a
                     local-first install. */}

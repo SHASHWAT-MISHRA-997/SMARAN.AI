@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Sparkles, ArrowRight, Lock, AlertCircle, Loader2 } from 'lucide-react';
 import { PROVIDERS, enabledProviders, isNative, providerLabel, startOAuth } from '../utils/directAuth';
+import * as localAccount from '../utils/localAccount';
 import { API_BASE } from '../context/AuthContext';
 
 export const GOOGLE_STORAGE_KEY = 'smaran_google_user';
@@ -129,19 +130,33 @@ const providerIcon = (id) => {
   return null;
 };
 
-/** The three things this screen can be doing. */
+/** The things this screen can be doing. */
 const SIGN_IN = 'signin';
 const REGISTER = 'register';
-const RECOVER = 'recover';
+const RECOVER_QUESTIONS = 'questions';
 
 const FORM_COPY = {
   [SIGN_IN]: { title: 'Sign in', action: 'Sign in' },
   [REGISTER]: { title: 'Create an account', action: 'Create account' },
-  [RECOVER]: { title: 'Use your recovery code', action: 'Set new password' },
+  [RECOVER_QUESTIONS]: { title: 'Answer your security questions', action: 'Set new password' },
 };
 
+/* Required, and phrased so the answer is one word that does not change:
+   "favourite film" changes, "first school" does not. Kept short because a
+   <select> cannot wrap - a long question is simply cut off mid-word on a
+   phone, which is exactly how these first shipped. */
+const SUGGESTED_QUESTIONS = [
+  'Your first school?',
+  'Your first pet’s name?',
+  'City you were born in?',
+  'Your mother’s maiden name?',
+  'Make of your first vehicle?',
+  'Your oldest cousin’s name?',
+];
+const QUESTION_SLOTS = 2;
+
 const inputClass =
-  'w-full rounded-xl border border-zinc-700/80 bg-zinc-900/80 px-3 py-2.5 text-sm text-white '
+  'w-full min-w-0 rounded-xl border border-zinc-700/80 bg-zinc-900/80 px-3 py-2.5 text-sm text-white '
   + 'placeholder:text-zinc-500 outline-none transition focus:border-red-500/60';
 
 const GoogleAuthGate = ({ children, onUserChange }) => {
@@ -154,7 +169,6 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   // null means "not known yet, or could not ask" - every button stays live.
   const [available, setAvailable] = useState(null);
   const attempt = useRef(null);
-  const [copied, setCopied] = useState(false);
 
   /* The account form. Google is still one tap for anyone who wants it; this
      is the path that needs nothing but this machine. */
@@ -162,38 +176,14 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [recoveryCode, setRecoveryCode] = useState('');
   const [working, setWorking] = useState(false);
-
-  /* A recovery code exists in readable form exactly once, on this screen. It
-     is stored only as a hash, so there is no "show it to me again" - which is
-     why the app is not entered until the person says they have written it
-     down. */
-  const [issued, setIssued] = useState(null);
-
-  /* Put the code on the clipboard the moment it exists, and again on tap.
-     navigator.clipboard needs a secure context, which the packaged app has
-     (https://localhost) and a plain-http LAN page does not - hence the
-     fallback, rather than a silent no-op. */
-  const copyCode = useCallback((code) => {
-    if (!code) return;
-    const done = () => { setCopied(true); window.setTimeout(() => setCopied(false), 2000); };
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(code).then(done).catch(() => {});
-      return;
-    }
-    try {
-      const field = document.createElement('textarea');
-      field.value = code;
-      field.setAttribute('readonly', '');
-      field.style.cssText = 'position:fixed;top:-1000px';
-      document.body.appendChild(field);
-      field.select();
-      document.execCommand('copy');
-      field.remove();
-      done();
-    } catch { /* the code is on screen either way */ }
-  }, []);
+  /* Set at registration, answered to get back in. Two of them, both required:
+     one short answer is not a password, and these are now the only way back
+     into an account whose password has been forgotten. */
+  const [questions, setQuestions] = useState(
+    () => Array.from({ length: QUESTION_SLOTS }, (_, i) => ({ question: SUGGESTED_QUESTIONS[i], answer: '' })),
+  );
+  const [askedQuestions, setAskedQuestions] = useState(null);
 
   useEffect(() => () => attempt.current?.abort(), []);
 
@@ -211,9 +201,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
       setError('');
       setBusyProvider('');
       setFinishing(false);
-      setIssued(null);
       setPassword('');
-      setRecoveryCode('');
       setMode(SIGN_IN);
       attempt.current?.abort();
     };
@@ -249,43 +237,95 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     sendSignInAnalytics(user);
   }, [onUserChange]);
 
-  /** Register, sign in, or set a new password with the recovery code. */
+  /* A packaged phone with no paired computer has no backend to talk to: every
+     /api/auth call would land on the asset server and 404, which is exactly
+     why registering on the phone appeared to do nothing at all. There, the
+     account is kept on the device instead - see utils/localAccount.js, and
+     read the note there about what that does and does not protect. */
+  const standalone = isNative() && !API_BASE;
+
+  const answersPayload = () => questions
+    .filter((entry) => entry.question && entry.answer.trim())
+    .map((entry) => ({ question: entry.question, answer: entry.answer }));
+
+  /** Ask which questions this account was set up with, so they can be answered.
+   *
+   * Returning questions for an address might look like it reveals who has an
+   * account. It does not: an unknown address and an account with no questions
+   * both come back empty, and the questions were never the secret.
+   */
+  const loadQuestions = async () => {
+    setError('');
+    setWorking(true);
+    try {
+      let asked;
+      if (standalone) {
+        asked = localAccount.localSecurityQuestions(email);
+      } else {
+        const response = await fetch(`${API_BASE || ''}/api/auth/security-questions`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: 'unused' }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) throw new Error('Question lookup failed');
+        asked = (await response.json()).questions;
+        if (!Array.isArray(asked)) throw new Error('Invalid questions response');
+      }
+      setAskedQuestions(asked);
+      setQuestions(asked.map((question) => ({ question, answer: '' })));
+    } catch {
+      setError('Could not load the security questions. Please try again.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  /** Register, sign in, or set a new password by answering security questions. */
   const submitAccount = async (event) => {
     event.preventDefault();
     if (working || busyProvider) return;
     setError('');
     setWorking(true);
-    const endpoint = { [SIGN_IN]: 'login', [REGISTER]: 'register', [RECOVER]: 'recover' }[mode];
+    const endpoint = {
+      [SIGN_IN]: 'login', [REGISTER]: 'register',
+      [RECOVER_QUESTIONS]: 'recover-questions',
+    }[mode];
     const body = mode === SIGN_IN ? { email, password }
-      : mode === REGISTER ? { email, password, display_name: displayName || undefined }
-        : { email, recovery_code: recoveryCode, new_password: password };
+      : mode === REGISTER
+        ? { email, password, display_name: displayName || undefined,
+            security_questions: answersPayload() }
+        : { email, answers: answersPayload(), new_password: password };
     try {
-      const res = await fetch(`${API_BASE || ''}/api/auth/${endpoint}`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(20000),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        // FastAPI reports a validation failure as a list of objects; showing
-        // "[object Object]" to someone who mistyped an address is not an error
-        // message.
-        const detail = Array.isArray(data.detail)
-          ? (data.detail[0]?.msg || 'Please check the details and try again.')
-          : data.detail;
-        throw new Error(detail || 'That did not work. Please try again.');
-      }
-      const account = {
+      const data = standalone
+        ? await (mode === SIGN_IN ? localAccount.signInLocally({ email, password })
+          : mode === REGISTER ? localAccount.registerLocally({
+            email, password, displayName, securityQuestions: answersPayload() })
+            : localAccount.recoverLocallyWithAnswers({
+              email, answers: answersPayload(), newPassword: password }))
+        : await (async () => {
+          const res = await fetch(`${API_BASE || ''}/api/auth/${endpoint}`, {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(20000),
+          });
+          const parsed = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            // FastAPI reports a validation failure as a list of objects;
+            // showing "[object Object]" to someone who mistyped an address is
+            // not an error message.
+            const detail = Array.isArray(parsed.detail)
+              ? (parsed.detail[0]?.msg || 'Please check the details and try again.')
+              : parsed.detail;
+            throw new Error(detail || 'That did not work. Please try again.');
+          }
+          return parsed;
+        })();
+      handleSignInSuccess({
         id: data.user?.id, name: data.user?.username, email: data.user?.email || email,
         provider: 'password', access_token: data.access_token,
-      };
-      if (data.recovery_code) {
-        setIssued({ code: data.recovery_code, notice: data.recovery_notice, account });
-        copyCode(data.recovery_code);
-      } else {
-        handleSignInSuccess(account);
-      }
+      });
     } catch (err) {
       setError(err.name === 'TimeoutError'
         ? 'The local engine did not answer. Is SMARAN.AI running?'
@@ -293,27 +333,6 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     } finally {
       setWorking(false);
     }
-  };
-
-  /** Keep a copy of the recovery code somewhere that is not this screen. */
-  const downloadRecoveryCode = () => {
-    if (!issued) return;
-    const text = [
-      'SMARAN.AI recovery code',
-      '',
-      `Account: ${issued.account.email}`,
-      `Code:    ${issued.code}`,
-      '',
-      'This code sets a new password if the password for this account is',
-      'forgotten. It works once, and SMARAN.AI cannot show it again - it is',
-      'stored only as a hash. Keep it somewhere a stranger cannot reach.',
-    ].join('\n');
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'smaran-ai-recovery-code.txt';
-    link.click();
-    URL.revokeObjectURL(url);
   };
 
   const onProviderClick = async (provider) => {
@@ -347,7 +366,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   if (currentUser) return <>{children}</>;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050508] text-zinc-100 overflow-y-auto select-none font-sans py-6">
+    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-[#050508] text-zinc-100 overflow-y-auto select-none font-sans px-4 py-6">
       <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
         <div
           className="absolute -top-32 left-1/2 -translate-x-1/2 w-[480px] h-[480px] rounded-full opacity-20 blur-[90px]"
@@ -359,8 +378,8 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
         />
       </div>
 
-      <div className="relative z-10 w-full max-w-[460px] mx-4 my-auto">
-        <div className="relative rounded-2xl border border-red-500/25 bg-zinc-950/95 p-7 sm:p-8 shadow-[0_0_60px_rgba(239,68,68,0.18)] backdrop-blur-md">
+      <div className="relative z-10 w-full min-w-0 max-w-[460px] my-auto shrink-0">
+        <div className="relative rounded-2xl border border-red-500/25 bg-zinc-950/95 p-4 sm:p-8 shadow-[0_0_60px_rgba(239,68,68,0.18)] backdrop-blur-md">
           <span className="pointer-events-none absolute left-0 top-0 h-4 w-4 border-l-2 border-t-2 border-red-500/60 rounded-tl-xl" />
           <span className="pointer-events-none absolute right-0 top-0 h-4 w-4 border-r-2 border-t-2 border-red-500/60 rounded-tr-xl" />
           <span className="pointer-events-none absolute left-0 bottom-0 h-4 w-4 border-l-2 border-b-2 border-red-500/60 rounded-bl-xl" />
@@ -406,46 +425,16 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               <Loader2 className="h-6 w-6 animate-spin text-red-500" />
               <span>Finishing sign-in…</span>
             </div>
-          ) : issued ? (
-            /* Shown once, and the app is not entered until it is acknowledged.
-               A code nobody wrote down is a locked account later. */
-            <div className="space-y-4 text-sm">
-              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-[12px] leading-relaxed text-amber-100">
-                <p className="font-bold">Save your recovery code</p>
-                <p className="mt-1">{issued.notice}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => copyCode(issued.code)}
-                title="Copy the code"
-                className="block w-full select-text rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-3 font-mono text-base font-bold tracking-wider text-white"
-              >
-                {issued.code}
-              </button>
-              <div className="flex items-center justify-between text-[11px] text-zinc-400">
-                <span>{copied ? 'Copied to clipboard' : 'Tap the code to copy'}</span>
-                <button type="button" onClick={downloadRecoveryCode} className="underline hover:text-zinc-200">
-                  Download as a file
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => { const { account } = issued; setIssued(null); handleSignInSuccess(account); }}
-                className="w-full rounded-xl bg-red-600 py-3 text-sm font-bold text-white transition hover:bg-red-500"
-              >
-                I have saved my recovery code
-              </button>
-            </div>
           ) : (
             <div className="space-y-4">
               <form onSubmit={submitAccount} className="space-y-3">
                 <p className="text-[13px] font-bold text-zinc-200">{FORM_COPY[mode].title}</p>
                 <input
-                  type="email"
+                  type="email" disabled={working}
                   required
                   autoComplete="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => { setEmail(e.target.value); if (mode === RECOVER_QUESTIONS) { setAskedQuestions(null); setQuestions([]); } }}
                   placeholder="you@example.com"
                   className={inputClass}
                 />
@@ -460,17 +449,80 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                     className={inputClass}
                   />
                 )}
-                {mode === RECOVER && (
-                  <input
-                    type="text"
-                    required
-                    value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value)}
-                    placeholder="Recovery code"
-                    autoComplete="one-time-code"
-                    spellCheck={false}
-                    className={`${inputClass} font-mono tracking-wider`}
-                  />
+                {mode === REGISTER && (
+                  <div className="space-y-2 rounded-xl border border-zinc-800 p-3">
+                    <p className="text-[11px] leading-relaxed text-zinc-400">
+                      Security questions (required). Answer both questions,
+                      so pick answers that will not change.
+                    </p>
+                    {questions.map((entry, index) => (
+                      <div key={index} className="space-y-1.5">
+                        <select
+                          value={entry.question}
+                          onChange={(e) => setQuestions((all) => all.map((q, i) =>
+                            (i === index ? { ...q, question: e.target.value } : q)))}
+                          aria-label={`Security question ${index + 1}`}
+                          className={inputClass}
+                        >
+                          {SUGGESTED_QUESTIONS.map((text) => (
+                            <option key={text} value={text} disabled={questions.some((q, i) => i !== index && q.question === text)}>{text.replace(/^Your /, "").replace(/\?$/, "")}</option>
+                          ))}
+                        </select>
+                        <p className="text-sm leading-relaxed break-words text-zinc-300">{entry.question}</p>
+                        <input
+                          type="text"
+                          required
+                          aria-label={`Answer to security question ${index + 1}`}
+                          maxLength={160}
+                          value={entry.answer}
+                          onChange={(e) => setQuestions((all) => all.map((q, i) =>
+                            (i === index ? { ...q, answer: e.target.value } : q)))}
+                          placeholder="Answer"
+                          autoComplete="off"
+                          className={inputClass}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {mode === RECOVER_QUESTIONS && (
+                  askedQuestions === null ? (
+                    <button
+                      type="button"
+                      onClick={loadQuestions}
+                      disabled={!email || working}
+                      className="w-full rounded-xl border border-zinc-700 py-2.5 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:opacity-50"
+                    >
+                      Show my security questions
+                    </button>
+                  ) : askedQuestions.length === 0 ? (
+                    <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-100">
+                      No security questions are set for that address. Check the email address,
+                      or sign in with Google if this account uses Google.
+                    </p>
+                  ) : (
+                    askedQuestions.map((question, index) => (
+                      <div key={question} className="space-y-1">
+                        <p className="text-sm leading-relaxed break-words text-zinc-300">{question}</p>
+                        <input
+                          type="text"
+                          required
+                          aria-label={question}
+                          maxLength={160}
+                          value={questions[index]?.answer || ''}
+                          onChange={(e) => setQuestions((all) => {
+                            const next = [...all];
+                            next[index] = { question, answer: e.target.value };
+                            return next;
+                          })}
+                          placeholder="Answer"
+                          autoComplete="off"
+                          className={inputClass}
+                        />
+                      </div>
+                    ))
+                  )
                 )}
                 <input
                   type="password"
@@ -483,7 +535,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                 />
                 <button
                   type="submit"
-                  disabled={working || Boolean(busyProvider)}
+                  disabled={working || Boolean(busyProvider) || (mode === RECOVER_QUESTIONS && !askedQuestions?.length)}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-3 text-sm font-bold text-white transition hover:bg-red-500 disabled:opacity-60"
                 >
                   {working && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -491,21 +543,28 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
                 </button>
               </form>
 
-              <div className="flex items-center justify-between text-[11px] text-zinc-400">
+              {/* whitespace-nowrap on each link, because justify-between pushes
+                  them to opposite edges and a narrow phone then broke one in
+                  half - "Back to sign / in" across two lines. They wrap as
+                  whole links now, or sit on one row when they fit. */}
+              <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-xs text-zinc-400">
                 {mode === SIGN_IN ? (
                   <>
-                    <button type="button" className="underline hover:text-zinc-200"
-                            onClick={() => { setMode(REGISTER); setError(''); }}>
+                    <button type="button" className="whitespace-nowrap underline hover:text-zinc-200"
+                            onClick={() => { setMode(REGISTER); setError(''); setPassword(''); setQuestions(SUGGESTED_QUESTIONS.slice(0, QUESTION_SLOTS).map((question) => ({ question, answer: '' }))); }}>
                       Create an account
                     </button>
-                    <button type="button" className="underline hover:text-zinc-200"
-                            onClick={() => { setMode(RECOVER); setError(''); setPassword(''); }}>
+                    <button type="button" className="whitespace-nowrap underline hover:text-zinc-200"
+                            onClick={() => { setMode(RECOVER_QUESTIONS); setError(''); setPassword(''); setAskedQuestions(null); setQuestions([]); }}>
                       Forgot password?
                     </button>
                   </>
                 ) : (
-                  <button type="button" className="underline hover:text-zinc-200"
-                          onClick={() => { setMode(SIGN_IN); setError(''); setPassword(''); setRecoveryCode(''); }}>
+                  <button type="button" className="whitespace-nowrap underline hover:text-zinc-200"
+                          onClick={() => {
+                            setMode(SIGN_IN); setError(''); setPassword('');
+                            setAskedQuestions(null);
+                          }}>
                     Back to sign in
                   </button>
                 )}
@@ -547,7 +606,7 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             </div>
           )}
 
-          {busyProvider && !issued && (
+          {busyProvider && (
             <div className="mt-4 space-y-2 text-center text-sm text-zinc-300" role="status">
               <p>Complete sign-in at {providerLabel(busyProvider)}, then return here.</p>
               <button type="button" className="text-zinc-300 underline" onClick={() => attempt.current?.abort()}>Cancel sign-in</button>

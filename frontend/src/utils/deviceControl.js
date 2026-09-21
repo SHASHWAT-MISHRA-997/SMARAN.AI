@@ -1,8 +1,7 @@
-import { registerPlugin } from '@capacitor/core';
+import { device } from './devicePlugin';
 import { isNativeApp } from './hostLink';
 import { detectDeviceCommand, describeOutcome } from './deviceCommands';
 
-const device = registerPlugin('SmaranDevice');
 
 /**
  * Doing on the phone what was asked out loud.

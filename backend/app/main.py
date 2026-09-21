@@ -207,6 +207,7 @@ try:
             ("verification_token", "VARCHAR(255)"),
             ("reset_token", "VARCHAR(255)"),
             ("reset_token_expires", "TIMESTAMP"),
+            ("security_questions", "TEXT"),
             ("last_login", "TIMESTAMP"),
         ]
         for col_name, col_type in cols_to_add:

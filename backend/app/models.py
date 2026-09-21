@@ -22,6 +22,10 @@ class User(Base):
     verification_token = Column(String, nullable=True)
     reset_token = Column(String, nullable=True)
     reset_token_expires = Column(DateTime, nullable=True)
+    # JSON: [{"question": "...", "answer_hash": "..."}]. The answers are
+    # hashed exactly like a password, so this column is worth nothing to
+    # anyone who reads the database.
+    security_questions = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
 
     # Relationships

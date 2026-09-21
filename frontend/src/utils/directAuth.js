@@ -1,4 +1,5 @@
-import { CapacitorHttp, registerPlugin } from '@capacitor/core';
+import { CapacitorHttp } from '@capacitor/core';
+import { device } from './devicePlugin';
 import { API_BASE } from '../context/AuthContext';
 
 /**
@@ -13,14 +14,13 @@ import { API_BASE } from '../context/AuthContext';
  * can simply make here.
  *
  * What replaced it is in app/password_auth.py: an account on this machine,
- * with a recovery code that never leaves it.
+ * with security answers stored as salted hashes.
  */
 export const PROVIDERS = [
   { id: 'google', label: 'Continue with Google' },
 ];
 export const isNative = () => Boolean(window.Capacitor?.isNativePlatform?.());
 export const providerLabel = () => 'Google';
-const device = registerPlugin('SmaranDevice');
 const WEB_CLIENT_ID = '656427300466-jqr94suucdutmjerm0i096i87p1cpctf.apps.googleusercontent.com';
 
 async function api(path, body, signal) {

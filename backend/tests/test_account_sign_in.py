@@ -1,24 +1,4 @@
-"""Accounts on this machine: registering, signing in, and getting back in.
-
-SMARAN is local-first, so there is no server we run and often no internet.
-That removes the usual recovery story - a link sent by email - and it also
-means every guess an attacker makes is made here, against this machine, with
-nobody watching. The properties below are what stands in for that missing
-supervision, so each one is pinned rather than assumed:
-
-* a password is only ever stored as a bcrypt hash, and so is the recovery code
-* a wrong password, a wrong recovery code and an address with no account are
-  answered identically, so probing teaches nothing
-* repeated failures get slower, and the slowdown decays instead of locking an
-  account out permanently - which would let anybody who knows an address shut
-  the owner out of their own machine
-* a recovery code works once, and using it signs every other device out
-* arriving through Google and then choosing a password gives one account, not
-  two
-
-Everything runs against a throwaway sqlite file. These cases create users and
-change passwords, which is not something to do to a real database.
-"""
+"""Password sign-in and security-question recovery against a throwaway database."""
 
 import sys
 from pathlib import Path
@@ -107,7 +87,7 @@ def client(db_session):
 
 
 def register(client, email=EMAIL, password=PASSWORD, **extra):
-    return client.post("/api/auth/register", json={"email": email, "password": password, **extra})
+    return client.post("/api/auth/register", json={"email": email, "password": password, "security_questions": QUESTIONS, **extra})
 
 
 def sign_in(client, email=EMAIL, password=PASSWORD):
@@ -126,17 +106,13 @@ def stored_user(client, email=EMAIL):
 # Registering
 # ---------------------------------------------------------------------------
 
-def test_registering_signs_you_in_and_issues_one_recovery_code(client):
+def test_registering_signs_you_in_without_recovery_codes(client):
     res = register(client)
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["access_token"]
     assert body["user"]["email"] == EMAIL
-    code = body["recovery_code"]
-    # Five groups of five, so it can be written down without ambiguity.
-    assert len(code.split("-")) == password_auth.RECOVERY_GROUPS
-    assert all(len(group) == password_auth.RECOVERY_GROUP_SIZE for group in code.split("-"))
-    assert "only time" in body["recovery_notice"]
+    assert "recovery_code" not in body
 
 
 def test_the_password_is_never_stored(client):
@@ -147,14 +123,11 @@ def test_the_password_is_never_stored(client):
     assert user.password_hash.startswith("$2")
 
 
-def test_the_recovery_code_is_stored_the_same_way_as_a_password(client):
-    """A code kept in the clear is worth as much to a thief as the password."""
-    code = register(client).json()["recovery_code"]
-    user = stored_user(client)
-    assert user.reset_token
-    assert code not in user.reset_token
-    assert password_auth.normalise_recovery_code(code) not in user.reset_token
-    assert user.reset_token.startswith("$2")
+def test_no_recovery_code_is_stored_or_accepted(client):
+    register(client)
+    assert stored_user(client).reset_token is None
+    assert client.post('/api/auth/recover', json={
+        'email': EMAIL, 'recovery_code': 'old-code', 'new_password': OTHER}).status_code == 404
 
 
 def test_an_address_cannot_be_registered_twice(client):
@@ -262,81 +235,6 @@ def test_guessing_one_account_does_not_slow_down_another(client):
 # Getting back in with the recovery code
 # ---------------------------------------------------------------------------
 
-def recover(client, code, new_password=OTHER, email=EMAIL):
-    return client.post("/api/auth/recover", json={
-        "email": email, "recovery_code": code, "new_password": new_password})
-
-
-def test_the_recovery_code_sets_a_new_password(client):
-    code = register(client).json()["recovery_code"]
-    res = recover(client, code)
-    assert res.status_code == 200, res.text
-    assert sign_in(client, password=OTHER).status_code == 200
-    assert sign_in(client, password=PASSWORD).status_code == 401
-
-
-def test_the_code_is_accepted_however_it_was_written_down(client):
-    code = register(client).json()["recovery_code"]
-    assert recover(client, code.lower().replace("-", " ")).status_code == 200
-
-
-def test_a_recovery_code_works_once(client):
-    code = register(client).json()["recovery_code"]
-    assert recover(client, code).status_code == 200
-    again = recover(client, code, new_password="yet another long passphrase")
-    assert again.status_code == 401
-
-
-def test_recovery_hands_back_a_replacement_code(client):
-    code = register(client).json()["recovery_code"]
-    replacement = recover(client, code).json()["recovery_code"]
-    assert replacement != code
-    # And the replacement is itself usable, so nobody is left without one.
-    assert recover(client, replacement, new_password="a third long passphrase here").status_code == 200
-
-
-def test_recovering_signs_every_other_device_out(client):
-    """If the password was changed by somebody else, this is what takes it back."""
-    code = register(client).json()["recovery_code"]
-    before = stored_user(client).session_token
-    recover(client, code)
-    assert stored_user(client).session_token != before
-
-
-def test_a_wrong_recovery_code_changes_nothing(client):
-    register(client)
-    before = stored_user(client).password_hash
-    bad = recover(client, "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE")
-    assert bad.status_code == 401
-    # The stored password is untouched: a failed recovery must not be a way
-    # to clear somebody's password by attrition.
-    assert stored_user(client).password_hash == before
-
-
-def test_recovery_for_an_unknown_address_looks_the_same_as_a_wrong_code(client):
-    register(client)
-    wrong = recover(client, "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE")
-    missing = recover(client, "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE", email="nobody@example.com")
-    assert wrong.status_code == missing.status_code == 401
-    assert wrong.json() == missing.json()
-
-
-def test_recovery_guesses_are_slowed_down_too(client):
-    register(client)
-    for _ in range(password_auth.MAX_ATTEMPTS_BEFORE_DELAY + 1):
-        recover(client, "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE")
-    assert recover(client, "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE").status_code == 429
-
-
-def test_recovery_still_requires_a_password_worth_having(client):
-    code = register(client).json()["recovery_code"]
-    assert recover(client, code, new_password="abc").status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# Getting back in through Google
-# ---------------------------------------------------------------------------
-
 def test_a_signed_in_person_can_set_a_new_password(client):
     """The Google route: the provider proved who this is, so no old password."""
     token = register(client).json()["access_token"]
@@ -361,7 +259,7 @@ def test_an_invented_session_token_cannot_set_a_password(client):
     assert sign_in(client).status_code == 200
 
 
-def test_a_google_account_adding_a_password_stays_one_account(client):
+def test_registration_cannot_take_over_a_google_account(client):
     """Same person, same address - not a second row with the same email."""
     db = client.sessions()
     try:
@@ -372,21 +270,16 @@ def test_a_google_account_adding_a_password_stays_one_account(client):
         db.close()
 
     res = register(client)
-    assert res.status_code == 200, res.text
-
-    db = client.sessions()
-    try:
-        assert db.query(models.User).filter(models.User.email == EMAIL).count() == 1
-    finally:
-        db.close()
-    assert sign_in(client).status_code == 200
+    assert res.status_code == 409
+    assert stored_user(client).password_hash is None
+    assert sign_in(client).status_code == 401
 
 
 def test_account_status_says_whether_a_password_exists(client):
     token = register(client).json()["access_token"]
     body = client.get("/api/auth/account-status",
                       headers={"Authorization": f"Bearer {token}"}).json()
-    assert body == {"signed_in": True, "has_password": True, "has_recovery_code": True}
+    assert body == {"signed_in": True, "has_password": True, "has_questions": True}
     client.cookies.clear()
     assert client.get("/api/auth/account-status").json()["signed_in"] is False
 
@@ -395,20 +288,118 @@ def test_account_status_says_whether_a_password_exists(client):
 # The recovery code itself
 # ---------------------------------------------------------------------------
 
-def test_recovery_codes_do_not_repeat():
-    codes = {password_auth.make_recovery_code() for _ in range(500)}
-    assert len(codes) == 500
+QUESTIONS = [
+    {"question": "What was the name of your first school?", "answer": "St. Mary's"},
+    {"question": "What was the name of your first pet?", "answer": "Rex"},
+]
 
 
-def test_recovery_codes_avoid_characters_that_are_read_wrong():
-    """I, L, O and U: misread as 1, 1, 0, and able to spell things."""
-    everything = "".join(password_auth.make_recovery_code() for _ in range(200))
-    for letter in "ILOU":
-        assert letter not in everything
+def answer(client, answers, new_password=OTHER, email=EMAIL):
+    return client.post("/api/auth/recover-questions", json={
+        "email": email, "answers": answers, "new_password": new_password})
 
 
-def test_a_recovery_code_is_long_enough_that_guessing_is_not_a_strategy():
-    import math
-    bits = password_auth.RECOVERY_GROUPS * password_auth.RECOVERY_GROUP_SIZE * math.log2(
-        len(password_auth.RECOVERY_ALPHABET))
-    assert bits >= 100
+def test_questions_can_be_set_at_registration(client):
+    res = register(client, security_questions=QUESTIONS)
+    assert res.status_code == 200, res.text
+    asked = client.post("/api/auth/security-questions",
+                        json={"email": EMAIL, "password": "unused"}).json()["questions"]
+    assert asked == [q["question"] for q in QUESTIONS]
+
+
+def test_the_answers_are_stored_the_same_way_as_a_password(client):
+    register(client, security_questions=QUESTIONS)
+    stored = stored_user(client).security_questions
+    assert "Rex" not in stored and "rex" not in stored.lower().replace("first", "")
+    assert "$2" in stored
+
+
+def test_answering_every_question_sets_a_new_password(client):
+    register(client, security_questions=QUESTIONS)
+    res = answer(client, QUESTIONS)
+    assert res.status_code == 200, res.text
+    assert "recovery_code" not in res.json()
+    assert sign_in(client, password=OTHER).status_code == 200
+
+
+def test_answers_are_matched_the_way_a_person_writes_them(client):
+    """"St. Mary's" at registration, "st marys" a year later."""
+    register(client, security_questions=QUESTIONS)
+    res = answer(client, [
+        {"question": QUESTIONS[0]["question"], "answer": "st marys"},
+        {"question": QUESTIONS[1]["question"], "answer": "  REX "},
+    ])
+    assert res.status_code == 200, res.text
+
+
+def test_one_right_answer_is_not_enough(client):
+    register(client, security_questions=QUESTIONS)
+    assert answer(client, [QUESTIONS[0]]).status_code == 401
+    assert sign_in(client).status_code in (200, 429)
+
+
+def test_one_wrong_answer_fails_the_whole_reset(client):
+    register(client, security_questions=QUESTIONS)
+    before = stored_user(client).password_hash
+    res = answer(client, [QUESTIONS[0],
+                          {"question": QUESTIONS[1]["question"], "answer": "Fluffy"}])
+    assert res.status_code == 401
+    assert stored_user(client).password_hash == before
+
+
+def test_an_account_without_questions_cannot_be_reset_by_answering_none(client):
+    register(client)
+    assert answer(client, []).status_code == 401
+
+
+def test_asking_for_questions_does_not_reveal_who_has_an_account(client):
+    register(client, security_questions=QUESTIONS)
+    missing = client.post("/api/auth/security-questions",
+                          json={"email": "nobody@example.com", "password": "x"})
+    without = client.post("/api/auth/security-questions",
+                          json={"email": "plain@example.com", "password": "x"})
+    assert missing.status_code == without.status_code == 200
+    assert missing.json() == without.json() == {"questions": []}
+
+
+def test_answer_guesses_are_slowed_down(client):
+    register(client, security_questions=QUESTIONS)
+    wrong = [QUESTIONS[0], {"question": QUESTIONS[1]["question"], "answer": "nope"}]
+    for _ in range(password_auth.MAX_ATTEMPTS_BEFORE_DELAY + 1):
+        answer(client, wrong)
+    assert answer(client, QUESTIONS).status_code == 429
+
+
+def test_a_single_question_is_refused_as_too_weak(client):
+    res = register(client, security_questions=[QUESTIONS[0]])
+    assert res.status_code == 400
+    assert stored_user(client) is None
+
+
+def test_an_answer_too_short_to_be_worth_anything_is_refused(client):
+    res = register(client, security_questions=[
+        QUESTIONS[0], {"question": QUESTIONS[1]["question"], "answer": "!"}])
+    assert res.status_code == 400
+
+
+def test_the_same_question_cannot_be_used_twice(client):
+    res = register(client, security_questions=[QUESTIONS[0], QUESTIONS[0]])
+    assert res.status_code == 400
+
+
+def test_resetting_by_answers_signs_other_devices_out(client):
+    register(client, security_questions=QUESTIONS)
+    before = stored_user(client).session_token
+    answer(client, QUESTIONS)
+    assert stored_user(client).session_token != before
+
+
+def test_registration_requires_questions(client):
+    assert register(client, security_questions=[]).status_code == 400
+    assert stored_user(client) is None
+
+
+def test_reset_rejects_weak_password_without_changing_existing_password(client):
+    register(client)
+    assert answer(client, QUESTIONS, new_password='abc').status_code == 400
+    assert sign_in(client).status_code == 200
