@@ -5,7 +5,7 @@ import {
   Settings, Pencil, Check, Brain,
   ChevronDown, PanelLeftOpen, PanelLeftClose, Menu, Database,
   LogIn, Blocks, FolderOpen, Globe2, ArrowDownToLine, Terminal, Users,
-  Palette, Clock, Smartphone, LogOut
+  Palette, Clock, Smartphone, LogOut, Image as ImageIcon, Film
 } from 'lucide-react';
 import { isNativeApp } from '../utils/hostLink';
 import ModelHubModal from './ModelHubModal';
@@ -583,6 +583,8 @@ const Sidebar = ({
           <button onClick={() => onNavigate('design')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'design' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Palette className="h-4 w-4"/> Design</button>
           <button onClick={() => onNavigate('plugins')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'plugins' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Blocks className="h-4 w-4"/> Plugins</button>
           <button onClick={() => onNavigate('terminal')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Terminal className="h-4 w-4"/> Terminal</button>
+          <button onClick={() => onNavigate('images')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><ImageIcon className="h-4 w-4"/> Images</button>
+          <button onClick={() => onNavigate('videos')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Film className="h-4 w-4"/> Video</button>
           {!handheld && <button onClick={() => onNavigate('scheduled')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Clock className="h-4 w-4"/> Scheduled</button>}
           <button onClick={() => onNavigate('dispatch')} className="nav-neon sheen w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><span className="flex items-center gap-3"><Smartphone className="h-4 w-4"/> Dispatch</span><span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400">Beta</span></button>
           {openProject && (
@@ -608,6 +610,8 @@ const Sidebar = ({
           <RailBtn icon={<Globe2 className="h-5 w-5"/>} label="Sites" active={activeView === 'sites'} onClick={() => onNavigate('sites')}/>
           <RailBtn icon={<Blocks className="h-5 w-5"/>} label="Plugins & Skills" active={activeView === 'plugins'} onClick={() => onNavigate('plugins')}/>
           <RailBtn icon={<Terminal className="h-5 w-5"/>} label="Terminal" onClick={() => onNavigate('terminal')}/>
+          <RailBtn icon={<ImageIcon className="h-5 w-5"/>} label="Images" onClick={() => onNavigate('images')}/>
+          <RailBtn icon={<Film className="h-5 w-5"/>} label="Video" onClick={() => onNavigate('videos')}/>
           {!handheld && <RailBtn icon={<Clock className="h-5 w-5"/>} label="Scheduled" onClick={() => onNavigate('scheduled')}/>}
         </>}
       </div>
@@ -928,6 +932,8 @@ const Sidebar = ({
               just been using. */}
           <button onClick={() => { onNavigate('design'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'design' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Palette className="h-4 w-4"/> Design Studio</button>
           <button onClick={() => { onNavigate('terminal'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'terminal' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Terminal className="h-4 w-4"/> Terminal</button>
+          <button onClick={() => { onNavigate('images'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'images' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><ImageIcon className="h-4 w-4"/> Images</button>
+          <button onClick={() => { onNavigate('videos'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'videos' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Film className="h-4 w-4"/> Video</button>
           <button onClick={() => { onNavigate('dispatch'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'dispatch' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Smartphone className="h-4 w-4"/> Dispatch</button>
         </nav>
         )}

@@ -22,6 +22,8 @@ import DesktopPet from './components/DesktopPet';
 import TerminalPanel from './components/TerminalPanel';
 import SmaranDesignView from './components/SmaranDesignView';
 import ScheduledTasksView from './components/ScheduledTasksView';
+import ImageStudio from './components/ImageStudio';
+import VideoStudio from './components/VideoStudio';
 import DispatchView from './components/DispatchView';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 import { isNativeApp, loadLink } from './utils/hostLink';
@@ -548,6 +550,10 @@ const App = () => {
   // hosting SMARAN, and the sidebar no longer offers it there. Listed here too
   // so a saved view, or a link, cannot land on a screen with nothing in it.
   const RENDERABLE_VIEWS = new Set(['chat', 'collections', 'sites', 'plugins', 'design', 'dispatch',
+    // Images and video are offered on a phone too: one paired to a computer
+    // reaches that computer's engine perfectly well, and a standalone one
+    // says so on the screen rather than being refused the destination.
+    'images', 'videos',
     ...(isHandheld() ? [] : ['scheduled'])]);
 
   const handleNavigate = (view) => {
@@ -694,6 +700,8 @@ const App = () => {
           <CollectionManager />
         )}
         {activeView === 'sites' && <SitesHub />}
+        {activeView === 'images' && <ImageStudio />}
+        {activeView === 'videos' && <VideoStudio />}
         {activeView === 'plugins' && <ExtensionsHub embedded />}
         {activeView === 'scheduled' && !isHandheld() && (
           <ScheduledTasksView

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -137,3 +138,27 @@ async def job(job_id: str):
     if not record:
         raise HTTPException(status_code=404, detail="No such job.")
     return record
+
+
+@router.get("/file/{job_id}")
+async def file(job_id: str):
+    """Serve a finished picture.
+
+    The video routes have had this since a job reported "done", gave a path
+    on disk, and nothing could hand the file to a browser. Images had the
+    same hole and no equivalent route at all, so a picture generated here
+    could not be displayed by the app that made it - the only way to see one
+    was to open the data folder.
+
+    The id is checked against the pattern the generator produces rather than
+    trusted, because it is about to be joined onto a directory path.
+    """
+    from fastapi.responses import FileResponse
+    from app.config import settings
+
+    if not re.fullmatch(r"[a-f0-9]{12}", job_id):
+        raise HTTPException(status_code=404, detail="No such image.")
+    path = os.path.join(settings.DATA_DIR, "images", "%s.png" % job_id)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="That image is not on disk.")
+    return FileResponse(path, media_type="image/png")
