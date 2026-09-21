@@ -23,7 +23,9 @@
       --accent-purple: #a855f7;
       --text-main: #f4f4f5;
       --text-muted: #a1a1aa;
-      --text-dim: #71717a;
+      /* Was #71717a, which is 3.9:1 on the module cards - the "Location:"
+         lines under every heading, so it is body text and wants 4.5. */
+      --text-dim: #8b8b96;
       --code-bg: #0c0d14;
       --surface-1: #18181b;
       --surface-2: #27272a;
@@ -696,8 +698,8 @@
       .copy-btn { align-self: flex-start; }
     }
   </style>
-  <link rel="stylesheet" href="page-theme.css" />
-  <script src="page-theme.js"></script>
+  <link rel="stylesheet" href="page-theme.css?v=1904055dce" />
+  <script src="page-theme.js?v=68b58deb65"></script>
 </head>
 <body>
 
@@ -1771,7 +1773,7 @@
         <strong>SMARAN.AI</strong> — Designed, Engineered & Maintained by <a href="https://shashwatmishra-portfolio.netlify.app/" target="_blank">Shashwat Mishra</a>.
       </p>
       <p style="margin-top: 6px; font-size: 0.75rem;">
-        Private, Local-First, Zero-Telemetry Autonomous AI Coding Workstation • Official Release Version 1.0.2
+        Private, Local-First, Zero-Telemetry Autonomous AI Coding Workstation • Official Release Version 1.0.7
       </p>
     </div>
   </footer>

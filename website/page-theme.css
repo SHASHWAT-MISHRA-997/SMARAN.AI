@@ -29,7 +29,9 @@ html.light {
   --purple: #7e22ce;
   --text: #0f1115;
   --muted: #4b5563;
-  --dimmer: #6b7280;
+  /* #6b7280 is 4.34:1 on the code-block headers - the language labels above
+     every install command - which is under 4.5 for text that size. */
+  --dimmer: #596273;
   --code-bg: #f1f2f6;
 
   /* showcase.html names everything differently. */
@@ -39,7 +41,10 @@ html.light {
   --border-active: rgba(79, 70, 229, 0.5);
   --primary: #4f46e5;
   --primary-glow: rgba(79, 70, 229, 0.18);
-  --accent-emerald: #047857;
+  /* #047857 lands at 4.48:1 on the green release badge and on the inline
+     "SMARAN Code" mentions - two hundredths under, which is still a fail
+     and still the kind nobody would ever catch by eye. */
+  --accent-emerald: #065f46;
   --accent-cyan: #0e7490;
   --accent-amber: #b45309;
   --accent-rose: #be123c;
@@ -72,8 +77,15 @@ html.light {
   --accent-indigo-pale: #4338ca;
   --accent-violet: #7e22ce;
   --accent-violet-pale: #6b21a8;
-  --accent-mint: #047857;
-  --accent-gold: #a16207;
+  /* The green release badge and the inline "SMARAN Code" mentions take
+     their colour from here, not from --accent-emerald, and #047857 landed
+     at 4.48:1 on their tinted backgrounds - two hundredths under. */
+  --accent-mint: #065f46;
+  /* #a16207 read 4.42:1 on the pillar boxes and 4.37:1 in the amber
+     module icon - both just under the 4.5 these 12px bold headings
+     need, and both only visible once the surfaces under them were
+     composited properly. One shade down clears it. */
+  --accent-gold: #92400e;
   --accent-coral: #be123c;
   --accent-teal: #0e7490;
 }
@@ -160,4 +172,96 @@ html.light {
   --btn-text: #374151;
   --body-text: #374151;
   --mint-pale: #065f46;
+}
+
+/* Gradients do not follow a variable that is not in them.
+ *
+ * The developer card on showcase.html painted itself with two literal dark
+ * colours - rgba(28, 25, 65, .6) to rgba(15, 15, 22, .9) - written into the
+ * `background` shorthand rather than taken from --bg-card. Light mode
+ * repointed every variable the page uses and this rule did not contain one,
+ * so the card stayed almost black while the text inside it turned #0f1115.
+ * Measured at 1.05:1, which is not low contrast, it is no contrast: the bio
+ * was invisible and the feature pills under it were shapes with nothing in
+ * them.
+ *
+ * Checking the variables flipped was not enough to catch this, because they
+ * did flip. What was needed was compositing each layer down to an opaque
+ * colour and reading the result, which is how the card was found.
+ */
+html.light .architect-card {
+  background: linear-gradient(135deg, rgba(224, 226, 245, 0.75) 0%, rgba(255, 255, 255, 0.95) 100%);
+  border-color: rgba(79, 70, 229, 0.28);
+  box-shadow: 0 20px 45px -18px rgba(15, 17, 21, 0.18);
+}
+
+/* Its glow sat at 20% indigo over a dark card. Over a light one the same
+   wash is a smudge, so it is dropped to a hint. */
+html.light .architect-card::before {
+  background: radial-gradient(circle, rgba(79, 70, 229, 0.08) 0%, transparent 70%);
+}
+
+/* The three profile buttons keep white text, so their fills have to stay
+   dark enough to carry it in either theme. GitHub's began at
+   var(--surface-raised) - white in light mode - which put white text on
+   white for the first half of the button. */
+html.light .btn-link.portfolio {
+  background: linear-gradient(135deg, rgba(126, 34, 206, 0.95), rgba(88, 28, 135, 0.9));
+}
+html.light .btn-link.linkedin {
+  background: linear-gradient(135deg, rgba(29, 78, 216, 0.95), rgba(30, 58, 138, 0.9));
+}
+html.light .btn-link.github {
+  background: linear-gradient(135deg, rgba(55, 65, 81, 0.97), rgba(17, 24, 39, 0.92));
+  border-color: rgba(17, 24, 39, 0.35);
+  box-shadow: 0 0 18px rgba(17, 24, 39, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+html.light .btn-link { color: #ffffff; }
+
+/* The feature pills under the bio set `background: rgba(0, 0, 0, .4)` - a
+   literal, like the card around them. Over a light card that composites to
+   rgb(69, 68, 83) while the label resolves to #374151: 1.09:1, a row of
+   shapes with nothing legible in them.
+ *
+ * Note what is NOT here: .hero-title. It is gradient text via
+ * background-clip, so its stops are the letters themselves rather than
+ * anything behind them, and in light mode --text-bright already resolves
+ * dark. A contrast sweep flags it at 1:1 because it reads the gradient as a
+ * backdrop; recolouring it would have been a design change made to satisfy a
+ * measurement rather than a reader. */
+html.light .skill-tag {
+  background: rgba(15, 17, 21, 0.06);
+  border-color: rgba(15, 17, 21, 0.12);
+  color: #374151;
+}
+
+/* The last literal of its kind on showcase: the three pillar boxes inside
+   each module card set `background: rgba(0, 0, 0, .3)`, which over a white
+   card is mid-grey, and put the amber, mint and indigo headings on it at
+   2.3:1. The two remaining rgba(0, 0, 0, …) values in that file are
+   box-shadows, which are shadows in either theme and are left alone. */
+html.light .pillar-box {
+  background: rgba(15, 17, 21, 0.05);
+  border-color: rgba(15, 17, 21, 0.10);
+}
+
+/* White stays white on a saturated fill.
+ *
+ * Both of these set `color: var(--text-bright)` over a solid indigo, which is
+ * correct in dark mode and inverts in light: --text-bright resolves to
+ * #0f1115 there, so the avatar's initials and the selected tab's label went
+ * near-black on #4f46e5 at 3:1. The fill does not change between themes, so
+ * neither should the text on it. */
+html.light .arch-avatar,
+html.light .tab-btn.active {
+  color: #ffffff;
+}
+
+/* The current page's nav link resolves through `var(--red, var(--primary, …))`.
+   docs and terms define --red and land on it; showcase does not, so it fell
+   through to --primary, #6366f1, which is 4.45:1 on that page's near-black -
+   just under. The fallback chain gains a lighter indigo for the page with no
+   --red, leaving the other two exactly where they were. */
+html:not(.light) .site-nav-links a[aria-current="page"] {
+  color: var(--red, var(--accent-indigo, #818cf8));
 }

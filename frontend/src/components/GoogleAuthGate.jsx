@@ -379,10 +379,6 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               <button type="button" className="text-zinc-300 underline" onClick={() => attempt.current?.abort()}>Cancel sign-in</button>
             </div>
           )}
-          <p className="mt-6 text-center text-[11px] leading-relaxed text-zinc-500">
-            SMARAN.AI has no password of its own. Signing in happens at Google,
-            or GitHub, and only your profile and verified email are requested.
-          </p>
         </div>
       </div>
     </div>

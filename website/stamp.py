@@ -54,6 +54,77 @@ def main() -> None:
 
     io.open(ROOT / "index.html", "w", encoding="utf-8", newline="").write(raw)
     print(f"styles.css?v={css}\nmain.js?v={js}")
+    stamp_shared_theme()
+    stamp_version()
+
+
+# docs, showcase and terms share these two, and neither was ever stamped.
+#
+# netlify.toml caches every .css and .js for an hour, and these filenames do
+# not change, so a fix to the light palette reached returning visitors up to
+# an hour late - or not at all, if they came back inside the window and the
+# browser revalidated nothing. That is the exact failure the home page was
+# already protected from; these three pages were added later and did not
+# inherit it. Found while a light-mode fix appeared to have no effect.
+THEME_ASSETS = ("page-theme.css", "page-theme.js")
+THEMED_PAGES = ("docs.html", "showcase.html", "terms.html")
+
+
+def stamp_shared_theme() -> None:
+    hashes = {name: digest(name) for name in THEME_ASSETS}
+    for page in THEMED_PAGES:
+        path = ROOT / page
+        raw = io.open(path, "r", encoding="utf-8", newline="").read()
+        total = 0
+        for name, value in hashes.items():
+            attribute = "href" if name.endswith(".css") else "src"
+            raw, hits = re.subn(
+                rf'{attribute}="{re.escape(name)}(?:\?v=[^"]*)?"',
+                f'{attribute}="{name}?v={value}"',
+                raw,
+            )
+            total += hits
+        if total != len(THEME_ASSETS):
+            raise SystemExit(f"stamp.py matched {total} of {len(THEME_ASSETS)} theme assets in {page}")
+        io.open(path, "w", encoding="utf-8", newline="").write(raw)
+    print(" ".join(f"{name}?v={value}" for name, value in hashes.items()))
+
+
+# Version strings that are prose rather than markup, so a release edit that
+# greps for the previous number walks straight past them.
+#
+# Found at 1.0.7 still reading 1.0.2: the JSON-LD softwareVersion, the
+# showcase footer and the terms header, each written in its own wording. They
+# had been wrong since 1.0.3 and nobody had a reason to look. Anchoring on the
+# words around the number, rather than on the number, is what makes this hold
+# for the next release instead of only fixing this one.
+VERSION_PATTERNS = [
+    ("index.html", r'("softwareVersion":\s*")[0-9]+\.[0-9]+\.[0-9]+(")'),
+    ("showcase.html", r'(Official Release Version )[0-9]+\.[0-9]+\.[0-9]+()'),
+    ("terms.html", r'(Software Version: )[0-9]+\.[0-9]+\.[0-9]+( Production)'),
+]
+
+
+def current_version() -> str:
+    """The one the rest of the repository agrees on."""
+    source = (ROOT.parent / "cli" / "smaran_cli" / "__init__.py").read_text(encoding="utf-8")
+    found = re.search(r'__version__\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', source)
+    if not found:
+        raise SystemExit("stamp.py could not read the version from cli/smaran_cli/__init__.py")
+    return found.group(1)
+
+
+def stamp_version() -> None:
+    version = current_version()
+    for name, pattern in VERSION_PATTERNS:
+        path = ROOT / name
+        raw = io.open(path, "r", encoding="utf-8", newline="").read()
+        raw, hits = re.subn(pattern, lambda m: f"{m.group(1)}{version}{m.group(2)}", raw)
+        # Silence here is how these three went stale in the first place.
+        if not hits:
+            raise SystemExit(f"stamp.py matched no version string in {name}")
+        io.open(path, "w", encoding="utf-8", newline="").write(raw)
+    print(f"version {version} stamped into {len(VERSION_PATTERNS)} files")
 
 
 if __name__ == "__main__":

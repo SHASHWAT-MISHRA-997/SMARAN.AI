@@ -18,7 +18,10 @@
       --emerald: #10b981;
       --text: #f3f4f6;
       --muted: #9ca3af;
-      --dimmer: #6b7280;
+      /* Was #6b7280, which is 3.79:1 on the code-block surface - the
+         language labels above every install command, and the sidebar
+         group headings. Under 4.5 for text at that size. */
+      --dimmer: #7d8494;
       --code-bg: #0d0e15;
           --text-bright: #ffffff;
       --body-text: #d1d5db;
@@ -68,7 +71,7 @@
       display: inline-flex; align-items: center; gap: 6px;
       padding: 5px 14px; border-radius: 9999px;
       background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3);
-      font-size: 0.8rem; font-weight: 700; color: #fca5a5; margin-bottom: 18px;
+      font-size: 0.8rem; font-weight: 700; color: var(--badge-text, #fca5a5); margin-bottom: 18px;
     }
     .header-hero h1 {
       font-size: clamp(2rem, 4vw, 2.9rem); font-weight: 900; letter-spacing: -0.02em; margin-bottom: 14px;
@@ -127,7 +130,7 @@
       display: flex; gap: 14px; align-items: flex-start;
     }
     .highlight-box svg { flex-shrink: 0; color: var(--emerald); margin-top: 2px; }
-    .highlight-box strong { color: #a7f3d0; display: block; margin-bottom: 4px; font-size: 0.95rem; }
+    .highlight-box strong { color: var(--mint-pale, #a7f3d0); display: block; margin-bottom: 4px; font-size: 0.95rem; }
     .highlight-box p { color: var(--mint-pale); margin: 0; font-size: 0.9rem; }
 
     .footer {
@@ -139,8 +142,8 @@
     .footer-links { display: flex; gap: 20px; }
     .footer-links a { color: var(--muted); }
   </style>
-  <link rel="stylesheet" href="page-theme.css" />
-  <script src="page-theme.js"></script>
+  <link rel="stylesheet" href="page-theme.css?v=1904055dce" />
+  <script src="page-theme.js?v=68b58deb65"></script>
 </head>
 <body>
 
@@ -173,7 +176,7 @@
     <div class="meta-bar">
       <span>Effective Date: September 2026</span>
       <span>•</span>
-      <span>Software Version: 1.0.2 Production</span>
+      <span>Software Version: 1.0.7 Production</span>
       <span>•</span>
       <span>License: MIT Open Source</span>
     </div>

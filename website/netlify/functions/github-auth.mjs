@@ -68,8 +68,21 @@ function redirectIsAllowed(target) {
   return ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
 }
 
+/**
+ * The configured secret, without whatever came with it off the clipboard.
+ *
+ * A trailing newline survives a copy-paste into a dashboard field and is
+ * invisible there, and GitHub answers a secret with one on the end exactly as
+ * it answers a wrong secret: incorrect_client_credentials. Trimming costs
+ * nothing - no GitHub secret has leading or trailing whitespace in it - and
+ * removes a failure that reads as "you typed it wrong" when you did not.
+ */
+function clientSecret() {
+  return (process.env.GITHUB_CLIENT_SECRET || '').trim();
+}
+
 function sealingKey(purpose) {
-  const secret = process.env.GITHUB_CLIENT_SECRET;
+  const secret = clientSecret();
   if (!secret) throw new Error('unconfigured');
   return Buffer.from(crypto.hkdfSync('sha256', secret, 'smaran-github-oauth', purpose, 32));
 }
@@ -112,7 +125,7 @@ function start(url) {
 
   if (!/^[A-Za-z0-9_-]{43}$/.test(challenge)) return json(400, { error: 'A sign-in challenge is required.' });
   if (!redirectIsAllowed(redirect)) return json(400, { error: 'That is not a destination this sign-in can return to.' });
-  if (!process.env.GITHUB_CLIENT_SECRET) return json(503, { error: 'GitHub sign-in is not configured on this site.' });
+  if (!clientSecret()) return json(503, { error: 'GitHub sign-in is not configured on this site.' });
 
   const authorize = new URL('https://github.com/login/oauth/authorize');
   authorize.searchParams.set('client_id', GITHUB_CLIENT_ID);
@@ -122,21 +135,37 @@ function start(url) {
   return Response.redirect(authorize.toString(), 302);
 }
 
-/** Ask GitHub who this is. The access token stays inside this scope. */
+/**
+ * Ask GitHub who this is. The access token stays inside this scope.
+ *
+ * Every way this can fail used to come back as one word, "unverified", which
+ * the app showed as "GitHub did not return a verified email address" - so a
+ * client secret with a typo in it, a callback URL that did not match, and an
+ * account genuinely holding no confirmed address all read as the same thing,
+ * and the one that was true said nothing about where to look. They are told
+ * apart now. The reason is a short tag, chosen rather than passed through, so
+ * nothing GitHub says ends up quoted into a URL.
+ */
 async function identify(code, origin) {
   const exchanged = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({
       client_id: GITHUB_CLIENT_ID,
-      client_secret: process.env.GITHUB_CLIENT_SECRET,
+      client_secret: clientSecret(),
       code,
       redirect_uri: `${origin}/api/github/callback`,
     }),
   }).then((res) => res.json()).catch(() => null);
 
   const token = exchanged && exchanged.access_token;
-  if (!token) return null;
+  if (!token) {
+    // Logged because this is the failure an operator has to fix, and the
+    // browser is the wrong place to explain a misconfigured secret. GitHub's
+    // own error code only: never the code, never the secret.
+    console.error('github token exchange refused:', (exchanged && exchanged.error) || 'no answer');
+    return { failed: 'exchange' };
+  }
 
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' };
   const [profile, emails] = await Promise.all([
@@ -144,19 +173,29 @@ async function identify(code, origin) {
     fetch('https://api.github.com/user/emails', { headers }).then((r) => r.json()).catch(() => null),
   ]);
 
-  if (!profile || !profile.id || !Array.isArray(emails)) return null;
+  if (!profile || !profile.id) {
+    console.error('github profile unreadable');
+    return { failed: 'profile' };
+  }
+  if (!Array.isArray(emails)) {
+    // Almost always the user:email scope missing from the granted token.
+    console.error('github email list unreadable');
+    return { failed: 'scope' };
+  }
   // An unverified address is not an identity. GitHub lets an account hold
   // addresses it has never proved, and those must not become a SMARAN login.
   const verified = emails.filter((entry) => entry && entry.verified && entry.email);
   const email = (verified.find((entry) => entry.primary) || verified[0] || {}).email;
-  if (!email) return null;
+  if (!email) return { failed: 'unverified' };
 
   return {
-    id: `github_${profile.id}`,
-    email,
-    username: profile.name || profile.login,
-    avatar: profile.avatar_url,
-    provider: 'github',
+    identity: {
+      id: `github_${profile.id}`,
+      email,
+      username: profile.name || profile.login,
+      avatar: profile.avatar_url,
+      provider: 'github',
+    },
   };
 }
 
@@ -203,8 +242,8 @@ async function callback(url) {
     return handBack(state.redirect, 'error=denied');
   }
 
-  const identity = await identify(url.searchParams.get('code'), url.origin);
-  if (!identity) return handBack(state.redirect, 'error=unverified');
+  const { identity, failed } = await identify(url.searchParams.get('code'), url.origin);
+  if (!identity) return handBack(state.redirect, `error=${failed}`);
 
   return handBack(state.redirect, `result=${seal('identity-v1', { identity, challenge: state.challenge })}`);
 }
@@ -237,7 +276,7 @@ export default async function handler(request) {
     // discover a missing secret by sending someone to a dead end, when it
     // could have used the device-code flow that needs no secret at all.
     if (step === 'config' && request.method === 'GET') {
-      return json(200, { configured: Boolean(process.env.GITHUB_CLIENT_SECRET) });
+      return json(200, { configured: Boolean(clientSecret()) });
     }
     if (step === 'start' && request.method === 'GET') return start(url);
     if (step === 'callback' && request.method === 'GET') return await callback(url);

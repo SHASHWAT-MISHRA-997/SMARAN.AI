@@ -87,6 +87,14 @@ async function nativeGoogle(signal) {
  */
 const SITE = 'https://smaran-ai.netlify.app';
 const APP_REDIRECT = 'ai.smaran.app://auth-callback';
+const GITHUB_TROUBLE = {
+  denied: 'GitHub sign-in was cancelled.',
+  exchange: 'GitHub could not complete sign-in. The server OAuth configuration needs checking.',
+  profile: 'GitHub could not return your profile. Please try again.',
+  scope: 'GitHub could not return your email addresses. Please allow email access when signing in.',
+  unverified: 'Verify an email address in your GitHub account, then try again.',
+  unknown: 'GitHub sign-in could not finish. Please start again from SMARAN.AI.',
+};
 
 const base64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)))
   .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -127,8 +135,7 @@ async function nativeGitHubDirect(signal) {
   });
 
   const { sealed, error } = await returned;
-  if (error === 'denied') throw new Error('GitHub sign-in was cancelled.');
-  if (error || !sealed) throw new Error('GitHub did not return a verified email address.');
+  if (error || !sealed) throw new Error(GITHUB_TROUBLE[error] || GITHUB_TROUBLE.unknown);
 
   signal.throwIfAborted();
   const { user } = await nativeRequest(`${SITE}/api/github/exchange`, 'POST', { sealed, verifier },

@@ -21,7 +21,10 @@
       --purple: #a855f7;
       --text: #f3f4f6;
       --muted: #9ca3af;
-      --dimmer: #6b7280;
+      /* Was #6b7280, which is 3.79:1 on the code-block surface - the
+         language labels above every install command, and the sidebar
+         group headings. Under 4.5 for text at that size. */
+      --dimmer: #7d8494;
       --code-bg: #0c0d14;
           --text-bright: #ffffff;
       --badge-text: #fca5a5;
@@ -134,7 +137,7 @@
       background: rgba(239, 68, 68, 0.15); color: var(--badge-text); font-family: 'Fira Code', monospace;
     }
     .doc-section p {
-      color: #d1d5db; font-size: 0.98rem; margin-bottom: 16px; line-height: 1.7;
+      color: var(--body-text, #d1d5db); font-size: 0.98rem; margin-bottom: 16px; line-height: 1.7;
     }
 
     /* Cards & Grids */
@@ -220,7 +223,7 @@
     .callout-warn { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); }
     .callout-warn svg { color: var(--red); flex-shrink: 0; }
     .callout-body strong { display: block; font-size: 0.95rem; margin-bottom: 4px; color: var(--text-bright); }
-    .callout-body p { margin: 0; font-size: 0.9rem; color: #d1d5db; }
+    .callout-body p { margin: 0; font-size: 0.9rem; color: var(--body-text, #d1d5db); }
 
     /* Tables */
     .doc-table {
@@ -301,8 +304,8 @@
       .code-header { flex-wrap: wrap; gap: 8px; }
     }
   </style>
-  <link rel="stylesheet" href="page-theme.css" />
-  <script src="page-theme.js"></script>
+  <link rel="stylesheet" href="page-theme.css?v=1904055dce" />
+  <script src="page-theme.js?v=68b58deb65"></script>
 </head>
 <body>
 
@@ -628,7 +631,7 @@
         <p>
           The SMARAN Android application connects to your PC via local Wi-Fi / LAN:
         </p>
-        <ol style="margin-left: 24px; color: #d1d5db; font-size: 0.95rem; line-height: 1.8;">
+        <ol style="margin-left: 24px; color: var(--body-text, #d1d5db); font-size: 0.95rem; line-height: 1.8;">
           <li>Open SMARAN on your PC and click <strong>Host Telemetry / Pair Device</strong> in Settings.</li>
           <li>Open SMARAN on your Android phone and scan the local network or enter the 4-digit pairing PIN.</li>
           <li>Both devices now share synchronized memories, chat history, and can drive local models cooperatively.</li>
