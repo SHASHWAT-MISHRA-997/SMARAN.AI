@@ -736,7 +736,16 @@ const Sidebar = ({
                     when there is none. Two avatars for one person that
                     disagree is worse than having no picture at all. */}
                 {profilePicture ? (
-                  <img src={profilePicture} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                  <img
+                    src={profilePicture}
+                    alt=""
+                    /* A picture that fails to load left a torn-page icon
+                       sitting where the person's face should be. The provider
+                       URL needs the network and can simply stop working; the
+                       initials do not. */
+                    onError={() => setProfilePicture(null)}
+                    className="w-7 h-7 rounded-full object-cover shrink-0"
+                  />
                 ) : (
                   <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
                     {profileInitials}
@@ -1035,7 +1044,12 @@ const Sidebar = ({
               title="Open Account & Profile Settings"
             >
               {profilePicture ? (
-                <img src={profilePicture} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                <img
+                  src={profilePicture}
+                  alt=""
+                  onError={() => setProfilePicture(null)}
+                  className="w-7 h-7 rounded-full object-cover shrink-0"
+                />
               ) : (
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shadow-xs shrink-0">
                   {profileInitials}

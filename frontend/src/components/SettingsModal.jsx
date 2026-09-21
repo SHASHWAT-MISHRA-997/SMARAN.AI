@@ -1248,7 +1248,17 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                         className="group relative block w-14 h-14 rounded-2xl overflow-hidden ring-2 ring-indigo-500/30 transition hover:ring-indigo-400/70 focus:outline-none focus-visible:ring-indigo-400"
                       >
                         {chosenAvatar ? (
-                          <img src={chosenAvatar} alt="Profile" className="w-full h-full object-cover" />
+                          <img
+                            src={chosenAvatar}
+                            alt="Profile"
+                            /* A provider picture is a URL on somebody else's
+                               server: it needs the network, and it can stop
+                               resolving. When it does, fall back to the
+                               initials rather than leave a broken-image icon
+                               where the face should be. */
+                            onError={() => setChosenAvatar(loadAvatar())}
+                            className="w-full h-full object-cover"
+                          />
                         ) : (
                           <span className="flex h-full w-full items-center justify-center bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 text-lg font-black text-white">
                             {displayInitials}
