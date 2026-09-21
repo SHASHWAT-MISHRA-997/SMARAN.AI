@@ -1027,6 +1027,37 @@ from app.direct_oauth import make_router as _direct_oauth_router
 app.include_router(_direct_oauth_router(get_db, _finish_provider_login, google_client_id))
 
 
+def _serialise_user(user):
+    """One shape for the signed-in person, whichever door they came through."""
+    return {"id": user.id, "username": user.username, "email": user.email,
+            "role": user.role, "is_approved": user.is_approved,
+            "email_verified": bool(user.email_verified), "provider": "password"}
+
+
+def _start_password_session(user, response, request, db):
+    """The same session a provider sign-in issues, for an account sign-in.
+
+    Deliberately shared rather than reimplemented: the cookie flags, the
+    lifetime and the shape of the reply are security-relevant, and two copies
+    of them drift.
+    """
+    user.last_login = datetime.now()
+    token = generate_session_token()
+    user.session_token = token
+    user.session_expires = datetime.now() + timedelta(days=30)
+    db.commit()
+    response.set_cookie("session_token", token, httponly=True,
+                        secure=request.url.scheme == "https", samesite="lax",
+                        max_age=30 * 24 * 60 * 60, path="/")
+    return {"access_token": token, "token_type": "bearer", "user": _serialise_user(user)}
+
+
+from app.password_auth import make_router as _password_auth_router  # noqa: E402
+app.include_router(_password_auth_router(
+    get_db, hash_password, verify_password, verify_password_strength,
+    _start_password_session, _serialise_user))
+
+
 # Hosts that mean "this request came from the machine the backend runs on".
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1"})
 

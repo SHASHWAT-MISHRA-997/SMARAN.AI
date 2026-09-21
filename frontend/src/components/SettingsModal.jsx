@@ -1268,11 +1268,8 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                         {activeUser?.email || "No email address on this session — sign out and back in to attach one"}
                       </p>
                       <div className="mt-1 flex items-center gap-2">
-                        {/* The badge only knew "google" and "not google",
-                            so signing in with GitHub was labelled "Email &
-                            Password Account" - a kind of account this app no
-                            longer has at all. It names the provider that
-                            actually vouched for the session now. */}
+                        {/* Names what actually vouched for this session:
+                            Google, or an account held on this machine. */}
                         <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
                           {activeUser?.provider === 'google' && (
                             <svg className="h-3 w-3" viewBox="0 0 48 48" aria-hidden="true">
@@ -1282,14 +1279,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                               <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
                             </svg>
                           )}
-                          {activeUser?.provider === 'github' && (
-                            <svg className="h-3 w-3 fill-zinc-900 dark:fill-white" viewBox="0 0 24 24" aria-hidden="true">
-                              <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 0-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2 0-.4-.5-1.6.2-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.4 4.9 18.4 5.2 18.4 5.2c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3z"/>
-                            </svg>
-                          )}
                           <span>
                             {activeUser?.provider === 'google' ? 'Google Account'
-                              : activeUser?.provider === 'github' ? 'GitHub Account'
+                              : activeUser?.provider === 'password' ? 'SMARAN.AI Account'
                               : 'Signed in'}
                           </span>
                         </span>
@@ -1330,11 +1322,13 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
                     remove the in-app route to deleting an account -
                     DELETE /api/auth/account still exists and is unchanged. */}
 
-                {/* The SMTP card went with the feature it existed for.
-                    It configured delivery of the "Forgot password" code, and
-                    there is no forgot password any more - SMARAN.AI holds no
-                    password to forget. Sign-in is Google, GitHub or LinkedIn
-                    through Supabase. */}
+                {/* The SMTP card went with the feature it existed for: it
+                    configured delivery of a "Forgot password" code by email.
+                    Forgetting a password is recoverable again, but without
+                    any mail - a recovery code issued at registration, or a
+                    Google sign-in on the same address. Neither needs a mail
+                    server to be reachable, which is the point on a
+                    local-first install. */}
               </div>
             )}
 

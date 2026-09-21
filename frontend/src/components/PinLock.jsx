@@ -41,14 +41,21 @@ const PinLock = ({ children }) => {
      the owner to sign in again, which proves who is asking without involving
      anybody else - no email link, no support address.
 
-     It asked for an account password until the accounts stopped having one.
-     Sign-in is Google or GitHub now, so no user row carries a password hash
-     and that form could not succeed for anyone: the lock had quietly become
-     unopenable for anybody who forgot their PIN. */
+     Both ways in are offered, and that is the point rather than a luxury.
+     When this asked only for an account password it broke the day accounts
+     stopped having one; when it asked only for a provider it left anyone who
+     never used Google with no way past a forgotten PIN. Either alone is a
+     lockout waiting for the right user.
+
+     Whichever is used, it is a sign-in completed here and now - the backend
+     accepts nothing older, so the session already sitting on this machine is
+     no help to whoever is standing at the PIN screen. */
   const [recovering, setRecovering] = useState(false);
   const [newPin, setNewPin] = useState('');
   const [recoverError, setRecoverError] = useState('');
   const [proving, setProving] = useState('');
+  const [accountEmail, setAccountEmail] = useState('');
+  const [accountPassword, setAccountPassword] = useState('');
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -185,13 +192,21 @@ const PinLock = ({ children }) => {
      accepts a token minted in the last few minutes, so the session already
      saved on this machine - which whoever is sitting here already has - is
      not enough on its own. */
-  const recover = async (provider) => {
+  /** Prove it is the account holder, then set the new PIN.
+   *
+   * `signIn` returns a session token however it was obtained - Google, or the
+   * account's own password. Both are a sign-in completed just now, which is
+   * the only thing /api/lock/reset accepts, and having both matters: an
+   * install whose owner never used Google would otherwise have no way past a
+   * forgotten PIN at all.
+   */
+  const recover = async (method, signIn) => {
     if (busy) return;
     setBusy(true);
-    setProving(provider);
+    setProving(method);
     setRecoverError('');
     try {
-      const signedIn = await startOAuth(provider);
+      const signedIn = await signIn();
       await request('/api/lock/reset', {
         method: 'POST',
         body: JSON.stringify({ new_pin: newPin, session_token: signedIn.access_token }),
@@ -340,8 +355,9 @@ const PinLock = ({ children }) => {
             <div className="border-b border-line px-5 py-4">
               <h2 className="text-sm font-black text-ink">Set a new PIN</h2>
               <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-                Choose a new PIN, then sign in to confirm it is you. Nobody else
-                can do this for you, and nothing is sent anywhere.
+                Choose a new PIN, then sign in to confirm it is you - with your
+                SMARAN.AI account, or with Google. Nobody else can do this for
+                you, and nothing is sent anywhere.
               </p>
             </div>
 
@@ -365,13 +381,45 @@ const PinLock = ({ children }) => {
                 </p>
               )}
 
+              <input
+                type="email"
+                value={accountEmail}
+                onChange={(e) => setAccountEmail(e.target.value)}
+                placeholder="Account email"
+                autoComplete="email"
+                className="w-full rounded-xl border border-line bg-sunken px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-red-400/60"
+              />
+              <input
+                type="password"
+                value={accountPassword}
+                onChange={(e) => setAccountPassword(e.target.value)}
+                placeholder="Account password"
+                autoComplete="current-password"
+                className="w-full rounded-xl border border-line bg-sunken px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-red-400/60"
+              />
+              <button
+                type="button"
+                onClick={() => recover('password', async () => {
+                  const res = await request('/api/auth/login', {
+                    method: 'POST',
+                    body: JSON.stringify({ email: accountEmail, password: accountPassword }),
+                  });
+                  return res;
+                })}
+                disabled={busy || newPin.length < 4 || !accountEmail || !accountPassword}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-sm font-black text-white transition hover:bg-red-500 disabled:opacity-50"
+              >
+                {proving === 'password' && <Loader2 className="h-4 w-4 animate-spin" />}
+                Set new PIN
+              </button>
+
               {PROVIDERS.map(({ id, label }) => (
                 <button
                   key={id}
                   type="button"
-                  onClick={() => recover(id)}
+                  onClick={() => recover(id, () => startOAuth(id))}
                   disabled={busy || newPin.length < 4}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-sm font-black text-white transition hover:bg-red-500 disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-line py-2.5 text-sm font-bold text-ink-muted transition hover:bg-sunken hover:text-ink disabled:opacity-50"
                 >
                   {proving === id && <Loader2 className="h-4 w-4 animate-spin" />}
                   {label}

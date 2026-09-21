@@ -241,9 +241,11 @@ def test_reset_refuses_a_token_that_was_never_issued(locked, signed_in):
 def test_a_sign_in_that_just_happened_sets_the_new_pin(locked, signed_in):
     """The whole point: forgetting the PIN must not shut the app for good.
 
-    Before this, reset took an email and an account password. Sign-in became
-    Google and GitHub only, no user row kept a password hash, and so the
-    branch could not be satisfied by anybody - the lock had no way out.
+    Reset once took an email and an account password, and for a while there
+    were no passwords - sign-in was providers only, no user row kept a hash,
+    and the branch could not be satisfied by anybody. What it takes now is a
+    sign-in completed just now, by either route, which is why this is checked
+    on the token rather than on how the token was obtained.
     """
     token = signed_in(minutes_ago=0)
     res = locked.post("/api/lock/reset",

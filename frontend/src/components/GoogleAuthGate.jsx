@@ -126,19 +126,23 @@ const providerIcon = (id) => {
       </svg>
     );
   }
-  if (id === 'github') {
-    return (
-      <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="#ffffff" aria-hidden="true">
-        <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 0-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2 0-.4-.5-1.6.2-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.4 4.9 18.4 5.2 18.4 5.2c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3z" />
-      </svg>
-    );
-  }
-  return (
-    <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="#0A66C2" aria-hidden="true">
-      <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.95v5.66H9.35V9h3.41v1.56h.05a3.74 3.74 0 0 1 3.37-1.85c3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.55V9h3.57v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.22.79 24 1.77 24h20.45c.98 0 1.78-.78 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z" />
-    </svg>
-  );
+  return null;
 };
+
+/** The three things this screen can be doing. */
+const SIGN_IN = 'signin';
+const REGISTER = 'register';
+const RECOVER = 'recover';
+
+const FORM_COPY = {
+  [SIGN_IN]: { title: 'Sign in', action: 'Sign in' },
+  [REGISTER]: { title: 'Create an account', action: 'Create account' },
+  [RECOVER]: { title: 'Use your recovery code', action: 'Set new password' },
+};
+
+const inputClass =
+  'w-full rounded-xl border border-zinc-700/80 bg-zinc-900/80 px-3 py-2.5 text-sm text-white '
+  + 'placeholder:text-zinc-500 outline-none transition focus:border-red-500/60';
 
 const GoogleAuthGate = ({ children, onUserChange }) => {
   const [currentUser, setCurrentUser] = useState(getSavedGoogleUser);
@@ -150,8 +154,22 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
   // null means "not known yet, or could not ask" - every button stays live.
   const [available, setAvailable] = useState(null);
   const attempt = useRef(null);
-  const [progress, setProgress] = useState(null);
   const [copied, setCopied] = useState(false);
+
+  /* The account form. Google is still one tap for anyone who wants it; this
+     is the path that needs nothing but this machine. */
+  const [mode, setMode] = useState(SIGN_IN);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [working, setWorking] = useState(false);
+
+  /* A recovery code exists in readable form exactly once, on this screen. It
+     is stored only as a hash, so there is no "show it to me again" - which is
+     why the app is not entered until the person says they have written it
+     down. */
+  const [issued, setIssued] = useState(null);
 
   /* Put the code on the clipboard the moment it exists, and again on tap.
      navigator.clipboard needs a secure context, which the packaged app has
@@ -177,7 +195,6 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     } catch { /* the code is on screen either way */ }
   }, []);
 
-  useEffect(() => { if (progress?.user_code) copyCode(progress.user_code); }, [progress, copyCode]);
   useEffect(() => () => attempt.current?.abort(), []);
 
   useEffect(() => {
@@ -192,9 +209,12 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     const onSignedOut = () => {
       setCurrentUser(null);
       setError('');
-      setProgress(null);
       setBusyProvider('');
       setFinishing(false);
+      setIssued(null);
+      setPassword('');
+      setRecoveryCode('');
+      setMode(SIGN_IN);
       attempt.current?.abort();
     };
     window.addEventListener(SIGNED_OUT, onSignedOut);
@@ -229,6 +249,73 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     sendSignInAnalytics(user);
   }, [onUserChange]);
 
+  /** Register, sign in, or set a new password with the recovery code. */
+  const submitAccount = async (event) => {
+    event.preventDefault();
+    if (working || busyProvider) return;
+    setError('');
+    setWorking(true);
+    const endpoint = { [SIGN_IN]: 'login', [REGISTER]: 'register', [RECOVER]: 'recover' }[mode];
+    const body = mode === SIGN_IN ? { email, password }
+      : mode === REGISTER ? { email, password, display_name: displayName || undefined }
+        : { email, recovery_code: recoveryCode, new_password: password };
+    try {
+      const res = await fetch(`${API_BASE || ''}/api/auth/${endpoint}`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20000),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // FastAPI reports a validation failure as a list of objects; showing
+        // "[object Object]" to someone who mistyped an address is not an error
+        // message.
+        const detail = Array.isArray(data.detail)
+          ? (data.detail[0]?.msg || 'Please check the details and try again.')
+          : data.detail;
+        throw new Error(detail || 'That did not work. Please try again.');
+      }
+      const account = {
+        id: data.user?.id, name: data.user?.username, email: data.user?.email || email,
+        provider: 'password', access_token: data.access_token,
+      };
+      if (data.recovery_code) {
+        setIssued({ code: data.recovery_code, notice: data.recovery_notice, account });
+        copyCode(data.recovery_code);
+      } else {
+        handleSignInSuccess(account);
+      }
+    } catch (err) {
+      setError(err.name === 'TimeoutError'
+        ? 'The local engine did not answer. Is SMARAN.AI running?'
+        : (err.message || 'That did not work. Please try again.'));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  /** Keep a copy of the recovery code somewhere that is not this screen. */
+  const downloadRecoveryCode = () => {
+    if (!issued) return;
+    const text = [
+      'SMARAN.AI recovery code',
+      '',
+      `Account: ${issued.account.email}`,
+      `Code:    ${issued.code}`,
+      '',
+      'This code sets a new password if the password for this account is',
+      'forgotten. It works once, and SMARAN.AI cannot show it again - it is',
+      'stored only as a hash. Keep it somewhere a stranger cannot reach.',
+    ].join('\n');
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'smaran-ai-recovery-code.txt';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const onProviderClick = async (provider) => {
     if (attempt.current) return;
     setError('');
@@ -239,9 +326,8 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
     const controller = new AbortController();
     attempt.current = controller;
     setBusyProvider(provider);
-    setProgress(null);
     try {
-      const data = await startOAuth(provider, { signal: controller.signal, onProgress: setProgress });
+      const data = await startOAuth(provider, { signal: controller.signal });
       if (controller.signal.aborted) return;
       setFinishing(true);
       handleSignInSuccess({ id: data.user?.id, name: data.user?.username,
@@ -254,7 +340,6 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
         attempt.current = null;
         setBusyProvider('');
         setFinishing(false);
-        setProgress(null);
       }
     }
   };
@@ -321,8 +406,117 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
               <Loader2 className="h-6 w-6 animate-spin text-red-500" />
               <span>Finishing sign-in…</span>
             </div>
+          ) : issued ? (
+            /* Shown once, and the app is not entered until it is acknowledged.
+               A code nobody wrote down is a locked account later. */
+            <div className="space-y-4 text-sm">
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-[12px] leading-relaxed text-amber-100">
+                <p className="font-bold">Save your recovery code</p>
+                <p className="mt-1">{issued.notice}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => copyCode(issued.code)}
+                title="Copy the code"
+                className="block w-full select-text rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-3 font-mono text-base font-bold tracking-wider text-white"
+              >
+                {issued.code}
+              </button>
+              <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                <span>{copied ? 'Copied to clipboard' : 'Tap the code to copy'}</span>
+                <button type="button" onClick={downloadRecoveryCode} className="underline hover:text-zinc-200">
+                  Download as a file
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => { const { account } = issued; setIssued(null); handleSignInSuccess(account); }}
+                className="w-full rounded-xl bg-red-600 py-3 text-sm font-bold text-white transition hover:bg-red-500"
+              >
+                I have saved my recovery code
+              </button>
+            </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
+              <form onSubmit={submitAccount} className="space-y-3">
+                <p className="text-[13px] font-bold text-zinc-200">{FORM_COPY[mode].title}</p>
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className={inputClass}
+                />
+                {mode === REGISTER && (
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Your name (optional)"
+                    autoComplete="name"
+                    maxLength={80}
+                    className={inputClass}
+                  />
+                )}
+                {mode === RECOVER && (
+                  <input
+                    type="text"
+                    required
+                    value={recoveryCode}
+                    onChange={(e) => setRecoveryCode(e.target.value)}
+                    placeholder="Recovery code"
+                    autoComplete="one-time-code"
+                    spellCheck={false}
+                    className={`${inputClass} font-mono tracking-wider`}
+                  />
+                )}
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={mode === SIGN_IN ? 'Password' : 'New password'}
+                  autoComplete={mode === SIGN_IN ? 'current-password' : 'new-password'}
+                  className={inputClass}
+                />
+                <button
+                  type="submit"
+                  disabled={working || Boolean(busyProvider)}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-3 text-sm font-bold text-white transition hover:bg-red-500 disabled:opacity-60"
+                >
+                  {working && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {FORM_COPY[mode].action}
+                </button>
+              </form>
+
+              <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                {mode === SIGN_IN ? (
+                  <>
+                    <button type="button" className="underline hover:text-zinc-200"
+                            onClick={() => { setMode(REGISTER); setError(''); }}>
+                      Create an account
+                    </button>
+                    <button type="button" className="underline hover:text-zinc-200"
+                            onClick={() => { setMode(RECOVER); setError(''); setPassword(''); }}>
+                      Forgot password?
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="underline hover:text-zinc-200"
+                          onClick={() => { setMode(SIGN_IN); setError(''); setPassword(''); setRecoveryCode(''); }}>
+                    Back to sign in
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider text-zinc-600">
+                <span className="h-px flex-1 bg-zinc-800" />
+                <span>or</span>
+                <span className="h-px flex-1 bg-zinc-800" />
+              </div>
+
               {PROVIDERS.map(({ id, label }) => (
                 <button
                   key={id}
@@ -353,29 +547,9 @@ const GoogleAuthGate = ({ children, onUserChange }) => {
             </div>
           )}
 
-          {busyProvider && (
-            <div className="mt-4 space-y-3 text-center text-sm text-zinc-300" role="status">
-              {progress?.user_code && (
-                <div>
-                  <p>Confirm this code on GitHub:</p>
-                  {/* Tappable, because the prefill in the link can be ignored
-                      - if a browser drops the query, or GitHub sends the
-                      person through a login first - and retyping eight
-                      characters between two apps is the worst part of a
-                      device flow. */}
-                  <button
-                    type="button"
-                    onClick={() => copyCode(progress.user_code)}
-                    title="Copy the code"
-                    className="mt-1 block w-full select-text text-xl font-bold tracking-widest text-white"
-                  >
-                    {progress.user_code}
-                  </button>
-                  <span className="text-[11px] text-zinc-400">{copied ? 'Copied' : 'Tap the code to copy'}</span>
-                </div>
-              )}
-              {progress?.url && <a className="block text-red-300 underline" href={progress.url} target="_blank" rel="noreferrer">Open {providerLabel(busyProvider)} sign-in</a>}
-              <p>Complete sign-in, then return here.</p>
+          {busyProvider && !issued && (
+            <div className="mt-4 space-y-2 text-center text-sm text-zinc-300" role="status">
+              <p>Complete sign-in at {providerLabel(busyProvider)}, then return here.</p>
               <button type="button" className="text-zinc-300 underline" onClick={() => attempt.current?.abort()}>Cancel sign-in</button>
             </div>
           )}
