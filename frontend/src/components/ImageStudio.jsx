@@ -305,8 +305,16 @@ const ImageStudio = () => {
               className="w-full bg-zinc-100 object-contain dark:bg-zinc-950"
             />
             <div className="flex flex-wrap items-center justify-between gap-2 p-3">
+              {/* The seed is only shown when there is one. Asking for a random
+                  picture leaves it unset, and "seed  ·" with a hole in it
+                  reads as a value that failed to load. */}
               <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                {latest.result?.width}×{latest.result?.height} · seed {latest.result?.seed} · {latest.result?.model}
+                {[
+                  `${latest.result?.width}×${latest.result?.height}`,
+                  latest.result?.seed === null || latest.result?.seed === undefined
+                    ? null : `seed ${latest.result.seed}`,
+                  latest.result?.model,
+                ].filter(Boolean).join(' · ')}
               </span>
               <a href={`${API_BASE}/api/image/file/${finishedId}`} download={`smaran-${finishedId}.png`}
                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-bold dark:border-zinc-700">
