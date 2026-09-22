@@ -18,6 +18,7 @@ import { LiveVoiceSession } from '../utils/liveVoice';
 import { liveVoiceForPersona } from '../utils/liveVoicePersona';
 import { Ambience } from '../utils/ambience';
 import * as nativeSpeech from '../utils/nativeSpeech';
+import { openAppSettings } from '../utils/deviceControl';
 import { isNativeApp, loadLink } from '../utils/hostLink';
 import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 
@@ -266,6 +267,35 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
   // Bumped by the "Try again" button so the microphone effect below runs
   // a second time. Nothing else reads it.
   const [micRetry, setMicRetry] = useState(0);
+  // Set when Allow microphone had to send the person to Android Settings, so
+  // coming back to the app tries again by itself instead of waiting for a tap.
+  const sentToSettingsRef = useRef(false);
+
+  /* Ask again; and when Android will not ask any more, go where the switch is.
+     Android answers "denied" without showing anything once the prompt has
+     been refused twice, so on a phone a plain retry could never succeed. */
+  const allowMicrophone = async () => {
+    if (isNativeApp() && micStatus === 'denied') {
+      if (await nativeSpeech.ensureMicrophone()) {
+        setMicRetry((n) => n + 1);
+        return;
+      }
+      sentToSettingsRef.current = await openAppSettings();
+      return;
+    }
+    setMicRetry((n) => n + 1);
+  };
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const cameBack = () => {
+      if (document.visibilityState !== 'visible' || !sentToSettingsRef.current) return;
+      sentToSettingsRef.current = false;
+      setMicRetry((n) => n + 1);
+    };
+    document.addEventListener('visibilitychange', cameBack);
+    return () => document.removeEventListener('visibilitychange', cameBack);
+  }, [isOpen]);
   const [recognizerStatus, setRecognizerStatus] = useState('idle');
   const [recorderStatus, setRecorderStatus] = useState('idle');
   const [vadStatus, setVadStatus] = useState('idle');
@@ -769,6 +799,22 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
                 }
               }, 300);
             }
+            return;
+          }
+          /* A refused microphone is its own state, not "unavailable".
+             It fell through to here, left voiceState on 'permission', and
+             the screen said "Waiting for microphone permission" for as long
+             as the call stayed open - after the person had already answered.
+             Nothing restarts from here: asking again in a loop would pop the
+             prompt over and over, or, once Android stops showing it, spin. */
+          if (message.includes('permission') || message.includes('refused')) {
+            setMicStatus('denied');
+            setRecognizerStatus('denied');
+            setVoiceState('error');
+            voiceStateRef.current = 'error';
+            setRecognizerIssue('SMARAN.AI is not allowed to use the microphone. '
+              + 'Tap Allow microphone - if Android no longer asks, it opens '
+              + "this app's settings: turn Microphone on there and come back.");
             return;
           }
           setRecognizerStatus('unavailable');
@@ -2270,10 +2316,10 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
                 || recognizerStatus === 'unavailable' || recognizerStatus === 'error' || recognizerStatus === 'denied') && (
               <button
                 type="button"
-                onClick={() => setMicRetry((n) => n + 1)}
+                onClick={allowMicrophone}
                 className="ml-1 shrink-0 rounded-md border border-white/25 px-2 py-0.5 text-[10px] font-bold text-white/90 transition hover:bg-white/10"
               >
-                Try again
+                {isNativeApp() && micStatus === 'denied' ? 'Allow microphone' : 'Try again'}
               </button>
             )}
           </span>

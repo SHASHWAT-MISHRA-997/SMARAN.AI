@@ -7,7 +7,7 @@ import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '..
 import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening } from '../utils/deviceControl';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
 import { voicePersonaRule } from '../utils/voicePersona';
-import { languageRule, CODE_OUTPUT_RULE } from '../utils/replyRules';
+import { languageRule, CODE_OUTPUT_RULE, SILENT_RULES } from '../utils/replyRules';
 import ShareConversation from './ShareConversation';
 import { isPhone, micIsBlockedByOrigin, MIC_BLOCKED_REASON } from '../utils/device';
 import { useBackClose } from '../utils/backStack';
@@ -1304,6 +1304,11 @@ const ChatArea = ({
   const [workspaceStatus, setWorkspaceStatus] = useState(null);
 
   useEffect(() => {
+    // A phone with no computer linked has no workspace to report, and asking
+    // anyway got this app's own index.html back from the WebView every five
+    // seconds, parsed it as JSON, failed, and dropped it - for as long as the
+    // app was open.
+    if (isNativeApp() && !loadLink()?.url) return undefined;
     let cancelled = false;
     const refreshWorkspace = async () => {
       try {
@@ -2575,6 +2580,9 @@ const ChatArea = ({
 
   // Real-time hardware telemetry and speed stats for Single Row Auto-Adjust Bar
   useEffect(() => {
+    // Same reason: hardware telemetry comes from the computer's backend. On a
+    // standalone phone this was a wasted request every 2.5 seconds.
+    if (isNativeApp() && !loadLink()?.url) return undefined;
     let active = true;
     const fetchTelemetry = async () => {
       try {
@@ -3460,6 +3468,7 @@ const ChatArea = ({
              inside the code. */
           + '\n\n' + languageRule(selectedLanguage)
           + '\n\n' + CODE_OUTPUT_RULE
+          + '\n\n' + SILENT_RULES
           + (facts.length
             ? ['', '', 'Things this person has asked you to remember:', ...facts].join('\n')
             : ''),

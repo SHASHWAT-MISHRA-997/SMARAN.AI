@@ -1,163 +1,86 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { API_BASE } from '../context/AuthContext';
-import { loadLink, isNativeApp } from '../utils/hostLink';
+import { isNativeApp } from '../utils/hostLink';
+import { device } from '../utils/devicePlugin';
+
+/* Sharing is a copy of the conversation, sent from this device.
+
+   There used to be a "public link" too. It was served by the SMARAN.AI app on
+   the person's own computer, so the link only worked while that PC was on and
+   reachable - unlike ChatGPT or Claude, whose links are hosted - and a file
+   "snapshot" download beside it. Both are gone. What is left works anywhere,
+   with no computer involved: the device's own share sheet (WhatsApp, Gmail,
+   Telegram, Drive...) and Copy text.
+
+   On a phone the share sheet comes from the app's native plugin, because
+   Android's WebView does not implement navigator.share - which is why the
+   Share button never appeared on a phone before. */
+
+// Android passes shared text through a transaction with a hard size limit
+// (about 1 MB). Past this the share sheet fails outright, so a very long
+// conversation is trimmed from the start and says so.
+const MAX_SHARE_CHARS = 90000;
+
+const formatConversation = (messages) => {
+  const turns = messages.map((m) => `${m.role === 'user' ? 'You' : 'SMARAN.AI'}:\n${m.content.trim()}`);
+  const heading = `SMARAN.AI conversation - ${new Date().toLocaleString()}`;
+  let body = turns.join('\n\n');
+  if (body.length > MAX_SHARE_CHARS) {
+    body = '[Earlier messages trimmed - this conversation is too long to share in full.]\n\n'
+      + body.slice(body.length - MAX_SHARE_CHARS);
+  }
+  return `${heading}\n\n${body}\n`;
+};
 
 export default function ShareConversation({ messages }) {
   const [snapshot, setSnapshot] = useState(null);
   const [notice, setNotice] = useState('');
-  const [isPublishing, setIsPublishing] = useState(false);
-  const [shareData, setShareData] = useState(null);
 
-  const getBackendHost = () => {
-    try {
-      const link = loadLink();
-      if (link?.url) return link.url.replace(/\/+$/, '');
-    } catch {}
-    if (API_BASE) return API_BASE.replace(/\/+$/, '');
-    return '';
-  };
-
-  const text = snapshot?.map(m => `${m.role === 'user' ? 'You' : 'SMARAN'}\n\n${m.content}`).join('\n\n---\n\n') || '';
+  const text = snapshot && snapshot.length ? formatConversation(snapshot) : '';
 
   const open = () => {
     setNotice('');
-    setShareData(null);
     setSnapshot(
       messages
-        .filter(m => ['user', 'assistant'].includes(m.role) && !m.isLoading && typeof m.content === 'string' && m.content.trim())
-        .map(m => ({ role: m.role, content: m.content }))
+        .filter((m) => ['user', 'assistant'].includes(m.role) && !m.isLoading
+          && typeof m.content === 'string' && m.content.trim())
+        .map((m) => ({ role: m.role, content: m.content })),
     );
   };
 
-  const createPublicLink = async () => {
-    if (!snapshot || !snapshot.length) return;
-    setIsPublishing(true);
-    setNotice('');
-    const host = getBackendHost();
+  const close = () => setSnapshot(null);
 
-    if (!host && isNativeApp()) {
-      setIsPublishing(false);
-      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-        try {
-          await navigator.share({
-            title: 'SMARAN Conversation',
-            text: text,
-          });
-          setNotice('Shared snapshot via system share.');
-          return;
-        } catch (e) {
-          if (e.name === 'AbortError') return;
-        }
-      }
-      setNotice('Public link sharing requires a paired SMARAN desktop backend. You can export as text or snapshot below.');
-      return;
-    }
-
+  const copy = async () => {
     try {
-      const resp = await fetch(`${host}/api/share`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'SMARAN Conversation',
-          messages: snapshot,
-        }),
-      });
-      const contentType = resp.headers.get('content-type') || '';
-      if (!resp.ok || !contentType.includes('application/json')) {
-        let errMsg = 'Failed to create share link.';
-        if (contentType.includes('application/json')) {
-          const err = await resp.json().catch(() => ({}));
-          errMsg = err.detail || errMsg;
-        } else {
-          errMsg = 'Public link sharing requires a paired SMARAN desktop backend. You can export as text or snapshot below.';
-        }
-        throw new Error(errMsg);
-      }
-      const data = await resp.json();
-      setShareData(data);
-      setNotice('Public link created. You can copy or revoke it below.');
-    } catch (err) {
-      setNotice(err.message || 'Could not create public link. Export as text instead.');
-    } finally {
-      setIsPublishing(false);
-    }
-  };
-
-  const revokePublicLink = async () => {
-    if (!shareData?.share_id || !shareData?.revocation_token) return;
-    setNotice('Revoking public link...');
-    const host = getBackendHost();
-    try {
-      const resp = await fetch(`${host}/api/share/${shareData.share_id}?secret=${encodeURIComponent(shareData.revocation_token)}`, {
-        method: 'DELETE',
-      });
-      const contentType = resp.headers.get('content-type') || '';
-      if (resp.ok && contentType.includes('application/json')) {
-        setShareData(null);
-        setNotice('Public link revoked and permanently disabled.');
-      } else {
-        const err = contentType.includes('application/json') ? await resp.json().catch(() => ({})) : {};
-        setNotice(err.detail || 'Could not revoke link.');
-      }
-    } catch (err) {
-      setNotice(err.message || 'Could not revoke link.');
-    }
-  };
-
-  const getFullShareUrl = (path) => {
-    if (shareData?.lan_url) return shareData.lan_url;
-    const host = getBackendHost();
-    if (host) return `${host}${path}`;
-    if (typeof window === 'undefined') return path;
-    if (!isNativeApp()) {
-      return `${window.location.origin}${path}`;
-    }
-    return path;
-  };
-
-  const handleDownloadSnapshot = async () => {
-    if (!text) return;
-    const isMobile = isNativeApp() || (typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
-
-    if (isMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-      try {
-        if (typeof File !== 'undefined' && navigator.canShare) {
-          const file = new File([text], 'smaran-conversation.txt', { type: 'text/plain' });
-          if (navigator.canShare({ files: [file] })) {
-            await navigator.share({
-              files: [file],
-              title: 'SMARAN Conversation Snapshot',
-            });
-            setNotice('Snapshot saved / shared.');
-            return;
-          }
-        }
-        await navigator.share({
-          title: 'SMARAN Conversation Snapshot',
-          text: text,
-        });
-        setNotice('Snapshot shared.');
-        return;
-      } catch (e) {
-        if (e.name === 'AbortError') return;
-      }
-    }
-
-    try {
-      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'smaran-conversation.txt';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setNotice('Snapshot downloaded.');
+      await navigator.clipboard.writeText(text);
+      setNotice('Copied. Paste it anywhere.');
+      return true;
     } catch {
-      setNotice('Download failed. Use "Copy text" instead.');
+      setNotice('Copying was blocked here. Select the text above and copy it.');
+      return false;
     }
+  };
+
+  const share = async () => {
+    if (!text) return;
+    setNotice('');
+    if (isNativeApp()) {
+      try {
+        const result = await device.shareText({ text, title: 'SMARAN.AI conversation' });
+        if (result?.shared) return;
+      } catch { /* an older app build without the method - fall through */ }
+    }
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title: 'SMARAN.AI conversation', text });
+        return;
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+      }
+    }
+    // Nothing here can open a share sheet; the next best thing is the text
+    // on the clipboard, and saying so.
+    if (await copy()) setNotice('Sharing is not available here, so the conversation was copied instead.');
   };
 
   return (
@@ -174,7 +97,8 @@ export default function ShareConversation({ messages }) {
       {snapshot !== null && createPortal(
         <div
           className="fixed inset-0 z-[200] bg-veil flex items-center justify-center p-4 backdrop-blur-sm"
-          onKeyDown={e => { if (e.key === 'Escape') setSnapshot(null); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') close(); }}
+          onClick={(e) => { if (e.target === e.currentTarget) close(); }}
         >
           <section
             role="dialog"
@@ -186,127 +110,41 @@ export default function ShareConversation({ messages }) {
               <h2 className="font-bold text-lg text-ink">Share conversation</h2>
               <button
                 autoFocus
-                aria-label="Close share preview"
+                aria-label="Close"
                 className="text-ink-muted hover:text-ink text-sm px-2 py-1 rounded"
-                onClick={() => setSnapshot(null)}
+                onClick={close}
               >
                 ✕
               </button>
             </header>
 
             <p className="text-sm text-ink-muted leading-relaxed">
-              Review this snapshot before sharing. Later messages are not included. Attachments and account details are not exported; personal information written in messages remains visible.
+              Sends a copy of this conversation as text - to WhatsApp, email, notes or
+              anywhere else. Nothing is uploaded by SMARAN.AI; the copy goes only where you
+              send it. Anything personal written in the messages is included, so check it first.
             </p>
 
-            <pre className="overflow-auto min-h-24 max-h-48 whitespace-pre-wrap rounded-xl border border-line bg-sunken p-4 text-xs font-mono text-ink">
-              {text || 'No completed messages to share.'}
+            <pre className="overflow-auto min-h-24 max-h-64 whitespace-pre-wrap rounded-xl border border-line bg-sunken p-4 text-xs font-mono text-ink select-text">
+              {text || 'No completed messages to share yet.'}
             </pre>
 
-            <p className="text-xs text-ink-faint">
-              Share as text or a file. Public links are not configured for external access without public hosting; snapshot links can be published below.
-            </p>
-
-            {/* Public Link Section */}
-            <div className="rounded-xl border border-line bg-sunken p-3.5 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-ink">Public Link Sharing</span>
-                <span className="text-[11px] text-ink-faint">Immutable snapshot</span>
-              </div>
-
-              {!shareData ? (
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs text-ink-muted">
-                    Publish an immutable read-only snapshot. Anyone with the link will be able to view it.
-                  </p>
-                  <button
-                    type="button"
-                    disabled={!text || isPublishing}
-                    onClick={createPublicLink}
-                    className="shrink-0 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-sm transition"
-                  >
-                    {isPublishing ? 'Creating…' : 'Create public link'}
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={getFullShareUrl(shareData.share_url)}
-                      className="flex-1 rounded-lg border border-line bg-raised px-3 py-1.5 text-xs text-ink select-all outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(getFullShareUrl(shareData.share_url));
-                          setNotice('Copied public link to clipboard.');
-                        } catch {
-                          setNotice('Failed to copy. Select and copy the text box directly.');
-                        }
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
-                    >
-                      Copy link
-                    </button>
-                    <button
-                      type="button"
-                      onClick={revokePublicLink}
-                      className="px-2.5 py-1.5 rounded-lg border border-red-500/40 text-red-400 hover:bg-red-500/10 text-xs font-medium transition"
-                      title="Permanently disable this public link"
-                    >
-                      Revoke
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-ink-faint">
-                    {shareData.lan_url
-                      ? 'Link is reachable by any phone or PC on your local Wi-Fi. For friends outside your network, use "Copy text" or "Download snapshot" below.'
-                      : 'Snapshot is published. You can revoke and disable this link at any time from this device.'}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Local Export Controls */}
-            <div className="flex flex-wrap items-center gap-2.5 pt-1">
-              <span className="text-xs text-ink-faint mr-1">Local export:</span>
+            <div className="flex flex-wrap items-center justify-end gap-2.5">
               <button
+                type="button"
                 disabled={!text}
-                className="rounded-lg border border-line bg-raised px-3 py-1.5 text-xs font-medium text-ink hover:bg-sunken disabled:opacity-40 transition"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(text);
-                    setNotice('Copied snapshot.');
-                  } catch {
-                    setNotice('Clipboard unavailable. Download the snapshot instead.');
-                  }
-                }}
+                onClick={copy}
+                className="rounded-lg border border-line bg-raised px-4 py-2 text-sm font-medium text-ink hover:bg-sunken disabled:opacity-40 transition"
               >
                 Copy text
               </button>
               <button
+                type="button"
                 disabled={!text}
-                className="rounded-lg border border-line bg-raised px-3 py-1.5 text-xs font-medium text-ink hover:bg-sunken disabled:opacity-40 transition"
-                onClick={handleDownloadSnapshot}
+                onClick={share}
+                className="rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white shadow-sm transition"
               >
-                Download snapshot
+                Share…
               </button>
-              {typeof navigator.share === 'function' && (
-                <button
-                  disabled={!text}
-                  className="rounded-lg border border-line bg-raised px-3 py-1.5 text-xs font-medium text-ink hover:bg-sunken disabled:opacity-40 transition"
-                  onClick={async () => {
-                    try {
-                      await navigator.share({ title: 'SMARAN conversation', text });
-                    } catch (error) {
-                      if (error.name !== 'AbortError') setNotice('Sharing unavailable. Use copy or download.');
-                    }
-                  }}
-                >
-                  Share…
-                </button>
-              )}
             </div>
 
             <p role="status" className="text-xs font-medium text-indigo-400 min-h-[1.2rem]">
@@ -314,7 +152,7 @@ export default function ShareConversation({ messages }) {
             </p>
           </section>
         </div>,
-        document.body
+        document.body,
       )}
     </>
   );

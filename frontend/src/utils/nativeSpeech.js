@@ -4,6 +4,25 @@ const speech = registerPlugin('SmaranSpeech');
 let activeListening = null;
 let activeSpeechCleanup = null;
 let speechGeneration = 0;
+let microphoneRequest = null;
+
+/**
+ * Ask for the microphone once, however many callers want it at the same time.
+ *
+ * Opening a voice call asks from two places at once - the listener here and
+ * the background service in deviceControl - and two overlapping permission
+ * requests on Android leave the second one hanging or rejected. Sharing the
+ * one in flight means a single prompt, and both get its answer.
+ */
+export const ensureMicrophone = () => {
+  if (!microphoneRequest) {
+    microphoneRequest = speech.requestPermissions()
+      .then((permission) => permission?.speechRecognition === 'granted')
+      .catch(() => false)
+      .finally(() => { microphoneRequest = null; });
+  }
+  return microphoneRequest;
+};
 const errorMessage = (code) => ({
   1: 'Speech recognition timed out. Check the phone’s connection and try again.',
   2: 'Speech recognition could not reach its service. Check the phone’s connection.',
@@ -86,8 +105,7 @@ export const stopSpeaking = async (invalidate = true) => {
 
 export const listen = async ({ language, onText, onEnd, continuous = false }) => {
   if (activeListening) await activeListening.cancel();
-  const permission = await speech.requestPermissions();
-  if (permission?.speechRecognition !== 'granted') throw new Error('Microphone permission was refused.');
+  if (!(await ensureMicrophone())) throw new Error('Microphone permission was refused.');
 
   const handles = [];
   let finished = false;

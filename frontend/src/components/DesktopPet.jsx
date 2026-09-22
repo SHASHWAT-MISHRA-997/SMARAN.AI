@@ -32,7 +32,30 @@ export const PET_FORMS = {
  * Highly expressive animated SVG avatar with natural blinking, talking mouth,
  * blushing cheeks, and lively emotional facial expressions.
  */
+/* Still when there is nothing to show, on a phone.
+   Every pet runs SMIL loops - a bob, a blink, a colour cycle - and SMIL is
+   painted on the main thread. With the ring they kept a phone drawing sixty
+   frames a second, 24 ms each, on a chat screen where nothing was happening.
+   Idle, the pet now holds still on a touch screen (or for anyone who asked
+   for less motion); the moment it has something to show - talking, waving,
+   reviewing - it moves again. */
+const holdStillWhenIdle = () => typeof window !== 'undefined' && Boolean(
+  document.documentElement.classList.contains('is-handheld')
+  || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+
 export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', className = '' }) => {
+  const svgRef = useRef(null);
+  const still = activity === 'idle' && holdStillWhenIdle();
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (!svg?.pauseAnimations) return;
+    if (still) {
+      svg.pauseAnimations();
+      svg.setCurrentTime?.(0);
+    } else {
+      svg.unpauseAnimations();
+    }
+  }, [still, pet]);
   const kind = PET_FORMS[pet]?.kind || 'cyber';
   const isTalking = activity === 'typing' || activity === 'running' || activity === 'review';
   const isJoyful = activity === 'waving' || activity === 'jumping';
@@ -61,6 +84,7 @@ export const PetAvatar = ({ pet = 'smaru', size = 56, activity = 'idle', classNa
   const face = FACES[activity] || FACES.idle;
 
   const common = {
+    ref: svgRef,
     width: size,
     height: size,
     viewBox: '0 0 64 64',

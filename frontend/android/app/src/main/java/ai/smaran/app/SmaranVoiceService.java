@@ -6,6 +6,9 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
+import android.Manifest;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -80,7 +83,34 @@ public class SmaranVoiceService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        startForeground(NOTIFICATION_ID, buildNotification("Listening"));
+        // Every crash this app has had in the field was this one line. Android
+        // 14 lets a microphone service start only while the app holds the
+        // microphone permission *and* is on screen. Voice mode started the
+        // service before the permission had ever been asked for, so opening a
+        // call closed the app; and START_STICKY then had Android restart the
+        // service from the background - where it can never start - so the
+        // app died again every few seconds: six crashes in 25 seconds.
+        //
+        // So: no permission, no start; a refused start is caught and ends the
+        // service quietly; and a failed start is never sticky.
+        if (!hasMicrophone()) {
+            Log.w(TAG, "not starting: microphone permission not granted");
+            return giveUp();
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, buildNotification("Listening"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+            } else {
+                startForeground(NOTIFICATION_ID, buildNotification("Listening"));
+            }
+        } catch (RuntimeException refused) {
+            // SecurityException for the permission, and on Android 12+
+            // ForegroundServiceStartNotAllowedException (an
+            // IllegalStateException) for starting from the background.
+            Log.w(TAG, "Android refused the listening service", refused);
+            return giveUp();
+        }
         running = true;
         instance = this;
         stopping = false;
@@ -95,6 +125,20 @@ public class SmaranVoiceService extends Service {
         // a listener that quietly stops listening is worse than one that does
         // not start.
         return START_STICKY;
+    }
+
+    private boolean hasMicrophone() {
+        return checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** End a start that cannot succeed, without a restart to try it again. */
+    private int giveUp() {
+        running = false;
+        stopping = true;
+        if (instance == this) instance = null;
+        stopSelf();
+        return START_NOT_STICKY;
     }
 
     private Notification buildNotification(String text) {
@@ -164,6 +208,12 @@ public class SmaranVoiceService extends Service {
             @Override
             public void onError(int error) {
                 if (stopping || uiVisible) return;
+                // The microphone was taken away while listening - revoked in
+                // Settings. Retrying cannot succeed; it only spins.
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    giveUp();
+                    return;
+                }
                 // Silence and no-match are ordinary: nobody spoke. Anything
                 // else is worth a breath before trying again, so a persistent
                 // fault does not become a tight loop holding the microphone.

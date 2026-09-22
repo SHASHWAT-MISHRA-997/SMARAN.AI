@@ -5,6 +5,13 @@ import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { ThemeProvider } from './context/ThemeContext.jsx';
 import { ensureDeviceUser, getCurrentUser } from './context/AuthContext.jsx';
 import './index.css';
+import { isHandheld } from './utils/device';
+
+// Phones and tablets get the still versions of the decorations (index.css,
+// `html.is-handheld`). Set by device, before the first render, rather than
+// left to a hover/pointer media query that not every WebView answers the
+// same way.
+if (isHandheld()) document.documentElement.classList.add('is-handheld');
 
 // Unregister ALL service workers — nginx cache-control headers handle caching.
 // This prevents stale SW caches from ever blocking updates again.

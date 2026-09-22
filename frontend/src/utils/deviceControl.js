@@ -1,6 +1,7 @@
 import { device } from './devicePlugin';
 import { isNativeApp } from './hostLink';
 import { detectDeviceCommand, describeOutcome } from './deviceCommands';
+import { ensureMicrophone } from './nativeSpeech';
 
 
 /**
@@ -36,7 +37,21 @@ import { detectDeviceCommand, describeOutcome } from './deviceCommands';
 export async function startBackgroundListening() {
   if (!isNativeApp()) return false;
   try {
+    // The microphone first. Starting the service without it was the crash
+    // that closed the app whenever a voice call was opened: Android refuses a
+    // microphone service to an app that does not hold the microphone.
+    if (!(await ensureMicrophone())) return false;
     return Boolean((await device.startListeningService())?.listening);
+  } catch {
+    return false;
+  }
+}
+
+/** Open this app's page in Android Settings, where a blocked permission is turned back on. */
+export async function openAppSettings() {
+  if (!isNativeApp()) return false;
+  try {
+    return Boolean((await device.openAppSettings())?.opened);
   } catch {
     return false;
   }

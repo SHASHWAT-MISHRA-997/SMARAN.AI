@@ -19,7 +19,7 @@ import { languageRule, languageName, CODE_OUTPUT_RULE } from '../src/utils/reply
 
 test('English is stated explicitly rather than left unsaid', () => {
   const rule = languageRule('en');
-  assert.match(rule, /Respond entirely in English/);
+  assert.match(rule, /respond entirely in English/i);
   // Naming the drift is the point: a bare "respond in English" was not enough.
   assert.match(rule, /Hindi/);
   assert.match(rule, /do not mix languages/i);
@@ -27,13 +27,13 @@ test('English is stated explicitly rather than left unsaid', () => {
 
 test('no selection at all still means English', () => {
   for (const empty of [undefined, null, '', '   ']) {
-    assert.match(languageRule(empty), /Respond entirely in English/);
+    assert.match(languageRule(empty), /respond entirely in English/i);
   }
 });
 
 test('an unknown code falls back to English rather than being passed through', () => {
   // "Respond entirely in xx" is not an instruction a model can follow.
-  assert.match(languageRule('xx'), /Respond entirely in English/);
+  assert.match(languageRule('xx'), /respond entirely in English/i);
   assert.equal(languageName('xx'), '');
 });
 
@@ -61,4 +61,26 @@ test('the code rule asks for something that actually runs when pasted', () => {
   assert.match(CODE_OUTPUT_RULE, /runs as pasted/);
   assert.match(CODE_OUTPUT_RULE, /include every import/);
   assert.match(CODE_OUTPUT_RULE, /never elide a body/);
+});
+
+// "Speak in Hinglish" was answered in Arabic on a phone. Part of it was the
+// model; part was this rule, which with the picker on its English default
+// told the model "Do not switch to Hindi, Hinglish".
+test('the default follows the language the person writes in', () => {
+  const rule = languageRule('en');
+  assert.match(rule, /latest message/);
+  assert.match(rule, /Hinglish/);
+  assert.match(rule, /reply in natural Hinglish/);
+  assert.doesNotMatch(rule, /Do not switch to Hindi, Hinglish/);
+});
+
+test('an explicit request for a language is followed, whatever the picker says', () => {
+  for (const code of ['en', 'hi', 'gu']) {
+    assert.match(languageRule(code), /explicitly asks you to use a particular language/);
+    assert.match(languageRule(code), /speak in Hinglish/);
+  }
+});
+
+test('nobody is answered in a language they did not use or ask for', () => {
+  assert.match(languageRule('en'), /Never reply in a language they neither used nor asked for/);
 });

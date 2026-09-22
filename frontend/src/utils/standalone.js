@@ -161,7 +161,30 @@ export const saveKey = (provider, key) => {
 
 export const getProvider = () => localStorage.getItem(PROVIDER_STORE) || '';
 export const setProvider = (id) => localStorage.setItem(PROVIDER_STORE, id || '');
-export const getModel = () => localStorage.getItem(MODEL_STORE) || '';
+/* Models built for one language. ALLaM answers in Arabic; asked "Speak in
+   Hinglish" it apologised - in Arabic. It was never chosen by anybody: the
+   default picker below sorted small models first and then alphabetically, and
+   on Groq "allam-2-7b" comes first on both counts, so every phone that pasted
+   a Groq key was quietly given an Arabic model. */
+const LANGUAGE_SPECIALISTS = [
+  { pattern: /allam|jais|acegpt|silma/i, language: 'ar' },
+];
+
+const specialistLanguage = (id) =>
+  LANGUAGE_SPECIALISTS.find((s) => s.pattern.test(String(id || '')))?.language || '';
+
+/* A specialist that was picked automatically is forgotten, and the default
+   is chosen again - unless the reply language is the one it was built for,
+   which is the one case where somebody plausibly wants it. */
+export const getModel = () => {
+  const id = localStorage.getItem(MODEL_STORE) || '';
+  const language = specialistLanguage(id);
+  if (language && (localStorage.getItem('sm_response_language') || 'en') !== language) {
+    localStorage.removeItem(MODEL_STORE);
+    return '';
+  }
+  return id;
+};
 export const setModel = (id) => localStorage.setItem(MODEL_STORE, id || '');
 
 /** Is there a provider and a key to talk to right now? */
@@ -220,13 +243,26 @@ export async function listModels(provider, key) {
 export const usable = (models) => {
   const score = (id) => {
     const n = id.toLowerCase();
-    if (/embed|whisper|tts|image|vision|audio|rerank|moderation|guard|bge-/.test(n)) return 2;
+    if (/embed|whisper|tts|image|vision|audio|rerank|moderation|guard|bge-/.test(n)) return 3;
+    // Listed, but never offered first: a model for one language is the
+    // wrong answer for everybody who does not speak it.
+    if (specialistLanguage(n)) return 2;
     if (/flash|mini|small|lite|8b|7b|9b/.test(n)) return 0;
     return 1;
   };
   return [...models]
     .filter((m) => !/embed|bge-|rerank|moderation/i.test(m.id))
     .sort((a, b) => score(a.id) - score(b.id) || a.id.localeCompare(b.id));
+};
+
+/* In order of preference, per provider: fast, free-tier, general models that
+   follow instructions and answer in the language they are asked in. */
+const PREFERRED_DEFAULTS = {
+  groq: [/^llama-3\.3-70b-versatile$/, /^openai\/gpt-oss-120b$/, /^llama-3\.1-8b-instant$/, /^openai\/gpt-oss-20b$/],
+  gemini: [/^gemini-2\.5-flash$/, /^gemini-2\.0-flash$/, /^gemini-flash-latest$/, /^gemini-2\.5-flash-lite$/],
+  cerebras: [/^llama-3\.3-70b$/, /^gpt-oss-120b$/, /^llama3\.1-8b$/],
+  openrouter: [/^meta-llama\/llama-3\.3-70b-instruct:free$/, /^deepseek\/deepseek-chat.*:free$/,
+    /^google\/gemini-2\.0-flash.*:free$/, /^qwen\/qwen3.*:free$/, /^mistralai\/mistral-small.*:free$/],
 };
 
 /**
@@ -253,7 +289,15 @@ export async function pickDefaultModel(provider, key) {
   // Only where free and paid sit in one list. Elsewhere the flag is absent
   // and filtering on it would throw the whole catalogue away.
   const free = models.filter((m) => m.free);
-  const chosen = (free.length ? free[0] : models[0])?.id || '';
+  const pool = free.length ? free : models;
+  // A known good general model when the provider has one; the size ordering
+  // is only the fallback. Smallest-first put an Arabic model at the top of
+  // Groq's list, and on others it picks toy models that cannot follow a
+  // system prompt.
+  const preferred = (PREFERRED_DEFAULTS[provider] || [])
+    .map((pattern) => pool.find((m) => pattern.test(m.id)))
+    .find(Boolean);
+  const chosen = (preferred || pool.find((m) => !specialistLanguage(m.id)) || pool[0])?.id || '';
   if (chosen) setModel(chosen);
   return chosen;
 }

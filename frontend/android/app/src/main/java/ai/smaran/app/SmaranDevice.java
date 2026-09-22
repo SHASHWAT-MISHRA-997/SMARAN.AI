@@ -343,6 +343,16 @@ public class SmaranDevice extends Plugin {
      */
     @PluginMethod
     public void startListeningService(PluginCall call) {
+        // Checked here as well as in the service, because once
+        // startForegroundService() has been called Android insists the service
+        // go foreground - and without the microphone it cannot. Asking first
+        // means a service that could never start is never started.
+        if (getContext().checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            call.resolve(new JSObject().put("listening", false)
+                .put("reason", "microphone-permission"));
+            return;
+        }
         try {
             Intent service = new Intent(getContext(), SmaranVoiceService.class)
                 .setAction(SmaranVoiceService.ACTION_START);
@@ -363,6 +373,58 @@ public class SmaranDevice extends Plugin {
     public void stopListeningService(PluginCall call) {
         getContext().stopService(new Intent(getContext(), SmaranVoiceService.class));
         call.resolve(new JSObject().put("listening", false));
+    }
+
+    /**
+     * This app's page in Android Settings.
+     *
+     * Refuse the microphone twice and Android stops showing the prompt: every
+     * later request is answered "denied" without asking anybody. From then on
+     * the only place it can be turned back on is the app's own settings page,
+     * and a Try again button that asks again can never succeed.
+     */
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        try {
+            Intent settings = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", getContext().getPackageName(), null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(settings);
+            call.resolve(new JSObject().put("opened", true));
+        } catch (Exception e) {
+            Log.w(TAG, "could not open this app's settings", e);
+            call.resolve(new JSObject().put("opened", false));
+        }
+    }
+
+    /**
+     * Hand text to Android's own share sheet - WhatsApp, Gmail, Telegram,
+     * Drive, whatever the phone has.
+     *
+     * Android's WebView does not implement navigator.share, so the page's
+     * Share button never appeared on a phone at all; the only choices left were
+     * a public link that needed the PC switched on, and a file download.
+     */
+    @PluginMethod
+    public void shareText(PluginCall call) {
+        String text = call.getString("text", "");
+        if (text == null || text.trim().isEmpty()) {
+            call.resolve(new JSObject().put("shared", false).put("reason", "empty"));
+            return;
+        }
+        try {
+            Intent send = new Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_TEXT, text)
+                .putExtra(Intent.EXTRA_SUBJECT, call.getString("title", "SMARAN.AI conversation"));
+            Intent chooser = Intent.createChooser(send, call.getString("title", "Share"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(chooser);
+            call.resolve(new JSObject().put("shared", true));
+        } catch (Exception e) {
+            Log.w(TAG, "could not open the share sheet", e);
+            call.resolve(new JSObject().put("shared", false).put("reason", String.valueOf(e.getMessage())));
+        }
     }
 
     @PluginMethod

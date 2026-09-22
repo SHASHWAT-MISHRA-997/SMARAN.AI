@@ -2768,11 +2768,20 @@ html[data-reduce-motion="on"] *::after {
           mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
           mask-composite: exclude;
   filter: drop-shadow(0 0 6px rgba(0, 243, 255, 0.55)) drop-shadow(0 0 12px rgba(217, 70, 239, 0.35));
-  animation: sm-pet-hue 6s linear infinite;
+  /* The colour moves by turning the ring, not by animating its filter.
+     It used to animate `filter` - two drop-shadows and a hue-rotate - which
+     no browser can hand to the compositor: the masked, blurred ring was
+     re-rasterised on the CPU every frame, for ever. On a phone that was one
+     whole core, 95-130%, with the chat screen sitting idle - heat, battery,
+     lag, and an app Android is quicker to kill. A transform on its own layer
+     is drawn once and turned by the GPU; a conic rainbow turning reads as the
+     same cycling colour. */
+  will-change: transform;
+  animation: sm-pet-turn 6s linear infinite;
 }
 
-@keyframes sm-pet-hue {
-  to { filter: drop-shadow(0 0 6px rgba(0, 243, 255, 0.55)) drop-shadow(0 0 12px rgba(217, 70, 239, 0.35)) hue-rotate(360deg); }
+@keyframes sm-pet-turn {
+  to { transform: rotate(360deg); }
 }
 
 /* Grabbing it should feel like grabbing it: the whole frame takes pointer
@@ -2788,4 +2797,52 @@ html[data-reduce-motion="on"] *::after {
 /* Someone who has asked for less motion should not be given a spinning ring. */
 @media (prefers-reduced-motion: reduce) {
   .sm-pet-ring { animation: none; }
+}
+
+/* Phones and tablets: the decorations stand still.
+   Each of these animates something no browser can hand to the GPU - a
+   filter, a box-shadow, a background position - so every frame was painted
+   on the CPU. Together with the companion ring they held a phone's WebView at
+   a full core with the chat screen doing nothing at all. They stop on their
+   first frame, glow included; what still moves (spinners and the
+   typing dots, while they are needed) moves by transform or opacity, which the compositor does for
+   free. Desktop keeps them - a desktop has the headroom, a phone in a pocket
+   does not. */
+html.is-handheld .animate-gemini-shimmer,
+html.is-handheld .animate-lightning-border,
+html.is-handheld .animate-message-glow,
+html.is-handheld .animate-rgb-spin,
+html.is-handheld .cyber-rainbow-card,
+html.is-handheld .holographic-glow,
+html.is-handheld .developer-highlight-card::before,
+html.is-handheld .cyber-text,
+html.is-handheld .live-dot,
+html.is-handheld .hero3d-mark,
+html.is-handheld .hero3d-mark-spec,
+html.is-handheld .hero3d-letter::before,
+html.is-handheld .cyberfx-grid,
+html.is-handheld .auth-halo,
+html.is-handheld .auth-crest,
+html.is-handheld .auth-title,
+html.is-handheld .neon-ring-focus:focus-within,
+html.is-handheld .sm-pet-ring,
+/* The chat backdrop: 45 twinkling stars, two pulsing nebulae, three blurred
+   orbs drifting, a scan sweep. Measured on the phone over the debugger, these
+   were the rest of the 54 animations that kept an idle screen at 60 fps. */
+html.is-handheld .animate-twinkle,
+html.is-handheld .animate-nebula,
+html.is-handheld .animate-drift-1,
+html.is-handheld .animate-drift-2,
+html.is-handheld .cyberfx-scan {
+  animation: none !important;
+}
+
+/* Status dots that pulse for ever - the model is chosen, the link is up.
+   Cheap to draw, but a WebView redraws the whole screen for every frame of
+   any running animation, and on a phone that is 24 ms a frame, sixty times a
+   second. The dot says the same thing standing still. Spinners and bounces
+   are left: they only exist while something is happening. */
+html.is-handheld .animate-pulse,
+html.is-handheld .animate-ping {
+  animation: none !important;
 }
