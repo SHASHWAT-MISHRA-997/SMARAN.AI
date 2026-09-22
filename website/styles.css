@@ -2771,3 +2771,107 @@ html.light .btn-primary {
 html.light .btn-primary:hover {
   box-shadow: 0 14px 34px rgba(200, 31, 31, .4);
 }
+
+/* ---------------------------------------------------------------------
+   Hero light trails, focus-in headline, and the side rail
+   --------------------------------------------------------------------- */
+
+/* Neon ribbons streaming out of a vanishing point above the headline
+   (hero-trails.js). Behind the copy, faded top and bottom so they rise out
+   of the page rather than starting at a hard edge. */
+.hero { position: relative; isolation: isolate; }
+.hero-inner { position: relative; z-index: 1; }
+#trails {
+  position: absolute; inset: 0; z-index: 0;
+  pointer-events: none;
+  opacity: .85;
+  /* Faded top and bottom, and dimmed across the text column on the left. */
+  -webkit-mask-image:
+    linear-gradient(to bottom, transparent 0%, #000 16%, #000 78%, transparent 100%),
+    linear-gradient(to right, rgba(0, 0, 0, .28) 0%, rgba(0, 0, 0, .45) 38%, #000 60%);
+  -webkit-mask-composite: source-in;
+          mask-image:
+    linear-gradient(to bottom, transparent 0%, #000 16%, #000 78%, transparent 100%),
+    linear-gradient(to right, rgba(0, 0, 0, .28) 0%, rgba(0, 0, 0, .45) 38%, #000 60%);
+          mask-composite: intersect;
+}
+@media (max-width: 900px) {
+  /* Stacked layout: the copy spans the width, so the dimming does too. */
+  #trails {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,.5) 20%, rgba(0,0,0,.5) 75%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,.5) 20%, rgba(0,0,0,.5) 75%, transparent 100%);
+  }
+}
+html.light #trails { opacity: .4; }
+
+/* The headline resolves out of a blur, one line after another. `backwards`
+   rather than `both`, so once it has finished each line gets its own filter
+   back - the gradient line keeps its glow and its colour flow. */
+@keyframes smaran-focus-in {
+  from { opacity: 0; filter: blur(16px); transform: translateY(14px); }
+  to   { opacity: 1; filter: blur(0);    transform: none; }
+}
+.hero h1 > span {
+  display: inline-block;
+  animation: smaran-focus-in 1.15s cubic-bezier(.2, .7, .2, 1) backwards;
+}
+.hero h1 > span:nth-of-type(2) { animation-delay: .2s; }
+.hero h1 > span:nth-of-type(3) { animation-delay: .4s; }
+.hero h1 > .grad {
+  animation: smaran-focus-in 1.15s cubic-bezier(.2, .7, .2, 1) .2s backwards,
+             flow 6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero h1 > span { animation: none; }
+  .hero h1 > .grad { animation: flow 6s linear infinite; }
+}
+
+/* The rail: the places SMARAN.AI lives, one tap from anywhere on the page. */
+.side-rail {
+  position: fixed; left: 18px; top: 50%; z-index: 40;
+  transform: translateY(-10%);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.side-rail a {
+  position: relative;
+  width: 48px; height: 48px; border-radius: 50%;
+  display: grid; place-items: center;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(255, 255, 255, .1);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  transition: background .2s, border-color .2s, color .2s, transform .2s;
+}
+.side-rail a:hover, .side-rail a:focus-visible {
+  background: rgba(255, 255, 255, .1); color: #fff; transform: translateX(3px);
+  outline: none;
+}
+.side-rail a.accent {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, .18);
+  border-color: rgba(239, 68, 68, .5);
+  box-shadow: 0 0 18px rgba(239, 68, 68, .25);
+}
+.side-rail svg { width: 20px; height: 20px; }
+.side-rail a::after {
+  content: attr(data-label);
+  position: absolute; left: 58px; top: 50%;
+  transform: translate(-4px, -50%);
+  padding: 5px 10px; border-radius: 8px;
+  white-space: nowrap; font-size: .75rem; font-weight: 600; color: #f8fafc;
+  background: rgba(10, 10, 14, .92); border: 1px solid rgba(255, 255, 255, .12);
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s, transform .15s;
+}
+.side-rail a:hover::after, .side-rail a:focus-visible::after {
+  opacity: 1; transform: translate(0, -50%);
+}
+html.light .side-rail a {
+  color: #334155; background: rgba(15, 23, 42, .04); border-color: rgba(15, 23, 42, .12);
+}
+html.light .side-rail a.accent { color: #b91c1c; background: rgba(239, 68, 68, .1); }
+/* Only where the page leaves it a margin. The content column is 1180px plus
+   its padding, so below about 1300px wide the rail would sit on the headline. */
+@media (max-width: 1299px) {
+  .side-rail { display: none; }
+}
