@@ -39,13 +39,33 @@ export function isBeingDiscussed(utterance) {
 
 // Verb-first and verb-last both, because Hinglish puts the verb at the end:
 // "open Chrome" and "Chrome kholo" are the same instruction.
-const OPEN_FIRST = '(?:open|launch|start|run|kholo|khol\\s+do|chalu\\s+karo|start\\s+karo|open\\s+karo)';
-const OPEN_LAST = '(?:kholo|khol\\s+do|chalu\\s+karo|start\\s+karo|open\\s+karo|kholna)';
+//
+// Devanagari sits beside the romanised spellings because the speech engine
+// decides the script, not the speaker. Whisper transcribes Hindi speech in
+// Devanagari - "यूट्यूब खोलो" rather than "youtube kholo" - so a person who
+// speaks Hindi to the microphone produced text that matched none of these
+// rules, and the request fell through to the language model. That is the
+// exact failure this file was written to stop; it was only ever stopped for
+// people typing in Latin script. One YouTube pattern already carried a few
+// Devanagari words, which is why "यूट्यूब पर गाना चलाओ" worked while the
+// plainer "यूट्यूब खोलो" did not.
+const OPEN_FIRST = '(?:open|launch|start|run|kholo|khol\\s+do|chalu\\s+karo|start\\s+karo|open\\s+karo'
+  + '|खोलो|खोल\\s+दो|चालू\\s+करो|शुरू\\s+करो|ओपन\\s+करो)';
+const OPEN_LAST = '(?:kholo|khol\\s+do|chalu\\s+karo|start\\s+karo|open\\s+karo|kholna'
+  + '|खोलो|खोल\\s+दो|चालू\\s+करो|शुरू\\s+करो|ओपन\\s+करो|खोलना)';
 // "lagao" belongs here as much as "bajao" does - "tum hi ho youtube par lagao"
 // is how people actually ask - and it was missing, so that sentence reached
 // the model instead of the player.
-const PLAY_FIRST = '(?:play|bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|lagao|laga\\s+do)';
-const PLAY_LAST = '(?:bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|lagao|laga\\s+do|play\\s+karo|play\\s+kar\\s+do)';
+const PLAY_FIRST = '(?:play|bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|lagao|laga\\s+do'
+  + '|बजाओ|बजा\\s+दो|चलाओ|चला\\s+दो|सुनाओ|सुना\\s+दो|लगाओ|लगा\\s+दो)';
+const PLAY_LAST = '(?:bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|lagao|laga\\s+do|play\\s+karo|play\\s+kar\\s+do'
+  + '|बजाओ|बजा\\s+दो|चलाओ|चला\\s+दो|सुनाओ|सुना\\s+दो|लगाओ|लगा\\s+दो)';
+
+// The site's own name, and the particles that mean "on". Both scripts in one
+// place: the Devanagari was previously in one YouTube pattern and missing from
+// the other two, so "यूट्यूब पर X चलाओ" worked and "यूट्यूब खोलो" did not.
+const YT = '(?:youtube|यूट्यूब)';
+const ON = '(?:pe|par|mein|mai|men|पर|पे|में)';
 
 const RULES = [
   // YouTube, before the generic "play", so "YouTube pe X chalao" is a video
@@ -54,9 +74,9 @@ const RULES = [
     action: 'youtube',
     patterns: [
       /^(.+?)\s+(?:youtube|यूट्यूब)\s+(?:pe|par|पर|पे)\s+(?:channel|चैनल)\s+(?:(?:ko|को)\s+)?(?:open\s+karo|kholo|khol\s+do|खोलो|खोल\s+दो)$/i,
-      new RegExp(`(?:${OPEN_FIRST}|${PLAY_FIRST}|search|dikhao)\\s+(?:on\\s+|pe\\s+|par\\s+)?youtube\\s+(.+)$`, 'i'),
-      new RegExp(`youtube\\s+(?:pe|par|mein|mai|men)\\s+(.+?)\\s+(?:${PLAY_LAST}|${OPEN_LAST}|dikhao|search\\s+karo)$`, 'i'),
-      new RegExp(`(?:${PLAY_FIRST})\\s+(.+?)\\s+(?:on|pe|par)\\s+youtube$`, 'i'),
+      new RegExp(`(?:${OPEN_FIRST}|${PLAY_FIRST}|search|dikhao)\\s+(?:on\\s+|pe\\s+|par\\s+)?${YT}\\s+(.+)$`, 'i'),
+      new RegExp(`${YT}\\s+${ON}\\s+(.+?)\\s+(?:${PLAY_LAST}|${OPEN_LAST}|dikhao|search\\s+karo)$`, 'i'),
+      new RegExp(`(?:${PLAY_FIRST})\\s+(.+?)\\s+(?:on|pe|par|पर|पे)\\s+${YT}$`, 'i'),
       // What is being played, then where, then the verb:
       // "ganpati bappa song youtube par play karo".
       //
@@ -73,8 +93,8 @@ const RULES = [
   {
     action: 'youtube',
     patterns: [
-      new RegExp(`^\\s*${OPEN_FIRST}\\s+youtube\\s*$`, 'i'),
-      new RegExp(`^\\s*youtube\\s+${OPEN_LAST}\\s*$`, 'i'),
+      new RegExp(`^\\s*${OPEN_FIRST}\\s+${YT}\\s*$`, 'i'),
+      new RegExp(`^\\s*${YT}\\s+${OPEN_LAST}\\s*$`, 'i'),
     ],
     argument: null,
   },
@@ -82,11 +102,11 @@ const RULES = [
   {
     action: 'music',
     patterns: [
-      new RegExp(`^\\s*(?:koi\\s+|kuch\\s+)?(?:gaana|gana|song|music|gaane)\\s+${PLAY_LAST}\\s*$`, 'i'),
-      new RegExp(`^\\s*${PLAY_FIRST}\\s+(?:koi\\s+|kuch\\s+)?(?:gaana|gana|song|music)\\s*$`, 'i'),
+      new RegExp(`^\\s*(?:koi\\s+|kuch\\s+|कोई\\s+|कुछ\\s+)?(?:gaana|gana|song|music|gaane|गाना|गाने|गीत|संगीत)\\s+${PLAY_LAST}\\s*$`, 'i'),
+      new RegExp(`^\\s*${PLAY_FIRST}\\s+(?:koi\\s+|kuch\\s+|कोई\\s+|कुछ\\s+)?(?:gaana|gana|song|music|गाना|गीत|संगीत)\\s*$`, 'i'),
       new RegExp(`^\\s*${PLAY_FIRST}\\s+(?:the\\s+)?song\\s+(.+)$`, 'i'),
-      new RegExp(`^\\s*(.+?)\\s+(?:gaana|gana|song)\\s+${PLAY_LAST}\\s*$`, 'i'),
-      new RegExp(`^\\s*${PLAY_FIRST}\\s+(.+?)\\s+(?:gaana|gana|song)\\s*$`, 'i'),
+      new RegExp(`^\\s*(.+?)\\s+(?:gaana|gana|song|गाना|गीत)\\s+${PLAY_LAST}\\s*$`, 'i'),
+      new RegExp(`^\\s*${PLAY_FIRST}\\s+(.+?)\\s+(?:gaana|gana|song|गाना|गीत)\\s*$`, 'i'),
     ],
     argument: 'query',
   },

@@ -130,3 +130,48 @@ test('a YouTube search is described as a search', () => {
   assert.match(said, /Searching YouTube/i);
   assert.doesNotMatch(said, /playing/i);
 });
+
+/**
+ * Hindi spoken aloud arrives in Devanagari, not in Latin.
+ *
+ * The speech engine picks the script, not the speaker. Whisper transcribes
+ * Hindi as "यूट्यूब खोलो", never as "youtube kholo", so a person who talks to
+ * the microphone in Hindi produced text that matched none of these rules and
+ * the request fell through to the language model - which is the exact failure
+ * this module exists to prevent. It was only ever prevented for people typing
+ * in Latin script.
+ *
+ * Found by synthesising speech, transcribing it through the app's own
+ * endpoint, and feeding the result back in.
+ */
+test('a command spoken in Hindi is recognised in Devanagari', () => {
+  const cases = [
+    ['यूट्यूब खोलो', 'youtube'],
+    ['सेटिंग्स खोलो', 'app'],
+    ['कैलकुलेटर खोलो', 'app'],
+    ['व्हाट्सएप खोलो', 'app'],
+    ['गाना बजाओ', 'music'],
+    ['कोई गाना चलाओ', 'music'],
+    ['संगीत चलाओ', 'music'],
+    ['यूट्यूब पर तुम ही हो चलाओ', 'youtube'],
+  ];
+  for (const [utterance, action] of cases) {
+    const got = detectDeviceCommand(utterance);
+    assert.ok(got, `${utterance} was not recognised at all`);
+    assert.equal(got.action, action, `${utterance} became ${got.action}`);
+  }
+});
+
+test('the romanised spellings still work, unchanged', () => {
+  // The Devanagari was added beside them, not instead of them.
+  for (const [utterance, action] of [
+    ['youtube kholo', 'youtube'],
+    ['settings kholo', 'app'],
+    ['open calculator', 'app'],
+    ['gaana bajao', 'music'],
+    ['koi gaana chalao', 'music'],
+    ['tum hi ho youtube par lagao', 'youtube'],
+  ]) {
+    assert.equal(detectDeviceCommand(utterance)?.action, action, utterance);
+  }
+});
