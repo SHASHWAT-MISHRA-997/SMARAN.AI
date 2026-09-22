@@ -95,6 +95,12 @@ async def _answer_locally(prompt: str, history: list) -> str:
 @router.websocket("/ws/voice/local")
 async def local_voice(socket: WebSocket):
     """A live call served entirely from this machine."""
+    # Same rule as every other route: this computer, a paired phone, or a
+    # signed-in session - not anyone on the Wi-Fi (main.websocket_caller_allowed).
+    from app.main import websocket_caller_allowed
+    if not websocket_caller_allowed(socket):
+        await socket.close(code=4401)
+        return
     await socket.accept()
     history: list = []
     session = None

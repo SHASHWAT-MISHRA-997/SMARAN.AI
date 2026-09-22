@@ -476,7 +476,20 @@ def selftest_flags():
             "mic": wanted in {"mic", "all"}}
 
 
-@app.post("/api/client-log")
+def _signed_in(request: Request, db: Session = Depends(get_db),
+               session_token: Optional[str] = Cookie(None)):
+    """get_current_user, for routes declared above it in this file.
+
+    These routes had no check at all, and the app listens on 0.0.0.0 for the
+    paired phone - so anyone on the same Wi-Fi could start an update install,
+    kick off an 820 MB download, rewrite the Google sign-in configuration,
+    turn usage reporting on, or drive the window. From this computer it is the
+    owner, exactly as before; from elsewhere, a session or a pairing token.
+    """
+    return get_current_user(request, db, session_token)
+
+
+@app.post("/api/client-log", dependencies=[Depends(_signed_in)])
 def client_log(entry: ClientLog):
     # Written straight to a file rather than through the logging config. The
     # first attempt used logger.warning and nothing arrived: the file handler
@@ -519,7 +532,7 @@ class UpdateDownloadRequest(BaseModel):
     platform: str = "windows"
 
 
-@app.post("/api/updates/download")
+@app.post("/api/updates/download", dependencies=[Depends(_signed_in)])
 def download_update(req: UpdateDownloadRequest):
     """Start fetching the published installer, and return straight away.
 
@@ -558,7 +571,7 @@ class UpdateInstallRequest(BaseModel):
     path: str
 
 
-@app.post("/api/updates/install")
+@app.post("/api/updates/install", dependencies=[Depends(_signed_in)])
 def install_update(req: UpdateInstallRequest):
     """Open the downloaded installer and stand aside.
 
@@ -609,7 +622,7 @@ def usage_reporting_status():
     return usage_reporting.status()
 
 
-@app.post("/api/usage-reporting")
+@app.post("/api/usage-reporting", dependencies=[Depends(_signed_in)])
 async def set_usage_reporting(request: Request):
     """Turn anonymous usage reporting on or off. The choice is honoured."""
     body = await request.json()
@@ -741,6 +754,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Refuses requests a foreign web page makes - see app/origin_guard.py. Added
+# after CORS so it wraps it and sees every request, WebSockets included.
+from app.origin_guard import OriginGuard  # noqa: E402
+
+app.add_middleware(OriginGuard)
 
 # Security headers middleware
 _GOOGLE_CONFIG_FILE = os.path.join(settings.DATA_DIR, "google_oauth.json")
@@ -967,7 +986,7 @@ async def google_sign_in(req: GoogleSignInRequest, response: Response, request: 
     return _finish_provider_login({**claims, "provider": "google"}, response, request, db)
 
 
-@app.post("/api/auth/google/config")
+@app.post("/api/auth/google/config", dependencies=[Depends(_signed_in)])
 async def save_google_client_id(request: Request):
     """Store the OAuth client id so Google Sign-In can be switched on.
 
@@ -1117,15 +1136,34 @@ def get_current_user(request: Request, db: Session = Depends(get_db), session_to
         # Remote callers are unchanged: the companion phone authenticates with
         # a pairing token above and never reaches here, and a device id from
         # off-machine still identifies its own account.
-        device_id = LOCAL_OWNER_DEVICE_ID
-    elif not device_id:
-        device_id = f"guest_{hashlib.md5(client_ip.encode()).hexdigest()[:12]}"
+        return _get_or_create_device_user(db, LOCAL_OWNER_DEVICE_ID, device_fingerprint)
 
-    if device_id:
-        user = _get_or_create_device_user(db, device_id, device_fingerprint)
-        return user
-        
-    raise HTTPException(status_code=401, detail="Authentication required. Please log in.")
+    # From anywhere else, a credential or nothing.
+    #
+    # This used to invent an account for a remote caller that sent no token -
+    # `guest_<hash of its IP>`, approved - or one per X-Device-ID it chose to
+    # send, and let it in. The app listens on 0.0.0.0 so the paired phone can
+    # reach it, so that put every "signed-in" route within reach of anyone on
+    # the same Wi-Fi: chats, files, screenshots, desktop control, and
+    # /api/terminal/run, which runs any shell command. The companion routes
+    # were closed against exactly this earlier (companion.get_current_user_dep);
+    # these were not.
+    #
+    # A paired phone is not a stranger: pairing is the owner saying, at their
+    # own keyboard, that this device may act for them, and it carries the
+    # token it was issued. A browser on another device signs in and has a
+    # session token, checked above.
+    paired = (request.headers.get("X-Companion-Token", "")
+              or request.query_params.get("companion_token", "")).strip()
+    if paired:
+        from app.models import PairedDevice
+        device = db.query(PairedDevice).filter(PairedDevice.token == paired).first()
+        holder = db.query(User).filter(User.id == device.user_id).first() if device else None
+        if holder:
+            return holder
+        raise HTTPException(status_code=401, detail="That device is no longer paired.")
+
+    raise HTTPException(status_code=401, detail="Sign in to use SMARAN.AI from another device.")
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
     """Dependency that requires admin role."""
@@ -3273,7 +3311,7 @@ def speech_gpu_status():
     return gpu_speech.status()
 
 
-@app.post("/api/speech/gpu/install")
+@app.post("/api/speech/gpu/install", dependencies=[Depends(_signed_in)])
 def speech_gpu_install():
     """Fetch the CUDA libraries so the card can be used. Does not block.
 
@@ -5938,7 +5976,7 @@ def get_available_models(current_user: User = Depends(get_current_user)):
     return res
 
 
-@app.get("/api/system/device-specs")
+@app.get("/api/system/device-specs", dependencies=[Depends(_signed_in)])
 def get_device_specs():
     """Do not expose server or container hardware to web clients."""
     return {
@@ -5946,7 +5984,7 @@ def get_device_specs():
         "message": "Device capabilities are collected locally in your browser."
     }
 
-@app.get("/api/system/container-info")
+@app.get("/api/system/container-info", dependencies=[Depends(_signed_in)])
 def container_info():
     image = os.getenv("SMARAN_IMAGE", "shashwatmishra062/smaran-ai:2.8.2")
     container_id = os.getenv("HOSTNAME", "unknown")
@@ -6192,7 +6230,7 @@ _client_device_cache: dict = {}
 _client_device_ts: float = 0.0
 
 
-@app.post("/api/client-device")
+@app.post("/api/client-device", dependencies=[Depends(_signed_in)])
 async def report_client_device(request: Request):
     """Accept browser-reported device capabilities and cache them in memory.
 
@@ -6297,7 +6335,7 @@ def _merge_client_device(telemetry: dict) -> dict:
     return result
 
 
-@app.get("/api/telemetry")
+@app.get("/api/telemetry", dependencies=[Depends(_signed_in)])
 def get_telemetry_endpoint(db: Session = Depends(get_db)):
     time_limit = datetime.now() - timedelta(minutes=15)
     active_sessions = db.query(ChatSession).filter(ChatSession.updated_at >= time_limit).count()
@@ -6585,6 +6623,35 @@ def live_voice_status(current_user: User = Depends(get_current_user)):
     }
 
 
+def websocket_caller_allowed(websocket: WebSocket) -> bool:
+    """The WebSocket form of get_current_user's rule.
+
+    WebSockets were accepted from anyone who could reach the port - and the app
+    listens on 0.0.0.0 - so a stranger on the same Wi-Fi could stream a voice
+    call through the owner's Gemini key or run their local model. The same
+    rule as HTTP now: this computer, a paired phone (its token rides in the
+    query, since a browser cannot set headers on a WebSocket), or a signed-in
+    session cookie.
+    """
+    client = websocket.client.host if websocket.client else ""
+    if client in LOOPBACK_HOSTS:
+        return True
+    from app.models import PairedDevice
+    db = SessionLocal()
+    try:
+        paired = (websocket.query_params.get("companion_token") or "").strip()
+        if paired and db.query(PairedDevice).filter(PairedDevice.token == paired).first():
+            return True
+        token = (websocket.cookies.get("session_token") or "").strip()
+        if token:
+            user = db.query(User).filter(User.session_token == token).first()
+            if user and user.session_expires and user.session_expires > datetime.now():
+                return True
+    finally:
+        db.close()
+    return False
+
+
 @app.websocket("/ws/voice/live")
 async def websocket_voice_live(websocket: WebSocket):
     """Bridge the browser to Gemini Live for real-time spoken conversation.
@@ -6593,6 +6660,9 @@ async def websocket_voice_live(websocket: WebSocket):
     starts playing while the model is still talking and the user can interrupt
     it. The API key stays on this side and is never sent to the page.
     """
+    if not websocket_caller_allowed(websocket):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
 
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -6768,6 +6838,9 @@ async def websocket_voice_live(websocket: WebSocket):
 
 @app.websocket("/ws/telemetry")
 async def websocket_telemetry(websocket: WebSocket):
+    if not websocket_caller_allowed(websocket):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     db = SessionLocal()
     async def watch_disconnect():
@@ -7775,7 +7848,7 @@ async def terminal_context_endpoint(current_user: User = Depends(get_current_use
             "timeout": terminal.DEFAULT_TIMEOUT}
 
 
-@app.get("/api/window/status")
+@app.get("/api/window/status", dependencies=[Depends(_signed_in)])
 async def window_status_endpoint():
     """Whether this window can be pinned above other applications."""
     from app import host_window
@@ -7783,7 +7856,7 @@ async def window_status_endpoint():
     return host_window.status()
 
 
-@app.post("/api/window/pip")
+@app.post("/api/window/pip", dependencies=[Depends(_signed_in)])
 async def window_pip_endpoint(request: Request):
     """Pin the desktop window above the others, or put it back.
 
@@ -7891,7 +7964,7 @@ class SystemActionExecuteRequest(PydanticBaseModel):
 # These four ran unauthenticated while every sibling route required a user.
 # The execute one performs machine operations, so reaching it without a
 # session was the gap that mattered.
-@app.get("/api/system-agent/status")
+@app.get("/api/system-agent/status", dependencies=[Depends(_signed_in)])
 def get_system_agent_status():
     return {
         "host_bridge": system_agent_bridge_status(),
@@ -8406,7 +8479,7 @@ app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="stati
 from . import control_session as _control_session  # noqa: E402
 
 
-@app.post("/api/control/session", tags=["control"])
+@app.post("/api/control/session", tags=["control"], dependencies=[Depends(_signed_in)])
 async def start_control_session(payload: dict | None = None):
     """Open a scope that desktop actions can be run under, and stopped as one."""
     reason = (payload or {}).get("reason", "")
@@ -8416,14 +8489,14 @@ async def start_control_session(payload: dict | None = None):
     return {"session": token, "active": _control_session.active()}
 
 
-@app.get("/api/control/session", tags=["control"])
+@app.get("/api/control/session", tags=["control"], dependencies=[Depends(_signed_in)])
 async def list_control_sessions():
     """What is currently allowed to drive this machine."""
     running = _control_session.active()
     return {"active": running, "running": bool(running)}
 
 
-@app.post("/api/control/stop", tags=["control"])
+@app.post("/api/control/stop", tags=["control"], dependencies=[Depends(_signed_in)])
 async def stop_control(payload: dict | None = None):
     """Stop one session, or all of them.
 
@@ -8450,6 +8523,9 @@ async def stop_control(payload: dict | None = None):
 
 from app import companion as _companion  # noqa: E402
 app.include_router(_companion.router)
+
+from app.live_browser_routes import router as _live_browser_router  # noqa: E402
+app.include_router(_live_browser_router)
 
 
 # Register the SPA fallback last so it cannot swallow model-storage, engine

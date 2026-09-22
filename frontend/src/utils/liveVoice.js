@@ -10,6 +10,8 @@
  * in the packaged desktop window and made spoken input silently do nothing.
  */
 
+import { companionHeaders } from './companionAuth';
+
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
 
@@ -106,7 +108,11 @@ export class LiveVoiceSession {
       // or a camera. The messages either sends are identical, so the only
       // difference here is the path.
       const path = this.engine === 'local' ? '/ws/voice/local' : '/ws/voice/live';
-      this.socket = new WebSocket(`${scheme}//${base.host}${path}`);
+      // A paired phone proves itself with its pairing token; a browser cannot
+      // put headers on a WebSocket, so it rides in the query.
+      const paired = companionHeaders()['X-Companion-Token'];
+      const query = paired ? `?companion_token=${encodeURIComponent(paired)}` : '';
+      this.socket = new WebSocket(`${scheme}//${base.host}${path}${query}`);
     } catch  {
       this.handlers.onError?.('Could not open the real-time voice channel.');
       this._emit('error');

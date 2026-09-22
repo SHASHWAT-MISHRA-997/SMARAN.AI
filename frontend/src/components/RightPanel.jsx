@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Activity, Cpu, HardDrive, LayoutDashboard, Shield, Wifi, X, Zap, Gauge, Battery, Monitor, AlertTriangle, ExternalLink } from "lucide-react";
 import { API_BASE } from "../context/AuthContext";
+import { companionHeaders } from "../utils/companionAuth";
 
 const UNAVAILABLE = "Unavailable";
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
@@ -31,7 +32,9 @@ const rate = (value) => {
 };
 const wsUrl = () => {
   const base = new URL(API_BASE || window.location.origin, window.location.origin);
-  return `${base.protocol === "https:" ? "wss:" : "ws:"}//${base.host}/ws/telemetry`;
+  const paired = companionHeaders()["X-Companion-Token"];
+  const query = paired ? `?companion_token=${encodeURIComponent(paired)}` : "";
+  return `${base.protocol === "https:" ? "wss:" : "ws:"}//${base.host}/ws/telemetry${query}`;
 };
 
 /**

@@ -135,24 +135,23 @@ def test_the_fingerprint_the_app_sends_is_actually_stored():
 
 def remote_whoami(device_id=None):
     headers = {"X-Device-ID": device_id} if device_id else {}
-    res = remote.get("/api/auth/me", headers=headers)
-    assert res.status_code == 200, res.text
-    return res.json()
+    return remote.get("/api/auth/me", headers=headers)
 
 
 def test_a_caller_from_the_network_is_not_the_owner():
     """Collapsing to one account must stop at the edge of this machine.
 
     The phone reaches the app over the LAN. It must not inherit the desktop
-    owner's conversations because it happened to omit a header.
+    owner's conversations because it happened to omit a header - and, since
+    anonymous remote callers stopped being given accounts of their own at all,
+    it is refused outright (tests/test_remote_callers_must_sign_in.py).
     """
-    owner = whoami("device_owner01_12345678")
-    assert remote_whoami("device_phone01_12345678")["id"] != owner["id"]
-    assert remote_whoami()["id"] != owner["id"]
+    whoami("device_owner01_12345678")
+    assert remote_whoami("device_phone01_12345678").status_code == 401
+    assert remote_whoami().status_code == 401
 
 
-def test_two_devices_on_the_network_stay_separate():
-    """The fix must not merge distinct remote callers either."""
-    a = remote_whoami("device_phoneaa_12345678")
-    b = remote_whoami("device_phonebb_12345678")
-    assert a["id"] != b["id"]
+def test_no_account_is_invented_for_a_caller_on_the_network():
+    """Two strangers on the Wi-Fi used to get an account each. Now neither does."""
+    assert remote_whoami("device_phoneaa_12345678").status_code == 401
+    assert remote_whoami("device_phonebb_12345678").status_code == 401
