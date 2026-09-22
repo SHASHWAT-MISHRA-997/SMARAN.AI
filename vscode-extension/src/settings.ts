@@ -8,9 +8,8 @@
  * still read once and moved across, so nothing anyone already typed is lost,
  * and it is emptied afterwards so it does not sit there as a copy.
  *
- * Nothing here needs the SMARAN.AI app. If it is installed, keys already
- * entered there are read off disk as a convenience - the app does not have to
- * be running, and does not have to exist.
+ * Nothing here needs the SMARAN.AI app, and nothing here reads its keys: a key
+ * is used by the extension only if it was entered in the extension.
  */
 
 import * as fs from 'fs';

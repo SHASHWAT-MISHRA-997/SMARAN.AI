@@ -337,6 +337,33 @@ export interface PreparedChange {
     preview: string;
 }
 
+/**
+ * The file a model meant, without the Markdown it wrapped it in.
+ *
+ * Models trained on chat answer "write this file" the way they answer a
+ * question: a blank line, ```javascript, the code, ```. That went to disk
+ * verbatim, so stats.cjs began with a fence and could not even be loaded -
+ * and the result shown back to the model looked like success.
+ *
+ * Only a fence around the whole content is removed, only when nothing inside
+ * it opens another, and never in a Markdown file, where a fenced block can be
+ * exactly what was wanted.
+ */
+export function unwrapFence(content: string, filePath: string): string {
+    if (/\.(md|markdown|mdx)$/i.test(filePath)) return content;
+    const lines = content.split(/\r?\n/);
+    let first = 0;
+    let last = lines.length - 1;
+    while (first <= last && !lines[first].trim()) first += 1;
+    while (last >= first && !lines[last].trim()) last -= 1;
+    if (last - first < 1) return content;
+    if (!/^\s*```[\w.+#-]*\s*$/.test(lines[first]) || !/^\s*```\s*$/.test(lines[last])) return content;
+    const inner = lines.slice(first + 1, last);
+    if (inner.some((line) => /^\s*```/.test(line))) return content;
+    const eol = content.includes('\r\n') ? '\r\n' : '\n';
+    return inner.join(eol) + eol;
+}
+
 /** Read and calculate only; approval sees the same bytes that will be saved. */
 export function prepareFileChange(name: string, args: Record<string, string>, root: string): PreparedChange {
     if (!args.path?.trim()) throw new ToolError(`${name} needs path.`);
@@ -347,7 +374,7 @@ export function prepareFileChange(name: string, args: Record<string, string>, ro
     let after: string;
     if (name === 'write_file') {
         if (!('content' in args)) throw new ToolError('write_file needs content.');
-        after = args.content;
+        after = unwrapFence(args.content, args.path);
     } else {
         const find = args.find ?? '';
         if (!('replace' in args)) throw new ToolError('edit_file needs replace.');

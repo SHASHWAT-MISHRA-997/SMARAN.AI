@@ -27,6 +27,26 @@ exports.run = async function () {
     });
     return request;
   };
+  // Ollama and LM Studio answer over plain http, which the hook above does
+  // not see. Their raw replies are what shows whether a rejected tool call
+  // was the parser being strict or the model being wrong.
+  const http = require('node:http');
+  const originalHttpRequest = http.request;
+  http.request = function (...args) {
+    const request = originalHttpRequest.apply(this, args);
+    request.on('response', response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => {
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          const content = data.message?.content ?? data.choices?.[0]?.message?.content;
+          if (typeof content === 'string') entries.push({ kind: 'raw-reply', content: content.slice(0, 4000) });
+        } catch {}
+      });
+    });
+    return request;
+  };
   const save = (extra) => fs.writeFileSync(resultPath, JSON.stringify({ checks, entries, ...extra }, null, 2));
   const extension = vscode.extensions.getExtension('ShashwatMishra.smaran-ai-codex');
   assert.ok(extension);
@@ -59,10 +79,16 @@ exports.run = async function () {
     entries.push({ kind: 'approval-audit', tool: call.name, allowed });
     return allowed;
   };
-  const keyFile = path.join(audit, '../../data/cloud_keys.json');
-  const provider = process.env.SMARAN_AUDIT_PROVIDER === 'ollama' ? '' : (process.env.SMARAN_AUDIT_PROVIDER || 'openrouter');
-  const key = provider ? String((provider === 'openrouter' && process.env.SMARAN_AUDIT_OPENROUTER_KEY) || JSON.parse(fs.readFileSync(keyFile, 'utf8'))[provider] || '').trim() : '';
-  if (provider && !key) {
+  // The app's own key file by default; SMARAN_AUDIT_KEY_FILE points at the
+  // installed app's store so a run can use keys saved there without anyone
+  // copying them into an environment variable.
+  const keyFile = process.env.SMARAN_AUDIT_KEY_FILE || path.join(audit, '../../data/cloud_keys.json');
+  const requested = process.env.SMARAN_AUDIT_PROVIDER || 'openrouter';
+  // Ollama is the empty provider; LM Studio is named. Neither takes a key.
+  const provider = requested === 'ollama' ? '' : requested;
+  const local = provider === '' || provider === 'lmstudio';
+  const key = local ? '' : String((provider === 'openrouter' && process.env.SMARAN_AUDIT_OPENROUTER_KEY) || JSON.parse(fs.readFileSync(keyFile, 'utf8'))[provider] || '').trim();
+  if (!local && !key) {
     save({ passed: false, running: false, error: 'Configured provider credential is unavailable' });
     throw new Error('A project-configured provider key is needed for the live scenario');
   }
@@ -105,5 +131,6 @@ exports.run = async function () {
     AgentPanel.prototype.ask = originalAsk;
     Keys.prototype.get = originalGet;
     https.request = originalRequest;
+    http.request = originalHttpRequest;
   }
 };

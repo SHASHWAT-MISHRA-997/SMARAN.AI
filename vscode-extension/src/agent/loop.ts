@@ -18,6 +18,8 @@
  * workspace boundaries and approval policy before an action executes.
  */
 
+import * as path from 'path';
+import * as fs from 'fs';
 import { canDelegate, setDelegator, summarise, DELEGATE_STEPS, DELEGATE_SYSTEM } from './delegate';
 import { decide, Policy } from './modes';
 import { Choice, complete, Message, NativeTool, NATIVE_CALL_PREFIX } from './models';
@@ -153,6 +155,25 @@ export function looksTruncated(text: string): boolean {
     if (/<tool[_-]?call\s+name=/i.test(body)
         && !/<\/(?:tool[_-]?call|tool)>/i.test(body)) return true;
     return /<invoke\s+name=/i.test(body) && !/<\/invoke>/i.test(body);
+}
+
+/**
+ * The call is missing only its closing tag: the last argument it opened was
+ * closed, and nothing follows.
+ *
+ * qwen2.5-coder:7b writes a whole file, closes </content>, and then stops
+ * without </tool_call> - three times running, on the same file. The content
+ * was complete every time, but the rule against running a cut-off write
+ * refused it, and the run ended as "unusable tool calls". A reply that was
+ * really cut off mid-file ends inside the content, not on its closing tag,
+ * so it is still refused - and so is one that closed <path> but never sent
+ * the content at all: every argument the tool takes has to be there.
+ */
+export function endsOnClosedArgument(text: string, name: string, args: Record<string, string>): boolean {
+    const end = (text || '').trimEnd().match(/<\/([a-z_]+)>$/i);
+    if (!end || !Object.prototype.hasOwnProperty.call(args, end[1].toLowerCase())) return false;
+    const needed = TOOLS[name]?.args || [];
+    return needed.every((arg) => Object.prototype.hasOwnProperty.call(args, arg));
 }
 
 /** Where a tool call starts, in either spelling, or -1. */
@@ -318,6 +339,65 @@ export async function plan(task: string, choice: Choice): Promise<string> {
         ],
         choice,
     );
+}
+
+/**
+ * A reply that types out a tool result instead of calling the tool.
+ *
+ * Small models learn the shape of the results they are shown - "Created
+ * stats.test.cjs." then "stats.test.cjs: +25 -0" then the diff - and, a few
+ * steps in, start writing that shape themselves in place of a call. Nothing
+ * runs, no file appears, and because the reply has no tool call in it the loop
+ * took it as the final answer and reported "Finished". qwen2.5-coder:7b did
+ * exactly this on its third step of a four-file task.
+ *
+ * Judged against the disk rather than the wording, so a true summary that
+ * repeats a real result line is never mistaken for one: it is an imitation
+ * only if a file it claims to have made or changed does not exist.
+ */
+export function imitatedResultPaths(reply: string, root: string): string[] {
+    const claimed = new Set<string>();
+    for (const match of reply.matchAll(/^\s*[+>]?\s*([^\s:`*]+\.[\w]+): \+\d+ -\d+\s*$/gm)) claimed.add(match[1]);
+    for (const match of reply.matchAll(/^\s*(?:Created|Updated|Wrote|Edited) ([^\s`*]+\.[\w]+)\.\s*$/gm)) claimed.add(match[1]);
+    const missing: string[] = [];
+    for (const name of claimed) {
+        try {
+            if (!fs.existsSync(path.resolve(root, name))) missing.push(name);
+        } catch {
+            missing.push(name);
+        }
+    }
+    return missing;
+}
+
+/**
+ * A reply that shows a file instead of writing it.
+ *
+ * "Here's the initial content for `stats.cjs`:" and a code block, then the
+ * same for the tests - and no call. The loop saw no tool call, printed the
+ * code as the answer and reported the task finished, with nothing on disk.
+ *
+ * Deliberately narrow. The reply has to say it is creating something, has to
+ * contain code, and has to name a file that does not exist - so "here is an
+ * example of a debounce function" is still an answer, and a summary of files
+ * that really were written is not caught.
+ */
+export function describedButUnwritten(reply: string, root: string): string[] {
+    if (!/```/.test(reply)) return [];
+    if (!/\b(let'?s (create|write|add|make)|let me (create|write)|i'?ll (create|write|add|make)|creating|here'?s the (initial |full |complete |updated )?(content|code|file) for|create (the|a|an) (file|new file)?)/i.test(reply)) return [];
+    const named = new Set<string>();
+    for (const match of reply.matchAll(/`([\w./-]+\.[A-Za-z][\w]{0,9})`/g)) named.add(match[1]);
+    for (const match of reply.matchAll(/^\s*(?:\/\/|#|<!--)\s*([\w./-]+\.[A-Za-z][\w]{0,9})\s*(?:-->)?\s*$/gm)) named.add(match[1]);
+    const missing: string[] = [];
+    for (const name of named) {
+        if (/^(node|npm|README)$/i.test(name) || /^https?:/i.test(name)) continue;
+        try {
+            if (!fs.existsSync(path.resolve(root, name))) missing.push(name);
+        } catch {
+            missing.push(name);
+        }
+    }
+    return missing;
 }
 
 export async function* run(
@@ -488,7 +568,8 @@ ${DELEGATE_SYSTEM}` : '')
            cut off, and running it would put half a file on disk and report
            success. So a truncated call that changes something is treated as
            no call at all, and asked for again. */
-        if (call && looksTruncated(reply) && changesThings(call.name)) {
+        if (call && looksTruncated(reply) && changesThings(call.name)
+                && !endsOnClosedArgument(reply, call.name, call.args)) {
             call = undefined;
         }
 
@@ -522,6 +603,35 @@ ${DELEGATE_SYSTEM}` : '')
                         + 'and no other, with nothing after it:\n\n'
                         + '<tool_call name="read_file">\n<path>src/main.py</path>\n'
                         + '</tool_call>',
+                });
+                continue;
+            }
+            // Only where writing is allowed: in read-only (Plan) a reply that
+            // shows the code is exactly the right answer.
+            const imitated = policy.reach === 'read' ? [] : [...new Set([
+                ...imitatedResultPaths(reply, root),
+                ...describedButUnwritten(reply, root),
+            ])];
+            if (imitated.length) {
+                malformedReplies += 1;
+                if (malformedReplies >= 3) {
+                    yield { type: 'error', message: `The model kept describing changes instead of making them - ${imitated.join(', ')} ${imitated.length === 1 ? 'was' : 'were'} never written. The task is incomplete. Try a stronger coding model; files already written are preserved.` };
+                    return;
+                }
+                const said = proseBefore(reply.split(/^\s*(?:Created|Updated|Wrote|Edited) /m)[0]);
+                if (said) yield { type: 'message', text: said };
+                yield {
+                    type: 'note',
+                    text: `That reply showed ${imitated.join(', ')} but did not write ${imitated.length === 1 ? 'it' : 'them'} - no tool ran. Asking for the real call.`,
+                };
+                messages.push({ role: 'assistant', content: reply });
+                messages.push({
+                    role: 'user',
+                    content: `Nothing was written: ${imitated.join(', ')} does not exist. Showing code or `
+                        + 'describing a result does not create a file - only calling write_file does, and '
+                        + 'results come from the tool, never from you. Write the first file now - one call, '
+                        + 'in this form, with nothing after it:\n\n'
+                        + `<tool_call name="write_file">\n<path>${imitated[0]}</path>\n<content>...the whole file...</content>\n</tool_call>`,
                 });
                 continue;
             }

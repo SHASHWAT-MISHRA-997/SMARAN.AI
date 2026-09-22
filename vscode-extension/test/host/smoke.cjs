@@ -12,8 +12,8 @@ exports.run = async function () {
   try {
     const extension = vscode.extensions.getExtension('ShashwatMishra.smaran-ai-codex');
     assert.ok(extension, 'Packaged extension is discoverable');
-    assert.equal(extension.packageJSON.version, '2.20.1');
-    checks.push('packaged extension 2.20.1 discovered');
+    assert.equal(extension.packageJSON.version, require('../../package.json').version);
+    checks.push('packaged extension discovered at its manifest version');
     await extension.activate();
     const panelPath = path.join(extension.extensionPath, 'out', 'agentPanel.js');
     // Windows drive-letter casing can give require() a second module instance.

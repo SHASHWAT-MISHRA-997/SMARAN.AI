@@ -81,13 +81,21 @@ tree both fail as a message rather than as a file somewhere else on your disk.
 **Ollama, on your machine.** `ollama pull qwen2.5-coder:7b`, leave the
 provider empty. Nothing leaves the computer.
 
+**Or LM Studio, on your machine.** Start its local server (Developer tab →
+Start server, or `lms server start`), load a model, and choose **LM Studio**
+in Setup. The extension talks to `http://127.0.0.1:1234/v1` unless
+`smaran.lmStudioUrl` says otherwise. If LM Studio lists a model it cannot
+run - it has no engine installed - the panel says so and tells you the fix
+(Settings → Runtime → llama.cpp, or `lms runtime get llama.cpp`).
+
 **Or a provider key.** Groq, Google Gemini, OpenRouter and NVIDIA all have
 free tiers; Anthropic, OpenAI and DeepSeek are paid. Paste it into Setup — it
 goes into your operating system's keychain, not settings.json, and is sent to
 that provider and nowhere else. There is no server of ours in between.
 
-If you happen to have the SMARAN.AI desktop app installed, keys you entered
-there are picked up so you do not type them twice. It never has to be running.
+Keys entered in the SMARAN.AI desktop app are not read from here: the
+extension uses only the keys you give it, so what Setup shows is exactly what
+it has and Remove really removes it.
 
 ## About the model
 

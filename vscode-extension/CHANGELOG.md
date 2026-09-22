@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.21.0
+
+Found by giving the extension a real task in a real VS Code - build a small
+library with tests and a README - with qwen2.5-coder:7b through Ollama, and
+reading every step.
+
+**A file wrapped in a Markdown fence is written without it.** The model sent
+```` ```javascript ```` around the file and the fence went to disk, so
+`stats.cjs` began with a fence and could not load. A fence around the whole
+file is removed; Markdown files, and code that merely contains a fence, are
+left alone.
+
+**"Finished" means the files exist.** A model that typed out what a tool
+result looks like ("Created stats.test.cjs." and a diff), or showed a file in
+its reply ("Here's the content for `stats.cjs`:") without calling a tool,
+ended the run as finished with nothing on disk. Now, when a file it claims to
+have written does not exist, it is told so and asked for the real call. Judged
+against the disk, so a true summary is never mistaken for one - and never in
+Plan mode, where showing code is the right answer.
+
+**A complete write missing only `</tool_call>` is run.** The same model closed
+`</content>` and stopped, three times running; the rule against running a
+cut-off write refused it every time. A write whose content closed and whose
+arguments are all present is complete; one cut off inside the content, or
+missing its content, is still refused.
+
+**LM Studio with no engine installed says what to do.** Its own message named
+the problem but not the fix; the fix is now appended.
+
+**Documentation.** The key setting still claimed keys stay in settings.json
+and that the desktop app's keys are picked up - neither has been true since
+keys moved to the keychain. Corrected, and LM Studio is described in the
+README.
+
 ## 2.20.0
 
 **It works with models that spell the tag differently.** nemotron-3-super

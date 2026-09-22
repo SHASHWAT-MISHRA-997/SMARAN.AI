@@ -95,7 +95,7 @@ function post(url: string, payload: unknown, headers: Record<string, string>): P
             if (error.code === 'ECONNREFUSED' && target.port === '11434') {
                 reject(new Error(
                     'Ollama is not running on this machine, and no cloud provider is configured. ' +
-                    'Start Ollama, or set smaran.provider and a key in smaran.apiKeys.',
+                    'Start Ollama, or choose a provider and paste its key in the Setup tab of the SMARAN.AI panel.',
                 ));
                 return;
             }
@@ -113,6 +113,14 @@ function contentOrThrow(provider: string, status: number, body: string): unknown
             const parsed = JSON.parse(body);
             detail = parsed?.error?.message || parsed?.detail || detail;
         } catch { /* the body was not the error shape */ }
+        // LM Studio lists a downloaded model even when it has no engine that
+        // can run it, so choosing it looked fine until the first message.
+        // Its own wording names the problem but not the fix.
+        if (/No LM Runtime found/i.test(String(detail))) {
+            detail += ' LM Studio has no engine installed for this model. In LM Studio open '
+                + 'Settings → Runtime and install llama.cpp, or run `lms runtime get llama.cpp`, '
+                + 'then send the task again.';
+        }
         const error = new Error(`${provider} refused the request (HTTP ${status}). ${detail}`);
         (error as Error & { status?: number }).status = status;
         throw error;
