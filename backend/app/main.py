@@ -33,6 +33,7 @@ import shutil
 import magic
 import hashlib
 import secrets
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 # Tuple was missing, and why it went unnoticed is worth writing down.
@@ -1680,11 +1681,19 @@ def get_document_content(doc_id: int, db: Session = Depends(get_db), current_use
 
 # --- Chat Routing & streaming RAG ---
 
+# Where a conversation lives. Design Studio asked for "design" sessions and
+# was given "chat" ones - this list held only chat and code - and every turn
+# then rewrote the section to "chat" again because Design Studio did not
+# send one. Each generated page appeared in the Chat history as a
+# conversation nobody had started there.
+CHAT_SECTIONS = ("chat", "code", "design")
+
+
 @app.post("/api/chat/sessions", response_model=ChatSessionResponse)
 def create_session(session_data: Optional[ChatSessionCreate] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session_id = uuid.uuid4().hex
     title = (session_data.title if session_data and session_data.title else None) or f"Chat Session {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    section = (session_data.section if session_data and session_data.section in ("chat", "code") else "chat")
+    section = (session_data.section if session_data and session_data.section in CHAT_SECTIONS else "chat")
     session = ChatSession(id=session_id, user_id=current_user.id, title=title, section=section)
     db.add(session)
     db.commit()
@@ -1703,7 +1712,7 @@ def list_sessions(section: Optional[str] = None, db: Session = Depends(get_db), 
         .all()
     )
     query = db.query(ChatSession).filter(ChatSession.user_id == current_user.id)
-    if section in ("chat", "code"):
+    if section in CHAT_SECTIONS:
         query = query.filter(ChatSession.section == section)
     rows = query.order_by(ChatSession.updated_at.desc()).all()
     return [
@@ -2762,6 +2771,21 @@ def _is_vision_model(model_id: str) -> bool:
     return any(ind in mid for ind in vision_indicators)
 
 
+# How long a video job chat will start without asking first. Three hours is
+# already a long time to hold a GPU; a five minute clip on a 6 GB card is closer
+# to a week, and nobody types "5 minute video" meaning that.
+#
+# These two were deleted along with the fake-video drawer that sat beside them
+# (922c666), while the chat video path still used both. Asking chat for a video
+# then raised NameError before anything started.
+CHAT_VIDEO_AUTOSTART_LIMIT_SECONDS = 3 * 3600
+
+VIDEO_TAG_TEMPLATE = (
+    "\n" + '<video controls style="max-width:100%" '
+    'src="/api/video/file/{job_id}"></video>'
+)
+
+
 def call_sd_txt2img_bridge(prompt: str, aspect: str = None,
                            target: str = None) -> str:
     service_url = os.getenv("LOCAL_IMAGE_SERVICE_URL", "http://media-generator:8002")
@@ -2957,6 +2981,41 @@ def _clean_key(value) -> str:
     # Every kind of whitespace, not just spaces: a newline is the one that
     # actually causes this, and a tab would do it too.
     return "".join(str(value).split())
+
+
+def _clean_user_error(text) -> str:
+    """An error message fit to show someone, with the secrets taken out.
+
+    Five places in the streaming paths called this and it was never written,
+    so the moment any of them ran - a provider timing out, a local server
+    refusing the connection - the error handler itself raised NameError. The
+    handler dies inside the response body, after the headers have gone, so
+    there is nothing to show a 500 in: the reply simply stops mid-sentence
+    with no message at all. The failure that was being reported was hidden by
+    the reporting.
+
+    Provider errors quote the request back, and the request carries the key.
+    An error is displayed in the chat and copied into bug reports, so the key
+    is removed here rather than trusted not to appear.
+    """
+    message = " ".join(str(text or "").split())
+    if not message:
+        return "The request failed without saying why."
+    # Anything key-shaped: the provider prefixes (sk-, gsk_, hf_, AIza...) and
+    # whatever follows an Authorization header.
+    message = re.sub(r"(?i)(bearer\s+)\S+", r"\1[key hidden]", message)
+    message = re.sub(
+        r"\b(?:sk|gsk|hf|xai|nvapi|csk|sk-or-v1)[-_][A-Za-z0-9\-_]{6,}",
+        "[key hidden]", message)
+    # Google's keys have no separator: "AIza" and then the rest.
+    message = re.sub(r"\bAIza[A-Za-z0-9\-_]{16,}", "[key hidden]", message)
+    # A long unbroken token next to the word "key" is a key even if the
+    # provider invented its own prefix.
+    message = re.sub(r"(?i)(api[_\- ]?key[\"'\s:=]+)[A-Za-z0-9\-_]{12,}",
+                     r"\1[key hidden]", message)
+    if len(message) > 400:
+        message = message[:400].rstrip() + "..."
+    return message
 
 
 def _load_persisted_cloud_keys() -> None:
@@ -3842,6 +3901,25 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
 
     # Validate session
     req_section = getattr(chat_req, "section", "chat") or "chat"
+    if req_section not in CHAT_SECTIONS:
+        req_section = "chat"
+
+    # How much the model may wander. A question wants the same right answer
+    # every time, so chat and code stay near-greedy. A design does not: Design
+    # Studio promises a different page for the same brief, and at 0.1 the two
+    # runs it was tested with came back byte-identical - 857 tokens, not one
+    # different - because the random "Variant=" tag in the prompt is six
+    # characters that near-greedy decoding simply ignores. Sites already
+    # sampled at 0.6-0.7 and varied; this brings Design Studio into line, and
+    # a fresh seed per turn stops a local server from replaying its last run.
+    if req_section == "design":
+        answer_temperature = 0.8
+        answer_seed = secrets.randbelow(2 ** 31)
+    else:
+        answer_temperature = 0.1
+        answer_seed = None
+    seed_option = {"seed": answer_seed} if answer_seed is not None else {}
+
     session = db.query(ChatSession).filter(ChatSession.id == chat_req.session_id).first()
     if not session:
         # Create dynamically if doesn't exist
@@ -4027,7 +4105,14 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             clean_root = ws_root.strip()
             system_prompt += f"\n\nACTIVE WORKSPACE DIRECTORY: {clean_root}\n"
             try:
-                import os
+                # No `import os` here. It is imported at the top of the file,
+                # and importing it again inside this function makes `os` a
+                # local of the function - which means the generator nested
+                # below reads it as a free variable that is unbound unless
+                # this one branch happened to run. Every chat turn that was
+                # not Code mode with a workspace folder therefore died on
+                # `os.getenv("OLLAMA_URL")` further down, taking all local
+                # inference with it.
                 if os.path.isdir(clean_root):
                     root_files = [f for f in os.listdir(clean_root) if not f.startswith(".")][:30]
                     system_prompt += f"Workspace Root Items: {', '.join(root_files)}\n"
@@ -4105,7 +4190,15 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
 
     # One bounded, source-linked archive view; do not also inject duplicate
     # 140-character snippets with an unsupported promise of complete recall.
-    if memory_is_active:
+    #
+    # Not for a design. Recall looks in the same section, so each new Design
+    # Studio page was handed the previous pages as "historical messages" -
+    # 2,400 extra tokens of earlier HTML for the same kind of brief - and the
+    # model did the obvious thing and reproduced them. Three fresh sessions
+    # came out 96-99% identical whatever the seed or temperature. A brief is
+    # meant to be answered on its own; the memory vault facts above (who the
+    # person is, what they prefer) still apply.
+    if memory_is_active and req_section != "design":
         from .conversation_memory import retrieve_conversations
         recalled = retrieve_conversations(db, current_user.id, session.id, chat_req.prompt, section=getattr(session, "section", "chat"))
         if recalled:
@@ -4831,7 +4924,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                         system_text = "\n\n".join(str(m.get('content', '')) for m in messages_payload if m.get('role') == 'system')
                         anthropic_messages = [{'role': m.get('role'), 'content': str(m.get('content', ''))} for m in messages_payload if m.get('role') in ('user', 'assistant')]
                         headers = {'x-api-key': api_key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json'}
-                        payload = {'model': model, 'messages': anthropic_messages, 'stream': True, 'temperature': 0.1, 'max_tokens': 4096}
+                        payload = {'model': model, 'messages': anthropic_messages, 'stream': True, 'temperature': answer_temperature, 'max_tokens': 4096}
                         if system_text:
                             payload['system'] = system_text
                         _route_begin(provider)
@@ -4901,7 +4994,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                             headers.update({'HTTP-Referer': 'http://localhost:3003', 'X-Title': 'SMARAN.AI'})
                         _route_begin(provider)
                         async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
-                            async with client.stream('POST', f'{endpoint}/chat/completions', headers=headers, json={'model': model, 'messages': messages_payload, 'stream': True, 'temperature': 0.1, 'max_tokens': 4096}) as response:
+                            async with client.stream('POST', f'{endpoint}/chat/completions', headers=headers, json={'model': model, 'messages': messages_payload, 'stream': True, 'temperature': answer_temperature, 'max_tokens': 4096}) as response:
                                 if response.status_code != 200:
                                     _note_route_failure(provider, model)
                                     failures.append(f'{provider}/{model}: HTTP {response.status_code}')
@@ -5150,7 +5243,8 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                             "messages":    messages_payload,
                             "stream":      True,
                             "stream_options": {"include_usage": True},
-                            "temperature": 0.1,
+                            "temperature": answer_temperature,
+                            **seed_option,
                             "max_tokens":  4096 if context_str else (1024 if (chat_req.web_search or web_references) else 2048),
                             "chat_template_kwargs": {"enable_thinking": False},
                         }
@@ -5215,7 +5309,8 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                 "stream": True,
                                 "think": False,
                                 "options": {
-                                    "temperature": 0.1,
+                                    "temperature": answer_temperature,
+                                    **seed_option,
                                     "num_ctx": hw_cfg.get("ctx_window", 16384),
                                     "num_predict": 4096 if (context_str or chat_req.web_search) else 8192
                                 }
@@ -5258,7 +5353,8 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                                     "messages": messages_payload,
                                     "stream": True,
                                     "stream_options": {"include_usage": True},
-                                    "temperature": 0.1,
+                                    "temperature": answer_temperature,
+                                    **seed_option,
                                     "max_tokens": 4096 if (context_str or chat_req.web_search) else 8192,
                                     "chat_template_kwargs": {"enable_thinking": False}
                                 }
@@ -6206,7 +6302,9 @@ def get_available_models(current_user: User = Depends(get_current_user)):
     if _available_models_cache["data"] is not None and (now - _available_models_cache["ts"] < 10):
         return dict(_available_models_cache["data"])
 
-    import json
+    # `json` is imported at the top of the file. Re-importing it here would
+    # make it a local of this function, which is the same trap that killed
+    # every local chat turn - see the note in chat_interaction.
     hw_config = {}
     hw_path = os.path.join(settings.DATA_DIR, "hardware_config.json")
     try:
@@ -7597,6 +7695,19 @@ def _validate_exact_hf_repository(
     assert_exact_hf_repository(expected_repo, resolved_repo)
     mark_hf_repository_verified(expected_repo)
     return info
+
+
+# What every model download is doing, keyed by model id: percent, sizes,
+# speed, ETA, status and error. Read by /api/models/download-status, which the
+# Model Hub polls, and by cancel-download.
+#
+# These were deleted in 010db94 along with a duplicate /api/models/compare
+# route they happened to sit under. Nothing failed at import, because the
+# names are only looked up when a route runs - so download-status and
+# cancel-download returned 500 on every call, and starting a download died
+# in its background thread with nothing shown at all.
+_download_progress: dict = {}
+_cancel_events: dict = {}
 
 
 def _run_bg_download(model_id: str, hf_token: str | None = None):

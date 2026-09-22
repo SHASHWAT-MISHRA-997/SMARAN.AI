@@ -407,6 +407,11 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
           session_id: session?.id,
           prompt: finalPrompt,
           collections: [],
+          /* Without this the backend assumed "chat": it sampled near-greedily,
+             so the Variant seed above changed nothing and the same brief
+             returned the same page byte for byte, and it re-filed the session
+             under Chat, where every design showed up as a stray conversation. */
+          section: 'design',
           ...(chosenModel?.provider
             ? {
               model: chosenModel.model,

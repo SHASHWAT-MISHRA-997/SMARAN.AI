@@ -1354,7 +1354,8 @@ class DesktopAgent:
         if sys.platform != "win32":
             return {"success": False, "error": "Listing windows is only supported on Windows."}
         try:
-            import ctypes
+            # ctypes itself is imported at the top of the file; see
+            # tests/test_names_resolve.py for why it is not imported again here.
             from ctypes import wintypes
 
             user32 = ctypes.windll.user32

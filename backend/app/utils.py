@@ -549,7 +549,7 @@ def fetch_url_content(url: str) -> str:
                 lines = [line.strip() for line in fast_text.splitlines() if line.strip()]
                 clean_body = "\n".join(lines)
                 
-                parts = [f"[Web Page: {title or urllib.parse.urlparse(url).netloc}]", f"URL: {fast_resp.url}"]
+                parts = [f"[Web Page: {title or urlparse(url).netloc}]", f"URL: {fast_resp.url}"]
                 if meta_desc:
                     parts.append(f"Meta Description: {meta_desc}")
                 if clean_body:
@@ -599,7 +599,7 @@ def fetch_url_content(url: str) -> str:
                 lines = [l.strip() for l in text.splitlines() if l.strip()]
                 clean_text = "\n".join(lines)
                 
-                parts = [f"[Web Page: {title or urllib.parse.urlparse(url).netloc}]", f"URL: {url}"]
+                parts = [f"[Web Page: {title or urlparse(url).netloc}]", f"URL: {url}"]
                 if meta_desc:
                     parts.append(f"Meta Description: {meta_desc}")
                 if clean_text:
