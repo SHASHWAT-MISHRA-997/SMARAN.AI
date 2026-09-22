@@ -770,6 +770,22 @@ def clear_operation_log() -> None:
     _OPERATION_LOG.clear()
 
 
+
+# App names are words, in any script - "notepad++", "7-zip", "paint.net",
+# and Hindi ones too, whose vowel signs a \w class would refuse. What is
+# refused instead is everything a shell treats as syntax, and the path
+# characters, so a name cannot become a command or a file to run.
+_UNSAFE_APP_NAME = re.compile(r'[&|<>^%"`$;()!*?\\/:\x00-\x1f\x7f]')
+
+
+class _SafeAppName:
+    @staticmethod
+    def fullmatch(name: str) -> bool:
+        return 0 < len(name) <= 80 and not _UNSAFE_APP_NAME.search(name)
+
+
+_SAFE_APP_NAME = _SafeAppName()
+
 class DesktopAgent:
     """Executes desktop actions on the host Windows machine."""
 
@@ -1028,6 +1044,16 @@ class DesktopAgent:
         name = params.get("name", "").strip().lower()
         if not name:
             return {"success": False, "error": "No application name provided."}
+        # The name is whatever was said, typed, or chosen by a model that may
+        # have just read a hostile web page. The last fallback below used to
+        # hand it to cmd.exe as `start "" <name>`, and a name with no spaces
+        # is not quoted - so "notepad&calc" opened Notepad and then ran calc,
+        # and `&` could chain anything at all. App names are words; anything
+        # carrying a shell character is refused here before any launcher
+        # sees it.
+        if not _SAFE_APP_NAME.fullmatch(name):
+            return {"success": False,
+                    "error": "That does not look like an application name."}
 
         if sys.platform.startswith("linux"):
             aliases = {
@@ -1103,9 +1129,14 @@ class DesktopAgent:
             except Exception as e:
                 return {"success": False, "error": f"Failed to launch {name}: {e}"}
 
-        # Try launching by name directly
+        # Try launching by name directly. os.startfile is ShellExecute - what
+        # `start` calls underneath - without cmd.exe in between, so there is
+        # no command line for the name to break out of.
         try:
-            subprocess.Popen(["start", "", name], shell=True)
+            if sys.platform == "win32":
+                os.startfile(name)  # noqa: S606 - validated above, no shell
+            else:
+                subprocess.Popen([name])
             return {"success": True, "message": f"Launched {name}.", "app": name}
         except Exception as e:
             return {"success": False, "error": f"Could not find or launch '{name}': {e}"}
