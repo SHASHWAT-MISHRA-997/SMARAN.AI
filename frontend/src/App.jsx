@@ -23,6 +23,7 @@ import TerminalPanel from './components/TerminalPanel';
 import SmaranDesignView from './components/SmaranDesignView';
 import ScheduledTasksView from './components/ScheduledTasksView';
 import ImageStudio from './components/ImageStudio';
+import LiveBrowser from './components/LiveBrowser';
 import VideoStudio from './components/VideoStudio';
 import DispatchView from './components/DispatchView';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
@@ -553,7 +554,7 @@ const App = () => {
     // Images and video are offered on a phone too: one paired to a computer
     // reaches that computer's engine perfectly well, and a standalone one
     // says so on the screen rather than being refused the destination.
-    'images', 'videos',
+    'images', 'videos', 'browser',
     ...(isHandheld() ? [] : ['scheduled'])]);
 
   const handleNavigate = (view) => {
@@ -663,6 +664,9 @@ const App = () => {
                 : activeView === 'collections' ? 'Collections'
                 : activeView === 'design' ? 'SMARAN Design'
                 : activeView === 'scheduled' ? 'Scheduled Tasks'
+                : activeView === 'images' ? 'Images'
+                : activeView === 'videos' ? 'Video'
+                : activeView === 'browser' ? 'Live Browser'
                 : activeView === 'dispatch' ? 'Dispatch' : ''}
             </span>
           </div>
@@ -702,6 +706,7 @@ const App = () => {
         {activeView === 'sites' && <SitesHub />}
         {activeView === 'images' && <ImageStudio />}
         {activeView === 'videos' && <VideoStudio />}
+        {activeView === 'browser' && <LiveBrowser />}
         {activeView === 'plugins' && <ExtensionsHub embedded />}
         {activeView === 'scheduled' && !isHandheld() && (
           <ScheduledTasksView
