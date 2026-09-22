@@ -160,10 +160,19 @@ def generate_track(
     if peak > 0:
         samples = samples / peak * 0.89
 
-    from scipy.io import wavfile
+    # The standard library's wave module, not scipy. scipy is neither bundled
+    # with the app nor among the video packages installed at runtime, so the
+    # frozen build failed here on import - the music was generated and then
+    # could not be saved. A 16-bit mono WAV needs nothing more than this.
+    import wave
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
-    wavfile.write(output_path, SAMPLE_RATE, (samples * 32767).astype("int16"))
+    pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+    with wave.open(output_path, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(SAMPLE_RATE)
+        out.writeframes(pcm)
     return output_path
 
 

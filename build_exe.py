@@ -244,6 +244,16 @@ EXCLUDES = [
     "notebook",
     "pytest",
     "PyInstaller",
+    # Image and video generation import these from data/video-packages,
+    # installed at runtime against the matching CUDA torch. Bundling the
+    # build machine's copies put a second, mismatched diffusers ahead of
+    # that one on the import path, and dragged in scipy and pandas through
+    # it and networkx - 85 MB nothing else uses.
+    "diffusers",
+    "networkx",
+    "accelerate",
+    "scipy",
+    "pandas",
 ]
 
 
