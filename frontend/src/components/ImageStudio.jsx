@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { takeStudioPrompt } from '../utils/studioHandoff';
 import { Image as ImageIcon, Loader2, AlertCircle, Download, Sparkles, ChevronDown, RefreshCw } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
@@ -41,7 +42,10 @@ const field = 'w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-
 const ImageStudio = () => {
   const [catalogue, setCatalogue] = useState(null);
   const [loadError, setLoadError] = useState('');
-  const [prompt, setPrompt] = useState('');
+  // Asked for by voice ("ek sunset ki image banao"): the words arrive as the
+  // prompt, and the picture starts once a model that can make it is chosen.
+  const [prompt, setPrompt] = useState(() => takeStudioPrompt('images'));
+  const autoStart = useRef(Boolean(prompt));
   const [negative, setNegative] = useState('');
   const [model, setModel] = useState('');
   const [size, setSize] = useState(SIZES[0]);
@@ -84,6 +88,16 @@ const ImageStudio = () => {
 
   const chosen = (catalogue?.models || []).find((m) => m.id === model);
 
+  // Already on screen when the next request is spoken.
+  useEffect(() => {
+    const arrived = () => {
+      const next = takeStudioPrompt('images');
+      if (next) { setPrompt(next); autoStart.current = true; }
+    };
+    window.addEventListener('smaran:studio-prompt', arrived);
+    return () => window.removeEventListener('smaran:studio-prompt', arrived);
+  }, []);
+
   const watch = useCallback((jobId) => {
     const tick = async () => {
       try {
@@ -115,7 +129,7 @@ const ImageStudio = () => {
   }, [prompt]);
 
   const generate = async (event) => {
-    event.preventDefault();
+    event?.preventDefault?.();
     if (!prompt.trim() || job?.status === 'running') return;
     setError('');
     setJob({ status: 'running', messages: ['Starting…'] });
@@ -148,6 +162,16 @@ const ImageStudio = () => {
   const running = job?.status === 'running';
   const latest = job?.status === 'completed' ? job : null;
   const finishedId = latest ? (job.id || gallery[0]?.id) : null;
+
+  // The spoken request starts by itself once there is something to make it with.
+  // Without a runnable model it stays filled in, and the screen says what to install.
+  useEffect(() => {
+    if (autoStart.current && prompt.trim() && chosen?.runnable && job?.status !== 'running') {
+      autoStart.current = false;
+      generate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chosen, prompt]);
 
   return (
     <div className="h-full overflow-y-auto p-4 sm:p-6">

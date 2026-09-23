@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Globe2, Loader2, Plus, RefreshCw, Search, Send, Trash2, X,
   Code2, Eye, Download, Sparkles, Laptop, Smartphone, Check
 } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
+import { takeStudioPrompt, siteNameFrom } from '../utils/studioHandoff';
 import GenerationProgress from './GenerationProgress';
 
 const PRESET_TEMPLATES = [
@@ -183,7 +184,10 @@ const SitesHub = () => {
 
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
+  // A site asked for by voice opens the create dialog already filled in, and
+  // builds straight away - the same request the button makes.
+  const [spoken, setSpoken] = useState(() => takeStudioPrompt('sites'));
+  const [creating, setCreating] = useState(() => Boolean(spoken));
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -397,10 +401,12 @@ const SitesHub = () => {
 
       {creating && (
         <CreateSiteModal
-          onClose={() => setCreating(false)}
+          initialPrompt={spoken}
+          onClose={() => { setCreating(false); setSpoken(''); }}
           onCreated={(newSite) => {
             setSites((all) => [newSite, ...all]);
             setCreating(false);
+            setSpoken('');
             setSelected(newSite);
           }}
         />
@@ -420,9 +426,9 @@ const SitesHub = () => {
   );
 };
 
-const CreateSiteModal = ({ onClose, onCreated }) => {
-  const [name, setName] = useState('');
-  const [prompt, setPrompt] = useState('');
+const CreateSiteModal = ({ onClose, onCreated, initialPrompt = '' }) => {
+  const [name, setName] = useState(() => (initialPrompt ? siteNameFrom(initialPrompt) : ''));
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [busy, setBusy] = useState(false);
 
   const applyTemplate = (t) => {
@@ -431,7 +437,7 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
   };
 
   const submit = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
     if (!name.trim() || prompt.trim().length < 3) return;
     setBusy(true);
 
@@ -469,6 +475,17 @@ const CreateSiteModal = ({ onClose, onCreated }) => {
     // Only when the request itself did not get through.
     onCreated({ ...siteObj, generatedLocally: true });
   };
+
+  // Spoken: build at once, as though the button had been pressed. Once -
+  // development mode runs mount effects twice, and that built two sites.
+  const started = useRef(false);
+  useEffect(() => {
+    if (initialPrompt && !started.current) {
+      started.current = true;
+      submit();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center bg-black/60 dark:bg-black/80 p-4 backdrop-blur-sm" onMouseDown={onClose}>

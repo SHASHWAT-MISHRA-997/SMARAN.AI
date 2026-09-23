@@ -6,6 +6,7 @@ import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
 import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening, startWakeListening, setPageListening, takePendingQuery, onDeviceEvent } from '../utils/deviceControl';
 import { heySmaranOn, setHeySmaran, WAKE_GREETING } from '../utils/wakeSetting';
+import { detectCreateRequest, handOffToStudio } from '../utils/studioHandoff';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
 import { voicePersonaRule } from '../utils/voicePersona';
 import { languageRule, CODE_OUTPUT_RULE, SILENT_RULES } from '../utils/replyRules';
@@ -4309,6 +4310,20 @@ const ChatArea = ({
       } else {
         speakNativeText(onDevice.spoken);
       }
+      return;
+    }
+
+    // "Make a website for my bakery", "ek sunset ki image banao": made by the
+    // studio for it, not described by the chat model. The call closes so the
+    // studio can be seen, and the job starts there with these words.
+    const creation = detectCreateRequest(query);
+    if (creation) {
+      const studio = { sites: 'Sites', images: 'Image Studio', videos: 'Video Studio' }[creation.view];
+      window.dispatchEvent(new CustomEvent('smaran:pet-state', {
+        detail: { state: 'waving', message: `Making it in ${studio}.` },
+      }));
+      closeVoiceMode();
+      handOffToStudio(creation.view, creation.prompt);
       return;
     }
 

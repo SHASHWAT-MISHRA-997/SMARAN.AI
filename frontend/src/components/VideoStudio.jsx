@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { takeStudioPrompt } from '../utils/studioHandoff';
 import { Film, Loader2, AlertCircle, Download, Sparkles, RefreshCw, HardDriveDownload } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
@@ -36,7 +37,10 @@ const VideoStudio = () => {
   const [suggested, setSuggested] = useState(null);
   const [loadError, setLoadError] = useState('');
 
-  const [prompt, setPrompt] = useState('');
+  // Asked for by voice: the words become the prompt, and the clip starts once
+  // the video packages are installed.
+  const [prompt, setPrompt] = useState(() => takeStudioPrompt('videos'));
+  const autoStart = useRef(Boolean(prompt));
   const [seconds, setSeconds] = useState(2);
   const [job, setJob] = useState(null);
   const [error, setError] = useState('');
@@ -125,7 +129,7 @@ const VideoStudio = () => {
   }, [prompt]);
 
   const generate = async (event) => {
-    event.preventDefault();
+    event?.preventDefault?.();
     if (!prompt.trim() || job?.status === 'running') return;
     setError('');
     setJob({ status: 'running', messages: ['Starting…'] });
@@ -149,6 +153,23 @@ const VideoStudio = () => {
   const done = job?.status === 'completed' ? job : null;
   const installing = install?.status === 'running';
   const ready = install?.installed;
+
+  useEffect(() => {
+    const arrived = () => {
+      const next = takeStudioPrompt('videos');
+      if (next) { setPrompt(next); autoStart.current = true; }
+    };
+    window.addEventListener('smaran:studio-prompt', arrived);
+    return () => window.removeEventListener('smaran:studio-prompt', arrived);
+  }, []);
+
+  useEffect(() => {
+    if (autoStart.current && prompt.trim() && ready && job?.status !== 'running') {
+      autoStart.current = false;
+      generate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, prompt]);
   const hw = capability?.hardware;
 
   return (
