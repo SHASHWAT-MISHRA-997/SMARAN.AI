@@ -38,6 +38,7 @@ import HackerVoiceAssistant from './HackerVoiceAssistant';
 import HeroLogo3D from './HeroLogo3D';
 
 import { WakeWordListener, WAKE_PHRASE_DEFAULT, wakeRest } from '../utils/wakeWord';
+import { startPcWake } from '../utils/pcWake';
 import { detectClientDevice, isDesktopApp } from './RightPanel';
 import { Maya3DCanvas } from './CodePreviewVisualizer';
 
@@ -2650,8 +2651,21 @@ const ChatArea = ({
     listener.start();
     wakeListenerRef.current = listener;
 
+    // "Hey Jarvis" by openWakeWord in the backend, alongside the browser's
+    // listener: works minimised, and brings the window forward when heard.
+    const stopPcWake = startPcWake({
+      apiBase: API_BASE,
+      onWake: () => {
+        listener.stop();
+        fetch(`${API_BASE}/api/window/front`, { method: 'POST', credentials: 'include' }).catch(() => {});
+        wakeHandlersRef.current.woke('');
+      },
+      onError: (message) => console.warn('Hey Jarvis:', message),
+    });
+
     return () => {
       listener.stop();
+      stopPcWake();
       wakeListenerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

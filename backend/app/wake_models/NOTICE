@@ -1,0 +1,6 @@
+openWakeWord models, from https://github.com/dscripka/openWakeWord (v0.5.1).
+
+melspectrogram.onnx, embedding_model.onnx: Apache License 2.0.
+hey_jarvis_v0.1.onnx: Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+(CC BY-NC-SA 4.0), by David Scripka. Used unmodified, in a free non-commercial app.
+If SMARAN.AI is ever sold, replace hey_jarvis with a model trained in-house.

@@ -6656,6 +6656,47 @@ def websocket_caller_allowed(websocket: WebSocket) -> bool:
     return False
 
 
+@app.websocket("/ws/wake")
+async def websocket_wake(websocket: WebSocket):
+    """'Hey Jarvis' heard on this computer.
+
+    The page streams 16 kHz int16 mono PCM as binary frames; this answers
+    {"wake": "jarvis", "score": ...} when openWakeWord hears the phrase
+    (app.pc_wake). Same caller rule as every other socket: this computer, a
+    paired phone, or a signed-in session. Nothing is stored.
+    """
+    if not websocket_caller_allowed(websocket):
+        await websocket.close(code=4401)
+        return
+    from app import pc_wake
+
+    await websocket.accept()
+    if not await asyncio.to_thread(pc_wake.available):
+        await websocket.send_json({"error": "wake word unavailable"})
+        await websocket.close()
+        return
+    detector = pc_wake.Detector()
+    try:
+        while True:
+            frame = await websocket.receive_bytes()
+            score = await asyncio.to_thread(detector.feed, frame)
+            if score is not None and score >= pc_wake.THRESHOLD:
+                detector.reset()
+                await websocket.send_json({"wake": "jarvis", "score": round(score, 2)})
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.warning("wake socket closed: %s", exc)
+
+
+@app.post("/api/window/front", dependencies=[Depends(_signed_in)])
+async def window_front_endpoint():
+    """Bring SMARAN's window forward - "Hey Jarvis" heard while it was minimised."""
+    from app import host_window
+
+    return host_window.bring_to_front()
+
+
 @app.websocket("/ws/voice/live")
 async def websocket_voice_live(websocket: WebSocket):
     """Bridge the browser to Gemini Live for real-time spoken conversation.

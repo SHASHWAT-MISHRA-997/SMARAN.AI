@@ -301,6 +301,8 @@ def build(onefile: bool = False, output_root: str = ROOT, incremental: bool = Fa
         "--paths", os.path.join(ROOT, "backend"),
         "--add-data", f"{web_snapshot}{sep}frontend_dist",
         "--add-data", f"{corpus_dir}{sep}nltk_data",
+        # "Hey Jarvis" (app.pc_wake): openWakeWord's models, beside the code that loads them.
+        "--add-data", f"{os.path.join(ROOT, 'backend', 'app', 'wake_models')}{sep}app/wake_models",
     ]
     if not incremental:
         cmd.append("--clean")

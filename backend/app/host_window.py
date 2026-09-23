@@ -196,6 +196,34 @@ def exit_pip() -> Dict[str, Any]:
         return {"ok": False, "error": "Could not restore the window: %s" % str(exc)[:120]}
 
 
+def bring_to_front() -> Dict[str, Any]:
+    """Restore the window if minimised and put it in front of the others.
+
+    Windows only lets a background process take the foreground in limited
+    cases; restoring the window and asking for it twice (with the window
+    briefly on top) is the reliable way that stays within the rules.
+    """
+    if not available():
+        return {"ok": False, "error": status()["detail"]}
+    try:
+        _window.restore()
+        _window.show()
+        hwnd = _handle()
+        if hwnd:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            user32.ShowWindow(hwnd, 9)          # SW_RESTORE
+            was_on_top = bool(_window.on_top)
+            _window.on_top = True               # above the rest, just for a moment
+            user32.SetForegroundWindow(hwnd)
+            if not was_on_top and _mode is None:
+                _window.on_top = False
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": "Could not bring the window forward: %s" % str(exc)[:120]}
+
+
 def close_app(delay_seconds: float = 2.0) -> bool:
     """Shut the window so an installer can replace the files it is running from.
 

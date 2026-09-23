@@ -2706,6 +2706,13 @@ def detect_desktop_intent(text: str) -> Optional[Dict[str, Any]]:
     if not text or len(text) < 3:
         return None
 
+    # "What time is it?" is a question in form and an instruction in intent:
+    # the filter below drops sentences that open with "what", so the clock -
+    # the one thing this computer knows exactly - went to a language model.
+    if re.fullmatch(r"(?:what(?:'s| is) the time|what time is it|time (?:kya|kitna) (?:hua|hai|ho gaya)"
+                    r"|abhi kitne baje hain|kitne baje hain)(?: now| abhi)?[.?!]*", text, re.I):
+        return {"action": "get_time", "params": {}}
+
     # These are conversation, not instructions to control the desktop. In
     # particular, "do not mute" previously fired the system mute key.
     #
