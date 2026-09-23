@@ -24,6 +24,7 @@ import { canDelegate, setDelegator, summarise, DELEGATE_STEPS, DELEGATE_SYSTEM }
 import { decide, Policy } from './modes';
 import { Choice, complete, Message, NativeTool, NATIVE_CALL_PREFIX } from './models';
 import { McpRegistry } from './mcpRegistry';
+import { showPreview } from './preview';
 import { readInstructions } from '../instructions';
 import {
     confineToFolder, describeTools, execute, parseTodo, TodoItem, TOOLS,
@@ -537,6 +538,7 @@ ${DELEGATE_SYSTEM}` : '')
 
     const limit = asDelegate ? DELEGATE_STEPS : MAX_STEPS;
     let malformedReplies = 0;
+    let previewShown = false;
     for (let step = 1; step <= limit; step += 1) {
         if (stopped()) {
             return;
@@ -687,6 +689,19 @@ ${DELEGATE_SYSTEM}` : '')
                     : await execute(call.name, call.args, root);
             } catch (error) {
                 result = `${call.name} failed: ${(error as Error).message}`;
+            }
+            // The first page written in a run opens beside the editor on its own,
+            // the way Claude Code and Codex show what they are building. It then
+            // reloads itself on every later write, so nothing more is asked of
+            // the model - it only has to keep working.
+            if (!previewShown && call.name === 'write_file' && /\.html?$/i.test(String(call.args.path || ''))
+                    && !String(result).includes('failed')) {
+                previewShown = true;
+                try {
+                    result = `${result}\n${await showPreview(root, String(call.args.path))}`;
+                } catch {
+                    /* a preview that cannot open never fails the write */
+                }
             }
             performed.push(call.name);
             if (call.name === 'todo') {

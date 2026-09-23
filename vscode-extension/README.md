@@ -71,6 +71,9 @@ tree both fail as a message rather than as a file somewhere else on your disk.
   Reopen one and carry on where it stopped.
 * **Attach** — pull in a file. One inside the project is named for the agent
   to read; one from outside is included, because no tool can reach it.
+* **A live preview beside the code.** Build a page and it opens in the column
+  next to the editor, reloading itself as the agent edits. The agent tests the
+  same page in a real browser - errors, clicks, typing - and fixes what it finds.
 * **Every step, with its result.** Not a summary — the command that ran and
   what it printed. If it goes wrong, you can see the step it went wrong on.
 * **The tools that actually ran**, listed at the end beside the agent's own

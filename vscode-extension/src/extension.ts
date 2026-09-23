@@ -15,10 +15,25 @@ import { AgentPanel } from './agentPanel';
 import { SessionStore } from './sessions';
 import { Keys } from './settings';
 import { reportStartup } from './usage';
+import { setPreviewOpener, stopPreview } from './agent/preview';
 
 export function activate(context: vscode.ExtensionContext): void {
     // One install, then one launch per session. Nothing is waited for.
     void reportStartup(context);
+
+    // Live preview: VS Code's Simple Browser, beside the editor, without
+    // taking focus from the code. Older VS Code only has simpleBrowser.show.
+    //
+    // simpleBrowser.api.open with viewColumn Beside was ignored in a real
+    // VS Code 1.138 run - the preview landed on top of the code. Moving to
+    // the group on the right first (created if there is none), opening it
+    // there, and handing focus back to the code works in every version.
+    setPreviewOpener(async (url) => {
+        await vscode.commands.executeCommand('workbench.action.focusSecondEditorGroup');
+        await vscode.commands.executeCommand('simpleBrowser.show', url);
+        await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+    });
+    context.subscriptions.push({ dispose: () => { setPreviewOpener(undefined); void stopPreview(); } });
 
     const keys = new Keys(context.secrets);
     // Keys typed into settings.json by earlier versions are moved into the

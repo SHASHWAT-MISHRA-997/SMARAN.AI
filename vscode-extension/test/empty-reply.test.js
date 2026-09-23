@@ -7,10 +7,10 @@ const cases = [
   { name: 'reasoning_content only',     body: { choices: [{ message: { content: '', reasoning_content: 'thought' } }] }, throws: /without a final answer/ },
   { name: 'reasoning only',             body: { choices: [{ message: { content: '', reasoning: 'thought2' } }] },        throws: /without a final answer/ },
   { name: 'provider error with provisional text', body: { choices: [{ finish_reason: 'error', message: { content: 'I will build it', reasoning: 'thought' } }] }, throws: /could not complete/ },
-  { name: 'reasoning token limit is a failure', body: { choices: [{ finish_reason: 'length', message: { reasoning: 'unfinished' } }] }, throws: /whole budget/ },
+  { name: 'reasoning token limit is a failure', body: { choices: [{ finish_reason: 'length', message: { reasoning: 'unfinished' } }] }, throws: /ran out of room/ },
   { name: 'native call returned in provider format', body: { choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ function: { name: 'read_file', arguments: '{"path":"README.md"}' } }] } }] }, expect: 'SMARAN_TOOL_CALL_JSON\n{"name":"read_file","args":{"path":"README.md"}}' },
   { name: 'partial native call is refused', body: { choices: [{ finish_reason: 'length', message: { tool_calls: [{ function: { name: 'write_file', arguments: '{}' } }] } }] }, throws: /incomplete tool calls/ },
-  { name: 'empty, finish_reason length',body: { choices: [{ finish_reason: 'length', message: { content: '' } }] },      throws: /whole budget/ },
+  { name: 'empty, finish_reason length',body: { choices: [{ finish_reason: 'length', message: { content: '' } }] },      throws: /ran out of room/ },
   { name: 'empty, no reason',           body: { choices: [{ message: { content: '' } }] },                              throws: /empty reply/ },
 ];
 

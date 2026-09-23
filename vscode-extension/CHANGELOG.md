@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.22.0
+
+**A live preview beside the editor, that updates as the agent works.** The
+first HTML page the agent writes in a run opens in VS Code's own browser in
+the column next to the code, and reloads by itself on every later change - so
+you watch the page being built, the way Claude Code and Codex show it. The
+agent can also open it for any page or a local dev server with the new
+`preview` tool, and test the same address in its own Chrome window
+(`open_browser`, `browser_check`, `browser_click`, `browser_type`).
+
+The preview is served from 127.0.0.1 only, never outside the workspace, and
+never anything under a dot-name - `.env` and `.git` stay unreadable from a
+browser tab. Verified in a real VS Code: the preview opens in column 2 and
+the code stays in column 1.
+
+**LM Studio, end to end.** Tested with Gemma through LM Studio's CUDA engine:
+the agent wrote a library that passes independent checks. When a model runs
+out of room mid-run, the message now says so and that the files it already
+wrote are kept - it used to say it had written nothing.
+
 ## 2.21.0
 
 Found by giving the extension a real task in a real VS Code - build a small

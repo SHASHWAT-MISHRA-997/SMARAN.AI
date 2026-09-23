@@ -224,8 +224,12 @@ async function openAiStyle(base: string, choice: Choice, messages: Message[], to
      * extension being broken, and the reason is usually one of these two. */
     if (choiceOut?.finish_reason === 'length') {
         throw new Error(
-            `${choice.model} used its whole budget before writing anything. `
-            + 'Try a different model, or a shorter question.');
+            // "Before writing anything" was wrong mid-run: Gemma through LM
+            // Studio had written three correct files when this reply came
+            // back empty, and the message said it had done nothing.
+            `${choice.model} ran out of room before finishing its reply. Anything it `
+            + 'already wrote is kept. Ask it to continue, or try a model with a larger '
+            + 'context.');
     }
     if (message?.reasoning_content || message?.reasoning) {
         throw new Error(`${choice.model} returned reasoning without a final answer. Retry the task or choose another model.`);

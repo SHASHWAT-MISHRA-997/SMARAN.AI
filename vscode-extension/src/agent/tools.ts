@@ -15,6 +15,7 @@
 import { delegate } from './delegate';
 import { unified } from './diff';
 import * as browser from './browser';
+import { showPreview } from './preview';
 import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -165,6 +166,11 @@ export const TOOLS: Record<string, { args: string[]; description: string; change
         args: ['into', 'text', 'enter'],
         description: 'Type into a field, found by its label or placeholder. Replaces whatever is already in it. Set enter to yes to press Enter afterwards.',
         changes: true,
+    },
+    preview: {
+        args: ['target'],
+        description: 'Show a live preview beside the editor so the person can watch the page as you build it. target is an HTML file in the workspace (index.html) or a local dev server address (localhost:5173). It reloads by itself whenever files change. Open it as soon as there is a page to see.',
+        changes: false,
     },
     browser_reload: {
         args: [],
@@ -486,6 +492,7 @@ export async function execute(
             case 'open_browser': return await browser.open(String(args.url ?? ''));
             case 'delegate': return await delegate(String(args.task ?? ''));
             case 'browser_check': return await browser.check();
+            case 'preview': return await showPreview(root, String(args.target ?? ''));
             case 'browser_click': return await browser.click(String(args.text ?? ''));
             case 'browser_type': return await browser.type(
                 String(args.into ?? ''), String(args.text ?? ''),
