@@ -47,6 +47,7 @@ final class DeviceActions {
         final String argument; // may be empty
         final String app;      // music only: the service named, or empty
         String lang = "en";    // ask only: the language the question is in
+        boolean money;         // a request to pay or buy: opened, never done
         Command(String action, String argument) {
             this(action, argument, "");
         }
@@ -429,6 +430,44 @@ final class DeviceActions {
         return null;
     }
 
+    /* A request to pay, send money, buy, order or recharge. SMARAN opens the
+       app if one is named and says the rest is the user's: nothing here can
+       press a button inside another app, and this makes that a promise.
+       Mirrors deviceCommands.detectMoneyRequest. */
+    private static final Pattern MONEY_ACT = Pattern.compile(
+        "\\b(?:send|pay|transfer|bhejo|bhej\\s+do|de\\s+do)\\b.*(?:\\b(?:rs|inr|rupees?|rupaye|rupay|rupiya)\\b|\u20b9|\\d)"
+        + "|(?:\u20b9|\\d).*\\b(?:bhejo|bhej\\s+do|send\\s+karo|send\\s+kar\\s+do|transfer\\s+karo|de\\s+do|pay\\s+karo)\\b"
+        + "|\\b(?:pay|send\\s+money|transfer\\s+money)\\s+(?:to\\s+)?\\w+"
+        + "|\\b(?:paise|paisa|money|payment|amount)\\s+(?:ko\\s+)?(?:bhejo|bhej\\s+do|send\\s+karo|transfer\\s+karo|kar\\s*do|karo)\\b"
+        + "|\\b(?:buy|purchase|order|checkout|kharido|khareed\\s*(?:lo|do)|mangwa\\s*do|mangao)\\b"
+        + "|\\badd\\s+(?:it\\s+|this\\s+)?to\\s+(?:the\\s+|my\\s+)?cart\\b|\\bcart\\s+(?:me|mein|mai)\\s+(?:daalo|dalo|daal\\s+do|add\\s+karo)\\b"
+        + "|\\brecharge\\s+(?:karo|kar\\s*do|kardo|my|the)\\b|\\brecharge\\b.*\\d",
+        Pattern.CASE_INSENSITIVE);
+    private static final String[][] MONEY_APPS = {
+        {"Google Pay", "\\b(?:g\\s*pay|google\\s*pay|tez)\\b"},
+        {"Paytm", "\\bpaytm\\b"},
+        {"PhonePe", "\\bphone\\s*pe\\b"},
+        {"BHIM", "\\bbhim\\b"},
+        {"PayZapp", "\\bpay\\s*zapp\\b"},
+        {"Amazon", "\\bamazon\\b"},
+        {"Flipkart", "\\bflipkart\\b"},
+    };
+    static final String MONEY_LINE = "I don't send money or buy anything myself - that part is always yours.";
+
+    static Command moneyRequest(String text) {
+        if (!MONEY_ACT.matcher(text).find()) return null;
+        for (String[] app : MONEY_APPS) {
+            if (Pattern.compile(app[1], Pattern.CASE_INSENSITIVE).matcher(text).find()) {
+                Command open = new Command("app", app[0]);
+                open.money = true;
+                return open;
+            }
+        }
+        Command say = new Command("say", MONEY_LINE);
+        say.money = true;
+        return say;
+    }
+
     /** What this line is asking the phone to do, or null. */
     static Command detect(String utterance) {
         if (utterance == null) return null;
@@ -447,6 +486,10 @@ final class DeviceActions {
         if (control != null) return control;
 
         // First: "YouTube Music" would otherwise be taken for YouTube.
+        // Money and shopping first: opened if named, never done.
+        Command money = moneyRequest(text);
+        if (money != null) return money;
+
         Command found = musicInService(text);
         if (found == null) {
             found = firstMatch(YOUTUBE_QUERY, text, "youtube", true);
@@ -474,11 +517,30 @@ final class DeviceActions {
     }
 
     /** The installed app whose label best matches what was said. */
+    /* What people say, for apps whose label says something else: "gpay" is
+       "Google Pay" on one phone and "GPay" on the next. By package, so the
+       label can change without breaking it. */
+    static final String[][] KNOWN_APPS = {
+        {"gpay|googlepay|tez|gpe", "com.google.android.apps.nbu.paisa.user"},
+        {"phonepe|phonep", "com.phonepe.app"},
+        {"paytm", "net.one97.paytm"},
+        {"bhim", "in.org.npci.upiapp"},
+        {"payzapp", "com.hdfcbank.payzapp"},
+        {"amazon|amazonshopping", "in.amazon.mShop.android.shopping"},
+        {"flipkart", "com.flipkart.android"},
+    };
+
     static ResolveInfo findApp(Context context, String spoken) {
         String wanted = simplify(spoken);
         if (wanted.isEmpty()) return null;
         PackageManager pm = context.getPackageManager();
         Intent main = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        for (String[] known : KNOWN_APPS) {
+            if (!wanted.matches(known[0])) continue;
+            List<ResolveInfo> found = pm.queryIntentActivities(
+                new Intent(main).setPackage(known[1]), 0);
+            if (!found.isEmpty()) return found.get(0);
+        }
         List<ResolveInfo> all = pm.queryIntentActivities(main, 0);
         ResolveInfo prefix = null;
         ResolveInfo contains = null;
@@ -603,7 +665,11 @@ final class DeviceActions {
     static String perform(Context context, Command command) {
         if (command == null) return "";
         switch (command.action) {
-            case "app":     return openApp(context, command.argument);
+            case "app": {
+                String opened = openApp(context, command.argument);
+                return command.money && opened.startsWith("Opening ")
+                    ? "Opened " + opened.substring(8, opened.length() - 1) + ". " + MONEY_LINE : opened;
+            }
             case "youtube": return openYouTube(context, command.argument);
             case "music":   return playMusic(context, command.argument, command.app);
             case "media":   return performMedia(context, command.argument);
@@ -619,6 +685,7 @@ final class DeviceActions {
                 return "Playing " + query + " on YouTube.";
             }
             case "url":     return openUrl(context, command.argument);
+            case "say":     return command.argument;
             default:        return "";
         }
     }

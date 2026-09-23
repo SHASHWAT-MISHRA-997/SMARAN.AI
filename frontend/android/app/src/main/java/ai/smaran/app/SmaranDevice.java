@@ -190,20 +190,9 @@ public class SmaranDevice extends Plugin {
      * name that happens to contain it.
      */
     private ResolveInfo bestMatch(String spoken) {
-        String wanted = simplify(spoken);
-        if (wanted.isEmpty()) return null;
-        PackageManager pm = getContext().getPackageManager();
-
-        ResolveInfo prefix = null;
-        ResolveInfo contains = null;
-        for (ResolveInfo info : launchable()) {
-            String label = simplify(String.valueOf(info.loadLabel(pm)));
-            if (label.isEmpty()) continue;
-            if (label.equals(wanted)) return info;
-            if (prefix == null && label.startsWith(wanted)) prefix = info;
-            if (contains == null && label.contains(wanted)) contains = info;
-        }
-        return prefix != null ? prefix : contains;
+        // One matcher for the page and the listening service alike; this was a
+        // second copy, and the two had already started to differ.
+        return DeviceActions.findApp(getContext(), spoken);
     }
 
     @PluginMethod

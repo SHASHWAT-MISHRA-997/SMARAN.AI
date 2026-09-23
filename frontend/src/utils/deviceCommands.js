@@ -166,6 +166,57 @@ export function detectMusicInService(text) {
   return null;
 }
 
+/* Money and shopping: opened, never done.
+
+   "Hey SMARAN, open GPay" opens GPay. "Send 500 to Rahul on GPay", "buy this",
+   "add to cart" - SMARAN opens the app if one is named and says, every time,
+   that sending and buying are the user's to do. Nothing here can press a
+   button inside another app, and this makes that a promise rather than an
+   accident. Checked before every other rule, so "paytm par 500 bhejo" can
+   never become a search, a song, or anything else. */
+const MONEY_APPS = [
+  ['Google Pay', /\b(?:g\s*pay|google\s*pay|tez)\b|जीपे|गूगल\s*पे/i],
+  ['Paytm', /\bpaytm\b|पेटीएम/i],
+  ['PhonePe', /\bphone\s*pe\b|फोनपे/i],
+  ['BHIM', /\bbhim\b/i],
+  ['PayZapp', /\bpay\s*zapp\b/i],
+  ['Amazon', /\bamazon\b|अमेज़?न/i],
+  ['Flipkart', /\bflipkart\b|फ्लिपकार्ट/i],
+  ['Swiggy', /\bswiggy\b/i],
+  ['Zomato', /\bzomato\b/i],
+  ['Myntra', /\bmyntra\b/i],
+  ['Meesho', /\bmeesho\b/i],
+];
+const MONEY_ACT = new RegExp([
+  // send / pay / transfer an amount, or to someone
+  '\\b(?:send|pay|transfer|bhejo|bhej\\s+do|de\\s+do)\\b.*(?:\\b(?:rs|inr|rupees?|rupaye|rupay|rupiya)\\b|₹|\\d)',
+  // the amount first, as Hinglish says it: "Rahul ko 500 bhejo", "paytm par 200 bhej do"
+  '(?:₹|\\d).*\\b(?:bhejo|bhej\\s+do|send\\s+karo|send\\s+kar\\s+do|transfer\\s+karo|de\\s+do|pay\\s+karo)\\b',
+  '\\b(?:pay|send\\s+money|transfer\\s+money)\\s+(?:to\\s+)?\\w+',
+  '\\b(?:paise|paisa|money|payment|amount)\\s+(?:ko\\s+)?(?:bhejo|bhej\\s+do|send\\s+karo|transfer\\s+karo|kar\\s*do|karo)\\b',
+  // buy / order / cart / recharge
+  '\\b(?:buy|purchase|order|checkout|kharido|khareed\\s*(?:lo|do)|mangwa\\s*do|mangao)\\b',
+  '\\badd\\s+(?:it\\s+|this\\s+)?to\\s+(?:the\\s+|my\\s+)?cart\\b|\\bcart\\s+(?:me|mein|mai)\\s+(?:daalo|dalo|daal\\s+do|add\\s+karo)\\b',
+  '\\brecharge\\s+(?:karo|kar\\s*do|kardo|my|the)\\b|\\brecharge\\b.*\\d',
+  'पैसे\\s+भेजो|भेज\\s+दो|खरीदो|ऑर्डर\\s+करो',
+].join('|'), 'i');
+
+export function detectMoneyRequest(text) {
+  if (!MONEY_ACT.test(text)) return null;
+  const app = MONEY_APPS.find(([, pattern]) => pattern.test(text))?.[0] || '';
+  return app ? { action: 'app', name: app, money: true } : { action: 'say', money: true };
+}
+
+/* "gpay" is what people say; "Google Pay" is what the phone calls it. */
+const APP_ALIASES = [
+  [/^(?:g\s*pay|gpay|tez)$/i, 'Google Pay'],
+  [/^phone\s*pe$/i, 'PhonePe'],
+  [/^(?:insta)$/i, 'Instagram'],
+  [/^(?:fb)$/i, 'Facebook'],
+  [/^(?:yt)$/i, 'YouTube'],
+];
+const canonicalApp = (name) => APP_ALIASES.find(([pattern]) => pattern.test(name))?.[1] || name;
+
 const RULES = [
   // YouTube, before the generic "play", so "YouTube pe X chalao" is a video
   // and not a song handed to the music app.
@@ -277,6 +328,9 @@ export function detectDeviceCommand(utterance) {
   const text = stripPoliteness(stripWakePhrase(raw));
   if (!text) return null;
 
+  const money = detectMoneyRequest(text);
+  if (money) return money;
+
   const control = detectMediaControl(text);
   if (control) return control;
 
@@ -305,6 +359,7 @@ export function detectDeviceCommand(utterance) {
       if (rule.action === 'youtube' && WANTS_PLAY.test(text)) {
         return { action: 'youtube', query: value, play: true };
       }
+      if (rule.action === 'app') return { action: 'app', name: canonicalApp(value) };
       return { action: rule.action, [rule.argument]: value };
     }
   }
@@ -381,10 +436,15 @@ export function cancelledLine(asked) {
  * honest about failure: an app that is not installed is said plainly rather
  * than reported as if it had opened.
  */
+const MONEY_LINE = 'I don\'t send money or buy anything myself - that part is always yours.';
+
 export function describeOutcome(command, result) {
   const ok = Boolean(result?.opened);
   switch (command?.action) {
+    case 'say':
+      return MONEY_LINE;
     case 'app':
+      if (ok && command.money) return `Opened ${result.label || command.name}. ${MONEY_LINE}`;
       if (ok) return `Opening ${result.label || command.name}.`;
       if (result?.reason === 'not-installed') {
         return `I can't find ${command.name} on this phone.`;

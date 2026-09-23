@@ -535,6 +535,14 @@ DESKTOP_ACTION_CATALOG: Dict[str, Dict[str, Any]] = {
         "risk": "high", "changes_system": True, "requires_confirmation": True,
         "parameters": {}, "category": "power",
     },
+    "check_updates": {
+        "title": "Check for system updates",
+        "description": "Open the system's update page and start a check for updates.",
+        # Asked first like the rest of the power group: a check can start
+        # downloads, and the owner wants every system action confirmed.
+        "risk": "medium", "changes_system": True, "requires_confirmation": True,
+        "parameters": {}, "category": "power",
+    },
     "cancel_shutdown": {
         "title": "Cancel a pending shutdown or restart",
         "description": "Abort a shutdown or restart that is counting down.",
@@ -2051,43 +2059,99 @@ class DesktopAgent:
         except OSError as exc:
             return {"success": False, "error": f"The note could not be saved: {exc}"}
 
+    # Power, on every desktop SMARAN ships for. Windows was the only one, so
+    # "restart the computer" on Linux answered "only supported on Windows" -
+    # on the platform the packages are now built for. The POSIX commands run
+    # without a shell: _run_host_cmd's shell=True with a list would run only
+    # the first word there.
+    #
+    # Shutdown and restart keep a delay everywhere, so "cancel shutdown" has
+    # time to work. Linux's shutdown counts in whole minutes; one is the least.
+
     @staticmethod
     def _action_sleep_computer(params: Dict[str, Any]) -> Dict[str, Any]:
-        if sys.platform != "win32":
-            return {"success": False, "error": "Sleep is only supported on Windows."}
-        success, output = _run_host_cmd(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
+        if sys.platform == "win32":
+            success, output = _run_host_cmd(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
+        elif sys.platform == "darwin":
+            success, output = _run_host_cmd(["pmset", "sleepnow"], shell=False)
+        else:
+            success, output = _run_host_cmd(["systemctl", "suspend"], shell=False)
         return {"success": success, "message": "Going to sleep." if success else "", "error": None if success else output}
 
     @staticmethod
     def _action_restart_computer(params: Dict[str, Any]) -> Dict[str, Any]:
-        if sys.platform != "win32":
-            return {"success": False, "error": "Restart is only supported on Windows."}
-        success, output = _run_host_cmd(["shutdown", "/r", "/t", "15"])
+        if sys.platform == "win32":
+            success, output = _run_host_cmd(["shutdown", "/r", "/t", "15"])
+            wait = "15 seconds"
+        elif sys.platform == "darwin":
+            success, output = _run_host_cmd(
+                ["osascript", "-e", 'tell application "System Events" to restart'], shell=False)
+            return {"success": success, "message": "Restarting now." if success else "",
+                    "error": None if success else output}
+        else:
+            success, output = _run_host_cmd(["shutdown", "-r", "+1"], shell=False)
+            wait = "a minute"
         return {
             "success": success,
-            "message": "Restarting in 15 seconds. Say 'cancel shutdown' to stop it." if success else "",
+            "message": f"Restarting in {wait}. Say 'cancel shutdown' to stop it." if success else "",
             "error": None if success else output,
         }
 
     @staticmethod
     def _action_shutdown_computer(params: Dict[str, Any]) -> Dict[str, Any]:
-        if sys.platform != "win32":
-            return {"success": False, "error": "Shutdown is only supported on Windows."}
-        success, output = _run_host_cmd(["shutdown", "/s", "/t", "15"])
+        if sys.platform == "win32":
+            success, output = _run_host_cmd(["shutdown", "/s", "/t", "15"])
+            wait = "15 seconds"
+        elif sys.platform == "darwin":
+            success, output = _run_host_cmd(
+                ["osascript", "-e", 'tell application "System Events" to shut down'], shell=False)
+            return {"success": success, "message": "Shutting down now." if success else "",
+                    "error": None if success else output}
+        else:
+            success, output = _run_host_cmd(["shutdown", "-h", "+1"], shell=False)
+            wait = "a minute"
         return {
             "success": success,
-            "message": "Shutting down in 15 seconds. Say 'cancel shutdown' to stop it." if success else "",
+            "message": f"Shutting down in {wait}. Say 'cancel shutdown' to stop it." if success else "",
             "error": None if success else output,
         }
+
     @staticmethod
     def _action_cancel_shutdown(params: Dict[str, Any]) -> Dict[str, Any]:
-        if sys.platform != "win32":
-            return {"success": False, "error": "This is only supported on Windows."}
-        success, output = _run_host_cmd(["shutdown", "/a"])
-        # /a fails harmlessly when nothing is scheduled; say so plainly.
+        if sys.platform == "win32":
+            success, output = _run_host_cmd(["shutdown", "/a"])
+        elif sys.platform == "darwin":
+            return {"success": False, "error": "A Mac restarts at once; there is nothing to cancel."}
+        else:
+            success, output = _run_host_cmd(["shutdown", "-c"], shell=False)
+        # Cancelling fails harmlessly when nothing is scheduled; say so plainly.
         if not success:
             return {"success": True, "message": "There was no shutdown waiting to be cancelled."}
         return {"success": True, "message": "Cancelled the pending shutdown."}
+
+    @staticmethod
+    def _action_check_updates(params: Dict[str, Any]) -> Dict[str, Any]:
+        """Open the system's own updater, checking. Nothing is installed from here."""
+        try:
+            if sys.platform == "win32":
+                # The "-action" page starts a check as it opens.
+                os.startfile("ms-settings:windowsupdate-action")  # type: ignore[attr-defined]
+                return {"success": True, "message": "Opened Windows Update. It's checking for updates now."}
+            if sys.platform == "darwin":
+                success, output = _run_host_cmd(
+                    ["open", "x-apple.systempreferences:com.apple.preferences.softwareupdate"], shell=False)
+                return {"success": success, "message": "Opened Software Update." if success else "",
+                        "error": None if success else output}
+            # Linux: whichever graphical updater this desktop has.
+            for cmd in (["gnome-software", "--mode=updates"], ["plasma-discover", "--mode", "update"],
+                        ["update-manager"], ["mintupdate"]):
+                if shutil.which(cmd[0]):
+                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     start_new_session=True)
+                    return {"success": True, "message": "Opened the software updater. It will check for updates."}
+            return {"success": False, "error": "No graphical updater was found on this system."}
+        except OSError as exc:
+            return {"success": False, "error": f"The updater could not be opened: {exc}"}
 
     # ---- Information ----
 
@@ -2587,10 +2651,19 @@ INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
     (re.compile(r"(?:note|yaad rakho|save this|likh lo)[:,]?\s+(.+)", re.I), "create_note", {"text": "$1"}),
 
     # Power (all confirmed before they run)
-    (re.compile(r"\b(?:sleep|suspend)\s+(?:the\s+)?(?:computer|pc|laptop|system)\b|\bcomputer\s+ko\s+sula\s+do\b", re.I), "sleep_computer", {}),
-    (re.compile(r"\brestart\s+(?:the\s+)?(?:computer|pc|laptop|system)\b|\breboot\b|\bcomputer\s+restart\s+karo\b", re.I), "restart_computer", {}),
-    (re.compile(r"\bshut\s*down\s+(?:the\s+)?(?:computer|pc|laptop|system)?\b|\bcomputer\s+band\s+karo\b", re.I), "shutdown_computer", {}),
-    (re.compile(r"\bcancel\s+(?:the\s+)?(?:shut\s*down|restart|reboot)\b|\bshutdown\s+(?:cancel|rok\s+do|mat\s+karo)\b", re.I), "cancel_shutdown", {}),
+    # Cancel first: "shutdown cancel karo" must never read as a shutdown.
+    (re.compile(r"\bcancel\s+(?:the\s+)?(?:shut\s*down|restart|reboot)\b|\b(?:shut\s*down|restart)\s+(?:cancel|rok\s+do|roko|mat\s+karo)\b", re.I), "cancel_shutdown", {}),
+    (re.compile(r"\b(?:sleep|suspend)\s+(?:the\s+|my\s+)?(?:computer|pc|laptop|system)\b"
+                r"|\bput\s+(?:the\s+|my\s+)?(?:computer|pc|laptop|system)\s+to\s+sleep\b"
+                r"|\b(?:computer|pc|laptop|system)\s+(?:ko\s+)?(?:sula\s+do|sleep\s+(?:mode\s+)?(?:me[in]*\s+)?(?:daal|dal|kar)\s*do)\b", re.I), "sleep_computer", {}),
+    (re.compile(r"\brestart\s+(?:the\s+|my\s+)?(?:computer|pc|laptop|system)\b|\breboot\b"
+                r"|\b(?:computer|pc|laptop|system)\s+(?:ko\s+)?restart\s*(?:karo|kar\s*do|kardo)\b", re.I), "restart_computer", {}),
+    (re.compile(r"\bshut\s*down\s+(?:the\s+|my\s+)?(?:computer|pc|laptop|system)?\b|\bturn\s+off\s+(?:the\s+|my\s+)?(?:computer|pc|laptop|system)\b"
+                r"|\b(?:computer|pc|laptop|system)\s+(?:ko\s+)?(?:band|shut\s*down)\s*(?:karo|kar\s*do|kardo)\b", re.I), "shutdown_computer", {}),
+    (re.compile(r"\bcheck\s+(?:for\s+)?(?:windows\s+|system\s+|software\s+|os\s+)?updates?\b"
+                r"|\b(?:windows\s+|system\s+)?updates?\s+check\s*(?:karo|kar\s*do|kardo)\b"
+                r"|\b(?:koi\s+)?(?:windows\s+|system\s+)?update\s+(?:hai|aaya|aya)\s+kya\b"
+                r"|\bare\s+there\s+(?:any\s+)?(?:windows\s+|system\s+)?updates\b", re.I), "check_updates", {}),
 
     # Weather / connectivity (free services, no API key)
     (re.compile(r"\bweather\s+(?:in|at|for|of)\s+([A-Za-zऀ-ॿ .'-]+?)\s*(?:kaisa hai|hai|\?)?$", re.I), "get_weather", {"city": "$1"}),

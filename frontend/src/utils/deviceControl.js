@@ -196,6 +196,10 @@ export async function runDeviceCommand(command) {
       case 'url':
         result = await device.openUrl({ url: command.url });
         break;
+      case 'say':
+        // Nothing to do on the phone, only something to say: a request to
+        // pay or buy with no app named.
+        return { spoken: describeOutcome(command, result), floated: false, startsPlayback: false };
       default:
         return { spoken: '', floated: false };
     }
