@@ -42,7 +42,10 @@ def test_something_unusual_goes_to_the_model_as_a_subject(monkeypatch):
 
 def test_a_models_sketch_is_checked_before_anything_is_drawn():
     good = paint_draw.parse_strokes('Here: {"strokes": [[[10, 10], [90, 90]], [[50, 0], [50, 100]]]}')
-    assert good == [[(0.1, 0.1), (0.9, 0.9)], [(0.5, 0.0), (0.5, 1.0)]]
+    assert len(good) == 2 and all(0 <= v <= 1 for st in good for p in st for v in p)
+    parts = paint_draw.parse_strokes('{"shapes": [{"type": "circle", "cx": 50, "cy": 40, "r": 20},'
+                                     ' {"type": "polygon", "points": [[10, 10], [20, 10], [15, 20]]}]}')
+    assert len(parts) == 2 and parts[1][0] == parts[1][-1]  # polygons close
     # Off the square, not numbers, a single point, or no JSON at all: dropped.
     assert paint_draw.parse_strokes('{"strokes": [[[10, 10], [500, 90]]]}') == []
     assert paint_draw.parse_strokes('{"strokes": [[["x", 1], [2, 2]]]}') == []
@@ -121,3 +124,22 @@ def test_voice_route_asks_then_draws_the_answer(monkeypatch):
 def test_anything_means_smaran_picks():
     planned = paint_draw.plan("paint mein kuch bhi bana do")
     assert planned["subjects"][0] in paint_draw.SHAPES
+
+
+@pytest.mark.parametrize("said, shape", [
+    ("paint mein billi banao", "cat"), ("draw a dog", "dog"), ("ek gaadi banao paint mein", "car"),
+    ("draw a fish", "fish"), ("paint mein titli banao", "butterfly"), ("draw the moon", "moon"),
+    ("paint mein badal banao", "cloud"), ("draw a rocket", "rocket"), ("patang banao paint mein", "kite"),
+    ("draw mountains", "mountain"), ("paint mein chidiya banao", "bird"), ("draw a boat", "boat"),
+])
+def test_everyday_subjects_are_drawn_from_the_library(said, shape):
+    assert paint_draw.known_subjects(said) == [shape]
+
+
+def test_a_model_sketch_is_fitted_to_fill_the_square():
+    # A small drawing in one corner comes out filling the square, shape kept.
+    strokes = paint_draw.parse_strokes('{"shapes": [{"type": "rect", "x": 0, "y": 0, "w": 10, "h": 5}]}')
+    xs = [x for st in strokes for x, _ in st]
+    ys = [y for st in strokes for _, y in st]
+    assert min(xs) >= 0 and max(xs) <= 1 and max(xs) - min(xs) > 0.85
+    assert abs((max(ys) - min(ys)) / (max(xs) - min(xs)) - 0.5) < 0.01

@@ -99,6 +99,161 @@ SHAPES: dict[str, list[Stroke]] = {
     ],
 }
 
+def _poly(*points: Point, closed: bool = True) -> Stroke:
+    stroke = list(points)
+    return stroke + [stroke[0]] if closed else stroke
+
+
+def _circle(cx: float, cy: float, r: float, steps: int = 36) -> Stroke:
+    return _ellipse(cx, cy, r, r, steps)
+
+
+def _arc(cx: float, cy: float, rx: float, ry: float, start_deg: float, end_deg: float, steps: int = 24) -> Stroke:
+    return _ellipse(cx, cy, rx, ry, steps, math.radians(start_deg), math.radians(end_deg))
+
+
+def _crescent() -> list[Stroke]:
+    """A crescent moon: the outer circle's arc and the inner one's, meeting.
+
+    Two arcs chosen by eye did not meet. These run between the points where
+    the two circles actually cross.
+    """
+    (ax, ay, ar), (bx, by, br) = (0.46, 0.5, 0.36), (0.6, 0.45, 0.31)
+    d = math.hypot(bx - ax, by - ay)
+    a = (ar * ar - br * br + d * d) / (2 * d)
+    h = math.sqrt(max(ar * ar - a * a, 0.0))
+    mx, my = ax + a * (bx - ax) / d, ay + a * (by - ay) / d
+    p1 = (mx + h * (by - ay) / d, my - h * (bx - ax) / d)
+    p2 = (mx - h * (by - ay) / d, my + h * (bx - ax) / d)
+
+    def angle(cx: float, cy: float, point: Point) -> float:
+        return math.degrees(math.atan2(point[1] - cy, point[0] - cx))
+
+    def arc_between(cx, cy, r, start: Point, end: Point, keep) -> Stroke:
+        """The arc from start to end, whichever way round has its middle where `keep` says."""
+        a1, a2 = angle(cx, cy, start), angle(cx, cy, end)
+        for sweep in ((a2 - a1) % 360, (a2 - a1) % 360 - 360):
+            mid = math.radians(a1 + sweep / 2)
+            if keep(cx + r * math.cos(mid), cy + r * math.sin(mid)):
+                return _arc(cx, cy, r, r, a1, a1 + sweep, 48)
+        return []
+
+    # The outer circle where it is outside the inner one, then back along the
+    # inner circle where it is inside the outer one.
+    outer = arc_between(ax, ay, ar, p1, p2, lambda x, y: math.hypot(x - bx, y - by) > br)
+    inner = arc_between(bx, by, br, p2, p1, lambda x, y: math.hypot(x - ax, y - ay) < ar)
+    return [outer + inner]
+
+
+# The things people most often ask for, drawn the way a child draws them:
+# recognisable at a glance, and the same every time. A model is only asked
+# for what is not here.
+SHAPES.update({
+    "cat": [
+        _circle(0.5, 0.36, 0.17),                                        # head
+        _poly((0.37, 0.26), (0.36, 0.1), (0.46, 0.2), closed=False),     # ears
+        _poly((0.54, 0.2), (0.64, 0.1), (0.63, 0.26), closed=False),
+        _circle(0.44, 0.33, 0.025, 12), _circle(0.56, 0.33, 0.025, 12),  # eyes
+        _poly((0.48, 0.4), (0.52, 0.4), (0.5, 0.43)),                    # nose
+        [(0.47, 0.41), (0.3, 0.38)], [(0.47, 0.43), (0.3, 0.45)],       # whiskers
+        [(0.53, 0.41), (0.7, 0.38)], [(0.53, 0.43), (0.7, 0.45)],
+        _ellipse(0.5, 0.72, 0.2, 0.19),                                  # body
+        _arc(0.78, 0.66, 0.1, 0.2, 90, 300),                             # tail
+    ],
+    "dog": [
+        _circle(0.5, 0.35, 0.16),                                        # head
+        _ellipse(0.33, 0.37, 0.05, 0.12), _ellipse(0.67, 0.37, 0.05, 0.12),  # floppy ears
+        _circle(0.44, 0.32, 0.022, 12), _circle(0.56, 0.32, 0.022, 12),  # eyes
+        _ellipse(0.5, 0.41, 0.035, 0.025, 12),                           # nose
+        _arc(0.5, 0.43, 0.06, 0.04, 20, 160),                            # mouth
+        _ellipse(0.5, 0.72, 0.24, 0.15),                                 # body
+        [(0.35, 0.83), (0.35, 0.95)], [(0.44, 0.86), (0.44, 0.95)],     # legs
+        [(0.56, 0.86), (0.56, 0.95)], [(0.65, 0.83), (0.65, 0.95)],
+        [(0.73, 0.66), (0.86, 0.55)],                                    # tail
+    ],
+    "car": [
+        _poly((0.08, 0.62), (0.08, 0.5), (0.26, 0.48), (0.36, 0.32), (0.66, 0.32),
+              (0.78, 0.48), (0.92, 0.5), (0.92, 0.62)),                   # body
+        _poly((0.39, 0.36), (0.5, 0.36), (0.5, 0.48), (0.31, 0.48)),     # windows
+        _poly((0.53, 0.36), (0.64, 0.36), (0.73, 0.48), (0.53, 0.48)),
+        _circle(0.27, 0.64, 0.08), _circle(0.73, 0.64, 0.08),             # wheels
+        _circle(0.27, 0.64, 0.03, 12), _circle(0.73, 0.64, 0.03, 12),
+    ],
+    "fish": [
+        _ellipse(0.45, 0.5, 0.28, 0.16),                                 # body
+        _poly((0.72, 0.5), (0.92, 0.35), (0.92, 0.65)),                  # tail
+        _circle(0.3, 0.46, 0.025, 12),                                   # eye
+        _arc(0.42, 0.5, 0.08, 0.12, -60, 60),                            # gill
+        _poly((0.42, 0.35), (0.5, 0.24), (0.56, 0.36), closed=False),    # fin
+    ],
+    "bird": [
+        _ellipse(0.5, 0.56, 0.22, 0.14),                                 # body
+        _circle(0.3, 0.42, 0.09),                                        # head
+        _poly((0.21, 0.42), (0.12, 0.44), (0.21, 0.46)),                 # beak
+        _circle(0.29, 0.4, 0.015, 10),                                   # eye
+        _arc(0.52, 0.52, 0.14, 0.12, 180, 360),                          # wing
+        [(0.44, 0.69), (0.42, 0.82)], [(0.54, 0.69), (0.56, 0.82)],     # legs
+        _poly((0.72, 0.52), (0.88, 0.44), (0.86, 0.6)),                  # tail
+    ],
+    "boat": [
+        _poly((0.12, 0.62), (0.88, 0.62), (0.74, 0.78), (0.26, 0.78)),   # hull
+        [(0.5, 0.62), (0.5, 0.14)],                                      # mast
+        _poly((0.52, 0.16), (0.8, 0.56), (0.52, 0.56)),                  # sail
+        _poly((0.48, 0.24), (0.48, 0.56), (0.26, 0.56)),
+        [(0.05, 0.86), (0.2, 0.83), (0.35, 0.86), (0.5, 0.83), (0.65, 0.86), (0.8, 0.83), (0.95, 0.86)],
+    ],
+    "butterfly": [
+        _ellipse(0.5, 0.52, 0.035, 0.22),                                # body
+        _ellipse(0.32, 0.38, 0.16, 0.14), _ellipse(0.68, 0.38, 0.16, 0.14),  # wings
+        _ellipse(0.35, 0.66, 0.12, 0.11), _ellipse(0.65, 0.66, 0.12, 0.11),
+        [(0.49, 0.31), (0.42, 0.16)], [(0.51, 0.31), (0.58, 0.16)],     # antennae
+    ],
+    "moon": _crescent(),
+    "cloud": [
+        _arc(0.28, 0.6, 0.14, 0.14, 90, 270)       # left bump, bottom to top
+        + _arc(0.45, 0.46, 0.17, 0.17, 180, 360)   # big top bump
+        + _arc(0.62, 0.6, 0.14, 0.14, 270, 450)    # right bump, top to bottom
+        + [(0.28, 0.74)],                          # flat base
+    ],
+    "apple": [
+        [(0.4, 0.3), (0.5, 0.34), (0.6, 0.3)]      # top dip
+        + _arc(0.6, 0.58, 0.2, 0.28, -90, 90)       # right side
+        + [(0.5, 0.83)]                             # bottom dip
+        + _arc(0.4, 0.58, 0.2, 0.28, 90, 270),      # left side, back to the top
+        [(0.5, 0.32), (0.53, 0.14)],                # stem
+        _poly((0.53, 0.2), (0.66, 0.12), (0.7, 0.22), (0.56, 0.24)),  # leaf
+    ],
+    "balloon": [
+        _ellipse(0.5, 0.36, 0.2, 0.26),
+        _poly((0.47, 0.64), (0.53, 0.64), (0.5, 0.61)),
+        [(0.5, 0.64), (0.46, 0.74), (0.54, 0.84), (0.5, 0.95)],
+    ],
+    "umbrella": [
+        _arc(0.5, 0.5, 0.38, 0.32, 180, 360),      # canopy
+        [(0.12, 0.5), (0.88, 0.5)],
+        [(0.5, 0.18), (0.5, 0.84)],                # shaft
+        _arc(0.44, 0.84, 0.06, 0.06, 0, 180),      # handle
+    ],
+    "rocket": [
+        _poly((0.5, 0.08), (0.62, 0.28), (0.62, 0.7), (0.38, 0.7), (0.38, 0.28)),  # body
+        _circle(0.5, 0.36, 0.05),                                        # window
+        _poly((0.38, 0.54), (0.26, 0.74), (0.38, 0.7)),                  # fins
+        _poly((0.62, 0.54), (0.74, 0.74), (0.62, 0.7)),
+        _poly((0.43, 0.7), (0.5, 0.9), (0.57, 0.7), closed=False),       # flame
+    ],
+    "kite": [
+        _poly((0.5, 0.08), (0.74, 0.36), (0.5, 0.7), (0.26, 0.36)),
+        [(0.5, 0.08), (0.5, 0.7)], [(0.26, 0.36), (0.74, 0.36)],
+        [(0.5, 0.7), (0.44, 0.78), (0.56, 0.84), (0.46, 0.92), (0.54, 0.97)],
+    ],
+    "mountain": [
+        _poly((0.05, 0.85), (0.35, 0.3), (0.62, 0.85), closed=False),
+        _poly((0.45, 0.85), (0.68, 0.42), (0.95, 0.85), closed=False),
+        _poly((0.28, 0.43), (0.35, 0.3), (0.42, 0.43), (0.38, 0.4), (0.35, 0.44), (0.31, 0.4), closed=True),
+        [(0.02, 0.85), (0.98, 0.85)],
+    ],
+})
+
 #: What people call them, in English, Hinglish and Hindi.
 _NAMES: list[tuple[str, str]] = [
     ("house", r"house|home|ghar|makan|makaan|घर|मकान"),
@@ -112,6 +267,21 @@ _NAMES: list[tuple[str, str]] = [
     ("square", r"square|box|rectangle|chaukor|चौकोर|वर्ग"),
     ("triangle", r"triangle|tikon|trikon|त्रिकोण"),
     ("line", r"line|lakeer|rekha|रेखा|लकीर"),
+    ("cat", r"cat|kitten|billi|billee|बिल्ली"),
+    ("dog", r"dog|puppy|kutta|kutte|कुत्ता"),
+    ("car", r"car|gaadi|gadi|गाड़ी|कार"),
+    ("fish", r"fish|machli|machhli|मछली"),
+    ("bird", r"bird|chidiya|chidiyaa|pakshi|चिड़िया|पक्षी"),
+    ("boat", r"boat|ship|naav|nav|kashti|नाव"),
+    ("butterfly", r"butterfly|titli|titali|तितली"),
+    ("moon", r"moon|chand|chaand|चाँद|चांद"),
+    ("cloud", r"cloud|badal|baadal|बादल"),
+    ("apple", r"apple|seb|सेब"),
+    ("balloon", r"balloon|gubbara|gubara|गुब्बारा"),
+    ("umbrella", r"umbrella|chhata|chhatri|chata|छाता"),
+    ("rocket", r"rocket|रॉकेट"),
+    ("kite", r"kite|patang|पतंग"),
+    ("mountain", r"mountain|mountains|pahad|pahaad|parvat|पहाड़|पर्वत"),
 ]
 
 
@@ -161,24 +331,112 @@ def is_draw_request(text: str) -> bool:
     return bool(DRAW_REQUEST.search(text or ""))
 
 
-ASK_WHAT = ("What should I draw? I can draw a house, tree, sun, star, heart, smiley, flower, "
-            "circle, square or triangle - or name anything else and I'll sketch it.")
+ASK_WHAT = ("What should I draw? A house, tree, sun, moon, cloud, flower, cat, dog, bird, fish, "
+            "butterfly, car, boat, rocket, kite, balloon, star or heart - or name anything else "
+            "and I'll sketch it.")
 
 
 # ---------------------------------------------------------------------------
 # Anything else: a model sketches it as coordinates
 # ---------------------------------------------------------------------------
 
+#: Parts, not points. Asked for raw coordinates, a 7B model drew a "cat" that
+#: was a trapezium with rungs. Asked to compose it - a circle for the head,
+#: triangles for ears - the same model does what a child would, which is the
+#: kind of drawing that reads well in Paint.
 _SKETCH_SYSTEM = (
-    "You draw simple line drawings as coordinates. Reply with JSON only, no prose: "
-    '{"strokes": [[[x, y], [x, y], ...], ...]}. Coordinates are 0 to 100, with (0,0) '
-    "top-left. Use at most 20 strokes of at most 60 points each. Keep it simple and "
-    "recognisable, like a child's clean outline drawing, filling most of the square."
+    "You make simple line drawings by composing basic shapes. Reply with JSON only, "
+    'no prose, in this form: {"shapes": [ ... ]}. Each shape is one of:\n'
+    '  {"type": "circle", "cx": 50, "cy": 40, "r": 20}\n'
+    '  {"type": "ellipse", "cx": 50, "cy": 70, "rx": 25, "ry": 15}\n'
+    '  {"type": "arc", "cx": 50, "cy": 50, "r": 10, "start": 20, "end": 160}  (degrees, 0 = right, 90 = down)\n'
+    '  {"type": "line", "points": [[x, y], [x, y], ...]}\n'
+    '  {"type": "polygon", "points": [[x, y], [x, y], [x, y]]}  (closed)\n'
+    "Coordinates are 0 to 100 with (0,0) at the top left; fill most of the square. "
+    'Also {"type": "rect", "x": 10, "y": 20, "w": 30, "h": 15}. '
+    "Use 4 to 20 shapes. Draw the recognisable parts - for an animal: head, ears, "
+    "eyes, nose, mouth, body, legs, tail - placed where they belong."
 )
+
+_NUMBER = (int, float)
+
+
+def _num(value) -> Optional[float]:
+    if isinstance(value, _NUMBER) and not isinstance(value, bool) and math.isfinite(value):
+        return float(value)
+    return None
+
+
+def _points(raw) -> Stroke:
+    stroke: Stroke = []
+    for point in (raw or [])[:60]:
+        if isinstance(point, (list, tuple)) and len(point) == 2:
+            x, y = _num(point[0]), _num(point[1])
+            # Loose bounds here; the whole sketch is fitted to the square after.
+            if x is not None and y is not None and -50 <= x <= 150 and -50 <= y <= 150:
+                stroke.append((x / 100, y / 100))
+    return stroke
+
+
+def _shape(item) -> Stroke:
+    """One described shape as a stroke, or [] if any part of it is out of bounds."""
+    if not isinstance(item, dict):
+        return []
+    kind = str(item.get("type", "")).lower()
+    if kind in ("rect", "rectangle", "box"):
+        x, y, w, h = (_num(item.get(k)) for k in ("x", "y", "w", "h"))
+        if None in (x, y, w, h) or w <= 0 or h <= 0:
+            return []
+        return [(x / 100, y / 100), ((x + w) / 100, y / 100), ((x + w) / 100, (y + h) / 100),
+                (x / 100, (y + h) / 100), (x / 100, y / 100)]
+    if kind in ("line", "polyline", "polygon"):
+        stroke = _points(item.get("points"))
+        if kind == "polygon" and len(stroke) >= 3:
+            stroke.append(stroke[0])
+        return stroke if len(stroke) >= 2 else []
+    cx, cy = _num(item.get("cx")), _num(item.get("cy"))
+    if cx is None or cy is None:
+        return []
+    if kind == "ellipse":
+        rx, ry = _num(item.get("rx")), _num(item.get("ry"))
+    else:
+        rx = ry = _num(item.get("r"))
+    if rx is None or ry is None or not (0 < rx <= 80 and 0 < ry <= 80):
+        return []
+    start, finish = 0.0, 360.0
+    if kind == "arc":
+        start, finish = _num(item.get("start")) or 0.0, _num(item.get("end"))
+        finish = 180.0 if finish is None else finish
+    elif kind not in ("circle", "ellipse"):
+        return []
+    return _ellipse(cx / 100, cy / 100, rx / 100, ry / 100, 36,
+                    math.radians(start), math.radians(finish))
+
+
+def fit_to_square(strokes: list[Stroke], pad: float = 0.04) -> list[Stroke]:
+    """Scale and centre a sketch to fill the 0..1 square, keeping its shape.
+
+    A model's "car" came back as one small wheel in a corner: it had used the
+    corner of the square, and parts past the edge were being thrown away.
+    """
+    xs = [x for stroke in strokes for x, _ in stroke]
+    ys = [y for stroke in strokes for _, y in stroke]
+    if not xs:
+        return strokes
+    width, height = max(xs) - min(xs), max(ys) - min(ys)
+    span = max(width, height, 1e-6)
+    scale = (1 - 2 * pad) / span
+    ox = pad + (1 - 2 * pad - width * scale) / 2 - min(xs) * scale
+    oy = pad + (1 - 2 * pad - height * scale) / 2 - min(ys) * scale
+    return [[(ox + x * scale, oy + y * scale) for x, y in stroke] for stroke in strokes]
 
 
 def parse_strokes(reply: str) -> list[Stroke]:
-    """Strokes from a model's reply, or [] - nothing unchecked is ever drawn."""
+    """Strokes from a model's reply, or [] - nothing unchecked is ever drawn.
+
+    Takes composed shapes ({"shapes": [...]}) and, from older prompts or other
+    models, raw strokes ({"strokes": [[[x, y], ...], ...]}).
+    """
     match = re.search(r"\{.*\}", reply or "", re.S)
     if not match:
         return []
@@ -186,18 +444,14 @@ def parse_strokes(reply: str) -> list[Stroke]:
         data = json.loads(match.group(0))
     except (ValueError, TypeError):
         return []
-    strokes: list[Stroke] = []
+    if not isinstance(data, dict):
+        return []
+    strokes = [st for st in (_shape(item) for item in (data.get("shapes") or [])[:24]) if st]
     for raw in (data.get("strokes") or [])[:20]:
-        stroke: Stroke = []
-        for point in (raw or [])[:60]:
-            if (isinstance(point, (list, tuple)) and len(point) == 2
-                    and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in point)):
-                x, y = float(point[0]), float(point[1])
-                if 0 <= x <= 100 and 0 <= y <= 100:
-                    stroke.append((x / 100, y / 100))
+        stroke = _points(raw)
         if len(stroke) >= 2:
             strokes.append(stroke)
-    return strokes
+    return fit_to_square(strokes) if strokes else []
 
 
 def sketch_with_model(subject: str) -> tuple[list[Stroke], str]:
