@@ -26,6 +26,18 @@ public class MainActivity extends BridgeActivity {
         SmaranVoiceService.setUiVisible(false);
     }
 
+    /* A question said to "Hey SMARAN" while the app was elsewhere. The service
+       has already left it with the plugin; this tells a running page to
+       collect it. A page still loading collects it when it starts. */
+    @Override protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        String query = intent == null ? null : intent.getStringExtra(SmaranVoiceService.EXTRA_QUERY);
+        if (query != null && !query.trim().isEmpty()) {
+            SmaranDevice.setPendingQuery(query.trim());
+            SmaranDevice.announceQuery();
+        }
+    }
+
     /** The dispatcher runs before the IME gets a chance to consume Back. */
     private boolean isKeyboardVisible() {
         View decor = getWindow().getDecorView();

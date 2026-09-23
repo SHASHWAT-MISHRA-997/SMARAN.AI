@@ -10,10 +10,23 @@ android {
         versionCode 21069
         versionName "1.0.9"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Vosk (the offline "Hey SMARAN" listener) is the only native code in
+        // the app, and every phone sold in years is arm64 or armv7. x86_64 (Intel
+        // Chromebooks, emulators) cost another 10 MB for almost nobody.
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    // Native libraries compressed in the APK. Stored uncompressed they were
+    // 17 MB of the download for a one-time saving at install.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
     // Self-signed release key. Android requires every APK to be signed;
@@ -85,7 +98,72 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+    // Offline speech recognition for the wake word. It reads the microphone
+    // directly and never takes audio focus, so music keeps playing while it
+    // listens - Android's own recogniser pauses it every time.
+    implementation 'com.alphacephei:vosk-android:0.3.47@aar'
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
 }
+
+/* The wake-word model, packaged into the APK.
+
+   Not committed: 57 MB of binaries has no business in git history. Fetched
+   once per machine into .vosk-cache (git-ignored), refused unless its SHA-256
+   matches the file that was tested, and unpacked into generated assets that
+   Vosk's StorageService copies to storage on first run. The `uuid` file is
+   how StorageService tells a new model from the one already unpacked. */
+def voskModel = [
+    name  : 'vosk-model-small-en-in-0.4',
+    url   : 'https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip',
+    sha256: '20663dcac4d5cb783a579c54d98339344a688e4ec6e1b4a4b059fd1235454cc7',
+]
+def voskAssets = layout.buildDirectory.dir('generated/vosk-assets')
+
+tasks.register('prepareWakeWordModel') {
+    def zip = rootProject.file(".vosk-cache/${voskModel.name}.zip")
+    def outDir = voskAssets.get().dir('vosk-en-in').asFile
+    inputs.property('sha256', voskModel.sha256)
+    outputs.dir(outDir)
+    doLast {
+        def sha = { File f ->
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+            f.withInputStream { stream ->
+                byte[] buffer = new byte[1 << 16]
+                int n
+                while ((n = stream.read(buffer)) > 0) digest.update(buffer, 0, n)
+            }
+            digest.digest().encodeHex().toString()
+        }
+        if (!zip.exists() || sha(zip) != voskModel.sha256) {
+            zip.parentFile.mkdirs()
+            logger.lifecycle("Downloading ${voskModel.url}")
+            def part = new File(zip.path + '.part')
+            new URL(voskModel.url).withInputStream { input -> part.withOutputStream { it << input } }
+            def got = sha(part)
+            if (got != voskModel.sha256) {
+                part.delete()
+                throw new GradleException("Wake-word model checksum mismatch: ${got}")
+            }
+            if (zip.exists()) zip.delete()
+            part.renameTo(zip)
+        }
+        project.delete(outDir)
+        project.copy {
+            from(project.zipTree(zip)) {
+                include "${voskModel.name}/**"
+                eachFile { details ->
+                    details.path = details.path.substring(voskModel.name.length() + 1)
+                }
+                includeEmptyDirs = false
+            }
+            into outDir
+        }
+        new File(outDir, 'uuid').text = voskModel.sha256.substring(0, 16)
+    }
+}
+
+android.sourceSets.main.assets.srcDir(voskAssets)
+tasks.named('preBuild').configure { dependsOn 'prepareWakeWordModel' }
 
 apply from: 'capacitor.build.gradle'
 

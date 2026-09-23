@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { isNativeApp } from '../utils/hostLink';
 import { FLOAT_VIEWS, getFloatView, setFloatView } from '../utils/floatView';
+import { heySmaranOn, setHeySmaran } from '../utils/wakeSetting';
+import { startWakeListening, stopBackgroundListening } from '../utils/deviceControl';
 
 export default function VoicePreferences() {
   const [microphones, setMicrophones] = useState([]);
@@ -11,6 +13,27 @@ export default function VoicePreferences() {
   const [continuousDictation, setContinuousDictation] = useState(() => localStorage.getItem('sm_continuous_dictation') !== 'false');
   const [testNotice, setTestNotice] = useState('');
   const [floatView, setFloatViewState] = useState(getFloatView);
+  const [heySmaran, setHeySmaranState] = useState(heySmaranOn);
+  const [wakeNotice, setWakeNotice] = useState('');
+
+  const handleHeySmaran = async (on) => {
+    setWakeNotice('');
+    if (!on) {
+      setHeySmaran(false);
+      setHeySmaranState(false);
+      await stopBackgroundListening();
+      return;
+    }
+    const result = await startWakeListening();
+    if (!result.listening) {
+      setWakeNotice(result.reason === 'microphone-permission'
+        ? 'SMARAN needs the microphone for this. Allow it, then switch this on again.'
+        : 'Android would not start listening. Try again with SMARAN open.');
+      return;
+    }
+    setHeySmaran(true);
+    setHeySmaranState(true);
+  };
 
   const handleFloatView = (id) => {
     setFloatView(id);
@@ -185,6 +208,31 @@ export default function VoicePreferences() {
           </button>
         </div>
       </div>
+
+      {/* "Hey SMARAN", always listening. Phone only: the desktop has its own
+          wake phrase, which listens while the app is open. */}
+      {isNativeApp() && (
+        <div className="border-b border-line pb-4 space-y-2">
+          <label className="flex items-center justify-between gap-4 cursor-pointer">
+            <div>
+              <div className="text-sm font-semibold text-ink">“Hey SMARAN” — always listening</div>
+              <div className="text-[11px] text-ink-muted">
+                Say “Hey SMARAN”, “Hey Amarya”, “Hey Myra” or “Hey Jarvis” from any app, even with
+                music playing. It listens offline, on the phone; nothing is sent anywhere until you
+                say the name. Android shows a notification while it listens - Stop is there too.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={heySmaran}
+              onChange={e => handleHeySmaran(e.target.checked)}
+              className="h-4 w-4 rounded accent-indigo-600 cursor-pointer shrink-0"
+              aria-label="Hey SMARAN, always listening"
+            />
+          </label>
+          {wakeNotice && <p className="text-xs text-amber-400">{wakeNotice}</p>}
+        </div>
+      )}
 
       {/* The floating window. Only the phone app floats when it opens
           another app, so only the phone app offers the choice. */}

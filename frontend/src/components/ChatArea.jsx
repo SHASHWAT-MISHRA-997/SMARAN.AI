@@ -4,7 +4,8 @@ import { API_BASE } from '../context/AuthContext';
 import GenerationProgress from './GenerationProgress';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
-import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening } from '../utils/deviceControl';
+import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening, startWakeListening, setPageListening, takePendingQuery, onDeviceEvent } from '../utils/deviceControl';
+import { heySmaranOn, setHeySmaran, WAKE_GREETING } from '../utils/wakeSetting';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
 import { voicePersonaRule } from '../utils/voicePersona';
 import { languageRule, CODE_OUTPUT_RULE, SILENT_RULES } from '../utils/replyRules';
@@ -35,7 +36,7 @@ import ModelCompareModal from './ModelCompareModal';
 import HackerVoiceAssistant from './HackerVoiceAssistant';
 import HeroLogo3D from './HeroLogo3D';
 
-import { WakeWordListener, WAKE_PHRASE_DEFAULT } from '../utils/wakeWord';
+import { WakeWordListener, WAKE_PHRASE_DEFAULT, wakeRest } from '../utils/wakeWord';
 import { detectClientDevice, isDesktopApp } from './RightPanel';
 import { Maya3DCanvas } from './CodePreviewVisualizer';
 
@@ -2193,7 +2194,9 @@ const ChatArea = ({
     // Ending the call ends the listening, and takes the notification with it.
     // A microphone left held after the call is over is the thing nobody
     // forgives, and the notification would be the only sign of it.
-    stopBackgroundListening();
+    // Unless "Hey SMARAN" is switched on: then listening for it is what the
+    // user asked for, and it carries on.
+    if (!heySmaranOn()) stopBackgroundListening();
     stopSpeaking();
     setVoiceState('idle');
     // Ending a call should end what was on screen with it. These were left
@@ -2512,6 +2515,65 @@ const ChatArea = ({
   const composerRef = useRef(null);
   const [clientDevice, setClientDevice] = useState(null);
 
+  /* "Hey SMARAN" on the phone.
+
+     The listening itself is native (SmaranVoiceService): offline, and it
+     never pauses music. What reaches the page is the result - the wake
+     phrase heard while the app is on screen, or a question asked while it
+     was away - and both are answered by the voice call, character and all.
+     The latest handlers sit in a ref so the listeners are registered once. */
+  const wakeHandlersRef = useRef({});
+  wakeHandlersRef.current = {
+    // Woken: open the call and ask, or act on what was said with the name.
+    woke: (rest = '') => {
+      const said = String(rest || '').trim();
+      if (!isVoiceModeOpenRef.current) openVoiceMode();
+      if (said.split(/\s+/).length >= 2) {
+        setTimeout(() => handleSendVoicePrompt(said), 250);
+      } else {
+        setVoiceAiResponse(WAKE_GREETING);
+        speakNativeText(WAKE_GREETING);
+      }
+    },
+    // A question asked while the app was elsewhere: answered in the call.
+    asked: (query) => {
+      if (!query) return;
+      if (!isVoiceModeOpenRef.current) openVoiceMode();
+      setTimeout(() => handleSendVoicePrompt(query), 250);
+    },
+  };
+
+  useEffect(() => {
+    if (!isNativeApp()) return undefined;
+    let alive = true;
+    const collect = async () => {
+      const query = await takePendingQuery();
+      if (alive && query) wakeHandlersRef.current.asked(query);
+    };
+    // Opened by a question asked from elsewhere, before this page existed.
+    collect();
+    // Switched on: start listening now. Stop on the notification is
+    // respected, and the switch follows it rather than claiming otherwise.
+    if (heySmaranOn()) {
+      startWakeListening({ auto: true }).then((result) => {
+        if (alive && result.reason === 'stopped-by-user') setHeySmaran(false);
+      });
+    }
+    const offWake = onDeviceEvent('wake', (event) => wakeHandlersRef.current.woke(event?.rest));
+    const offQuery = onDeviceEvent('voiceQuery', collect);
+    return () => {
+      alive = false;
+      offWake();
+      offQuery();
+    };
+  }, []);
+
+  // One microphone, one owner: while a call or dictation listens, the
+  // wake listener lets go of it, and takes it back after.
+  useEffect(() => {
+    setPageListening(isVoiceModeOpen || isDictating);
+  }, [isVoiceModeOpen, isDictating]);
+
   useEffect(() => {
     localStorage.setItem('sm_wake_enabled', String(wakeWordEnabled));
     localStorage.setItem('sm_wake_phrase', wakePhrase);
@@ -2540,9 +2602,11 @@ const ChatArea = ({
     const listener = new WakeWordListener({
       phrase: wakePhrase,
       apiBase: API_BASE,
-      onWake: () => {
+      // Woken the way the phone is: an instruction said with the name is
+      // carried out, and the name alone is answered with a question.
+      onWake: (heard) => {
         listener.stop();
-        openVoiceMode();
+        wakeHandlersRef.current.woke(wakeRest(heard));
       },
       /* "mat suno" turns the microphone off and leaves it off.
          Nothing did this before: wake phrases started listening and no phrase

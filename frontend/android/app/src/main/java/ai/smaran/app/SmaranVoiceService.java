@@ -17,65 +17,93 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.util.Log;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
- * Listening while the app is not on screen.
+ * "Hey SMARAN", heard from anywhere on the phone.
  *
- * Without this, a second command never worked. Saying "open WhatsApp" opened
- * WhatsApp, and from that moment the activity was *stopped* - and a stopped
- * activity is not listening, cannot run the page's JavaScript, and cannot even
- * put itself into a floating window. Every one of those was reported as a
- * separate fault; they are one fault.
+ * A foreground service, because that is what Android provides for holding
+ * the microphone while the app is not on screen. The price is a notification
+ * that cannot be swiped away, and that price is the point: an app that
+ * listens while you are elsewhere should be visibly doing so, and stoppable
+ * from where it is seen.
  *
- * A foreground service is the thing Android provides for this. It survives the
- * activity going away, it is allowed to hold the microphone, and it is allowed
- * to start an activity - which is what carrying out "open YouTube" needs. The
- * price is a notification the user cannot dismiss, and that price is the point:
- * an app that listens while you are elsewhere should be visibly doing so.
+ * How it listens:
  *
- * The command rules live in DeviceActions rather than here, and rather than in
- * the page, because the page's copy cannot run when this service is the only
- * thing awake.
+ *  1. WakeSpotter waits for the wake phrase, offline, reading the microphone
+ *     directly. It never takes audio focus, so a song keeps playing.
+ *  2. On "Hey SMARAN" (or Amarya, Myra, Jarvis) - if SMARAN is on screen, the
+ *     page opens its voice call, which answers anything. Otherwise SMARAN
+ *     asks "How may I help you?" and hears one instruction with Android's own
+ *     recogniser, which understands Hindi and Hinglish.
+ *  3. A phone action (play, pause, open, "which song?") is done here, now.
+ *     Anything else - a question - is handed to the app, which opens with it.
+ *  4. Back to waiting.
+ *
+ * While the page itself is listening (a call, dictation) this steps aside
+ * entirely: two owners of one microphone is how both end up deaf.
+ *
+ * If the wake model cannot be loaded, the old behaviour stands in: every
+ * sentence is checked for an instruction, as before this existed.
  */
-public class SmaranVoiceService extends Service {
+public class SmaranVoiceService extends Service implements WakeSpotter.Listener {
     private static final String TAG = "SmaranVoiceService";
     private static final String CHANNEL_ID = "smaran_listening";
     private static final int NOTIFICATION_ID = 4102;
 
     public static final String ACTION_START = "ai.smaran.app.LISTEN_START";
     public static final String ACTION_STOP = "ai.smaran.app.LISTEN_STOP";
+    /** An extra on MainActivity's intent: something asked out loud for the app to answer. */
+    public static final String EXTRA_QUERY = "ai.smaran.app.VOICE_QUERY";
+
+    private static final String WAITING = "Say “Hey SMARAN”";
+    private static final String GREETING = "How may I help you?";
 
     /** Read by the plugin so the page can show whether it is on. */
     static volatile boolean running = false;
     private static boolean uiVisible = false;
+    private static boolean pageListening = false;
     private static SmaranVoiceService instance;
 
-    // Activity lifecycle callbacks and Service callbacks run on the main
-    // thread. Only one owner may hold recognition at a time, including PiP.
+    /** Where a wake phrase heard while the app is on screen goes: its voice call. */
+    interface PageSink {
+        /** True if the page took it. */
+        boolean onWake(String rest);
+    }
+    static PageSink pageSink;
+
+    // Activity lifecycle callbacks and Service callbacks run on the main thread.
     static void setUiVisible(boolean visible) {
         uiVisible = visible;
-        if (instance != null) {
-            instance.main.removeCallbacksAndMessages(null);
-            if (instance.recognizer != null) {
-                instance.recognizer.destroy();
-                instance.recognizer = null;
-            }
-            if (!visible && !instance.stopping) {
-                instance.main.postDelayed(instance::listen, 350);
-            }
-        }
+        if (instance != null) instance.conditionsChanged();
     }
 
+    /** The page opened or closed its own microphone: a call, or dictation. */
+    static void setPageListening(boolean listening) {
+        pageListening = listening;
+        if (instance != null) instance.conditionsChanged();
+    }
+
+    private final WakeSpotter spotter = new WakeSpotter(this);
     private SpeechRecognizer recognizer;
+    /** Between a wake phrase and the end of what followed it. */
+    private boolean conversing = false;
     /** A question just asked ("which song?") and when; the next turn answers it. */
     private DeviceActions.Command asked;
     private long askedAt;
     private TextToSpeech tts;
+    private boolean ttsReady = false;
+    private int utterances = 0;
+    private final Map<String, Runnable> afterSpeech = new HashMap<>();
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final Runnable resumeTask = this::resume;
     private boolean stopping = false;
 
     @Override public IBinder onBind(Intent intent) { return null; }
@@ -83,6 +111,9 @@ public class SmaranVoiceService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            // Remembered, so the app does not quietly start it again next time.
+            getSharedPreferences(SmaranDevice.PREFS, MODE_PRIVATE).edit()
+                .putBoolean(SmaranDevice.STOPPED_BY_USER, true).apply();
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -102,10 +133,10 @@ public class SmaranVoiceService extends Service {
         }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, buildNotification("Listening"),
+                startForeground(NOTIFICATION_ID, buildNotification(WAITING, null),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
             } else {
-                startForeground(NOTIFICATION_ID, buildNotification("Listening"));
+                startForeground(NOTIFICATION_ID, buildNotification(WAITING, null));
             }
         } catch (RuntimeException refused) {
             // SecurityException for the permission, and on Android 12+
@@ -119,11 +150,20 @@ public class SmaranVoiceService extends Service {
         stopping = false;
         if (tts == null) {
             tts = new TextToSpeech(this, status -> {
-                if (status == TextToSpeech.SUCCESS) tts.setLanguage(new Locale("en", "IN"));
+                if (status != TextToSpeech.SUCCESS || tts == null) return;
+                tts.setLanguage(new Locale("en", "IN"));
+                tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override public void onStart(String id) { }
+                    @Override public void onDone(String id) { finished(id); }
+                    @Override public void onError(String id) { finished(id); }
+                });
+                ttsReady = true;
             });
         }
-        main.removeCallbacksAndMessages(null);
-        if (!uiVisible) main.post(this::listen);
+        if (!conversing) {
+            main.removeCallbacks(resumeTask);
+            main.post(resumeTask);
+        }
         // START_STICKY so Android brings it back if it is killed for memory;
         // a listener that quietly stops listening is worse than one that does
         // not start.
@@ -144,17 +184,327 @@ public class SmaranVoiceService extends Service {
         return START_NOT_STICKY;
     }
 
-    private Notification buildNotification(String text) {
+    // ── who holds the microphone ────────────────────────────────────────────
+
+    private void conditionsChanged() {
+        if (stopping) return;
+        if (pageListening) {
+            hush();
+            return;
+        }
+        if (conversing) return; // it resumes itself when the exchange is over
+        main.removeCallbacks(resumeTask);
+        main.postDelayed(resumeTask, 600);
+    }
+
+    /** Wait for the wake phrase again. */
+    private void resume() {
+        if (stopping || pageListening) return;
+        conversing = false;
+        if (WakeSpotter.ready()) {
+            if (spotter.start()) {
+                status(WAITING, null);
+            } else {
+                // The microphone is busy - a phone call, another app recording.
+                main.postDelayed(resumeTask, 3000);
+            }
+            return;
+        }
+        if (WakeSpotter.failed()) {
+            // No wake model: the behaviour from before it existed.
+            if (!uiVisible) listen();
+            return;
+        }
+        status("Getting ready…", null);
+        WakeSpotter.load(this, resumeTask);
+    }
+
+    /** Let go of the microphone and stop talking. */
+    private void hush() {
+        main.removeCallbacksAndMessages(null);
+        afterSpeech.clear();
+        spotter.stop();
+        destroyRecognizer();
+        if (tts != null) tts.stop();
+        conversing = false;
+    }
+
+    private void destroyRecognizer() {
+        if (recognizer != null) {
+            recognizer.destroy();
+            recognizer = null;
+        }
+    }
+
+    // ── the wake phrase and what follows it ─────────────────────────────────
+
+    @Override
+    public void onWake(WakeWord.Heard heard) {
+        if (stopping || pageListening || conversing) return;
+        spotter.stop();
+        conversing = true;
+        Log.i(TAG, "woken: " + heard.name);
+        // SMARAN is on screen: its own voice call answers, with the character
+        // and the model. If the page does not take the microphone within a few
+        // seconds, go back to waiting rather than stay deaf.
+        if (uiVisible && pageSink != null && pageSink.onWake(heard.rest)) {
+            main.postDelayed(resumeTask, 5000);
+            return;
+        }
+        // "Hey SMARAN, play music on Spotify" in one breath: the offline model
+        // caught an instruction after the name, so there is nothing to ask.
+        if (!heard.rest.isEmpty() && DeviceActions.detect(heard.rest) != null) {
+            answer(heard.rest);
+            return;
+        }
+        say(GREETING, this::hearInstruction);
+    }
+
+    /** One turn of Android's recogniser, for the instruction itself. */
+    private void hearInstruction() {
+        if (stopping || pageListening) return;
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            resume();
+            return;
+        }
+        destroyRecognizer();
+        recognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        recognizer.setRecognitionListener(new OneTurn() {
+            @Override void heard(String said) {
+                destroyRecognizer();
+                if (stopping || pageListening) return;
+                if (said.isEmpty()) {
+                    resume();
+                } else {
+                    answer(said);
+                }
+            }
+        });
+        try {
+            recognizer.startListening(recognitionRequest());
+        } catch (Exception e) {
+            Log.w(TAG, "could not hear the instruction", e);
+            resume();
+        }
+    }
+
+    /** Do what was said, if the phone can; otherwise give it to the app. */
+    private void answer(String said) {
+        Outcome outcome = handle(said);
+        switch (outcome.kind) {
+            case QUESTION:
+                say(outcome.spoken, this::hearInstruction);
+                break;
+            case SPOKEN:
+                say(outcome.spoken, this::resume);
+                break;
+            case PLAYING:
+                // Spoken over, the song would pause. The notification says it.
+                status(outcome.spoken, null);
+                main.postDelayed(resumeTask, 800);
+                break;
+            default:
+                handToApp(said);
+                main.postDelayed(resumeTask, 800);
+                break;
+        }
+    }
+
+    /**
+     * A question, not a phone action: SMARAN opens with it and answers.
+     *
+     * Android may refuse to bring an app forward from the background, so the
+     * notification carries the same request - one tap asks it.
+     */
+    private void handToApp(String query) {
+        SmaranDevice.setPendingQuery(query);
+        Intent open = new Intent(this, MainActivity.class)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_QUERY, query);
+        try {
+            startActivity(open);
+        } catch (RuntimeException refused) {
+            Log.w(TAG, "could not bring SMARAN forward", refused);
+        }
+        status("“" + query + "” — tap to see the answer", open);
+    }
+
+    // ── the fallback: every sentence checked, no wake phrase ────────────────
+
+    /**
+     * One turn of listening, restarted for the next. Used only when the wake
+     * model could not be loaded.
+     */
+    private void listen() {
+        if (stopping || uiVisible || pageListening) return;
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Log.w(TAG, "no recognition service on this device");
+            stopSelf();
+            return;
+        }
+        destroyRecognizer();
+        recognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        recognizer.setRecognitionListener(new OneTurn() {
+            @Override void heard(String said) {
+                if (stopping || uiVisible || pageListening) return;
+                if (said.isEmpty()) {
+                    main.postDelayed(SmaranVoiceService.this::listen, 250);
+                    return;
+                }
+                Outcome outcome = handle(said);
+                if (outcome.kind == Kind.PLAYING) {
+                    // Listening on would take audio focus and pause the song.
+                    status(outcome.spoken, null);
+                    stopping = true;
+                    main.removeCallbacksAndMessages(null);
+                    main.postDelayed(SmaranVoiceService.this::stopSelf, 400);
+                } else if (outcome.kind == Kind.QUESTION || outcome.kind == Kind.SPOKEN) {
+                    say(outcome.spoken, SmaranVoiceService.this::listen);
+                } else {
+                    main.postDelayed(SmaranVoiceService.this::listen, 250);
+                }
+            }
+            @Override void failed(int error) {
+                if (stopping || uiVisible || pageListening) return;
+                // The microphone was taken away - revoked in Settings.
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    giveUp();
+                    return;
+                }
+                long wait = (error == SpeechRecognizer.ERROR_NO_MATCH
+                    || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) ? 250 : 1500;
+                main.postDelayed(SmaranVoiceService.this::listen, wait);
+            }
+        });
+        try {
+            recognizer.startListening(recognitionRequest());
+        } catch (Exception e) {
+            Log.w(TAG, "could not start listening", e);
+            main.postDelayed(this::listen, 2000);
+        }
+    }
+
+    private Intent recognitionRequest() {
+        return new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                      RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            // The phone's own language settings decide, and API 34 upward can
+            // switch between them mid-sentence. Pinning en-GB here was the
+            // original reason Hindi came out as nonsense.
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+    }
+
+    /** SpeechRecognizer's listener, reduced to "this was said" or "nothing was". */
+    private abstract static class OneTurn implements RecognitionListener {
+        abstract void heard(String said);
+        void failed(int error) { heard(""); }
+
+        @Override public void onReadyForSpeech(android.os.Bundle params) { }
+        @Override public void onBeginningOfSpeech() { }
+        @Override public void onRmsChanged(float rms) { }
+        @Override public void onBufferReceived(byte[] buffer) { }
+        @Override public void onEndOfSpeech() { }
+        @Override public void onEvent(int type, android.os.Bundle params) { }
+        @Override public void onPartialResults(android.os.Bundle partial) { }
+        @Override public void onError(int error) { failed(error); }
+        @Override public void onResults(android.os.Bundle results) {
+            ArrayList<String> heard = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+            heard(heard == null || heard.isEmpty() || heard.get(0) == null ? "" : heard.get(0).trim());
+        }
+    }
+
+    // ── carrying it out ──────────────────────────────────────────────────────
+
+    private enum Kind { NONE, QUESTION, SPOKEN, PLAYING }
+
+    private static final class Outcome {
+        final Kind kind;
+        final String spoken;
+        Outcome(Kind kind, String spoken) {
+            this.kind = kind;
+            this.spoken = spoken == null ? "" : spoken;
+        }
+    }
+
+    /** Act on what was heard, if it was an instruction. */
+    private Outcome handle(String said) {
+        DeviceActions.Command command = null;
+        if (asked != null && System.currentTimeMillis() - askedAt < 60_000) {
+            DeviceActions.Command question = asked;
+            asked = null;
+            command = DeviceActions.answer(question, said);
+            if (command != null && "cancelled".equals(command.action)) {
+                return new Outcome(Kind.SPOKEN, "hi".equals(question.lang) ? "ठीक है।"
+                    : "hinglish".equals(question.lang) ? "Theek hai." : "Okay.");
+            }
+        }
+        asked = null;
+        if (command == null) command = DeviceActions.detect(said);
+        if (command == null) return new Outcome(Kind.NONE, "");
+        // "Play music on Spotify": ask which song, and hear the answer next.
+        if ("ask".equals(command.action)) {
+            asked = command;
+            askedAt = System.currentTimeMillis();
+            return new Outcome(Kind.QUESTION, command.argument);
+        }
+        String spoken = DeviceActions.perform(this, command);
+        // Something just started playing. Speaking over it, or listening with
+        // Android's recogniser, takes audio focus and the song pauses itself a
+        // few seconds in - measured on a phone. So nothing is said aloud.
+        boolean startsPlayback = "music".equals(command.action)
+            || "youtube_play".equals(command.action)
+            || ("media".equals(command.action) && ("play".equals(command.argument)
+                || "next".equals(command.argument) || "previous".equals(command.argument)));
+        return new Outcome(startsPlayback ? Kind.PLAYING : Kind.SPOKEN, spoken);
+    }
+
+    // ── speaking and the notification ────────────────────────────────────────
+
+    private static final Pattern DEVANAGARI = Pattern.compile("[ऀ-ॿ]");
+
+    /** Say it, then run `after` once it has been said - never while it is being said. */
+    private void say(String text, Runnable after) {
+        if (tts == null || !ttsReady || text == null || text.isEmpty()) {
+            if (after != null) main.postDelayed(after, 200);
+            return;
+        }
+        status(text, null);
+        String id = "svc_" + (++utterances);
+        if (after != null) afterSpeech.put(id, after);
+        tts.setLanguage(DEVANAGARI.matcher(text).find() ? new Locale("hi", "IN") : new Locale("en", "IN"));
+        if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) {
+            finished(id);
+            return;
+        }
+        // Some engines never report the end. Listening must not wait for ever,
+        // nor start while the words are still coming out.
+        main.postDelayed(() -> finished(id), 2500 + 90L * text.length());
+    }
+
+    private void finished(String id) {
+        main.post(() -> {
+            Runnable after = afterSpeech.remove(id);
+            if (after != null && !stopping) after.run();
+        });
+    }
+
+    private void status(String text, Intent tapped) {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null && running) manager.notify(NOTIFICATION_ID, buildNotification(text, tapped));
+    }
+
+    private Notification buildNotification(String text, Intent tapped) {
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager != null
                 && manager.getNotificationChannel(CHANNEL_ID) == null) {
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID, "Listening", NotificationManager.IMPORTANCE_LOW);
-            channel.setDescription("Shown while SMARAN.AI is listening for commands.");
+            channel.setDescription("Shown while SMARAN.AI is listening for “Hey SMARAN”.");
             channel.setShowBadge(false);
             manager.createNotificationChannel(channel);
         }
-        Intent open = new Intent(this, MainActivity.class)
+        Intent open = tapped != null ? tapped : new Intent(this, MainActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent tap = PendingIntent.getActivity(this, 0, open,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
@@ -174,144 +524,12 @@ public class SmaranVoiceService extends Service {
             .build();
     }
 
-    private void say(String text) {
-        if (tts == null || text == null || text.isEmpty()) return;
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "svc_" + System.currentTimeMillis());
-    }
-
-    /**
-     * One turn of listening, restarted for the next.
-     *
-     * SpeechRecognizer is single-shot: it ends on silence, on a result, or on
-     * an error, and has to be asked again. Restarting is therefore the normal
-     * path and not error handling - the guard below is only about not doing it
-     * after the service has been told to stop.
-     */
-    private void listen() {
-        if (stopping || uiVisible) return;
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Log.w(TAG, "no recognition service on this device");
-            stopSelf();
-            return;
-        }
-        if (recognizer != null) {
-            recognizer.destroy();
-            recognizer = null;
-        }
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this);
-        recognizer.setRecognitionListener(new RecognitionListener() {
-            @Override public void onReadyForSpeech(android.os.Bundle params) { }
-            @Override public void onBeginningOfSpeech() { }
-            @Override public void onRmsChanged(float rms) { }
-            @Override public void onBufferReceived(byte[] buffer) { }
-            @Override public void onEndOfSpeech() { }
-            @Override public void onEvent(int type, android.os.Bundle params) { }
-            @Override public void onPartialResults(android.os.Bundle partial) { }
-
-            @Override
-            public void onError(int error) {
-                if (stopping || uiVisible) return;
-                // The microphone was taken away while listening - revoked in
-                // Settings. Retrying cannot succeed; it only spins.
-                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
-                    giveUp();
-                    return;
-                }
-                // Silence and no-match are ordinary: nobody spoke. Anything
-                // else is worth a breath before trying again, so a persistent
-                // fault does not become a tight loop holding the microphone.
-                long wait = (error == SpeechRecognizer.ERROR_NO_MATCH
-                    || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) ? 250 : 1500;
-                main.postDelayed(SmaranVoiceService.this::listen, wait);
-            }
-
-            @Override
-            public void onResults(android.os.Bundle results) {
-                if (stopping || uiVisible) return;
-                ArrayList<String> heard =
-                    results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                String said = (heard == null || heard.isEmpty()) ? "" : heard.get(0);
-                // After a question, wait for it to be spoken: listening at once
-                // would hear the question itself and take it for the answer.
-                boolean question = handle(said);
-                if (stopping) return;
-                main.postDelayed(SmaranVoiceService.this::listen,
-                    question ? 700 + 75L * asked.argument.length() : 250);
-            }
-        });
-
-        Intent request = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                      RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            // The phone's own language settings decide, and API 34 upward can
-            // switch between them mid-sentence. Pinning en-GB here was the
-            // original reason Hindi came out as nonsense.
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
-        try {
-            recognizer.startListening(request);
-        } catch (Exception e) {
-            Log.w(TAG, "could not start listening", e);
-            main.postDelayed(this::listen, 2000);
-        }
-    }
-
-    /** Act on what was heard, if it was an instruction. Returns true if a question was asked. */
-    private boolean handle(String said) {
-        DeviceActions.Command command = null;
-        if (asked != null && System.currentTimeMillis() - askedAt < 60_000) {
-            DeviceActions.Command question = asked;
-            asked = null;
-            command = DeviceActions.answer(question, said);
-            if (command != null && "cancelled".equals(command.action)) {
-                say("hi".equals(question.lang) ? "\u0920\u0940\u0915 \u0939\u0948\u0964"
-                    : "hinglish".equals(question.lang) ? "Theek hai." : "Okay.");
-                return false;
-            }
-        }
-        asked = null;
-        if (command == null) command = DeviceActions.detect(said);
-        if (command == null) return false;
-        // "Play music on Spotify": ask which song, and hear the answer next.
-        if ("ask".equals(command.action)) {
-            asked = command;
-            askedAt = System.currentTimeMillis();
-            say(command.argument);
-            return true;
-        }
-        String spoken = DeviceActions.perform(this, command);
-        NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager != null && !spoken.isEmpty()) {
-            manager.notify(NOTIFICATION_ID, buildNotification(spoken));
-        }
-        // Something just started playing. Speaking over it, or listening on,
-        // takes audio focus and the song pauses itself a few seconds in -
-        // measured on a phone. So the listener goes quiet and stops, the way
-        // an assistant does after "play X"; the notification says what happened.
-        boolean startsPlayback = "music".equals(command.action)
-            || "youtube_play".equals(command.action)
-            || ("media".equals(command.action) && ("play".equals(command.argument)
-                || "next".equals(command.argument) || "previous".equals(command.argument)));
-        if (startsPlayback) {
-            stopping = true;
-            main.removeCallbacksAndMessages(null);
-            main.postDelayed(this::stopSelf, 400);
-            return false;
-        }
-        say(spoken);
-        return false;
-    }
-
     @Override
     public void onDestroy() {
         stopping = true;
         running = false;
         if (instance == this) instance = null;
-        main.removeCallbacksAndMessages(null);
-        if (recognizer != null) {
-            recognizer.destroy();
-            recognizer = null;
-        }
+        hush();
         if (tts != null) {
             tts.stop();
             tts.shutdown();

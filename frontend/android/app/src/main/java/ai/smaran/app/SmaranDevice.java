@@ -67,6 +67,58 @@ import java.util.Locale;
 @CapacitorPlugin(name = "SmaranDevice")
 public class SmaranDevice extends Plugin {
     private static final String TAG = "SmaranDevice";
+    static final String PREFS = "smaran_voice";
+    static final String STOPPED_BY_USER = "stopped_by_user";
+
+    /* The plugin instance the listening service reports to, and a question
+       asked out loud that the page has not picked up yet. */
+    private static SmaranDevice active;
+    private static String pendingQuery;
+
+    static synchronized void setPendingQuery(String query) {
+        pendingQuery = query;
+    }
+
+    private static synchronized String takeQuery() {
+        String query = pendingQuery;
+        pendingQuery = null;
+        return query;
+    }
+
+    /** Tell a running page that a question is waiting for it. */
+    static void announceQuery() {
+        SmaranDevice plugin = active;
+        if (plugin != null) plugin.notifyListeners("voiceQuery", new JSObject());
+    }
+
+    @Override
+    public void load() {
+        active = this;
+        // "Hey SMARAN" heard while the app is on screen: the page's own voice
+        // call takes it from there, character and model included.
+        SmaranVoiceService.pageSink = rest -> {
+            SmaranDevice plugin = active;
+            if (plugin == null || !plugin.hasListeners("wake")) return false;
+            plugin.notifyListeners("wake", new JSObject().put("rest", rest));
+            return true;
+        };
+    }
+
+    /** The page opened or closed its microphone; the wake listener steps aside meanwhile. */
+    @PluginMethod
+    public void setPageListening(PluginCall call) {
+        boolean listening = Boolean.TRUE.equals(call.getBoolean("listening", false));
+        new android.os.Handler(android.os.Looper.getMainLooper())
+            .post(() -> SmaranVoiceService.setPageListening(listening));
+        call.resolve(new JSObject().put("listening", listening));
+    }
+
+    /** A question said to "Hey SMARAN" while the app was away, if one is waiting. */
+    @PluginMethod
+    public void takePendingQuery(PluginCall call) {
+        String query = takeQuery();
+        call.resolve(new JSObject().put("query", query == null ? "" : query));
+    }
 
     /**
      * Start an activity as the visible app rather than as the process.
@@ -380,6 +432,19 @@ public class SmaranDevice extends Plugin {
             call.resolve(new JSObject().put("listening", false)
                 .put("reason", "microphone-permission"));
             return;
+        }
+        // Stop, pressed on the notification, is the user's answer. An automatic
+        // start - the app opening with "Hey SMARAN" switched on - respects it;
+        // switching it on again, or opening a call, is a new answer.
+        android.content.SharedPreferences prefs =
+            getContext().getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE);
+        if (Boolean.TRUE.equals(call.getBoolean("auto", false))) {
+            if (prefs.getBoolean(STOPPED_BY_USER, false)) {
+                call.resolve(new JSObject().put("listening", false).put("reason", "stopped-by-user"));
+                return;
+            }
+        } else {
+            prefs.edit().putBoolean(STOPPED_BY_USER, false).apply();
         }
         try {
             Intent service = new Intent(getContext(), SmaranVoiceService.class)

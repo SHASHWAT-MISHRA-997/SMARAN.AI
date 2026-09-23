@@ -74,17 +74,40 @@ export const matchesSleepPhrase = (heard) => {
   return SLEEP_PHRASES.some((phrase) => text.includes(phrase));
 };
 
+const WAKE_ALIASES = [
+  'hey smaran', 'smaran', 'smaran ai', 'samaran', 'smarn', 'smaraan',
+  'hey amarya', 'amarya', 'amariya', 'amaria', 'hey amariya',
+  'hey myra', 'myra', 'myraa', 'meera', 'hey meera',
+  'jarvis', 'hey jarvis', 'wake up', 'namaste smaran',
+  'suno smaran', 'bhai smaran', 'hello smaran', 'start listening',
+];
+
+/**
+ * What was said after the wake phrase: "hey smaran open youtube" -> "open youtube".
+ * Empty when the name was all there was.
+ */
+export const wakeRest = (heard) => {
+  const text = String(heard || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+  let best = -1;
+  let end = 0;
+  for (const alias of WAKE_ALIASES) {
+    const at = text.indexOf(alias);
+    // The earliest match wins; of those, the longest ("hey smaran" over "smaran").
+    if (at >= 0 && (best < 0 || at < best || (at === best && at + alias.length > end))) {
+      best = at;
+      end = at + alias.length;
+    }
+  }
+  return best < 0 ? '' : text.slice(end).replace(/^\s*(?:ai\b)?\s*/, '').trim();
+};
+
 /** Loose & robust phrase matcher with extensive Hindi / Hinglish / English aliases */
 const buildMatcher = (phrase) => {
   const customWords = phrase ? phrase.toLowerCase().trim().split(/\s+/).filter(Boolean) : [];
   
-  // Standard built-in wake phrases
-  const globalAliases = [
-    'hey smaran', 'smaran', 'smaran ai', 'samaran', 'smarn', 'smaraan',
-    'hey myra', 'myra', 'myraa', 'meera', 'hey meera',
-    'jarvis', 'hey jarvis', 'alexa', 'wake up', 'namaste smaran',
-    'suno smaran', 'bhai smaran', 'hello smaran', 'start listening'
-  ];
+  // Standard built-in wake phrases. "alexa" was here, and woke SMARAN
+  // whenever anyone in the room spoke to their Echo.
+  const globalAliases = WAKE_ALIASES;
 
   return (heard) => {
     if (!heard || typeof heard !== 'string') return false;

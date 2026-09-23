@@ -58,6 +58,59 @@ export async function openAppSettings() {
   }
 }
 
+/**
+ * Start "Hey SMARAN" listening. `auto` marks a start nobody asked for just
+ * now - the app opening with the switch on - which respects Stop pressed on
+ * the notification.
+ *
+ * @returns {Promise<{listening: boolean, reason?: string}>}
+ */
+export async function startWakeListening({ auto = false } = {}) {
+  if (!isNativeApp()) return { listening: false, reason: 'not-native' };
+  try {
+    if (!(await ensureMicrophone())) return { listening: false, reason: 'microphone-permission' };
+    const result = await device.startListeningService({ auto });
+    return { listening: Boolean(result?.listening), reason: result?.reason };
+  } catch (error) {
+    return { listening: false, reason: String(error?.message || error) };
+  }
+}
+
+/** The page opened or closed its own microphone; the wake listener steps aside meanwhile. */
+export async function setPageListening(listening) {
+  if (!isNativeApp()) return;
+  try {
+    await device.setPageListening({ listening: Boolean(listening) });
+  } catch {
+    // an older app without the method: nothing to coordinate with
+  }
+}
+
+/** A question said to "Hey SMARAN" while the app was away, or ''. Taken once. */
+export async function takePendingQuery() {
+  if (!isNativeApp()) return '';
+  try {
+    return String((await device.takePendingQuery())?.query || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Subscribe to an event from the native plugin. Returns the unsubscribe. */
+export function onDeviceEvent(name, callback) {
+  if (!isNativeApp()) return () => {};
+  let handle = null;
+  let removed = false;
+  Promise.resolve(device.addListener(name, callback)).then((h) => {
+    handle = h;
+    if (removed) h?.remove?.();
+  }).catch(() => {});
+  return () => {
+    removed = true;
+    handle?.remove?.();
+  };
+}
+
 export async function stopBackgroundListening() {
   if (!isNativeApp()) return false;
   try {
