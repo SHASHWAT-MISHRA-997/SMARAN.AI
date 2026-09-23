@@ -3,7 +3,7 @@
 // A named music service is now a command, addressed to that app.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { detectDeviceCommand, describeOutcome } from '../src/utils/deviceCommands.js';
+import { detectDeviceCommand, describeOutcome, answerFollowUp } from '../src/utils/deviceCommands.js';
 
 const cases = [
   ['Shiv Sadashiv Boliye Spotify par play karo', 'Shiv Sadashiv Boliye', 'Spotify'],
@@ -53,4 +53,44 @@ test('a song with no service named plays on YouTube', () => {
   assert.deepEqual(detectDeviceCommand('play despacito'), { action: 'youtube', query: 'despacito', play: true });
   assert.deepEqual(detectDeviceCommand('kesariya bajao'), { action: 'youtube', query: 'kesariya', play: true });
   assert.equal(detectDeviceCommand("don't play despacito"), null);
+});
+
+// The follow-up: a request with no song asks for one, in the language it
+// was asked in, and the answer completes it in the app that was named.
+test('music with no song named asks which one', () => {
+  const spotify = detectDeviceCommand('play music for me on spotify');
+  assert.equal(spotify.action, 'ask');
+  assert.equal(spotify.app, 'Spotify');
+  assert.equal(spotify.question, 'Which song should I play on Spotify?');
+  assert.equal(detectDeviceCommand('Hey SMARAN, play music for me on Spotify').app, 'Spotify');
+  assert.equal(detectDeviceCommand('spotify par gaana bajao').question, 'Spotify par kaunsa gaana chalaun?');
+  assert.equal(detectDeviceCommand('gaana bajao').question, 'Kaunsa gaana sunna hai?');
+  assert.equal(detectDeviceCommand('play some music').question, 'Which song would you like to hear?');
+  assert.equal(detectDeviceCommand('गाना बजाओ').question, 'कौन सा गाना सुनना है?');
+  // A song that is named still plays at once.
+  assert.deepEqual(detectDeviceCommand('play kesariya on spotify'), { action: 'music', query: 'kesariya', app: 'Spotify' });
+});
+
+test('the answer completes the question', () => {
+  const asked = detectDeviceCommand('play music on spotify');
+  assert.deepEqual(answerFollowUp(asked, 'Kesariya'), { action: 'music', query: 'Kesariya', app: 'Spotify' });
+  assert.deepEqual(answerFollowUp(asked, 'tum hi ho bajao'), { action: 'music', query: 'tum hi ho', app: 'Spotify' });
+  assert.deepEqual(answerFollowUp(asked, 'kuch bhi'), { action: 'music', query: '', app: 'Spotify' });
+  assert.deepEqual(answerFollowUp(asked, 'rehne do'), { action: 'cancelled' });
+  assert.deepEqual(answerFollowUp(asked, 'pause'), { action: 'media', control: 'pause' });
+  // A new question is not an answer: forgotten, and it goes to the model.
+  assert.equal(answerFollowUp(asked, 'what is the weather today?'), null);
+  // Asked with no app: it plays where a song can actually be started.
+  const anywhere = detectDeviceCommand('gaana bajao');
+  assert.deepEqual(answerFollowUp(anywhere, 'kesariya'), { action: 'youtube', query: 'kesariya', play: true });
+});
+
+// Reported: each of these reached the model, which answered with a made-up
+// video link. "per" is how many people spell "par".
+test('YouTube requests with "per", "ko" and the verb before the place', () => {
+  const want = { action: 'youtube', query: 'Sada Shiv boliye', play: true };
+  assert.deepEqual(detectDeviceCommand('Sada Shiv boliye ko play karo YouTube per'), want);
+  assert.deepEqual(detectDeviceCommand('Sada Shiv boliye YouTube per play karo'), want);
+  assert.deepEqual(detectDeviceCommand('Sada Shiv boliye ko YouTube par chalao'), want);
+  assert.deepEqual(detectDeviceCommand('YouTube per kesariya chalao'), { action: 'youtube', query: 'kesariya', play: true });
 });

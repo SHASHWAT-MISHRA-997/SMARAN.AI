@@ -56,10 +56,11 @@ test('spoken channel request routes to YouTube instead of an app name', () => {
   assert.equal(detectDeviceCommand('Shashwat Mishra Techie youtube par channel ko open karo mat'), null);
 });
 
+// A request with no song named asks which one (answerFollowUp completes it).
 test('a song, named or not', () => {
-  assert.deepEqual(detectDeviceCommand('gaana bajao'), { action: 'music' });
-  assert.deepEqual(detectDeviceCommand('koi gaana chalao'), { action: 'music' });
-  assert.deepEqual(detectDeviceCommand('play music'), { action: 'music' });
+  assert.equal(detectDeviceCommand('gaana bajao').action, 'ask');
+  assert.equal(detectDeviceCommand('koi gaana chalao').action, 'ask');
+  assert.equal(detectDeviceCommand('play music').action, 'ask');
   assert.deepEqual(detectDeviceCommand('kesariya gaana bajao'),
     { action: 'music', query: 'kesariya' });
 });
@@ -153,9 +154,9 @@ test('a command spoken in Hindi is recognised in Devanagari', () => {
     ['सेटिंग्स खोलो', 'app'],
     ['कैलकुलेटर खोलो', 'app'],
     ['व्हाट्सएप खोलो', 'app'],
-    ['गाना बजाओ', 'music'],
-    ['कोई गाना चलाओ', 'music'],
-    ['संगीत चलाओ', 'music'],
+    ['गाना बजाओ', 'ask'],
+    ['कोई गाना चलाओ', 'ask'],
+    ['संगीत चलाओ', 'ask'],
     ['यूट्यूब पर तुम ही हो चलाओ', 'youtube'],
   ];
   for (const [utterance, action] of cases) {
@@ -171,8 +172,8 @@ test('the romanised spellings still work, unchanged', () => {
     ['youtube kholo', 'youtube'],
     ['settings kholo', 'app'],
     ['open calculator', 'app'],
-    ['gaana bajao', 'music'],
-    ['koi gaana chalao', 'music'],
+    ['gaana bajao', 'ask'],
+    ['koi gaana chalao', 'ask'],
     ['tum hi ho youtube par lagao', 'youtube'],
   ]) {
     assert.equal(detectDeviceCommand(utterance)?.action, action, utterance);

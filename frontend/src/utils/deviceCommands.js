@@ -65,7 +65,7 @@ const PLAY_LAST = '(?:bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|lagao
 // place: the Devanagari was previously in one YouTube pattern and missing from
 // the other two, so "यूट्यूब पर X चलाओ" worked and "यूट्यूब खोलो" did not.
 const YT = '(?:youtube|यूट्यूब)';
-const ON = '(?:pe|par|mein|mai|men|पर|पे|में)';
+const ON = '(?:pe|par|per|mein|mai|men|पर|पे|में)';
 
 /* Music in a service the person names: "kesariya Spotify par play karo",
    "play X on Spotify", "Spotify pe X bajao".
@@ -83,7 +83,7 @@ const MUSIC_SERVICES = [
   { name: 'JioSaavn', spoken: 'jio\\s*saavn|saavn|सावन' },
   { name: 'Apple Music', spoken: 'apple\\s*music' },
 ];
-const ON_ANY = '(?:on|in|pe|par|mein|mai|men|पर|पे|में)';
+const ON_ANY = '(?:on|in|pe|par|per|mein|mai|men|पर|पे|में)';
 
 /* Play, pause, stop, next, previous and volume - of whatever is playing.
 
@@ -115,6 +115,32 @@ export function detectMediaControl(text) {
 // look for it. Same words either way until now, and both only searched.
 const WANTS_PLAY = /\b(?:play|bajao|baja\s+do|chalao|chala\s+do|sunao|lagao|laga\s+do)\b|बजाओ|चलाओ|सुनाओ|लगाओ/i;
 
+/* A request for music that names none: "music", "some songs", "koi gaana",
+   "music for me". */
+const GENERIC_MUSIC = /^(?:(?:some|a|any|my|the|koi|kuch|कोई|कुछ)\s+)?(?:music|songs?|gaana|gana|gaane|gane|something|गाना|गाने|गीत|संगीत)(?:\s+(?:for\s+me|mere\s+liye|मेरे\s+लिए))?$/i;
+
+/** Which of the three ways the request was said: Hindi, Hinglish or English. */
+export function spokenLanguage(text) {
+  const t = String(text || '');
+  if (/[\u0900-\u097F]/.test(t)) return 'hi';
+  if (/\b(?:karo|kar\s+do|bajao|chalao|sunao|lagao|par|pe|mein|mere|liye|koi|kuch|gaana|gana|gaane|kholo|suno)\b/i.test(t)) return 'hinglish';
+  return 'en';
+}
+
+/* The question back, in the language of the request - the way an assistant
+   asks "which song?" rather than guessing or reciting instructions. */
+function askForSong(text, app = '') {
+  const lang = spokenLanguage(text);
+  const question = lang === 'hi'
+    ? (app ? `${app} पर कौन सा गाना चलाऊँ?` : 'कौन सा गाना सुनना है?')
+    : lang === 'hinglish'
+      ? (app ? `${app} par kaunsa gaana chalaun?` : 'Kaunsa gaana sunna hai?')
+      : (app ? `Which song should I play on ${app}?` : 'Which song would you like to hear?');
+  return app
+    ? { action: 'ask', about: 'song', app, question, lang }
+    : { action: 'ask', about: 'song', question, lang };
+}
+
 export function detectMusicInService(text) {
   for (const service of MUSIC_SERVICES) {
     const app = `(?:${service.spoken})`;
@@ -127,7 +153,13 @@ export function detectMusicInService(text) {
     for (const shape of shapes) {
       const match = shape.exec(text);
       if (!match) continue;
-      const query = tidy(match[1]).replace(/\s*(?:song|gaana|gana|gaane|गाना)\s*$/i, '').trim();
+      // "Play music on Spotify" names no song. It used to search Spotify
+      // for the word "music"; an assistant asks which one. Checked before
+      // the trailing "gaana" comes off, or "Spotify par gaana bajao" is
+      // left with nothing and loses the app it named.
+      const said = tidy(match[1]);
+      if (GENERIC_MUSIC.test(said)) return askForSong(text, service.name);
+      const query = said.replace(/\s*(?:song|gaana|gana|gaane|गाना)\s*$/i, '').trim();
       if (query) return { action: 'music', query, app: service.name };
     }
   }
@@ -140,10 +172,13 @@ const RULES = [
   {
     action: 'youtube',
     patterns: [
-      /^(.+?)\s+(?:youtube|यूट्यूब)\s+(?:pe|par|पर|पे)\s+(?:channel|चैनल)\s+(?:(?:ko|को)\s+)?(?:open\s+karo|kholo|khol\s+do|खोलो|खोल\s+दो)$/i,
-      new RegExp(`(?:${OPEN_FIRST}|${PLAY_FIRST}|search|dikhao)\\s+(?:on\\s+|pe\\s+|par\\s+)?${YT}\\s+(.+)$`, 'i'),
+      /^(.+?)\s+(?:youtube|यूट्यूब)\s+(?:pe|par|per|पर|पे)\s+(?:channel|चैनल)\s+(?:(?:ko|को)\s+)?(?:open\s+karo|kholo|khol\s+do|खोलो|खोल\s+दो)$/i,
+      new RegExp(`(?:${OPEN_FIRST}|${PLAY_FIRST}|search|dikhao)\\s+(?:on\\s+|pe\\s+|par\\s+|per\\s+)?${YT}\\s+(.+)$`, 'i'),
+      // "sada shiv boliye ko play karo youtube per": the verb before the place.
+      // It reached the model, which answered with a made-up video link.
+      new RegExp(`^(.+?)\\s+(?:${PLAY_LAST})\\s+(?:on\\s+)?${YT}(?:\\s+${ON})?$`, 'i'),
       new RegExp(`${YT}\\s+${ON}\\s+(.+?)\\s+(?:${PLAY_LAST}|${OPEN_LAST}|dikhao|search\\s+karo)$`, 'i'),
-      new RegExp(`(?:${PLAY_FIRST})\\s+(.+?)\\s+(?:on|pe|par|पर|पे)\\s+${YT}$`, 'i'),
+      new RegExp(`(?:${PLAY_FIRST})\\s+(.+?)\\s+(?:on|pe|par|per|पर|पे)\\s+${YT}$`, 'i'),
       // What is being played, then where, then the verb:
       // "ganpati bappa song youtube par play karo".
       //
@@ -152,7 +187,7 @@ const RULES = [
       // nothing here, so the phone answered "I have no tool that can open apps
       // on your device" to a request it was perfectly able to carry out. The
       // desktop had this exact gap once and it was fixed there and not here.
-      new RegExp(`^(.+?)\\s+(?:youtube|यूट्यूब)\\s+(?:pe|par|mein|mai|men|पर|पे)\\s+(?:${PLAY_LAST}|${OPEN_LAST}|dikhao|search\\s+karo)$`, 'i'),
+      new RegExp(`^(.+?)\\s+(?:youtube|यूट्यूब)\\s+(?:pe|par|per|mein|mai|men|पर|पे)\\s+(?:${PLAY_LAST}|${OPEN_LAST}|dikhao|search\\s+karo)$`, 'i'),
     ],
     argument: 'query',
   },
@@ -215,6 +250,11 @@ const stripPoliteness = (text) => {
   return out;
 };
 
+/* "Hey SMARAN, play music on Spotify": the name is how it was addressed,
+   not part of the instruction, and left on it matched nothing. */
+const WAKE_PREFIX = /^\s*(?:(?:hey|hi|hello|ok|okay|oye|suno|हे|सुनो)\s+)?(?:smaran|samaran|amarya|amariya|amaria|myra|myraa|jarvis|स्मरण|अमार्या|मायरा|जार्विस)(?:\s+ai)?[\s,!.:-]*/i;
+export const stripWakePhrase = (text) => String(text || '').replace(WAKE_PREFIX, '').trim();
+
 const tidy = (value) => stripPoliteness(String(value || ''))
   .replace(/[.!?,;:]+$/, '')
   .trim();
@@ -234,7 +274,7 @@ export function detectDeviceCommand(utterance) {
   // Checked on the original: politeness never makes a sentence a command, but
   // stripping first could in principle remove a word a refusal relies on.
   if (isBeingDiscussed(raw)) return null;
-  const text = stripPoliteness(raw);
+  const text = stripPoliteness(stripWakePhrase(raw));
   if (!text) return null;
 
   const control = detectMediaControl(text);
@@ -251,8 +291,14 @@ export function detectDeviceCommand(utterance) {
       // nothing to capture while "kesariya gaana bajao" names a song. An
       // undefined group means the wordless shape matched, not that the rule
       // failed - reading it as failure is what made "gaana bajao" do nothing.
-      if (!rule.argument || match[1] === undefined) return { action: rule.action };
-      const value = tidy(match[1]);
+      if (!rule.argument || match[1] === undefined) {
+        // "Gaana bajao", "play some music": which one? Asked, not guessed.
+        if (rule.action === 'music') return askForSong(text);
+        return { action: rule.action };
+      }
+      let value = tidy(match[1]);
+      // "sada shiv boliye ko ...": "ko" marks the object, it is not the title.
+      if (rule.action === 'youtube') value = value.replace(/\s+(?:ko|को)$/i, '').trim();
       if (!value) continue;
       // A single letter or a stray number is not an app anybody named.
       if (rule.action === 'app' && value.length < 2) continue;
@@ -271,12 +317,61 @@ export function detectDeviceCommand(utterance) {
   const song = /^(?:play|सुनाओ)\s+(.+)$/i.exec(text)
     || /^(.+?)\s+(?:bajao|baja\s+do|sunao|suna\s+do|play\s+karo|play\s+kar\s+do|बजाओ|सुनाओ)$/i.exec(text);
   if (song) {
+    // "Play some music", "play a song for me": nothing named, so ask.
+    if (GENERIC_MUSIC.test(tidy(song[1]))) return askForSong(text);
     const query = tidy(song[1]).replace(/\s*(?:song|gaana|gana|गाना)\s*$/i, '').trim();
     if (query.length > 1 && !/^(?:koi|kuch|कोई|कुछ)$/i.test(query)) {
       return { action: 'youtube', query, play: true };
     }
   }
   return null;
+}
+
+const CANCEL = /^(?:cancel|never\s*mind|nothing|no|nahi|nahin|kuch\s+nahi|rehne\s+do|rahne\s+do|chhodo|chodo|jane\s+do|रहने\s+दो|छोड़ो|कुछ\s+नहीं|नहीं)$/i;
+const ANYTHING = /^(?:any(?:thing)?|any\s+song|whatever|your\s+choice|you\s+choose|surprise\s+me|kuch\s+bhi|koi\s+bhi(?:\s+gaana)?|kuchh\s+bhi|tum\s+(?:choose|chuno)\s+karo|कुछ\s+भी|कोई\s+भी)$/i;
+const NOT_AN_ANSWER = /^(?:what|why|how|when|where|who|kya|kyu|kyon|kaise|kab|kahan|kaun\s+hai|tell\s+me|explain|batao)\b/i;
+
+/**
+ * The reply to a question SMARAN asked - "which song?".
+ *
+ * Returns the command to carry out, `{action: 'cancelled'}` when they
+ * called it off, or null when what was said is plainly not an answer (a
+ * new question), so the caller forgets the question and carries on.
+ */
+export function answerFollowUp(asked, answer) {
+  const raw = String(answer || '').trim();
+  if (!raw || !asked) return null;
+  const text = tidy(stripWakePhrase(raw));
+  if (!text) return null;
+  if (CANCEL.test(text)) return { action: 'cancelled' };
+  if (ANYTHING.test(text)) {
+    return asked.app ? { action: 'music', query: '', app: asked.app } : { action: 'music' };
+  }
+  // A whole instruction instead of an answer: "pause", "open WhatsApp".
+  // A song said with a verb - "kesariya bajao" - still goes to the app
+  // that was asked about.
+  const direct = detectDeviceCommand(text);
+  if (direct && direct.action === 'youtube' && direct.play && asked.app) {
+    return { action: 'music', query: direct.query, app: asked.app };
+  }
+  if (direct && direct.action !== 'ask') return direct;
+  if (raw.length > 80 || /\?\s*$/.test(raw) || NOT_AN_ANSWER.test(text)) return null;
+  const query = text
+    .replace(/^(?:play|bajao|chalao|sunao|लगाओ)\s+/i, '')
+    .replace(/\s+(?:bajao|baja\s+do|chalao|chala\s+do|sunao|suna\s+do|lagao|laga\s+do|play\s+karo|play\s+kar\s+do|बजाओ|चलाओ|सुनाओ)$/i, '')
+    .replace(/\s+(?:song|gaana|gana|गाना|wala|waala|वाला)$/i, '')
+    .trim();
+  if (query.length < 2) return null;
+  return asked.app
+    ? { action: 'music', query, app: asked.app }
+    : { action: 'youtube', query, play: true };
+}
+
+/** What to say when a question is called off. */
+export function cancelledLine(asked) {
+  if (asked?.lang === 'hi') return 'ठीक है।';
+  if (asked?.lang === 'hinglish') return 'Theek hai.';
+  return 'Okay.';
 }
 
 /**

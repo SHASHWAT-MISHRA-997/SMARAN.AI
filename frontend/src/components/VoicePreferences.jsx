@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { isNativeApp } from '../utils/hostLink';
+import { FLOAT_VIEWS, getFloatView, setFloatView } from '../utils/floatView';
 
 export default function VoicePreferences() {
   const [microphones, setMicrophones] = useState([]);
@@ -9,6 +10,12 @@ export default function VoicePreferences() {
   const [personaGender, setPersonaGender] = useState(() => localStorage.getItem('sm_persona_gender') || 'female');
   const [continuousDictation, setContinuousDictation] = useState(() => localStorage.getItem('sm_continuous_dictation') !== 'false');
   const [testNotice, setTestNotice] = useState('');
+  const [floatView, setFloatViewState] = useState(getFloatView);
+
+  const handleFloatView = (id) => {
+    setFloatView(id);
+    setFloatViewState(id);
+  };
 
   useEffect(() => {
     // Enumerate microphones
@@ -178,6 +185,36 @@ export default function VoicePreferences() {
           </button>
         </div>
       </div>
+
+      {/* The floating window. Only the phone app floats when it opens
+          another app, so only the phone app offers the choice. */}
+      {isNativeApp() && (
+        <div className="border-b border-line pb-4 space-y-2" role="radiogroup" aria-labelledby="sm-float-view-label">
+          <div id="sm-float-view-label" className="text-sm font-semibold text-ink">Floating window</div>
+          <p className="text-[11px] text-ink-faint">
+            What the small window in the corner shows when SMARAN opens another app.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {FLOAT_VIEWS.map((view) => (
+              <button
+                key={view.id}
+                type="button"
+                role="radio"
+                aria-checked={floatView === view.id}
+                onClick={() => handleFloatView(view.id)}
+                className={`p-3 rounded-2xl border text-left transition ${
+                  floatView === view.id
+                    ? 'border-indigo-500 bg-indigo-500/10'
+                    : 'border-line bg-sunken hover:border-line-strong'
+                }`}
+              >
+                <div className="text-xs font-bold text-ink">{view.label}</div>
+                <div className="text-[11px] text-ink-muted mt-0.5">{view.hint}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* TTS Voice Selection & Preview */}
       <div className="border-b border-line pb-4 space-y-2">

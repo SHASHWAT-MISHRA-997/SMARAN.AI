@@ -46,6 +46,7 @@ final class DeviceActions {
         final String action;   // app | youtube | music | url
         final String argument; // may be empty
         final String app;      // music only: the service named, or empty
+        String lang = "en";    // ask only: the language the question is in
         Command(String action, String argument) {
             this(action, argument, "");
         }
@@ -214,7 +215,88 @@ final class DeviceActions {
             Pattern.CASE_INSENSITIVE).matcher(text == null ? "" : text).find();
     }
 
-    private static final String ON_WORD = "(?:on|in|pe|par|mein|mai|men|\u092a\u0930|\u092a\u0947|\u092e\u0947\u0902)";
+    private static final String ON_WORD = "(?:on|in|pe|par|per|mein|mai|men|\u092a\u0930|\u092a\u0947|\u092e\u0947\u0902)";
+
+    /* A request for music that names none. */
+    static final Pattern GENERIC_MUSIC = Pattern.compile(
+        "^(?:(?:some|a|any|my|the|koi|kuch|\u0915\u094b\u0908|\u0915\u0941\u091b)\\s+)?"
+        + "(?:music|songs?|gaana|gana|gaane|gane|something|\u0917\u093e\u0928\u093e|\u0917\u093e\u0928\u0947|\u0917\u0940\u0924|\u0938\u0902\u0917\u0940\u0924)"
+        + "(?:\\s+(?:for\\s+me|mere\\s+liye))?$", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern DEVANAGARI = Pattern.compile("[\u0900-\u097F]");
+    private static final Pattern HINGLISH = Pattern.compile(
+        "\\b(?:karo|kar\\s+do|bajao|chalao|sunao|lagao|par|pe|mein|mere|liye|koi|kuch|gaana|gana|gaane|kholo|suno)\\b",
+        Pattern.CASE_INSENSITIVE);
+
+    /** "hi", "hinglish" or "en": how the request was said. */
+    static String spokenLanguage(String text) {
+        if (DEVANAGARI.matcher(text).find()) return "hi";
+        if (HINGLISH.matcher(text).find()) return "hinglish";
+        return "en";
+    }
+
+    /** "Which song?" in the language of the request. argument = the question. */
+    static Command askForSong(String text, String app) {
+        String lang = spokenLanguage(text);
+        boolean named = app != null && !app.isEmpty();
+        String question;
+        if ("hi".equals(lang)) {
+            question = named ? app + " \u092a\u0930 \u0915\u094c\u0928 \u0938\u093e \u0917\u093e\u0928\u093e \u091a\u0932\u093e\u090a\u0901?"
+                             : "\u0915\u094c\u0928 \u0938\u093e \u0917\u093e\u0928\u093e \u0938\u0941\u0928\u0928\u093e \u0939\u0948?";
+        } else if ("hinglish".equals(lang)) {
+            question = named ? app + " par kaunsa gaana chalaun?" : "Kaunsa gaana sunna hai?";
+        } else {
+            question = named ? "Which song should I play on " + app + "?" : "Which song would you like to hear?";
+        }
+        Command ask = new Command("ask", question, app);
+        ask.lang = lang;
+        return ask;
+    }
+
+    private static final Pattern CANCEL = Pattern.compile(
+        "^(?:cancel|never\\s*mind|nothing|no|nahi|nahin|kuch\\s+nahi|rehne\\s+do|rahne\\s+do|chhodo|chodo|jane\\s+do)$",
+        Pattern.CASE_INSENSITIVE);
+    private static final Pattern ANYTHING = Pattern.compile(
+        "^(?:any(?:thing)?|any\\s+song|whatever|your\\s+choice|you\\s+choose|surprise\\s+me|kuch\\s+bhi|koi\\s+bhi(?:\\s+gaana)?|kuchh\\s+bhi)$",
+        Pattern.CASE_INSENSITIVE);
+    private static final Pattern NOT_AN_ANSWER = Pattern.compile(
+        "^(?:what|why|how|when|where|who|which|kya|kyu|kyon|kaise|kab|kahan|tell\\s+me|explain|batao)\\b",
+        Pattern.CASE_INSENSITIVE);
+
+    /**
+     * The reply to "which song?". Mirrors deviceCommands.answerFollowUp:
+     * a command to run, action "cancelled", or null when it is not an answer.
+     */
+    static Command answer(Command asked, String said) {
+        if (asked == null || said == null) return null;
+        String text = tidy(stripWakePhrase(said.trim()));
+        if (text.isEmpty()) return null;
+        if (CANCEL.matcher(text).matches()) return new Command("cancelled", "");
+        if (ANYTHING.matcher(text).matches()) return new Command("music", "", asked.app);
+        Command direct = detect(text);
+        if (direct != null && "youtube_play".equals(direct.action) && !asked.app.isEmpty()) {
+            return new Command("music", direct.argument, asked.app);
+        }
+        if (direct != null && !"ask".equals(direct.action)) return direct;
+        if (said.length() > 80 || NOT_AN_ANSWER.matcher(text).find()) return null;
+        String query = text
+            .replaceAll("(?i)^(?:play|bajao|chalao|sunao)\\s+", "")
+            .replaceAll("(?i)\\s+(?:bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|lagao|laga\\s+do|play\\s+karo|play\\s+kar\\s+do)$", "")
+            .replaceAll("(?i)\\s+(?:song|gaana|gana|wala|waala)$", "")
+            .trim();
+        if (query.length() < 2) return null;
+        return asked.app.isEmpty() ? new Command("youtube_play", query)
+                                   : new Command("music", query, asked.app);
+    }
+
+    /* "Hey SMARAN, ..." - the name is how it was addressed, not the instruction. */
+    private static final Pattern WAKE_PREFIX = Pattern.compile(
+        "^\\s*(?:(?:hey|hi|hello|ok|okay|oye|suno)\\s+)?(?:smaran|samaran|amarya|amariya|amaria|myra|myraa|jarvis)(?:\\s+ai)?[\\s,!.:-]*",
+        Pattern.CASE_INSENSITIVE);
+
+    static String stripWakePhrase(String text) {
+        return WAKE_PREFIX.matcher(text).replaceFirst("").trim();
+    }
 
     private static Command musicInService(String text) {
         for (String[] service : MUSIC_SERVICES) {
@@ -235,6 +317,11 @@ final class DeviceActions {
             for (Pattern shape : shapes) {
                 Matcher m = shape.matcher(text);
                 if (m.find()) {
+                    // "Play music on Spotify" names no song: ask which, the
+                    // way the page does (deviceCommands.askForSong).
+                    if (GENERIC_MUSIC.matcher(tidy(m.group(1))).matches()) {
+                        return askForSong(text, service[0]);
+                    }
                     String query = m.group(1).replaceAll(
                         "(?i)\\s*(?:song|gaana|gana|gaane|\u0917\u093e\u0928\u093e)\\s*$", "").trim();
                     if (!query.isEmpty()) return new Command("music", query, service[0]);
@@ -267,12 +354,18 @@ final class DeviceActions {
         "(?:bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|play\\s+karo)";
 
     private static final Pattern[] YOUTUBE_QUERY = {
-        Pattern.compile("^(.+?)\\s+(?:youtube|यूट्यूब)\\s+(?:pe|par|पर|पे)\\s+(?:channel|चैनल)\\s+(?:(?:ko|को)\\s+)?(?:open\\s+karo|kholo|khol\\s+do|खोलो|खोल\\s+दो)$", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("^(.+?)\\s+(?:youtube|यूट्यूब)\\s+(?:pe|par|per|पर|पे)\\s+(?:channel|चैनल)\\s+(?:(?:ko|को)\\s+)?(?:open\\s+karo|kholo|khol\\s+do|खोलो|खोल\\s+दो)$", Pattern.CASE_INSENSITIVE),
         Pattern.compile("(?:" + OPEN_FIRST + "|" + PLAY_FIRST
-            + "|search|dikhao)\\s+(?:on\\s+|pe\\s+|par\\s+)?youtube\\s+(.+)$", Pattern.CASE_INSENSITIVE),
-        Pattern.compile("youtube\\s+(?:pe|par|mein|mai|men)\\s+(.+?)\\s+(?:" + PLAY_LAST
+            + "|search|dikhao)\\s+(?:on\\s+|pe\\s+|par\\s+|per\\s+)?youtube\\s+(.+)$", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("youtube\\s+(?:pe|par|per|mein|mai|men)\\s+(.+?)\\s+(?:" + PLAY_LAST
             + "|" + OPEN_LAST + "|dikhao|search\\s+karo)$", Pattern.CASE_INSENSITIVE),
-        Pattern.compile("(?:" + PLAY_FIRST + ")\\s+(.+?)\\s+(?:on|pe|par)\\s+youtube$",
+        Pattern.compile("(?:" + PLAY_FIRST + ")\\s+(.+?)\\s+(?:on|pe|par|per)\\s+youtube$",
+            Pattern.CASE_INSENSITIVE),
+        // "sada shiv boliye youtube per play karo" - what, where, then the verb.
+        Pattern.compile("^(.+?)\\s+youtube\\s+(?:pe|par|per|mein|mai|men)\\s+(?:" + PLAY_LAST
+            + "|" + OPEN_LAST + "|dikhao|search\\s+karo)$", Pattern.CASE_INSENSITIVE),
+        // "sada shiv boliye ko play karo youtube per" - the verb before the place.
+        Pattern.compile("^(.+?)\\s+(?:" + PLAY_LAST + ")\\s+(?:on\\s+)?youtube(?:\\s+(?:pe|par|per|mein|mai|men))?$",
             Pattern.CASE_INSENSITIVE),
     };
     private static final Pattern[] YOUTUBE_BARE = {
@@ -327,6 +420,8 @@ final class DeviceActions {
             if (!m.find()) continue;
             if (!capture) return new Command(action, "");
             String value = tidy(m.group(1));
+            // "sada shiv boliye ko ...": "ko" marks the object, it is not the title.
+            if ("youtube".equals(action)) value = value.replaceAll("(?i)\\s+(?:ko|को)$", "").trim();
             if (value.isEmpty()) continue;
             if ("app".equals(action) && value.length() < 2) continue;
             return new Command(action, value);
@@ -343,7 +438,7 @@ final class DeviceActions {
                 || QUOTED.matcher(raw).find()) {
             return null;
         }
-        String text = stripPoliteness(raw);
+        String text = stripPoliteness(stripWakePhrase(raw));
         if (text.isEmpty()) return null;
 
         // Control of whatever is already playing, before anything else: a
@@ -360,7 +455,10 @@ final class DeviceActions {
             }
         }
         if (found == null) found = firstMatch(YOUTUBE_BARE, text, "youtube", false);
-        if (found == null) found = firstMatch(MUSIC_BARE, text, "music", false);
+        // "Gaana bajao": which one? Asked, not guessed.
+        if (found == null && firstMatch(MUSIC_BARE, text, "music", false) != null) {
+            found = askForSong(text, "");
+        }
         if (found == null) found = firstMatch(MUSIC_QUERY, text, "music", true);
         if (found == null) found = firstMatch(URL, text, "url", true);
         if (found == null) found = firstMatch(APP, text, "app", true);

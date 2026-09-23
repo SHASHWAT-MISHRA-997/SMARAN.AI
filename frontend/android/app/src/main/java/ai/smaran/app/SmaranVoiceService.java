@@ -71,6 +71,9 @@ public class SmaranVoiceService extends Service {
     }
 
     private SpeechRecognizer recognizer;
+    /** A question just asked ("which song?") and when; the next turn answers it. */
+    private DeviceActions.Command asked;
+    private long askedAt;
     private TextToSpeech tts;
     private final Handler main = new Handler(Looper.getMainLooper());
     private boolean stopping = false;
@@ -228,8 +231,12 @@ public class SmaranVoiceService extends Service {
                 ArrayList<String> heard =
                     results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 String said = (heard == null || heard.isEmpty()) ? "" : heard.get(0);
-                handle(said);
-                main.postDelayed(SmaranVoiceService.this::listen, 250);
+                // After a question, wait for it to be spoken: listening at once
+                // would hear the question itself and take it for the answer.
+                boolean question = handle(said);
+                if (stopping) return;
+                main.postDelayed(SmaranVoiceService.this::listen,
+                    question ? 700 + 75L * asked.argument.length() : 250);
             }
         });
 
@@ -249,10 +256,29 @@ public class SmaranVoiceService extends Service {
         }
     }
 
-    /** Act on what was heard, if it was an instruction. */
-    private void handle(String said) {
-        DeviceActions.Command command = DeviceActions.detect(said);
-        if (command == null) return;
+    /** Act on what was heard, if it was an instruction. Returns true if a question was asked. */
+    private boolean handle(String said) {
+        DeviceActions.Command command = null;
+        if (asked != null && System.currentTimeMillis() - askedAt < 60_000) {
+            DeviceActions.Command question = asked;
+            asked = null;
+            command = DeviceActions.answer(question, said);
+            if (command != null && "cancelled".equals(command.action)) {
+                say("hi".equals(question.lang) ? "\u0920\u0940\u0915 \u0939\u0948\u0964"
+                    : "hinglish".equals(question.lang) ? "Theek hai." : "Okay.");
+                return false;
+            }
+        }
+        asked = null;
+        if (command == null) command = DeviceActions.detect(said);
+        if (command == null) return false;
+        // "Play music on Spotify": ask which song, and hear the answer next.
+        if ("ask".equals(command.action)) {
+            asked = command;
+            askedAt = System.currentTimeMillis();
+            say(command.argument);
+            return true;
+        }
         String spoken = DeviceActions.perform(this, command);
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager != null && !spoken.isEmpty()) {
@@ -270,9 +296,10 @@ public class SmaranVoiceService extends Service {
             stopping = true;
             main.removeCallbacksAndMessages(null);
             main.postDelayed(this::stopSelf, 400);
-            return;
+            return false;
         }
         say(spoken);
+        return false;
     }
 
     @Override

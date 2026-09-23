@@ -1,7 +1,8 @@
 import { device } from './devicePlugin';
 import { isNativeApp } from './hostLink';
-import { detectDeviceCommand, describeOutcome } from './deviceCommands';
+import { detectDeviceCommand, describeOutcome, answerFollowUp, cancelledLine } from './deviceCommands';
 import { ensureMicrophone } from './nativeSpeech';
+import { floatsAtAll } from './floatView';
 
 
 /**
@@ -76,6 +77,10 @@ const isFloating = async () => {
   }
 };
 
+/* The question SMARAN is waiting on an answer to, if any. */
+const FOLLOW_UP_MS = 60000;
+let asked = null;
+
 const armFloating = async () => {
   try {
     const result = await device.prepareFloating();
@@ -91,6 +96,12 @@ const armFloating = async () => {
  * @returns {Promise<{spoken: string, floated: boolean}>}
  */
 export async function runDeviceCommand(command) {
+  // A question back rather than an action: nothing opens, nothing floats,
+  // and the next thing said is read as the answer.
+  if (command?.action === 'ask') {
+    asked = { command, at: Date.now() };
+    return { spoken: command.question, floated: false, startsPlayback: false, awaitsAnswer: true };
+  }
   let result = { opened: false };
   // Arm auto-enter first. This alone floats the app for a launcher intent -
   // "open WhatsApp" - because that sends this task properly to the background.
@@ -106,8 +117,11 @@ export async function runDeviceCommand(command) {
   // screen just as playback was due to begin, and it never began: the right
   // video sat stopped on its first frame. Launched without the float, the
   // same link played at once.
+  //
+  // And never when the user has turned the floating window off in Settings.
   const pressesKey = command.action === 'media' || command.action === 'music'
-    || (command.action === 'youtube' && Boolean(command.play));
+    || (command.action === 'youtube' && Boolean(command.play))
+    || !floatsAtAll();
   if (!pressesKey) await armFloating();
   try {
     switch (command.action) {
@@ -176,9 +190,27 @@ export async function runDeviceCommand(command) {
  */
 export async function handleIfDeviceCommand(utterance) {
   if (!isNativeApp()) return null;
+  // The answer to a question just asked - "which song?" - completes it.
+  // Only the very next thing said, and only for a minute: anything later
+  // is a new conversation, not a reply.
+  if (asked && Date.now() - asked.at < FOLLOW_UP_MS) {
+    const question = asked.command;
+    asked = null;
+    const answer = answerFollowUp(question, utterance);
+    if (answer?.action === 'cancelled') {
+      return { spoken: cancelledLine(question), floated: false, startsPlayback: false };
+    }
+    if (answer) return runDeviceCommand(answer);
+  }
+  asked = null;
   const command = detectDeviceCommand(utterance);
   if (!command) return null;
   return runDeviceCommand(command);
+}
+
+/** Forget a question nobody answered - the call ended, the chat moved on. */
+export function forgetFollowUp() {
+  asked = null;
 }
 
 export default handleIfDeviceCommand;

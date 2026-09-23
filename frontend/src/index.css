@@ -2688,6 +2688,8 @@ html.sm-pip .voice-figure {
 /* Edge to edge: the window is small enough that padding is a real fraction of
    it, and the character should fill what there is. */
 html.sm-pip .voice-stage { padding: 0 !important; }
+/* PipCompanion is drawing the chosen character over the call. */
+html.sm-pip-figure .voice-figure { visibility: hidden; }
 
 .voice-caption-scroll {
   scrollbar-width: none;

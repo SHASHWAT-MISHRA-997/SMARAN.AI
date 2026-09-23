@@ -3940,7 +3940,11 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             "If they wrote in English, respond entirely in English - do not drift into Hindi "
             "or any other language because the topic is Indian, and do not mix languages. "
             "If they wrote in Hinglish (Hindi in Latin letters, like \"kya haal hai\"), reply "
-            "in natural Hinglish in Latin letters. If they explicitly ask for a particular "
+            "in natural Hinglish in Latin letters. Other Indian languages typed in Latin letters "
+            "are answered the same way, in that language and in Latin letters: Gujarati "
+            "(\"kem cho\", \"su thayo\"), Marathi (\"kasa aahes\"), Bengali (\"kemon acho\"), "
+            "Punjabi (\"ki haal aa\"), Tamil (\"eppadi irukeenga\"). Never answer one of them "
+            "in a different language. If they explicitly ask for a particular "
             "language or style (\"speak in Hinglish\", \"Hindi mein batao\"), do exactly that "
             "until they ask for something else. Never reply in a language they neither used nor asked for."
         )

@@ -74,7 +74,11 @@ export function languageRule(selected) {
     + 'If they wrote in English, respond entirely in English - do not drift into '
     + 'Hindi or any other language because the topic is Indian, and do not mix '
     + 'languages. If they wrote in Hinglish (Hindi written in Latin letters, like '
-    + '"kya haal hai"), reply in natural Hinglish in Latin letters. If they wrote '
+    + '"kya haal hai"), reply in natural Hinglish in Latin letters. Other Indian '
+    + 'languages typed in Latin letters are answered the same way, in that '
+    + 'language and in Latin letters: Gujarati ("kem cho", "su thayo"), Marathi '
+    + '("kasa aahes"), Bengali ("kemon acho"), Punjabi ("ki haal aa"), Tamil '
+    + '("eppadi irukeenga") - never answered in a different language. If they wrote '
     + 'in Hindi or another language in its own script, reply in that language and '
     + `script. ${EXPLICIT_REQUEST} Never reply in a language they neither used `
     + 'nor asked for.'

@@ -3646,9 +3646,10 @@ const ChatArea = ({
       // was asked for.
       // Not when something just started playing: a call greets and listens,
       // both take audio focus, and the song paused itself before it began.
-      if (deviceOutcome.floated && !isVoiceModeOpenRef.current && !deviceOutcome.startsPlayback) {
-        setIsVoiceModeOpen(true);
-      }
+      //
+      // No longer done: PipCompanion draws the character in the floating
+      // window from any screen, so a call no longer has to be opened - with
+      // its greeting and its microphone - just to have something to show.
       // Said aloud, and shown. emitVoiceReply fills the call bubble, which is
       // not on screen when the command was typed - so without the second line
       // a typed command would answer with nothing visible at all.
