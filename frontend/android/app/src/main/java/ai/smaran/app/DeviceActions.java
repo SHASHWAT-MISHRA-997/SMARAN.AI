@@ -295,6 +295,27 @@ final class DeviceActions {
         "^\\s*(?:(?:hey|hi|hello|ok|okay|oye|suno)\\s+)?(?:smaran|samaran|amarya|amariya|amaria|myra|myraa|jarvis)(?:\\s+ai)?[\\s,!.:-]*",
         Pattern.CASE_INSENSITIVE);
 
+    /* "Open Spotify and play X", "X Spotify par open karo aur play karo":
+       joined into the plain request, as deviceCommands.combineOpenAndPlay does. */
+    private static final String OPEN_VERB = "(?:open\\s+karo|open\\s+kar\\s+do|open|kholo|khol\\s+do|khol\\s+ke)";
+    private static final String PLAY_VERB = "(?:play\\s+karo|play\\s+kar\\s+do|play|chalao|chala\\s+do|bajao|baja\\s+do|sunao|lagao)";
+    private static final String JOIN = "(?:and|aur|or|then|phir|&)";
+    private static final Pattern OPEN_THEN_PLAY_VERB = Pattern.compile(
+        "\\s+" + OPEN_VERB + "\\s+" + JOIN + "\\s+(" + PLAY_VERB + ")\\s*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern OPEN_APP_AND_PLAY = Pattern.compile(
+        "^" + OPEN_VERB + "\\s+(\\S+(?:\\s+music)?)\\s+" + JOIN + "\\s+" + PLAY_VERB + "\\s+(.+)$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern APP_OPEN_AND_PLAY = Pattern.compile(
+        "^(\\S+(?:\\s+music)?)\\s+" + OPEN_VERB + "\\s+" + JOIN + "\\s+(.+?)\\s+(" + PLAY_VERB + ")$", Pattern.CASE_INSENSITIVE);
+
+    static String combineOpenAndPlay(String text) {
+        String t = OPEN_THEN_PLAY_VERB.matcher(text.trim()).replaceFirst(" $1");
+        Matcher m = OPEN_APP_AND_PLAY.matcher(t);
+        if (m.find()) return "play " + m.group(2) + " on " + m.group(1);
+        m = APP_OPEN_AND_PLAY.matcher(t);
+        if (m.find()) return m.group(2) + " " + m.group(1) + " par " + m.group(3);
+        return t;
+    }
+
     static String stripWakePhrase(String text) {
         return WAKE_PREFIX.matcher(text).replaceFirst("").trim();
     }
@@ -483,7 +504,7 @@ final class DeviceActions {
                 || QUOTED.matcher(raw).find()) {
             return null;
         }
-        String text = stripPoliteness(stripWakePhrase(raw));
+        String text = combineOpenAndPlay(stripPoliteness(stripWakePhrase(raw)));
         if (text.isEmpty()) return null;
 
         // Control of whatever is already playing, before anything else: a
@@ -651,7 +672,13 @@ final class DeviceActions {
             if (!launch(context, musicIntent(text, pkg))) {
                 return app + " isn't installed on this phone.";
             }
-            if (opensSearch(pkg, text)) return "Opened " + text + " in " + app + ". Tap it to play.";
+            if (opensSearch(pkg, text)) {
+                if (SmaranAccessibility.enabled()) {
+                    SmaranAccessibility.tapSpotifySong(text, null);
+                    return "Playing " + text + " on " + app + ".";
+                }
+                return "Opened " + text + " in " + app + ". Tap it to play - or turn on SMARAN.AI in Accessibility settings, and I'll press play for you.";
+            }
             return text.isEmpty() ? "Opening " + app + "." : "Playing " + text + " on " + app + ".";
         }
         if (!launch(context, musicIntent(text, null))) return "No music app answered on this phone.";

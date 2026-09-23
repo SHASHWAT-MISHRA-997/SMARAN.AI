@@ -96,6 +96,20 @@ export async function takePendingQuery() {
   }
 }
 
+/**
+ * "Hey SMARAN" heard while the app was elsewhere, which brought it forward.
+ * Taken once. @returns {Promise<{woke: boolean, rest: string}>}
+ */
+export async function takePendingWake() {
+  if (!isNativeApp()) return { woke: false, rest: '' };
+  try {
+    const result = await device.takePendingWake();
+    return { woke: Boolean(result?.woke), rest: String(result?.rest || '').trim() };
+  } catch {
+    return { woke: false, rest: '' };
+  }
+}
+
 /** Subscribe to an event from the native plugin. Returns the unsubscribe. */
 export function onDeviceEvent(name, callback) {
   if (!isNativeApp()) return () => {};

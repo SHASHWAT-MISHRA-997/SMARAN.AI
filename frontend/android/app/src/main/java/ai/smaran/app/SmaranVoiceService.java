@@ -62,6 +62,8 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
     public static final String ACTION_STOP = "ai.smaran.app.LISTEN_STOP";
     /** An extra on MainActivity's intent: something asked out loud for the app to answer. */
     public static final String EXTRA_QUERY = "ai.smaran.app.VOICE_QUERY";
+    /** An extra on MainActivity's intent: "Hey SMARAN" was heard; open the voice call. */
+    public static final String EXTRA_WAKE = "ai.smaran.app.VOICE_WAKE";
 
     private static final String WAITING = "Say “Hey SMARAN”";
     private static final String GREETING = "How may I help you?";
@@ -82,6 +84,11 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
     // Activity lifecycle callbacks and Service callbacks run on the main thread.
     static void setUiVisible(boolean visible) {
         uiVisible = visible;
+        // Off screen (stopped, not merely floating), the page cannot be holding
+        // the microphone - and its JavaScript is paused, so the call ending
+        // behind Spotify never got to say so, and the wake word stayed deaf
+        // until SMARAN was opened again.
+        if (!visible) pageListening = false;
         if (instance != null) instance.conditionsChanged();
     }
 
@@ -104,6 +111,11 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
     private final Map<String, Runnable> afterSpeech = new HashMap<>();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable resumeTask = this::resume;
+    /* Never stay deaf. A recogniser that never calls back, a page that never
+       takes the microphone, an activity Android would not bring forward -
+       each of these left `conversing` set and the wake phrase unheard until
+       the app was reopened. Whatever happens, listening resumes. */
+    private final Runnable stuckGuard = this::unstick;
     private boolean stopping = false;
 
     @Override public IBinder onBind(Intent intent) { return null; }
@@ -131,6 +143,16 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
             Log.w(TAG, "not starting: microphone permission not granted");
             return giveUp();
         }
+        // Restarted by Android itself (START_STICKY hands back a null intent) -
+        // after the process was killed, which this phone does when an app's
+        // accessibility permission changes. From the background Android gives
+        // a microphone service no microphone, so it ran on deaf and "Hey
+        // SMARAN" simply stopped working. Say so, and let one tap bring it back.
+        if (intent == null) {
+            Log.w(TAG, "restarted in the background, where the microphone is not allowed");
+            offerRestart();
+            return giveUp();
+        }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, buildNotification(WAITING, null),
@@ -148,6 +170,8 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
         running = true;
         instance = this;
         stopping = false;
+        NotificationManager shown = getSystemService(NotificationManager.class);
+        if (shown != null) shown.cancel(RESTART_NOTIFICATION_ID);
         if (tts == null) {
             tts = new TextToSpeech(this, status -> {
                 if (status != TextToSpeech.SUCCESS || tts == null) return;
@@ -168,6 +192,26 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
         // a listener that quietly stops listening is worse than one that does
         // not start.
         return START_STICKY;
+    }
+
+    private static final int RESTART_NOTIFICATION_ID = 4103;
+
+    /** A notification that reopens SMARAN, which starts listening again from the foreground. */
+    private void offerRestart() {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager == null) return;
+        buildNotification("", null); // makes sure the channel exists
+        Intent open = new Intent(this, MainActivity.class)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent tap = PendingIntent.getActivity(this, 2, open,
+            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        manager.notify(RESTART_NOTIFICATION_ID, new Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("SMARAN.AI stopped listening")
+            .setContentText("Tap to turn “Hey SMARAN” back on.")
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .build());
     }
 
     private boolean hasMicrophone() {
@@ -201,6 +245,7 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
     private void resume() {
         if (stopping || pageListening) return;
         conversing = false;
+        main.removeCallbacks(stuckGuard);
         if (WakeSpotter.ready()) {
             if (spotter.start()) {
                 status(WAITING, null);
@@ -244,6 +289,13 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
         spotter.stop();
         conversing = true;
         Log.i(TAG, "woken: " + heard.name);
+        // Felt at once, whatever else happens. The spoken greeting is not
+        // enough on its own: this phone mutes an app's background playback,
+        // so "How may I help you?" was never heard and nothing said it had
+        // woken at all.
+        buzz();
+        main.removeCallbacks(stuckGuard);
+        main.postDelayed(stuckGuard, 20000);
         // SMARAN is on screen: its own voice call answers, with the character
         // and the model. If the page does not take the microphone within a few
         // seconds, go back to waiting rather than stay deaf.
@@ -257,12 +309,80 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
             answer(heard.rest);
             return;
         }
+        // Elsewhere: bring the voice call forward, the way an assistant pops
+        // up. On screen, its greeting is heard, Hinglish is understood by the
+        // page's recogniser, and a question is answered, not just a command.
+        if (openCall(heard.rest)) {
+            // Android may decline to bring an app forward from the background.
+            // If it has not come up, ask here instead.
+            main.postDelayed(() -> {
+                if (conversing && !uiVisible && !pageListening) say(GREETING, this::hearInstruction);
+            }, 1500);
+            return;
+        }
         say(GREETING, this::hearInstruction);
+    }
+
+    private void unstick() {
+        if (conversing && !pageListening && !stopping) {
+            Log.i(TAG, "nothing followed the wake phrase; listening again");
+            destroyRecognizer();
+            resume();
+        }
+    }
+
+    /** Start the app with its voice call open. False if Android refused outright. */
+    private boolean openCall(String rest) {
+        SmaranDevice.setPendingWake(rest);
+        Intent open = new Intent(this, MainActivity.class)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            .putExtra(EXTRA_WAKE, true);
+        try {
+            startActivity(open);
+            return true;
+        } catch (RuntimeException refused) {
+            Log.w(TAG, "could not bring the voice call forward", refused);
+            SmaranDevice.setPendingWake(null);
+            return false;
+        }
+    }
+
+    /** A short buzz: "I heard you". */
+    private void buzz() {
+        try {
+            android.os.Vibrator vibrator;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                android.os.VibratorManager manager = getSystemService(android.os.VibratorManager.class);
+                vibrator = manager == null ? null : manager.getDefaultVibrator();
+            } else {
+                vibrator = (android.os.Vibrator) getSystemService(VIBRATOR_SERVICE);
+            }
+            if (vibrator != null && vibrator.hasVibrator()) {
+                vibrator.vibrate(android.os.VibrationEffect.createOneShot(70,
+                    android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+            }
+        } catch (RuntimeException ignored) {
+            // No vibrator, or not allowed: the notification still says it.
+        }
+    }
+
+    /* Nothing to act on: silence, a lone filler word, or the wake phrase said
+       again ("Hey Amarya" repeated). This used to be handed to the app as a
+       question, which opened a call - and stopped the listening - for nothing. */
+    private static boolean nothingSaid(String said) {
+        String text = said == null ? "" : said.trim();
+        if (text.isEmpty()) return true;
+        WakeWord.Heard again = WakeWord.match(text);
+        if (again != null && again.rest.isEmpty()) return true;
+        return !text.contains(" ") && text.length() < 4;
     }
 
     /** One turn of Android's recogniser, for the instruction itself. */
     private void hearInstruction() {
         if (stopping || pageListening) return;
+        main.removeCallbacks(stuckGuard);
+        main.postDelayed(stuckGuard, 20000);
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             resume();
             return;
@@ -273,7 +393,7 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
             @Override void heard(String said) {
                 destroyRecognizer();
                 if (stopping || pageListening) return;
-                if (said.isEmpty()) {
+                if (nothingSaid(said)) {
                     resume();
                 } else {
                     answer(said);
@@ -391,8 +511,16 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
             // The phone's own language settings decide, and API 34 upward can
             // switch between them mid-sentence. Pinning en-GB here was the
             // original reason Hindi came out as nonsense.
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, recognitionLanguage())
             .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+    }
+
+    /* The phone's language, except that English means Indian English. This
+       phone is set to English (UK), and en-GB heard Hinglish instructions
+       as nonsense; en-IN is trained on exactly that mix. */
+    private static String recognitionLanguage() {
+        Locale locale = Locale.getDefault();
+        return "en".equals(locale.getLanguage()) ? "en-IN" : locale.toLanguageTag();
     }
 
     /** SpeechRecognizer's listener, reduced to "this was said" or "nothing was". */

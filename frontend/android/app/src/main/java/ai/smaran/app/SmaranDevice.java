@@ -75,6 +75,35 @@ public class SmaranDevice extends Plugin {
     private static SmaranDevice active;
     private static String pendingQuery;
 
+    /* "Hey SMARAN" heard while the app was elsewhere: the words after it
+       (possibly none). Null when there is no wake waiting. */
+    private static String pendingWake;
+
+    static synchronized void setPendingWake(String rest) {
+        pendingWake = rest;
+    }
+
+    private static synchronized String takeWake() {
+        String rest = pendingWake;
+        pendingWake = null;
+        return rest;
+    }
+
+    /** Tell a running page the voice call is wanted; a page still loading takes it on start. */
+    static void announceWake() {
+        SmaranDevice plugin = active;
+        if (plugin == null || !plugin.hasListeners("wake")) return;
+        String rest = takeWake();
+        if (rest != null) plugin.notifyListeners("wake", new JSObject().put("rest", rest));
+    }
+
+    /** A wake waiting for the page, if any: {woke, rest}. */
+    @PluginMethod
+    public void takePendingWake(PluginCall call) {
+        String rest = takeWake();
+        call.resolve(new JSObject().put("woke", rest != null).put("rest", rest == null ? "" : rest));
+    }
+
     static synchronized void setPendingQuery(String query) {
         pendingQuery = query;
     }
@@ -277,6 +306,13 @@ public class SmaranDevice extends Plugin {
         String app = call.getString("app", "");
         String pkg = DeviceActions.musicPackage(app);
         boolean ok = launch(DeviceActions.musicIntent(query, pkg));
+        // Spotify opens on its search; with the accessibility service on, the
+        // song is pressed so it actually plays.
+        if (ok && DeviceActions.opensSearch(pkg, query) && SmaranAccessibility.enabled()) {
+            SmaranAccessibility.tapSpotifySong(query, tapped -> call.resolve(new JSObject()
+                .put("opened", true).put("mode", tapped ? "play" : "search")));
+            return;
+        }
         call.resolve(ok
             ? new JSObject().put("opened", true)
                 .put("mode", DeviceActions.opensSearch(pkg, query) ? "search" : "play")

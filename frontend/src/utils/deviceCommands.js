@@ -308,6 +308,25 @@ const stripPoliteness = (text) => {
 const WAKE_PREFIX = /^\s*(?:(?:hey|hi|hello|ok|okay|oye|suno|हे|सुनो)\s+)?(?:smaran|samaran|amarya|amariya|amaria|myra|myraa|jarvis|स्मरण|अमार्या|मायरा|जार्विस)(?:\s+ai)?[\s,!.:-]*/i;
 export const stripWakePhrase = (text) => String(text || '').replace(WAKE_PREFIX, '').trim();
 
+/* "Open Spotify and play X", "X Spotify par open karo aur play karo",
+   "Spotify kholo aur X chalao": opening is part of playing, so the two
+   halves are joined into the plain request. Read as they were, the first
+   opened an app called "spotify and play X", and the second searched
+   YouTube for "X spotify par open karo and". */
+const OPEN_VERB = '(?:open\\s+karo|open\\s+kar\\s+do|open|kholo|khol\\s+do|khol\\s+ke)';
+const PLAY_VERB = '(?:play\\s+karo|play\\s+kar\\s+do|play|chalao|chala\\s+do|bajao|baja\\s+do|sunao|lagao)';
+const JOIN = '(?:and|aur|or|then|phir|&)';
+
+export function combineOpenAndPlay(text) {
+  const t = String(text || '').trim().replace(
+    new RegExp(`\\s+${OPEN_VERB}\\s+${JOIN}\\s+(${PLAY_VERB})\\s*$`, 'i'), ' $1');
+  let m = new RegExp(`^${OPEN_VERB}\\s+(\\S+(?:\\s+music)?)\\s+${JOIN}\\s+${PLAY_VERB}\\s+(.+)$`, 'i').exec(t);
+  if (m) return `play ${m[2]} on ${m[1]}`;
+  m = new RegExp(`^(\\S+(?:\\s+music)?)\\s+${OPEN_VERB}\\s+${JOIN}\\s+(.+?)\\s+(${PLAY_VERB})$`, 'i').exec(t);
+  if (m) return `${m[2]} ${m[1]} par ${m[3]}`;
+  return t;
+}
+
 const tidy = (value) => stripPoliteness(String(value || ''))
   .replace(/[.!?,;:]+$/, '')
   .trim();
@@ -327,7 +346,7 @@ export function detectDeviceCommand(utterance) {
   // Checked on the original: politeness never makes a sentence a command, but
   // stripping first could in principle remove a word a refusal relies on.
   if (isBeingDiscussed(raw)) return null;
-  const text = stripPoliteness(stripWakePhrase(raw));
+  const text = combineOpenAndPlay(stripPoliteness(stripWakePhrase(raw)));
   if (!text) return null;
 
   // "Skip ad": the phone presses the Skip button in the app in front.
@@ -469,7 +488,7 @@ export function describeOutcome(command, result) {
       if (command.app) {
         // Spotify will not let another app start a song; it opens on the
         // search with the song on top. Said as it is, not as "playing".
-        if (ok && result?.mode === 'search') return `Opened ${command.query} in ${command.app}. Tap it to play.`;
+        if (ok && result?.mode === 'search') return `Opened ${command.query} in ${command.app}. Tap it to play - or turn on SMARAN.AI in Android's Accessibility settings, and I'll press play for you.`;
         if (ok) return command.query ? `Playing ${command.query} on ${command.app}.` : `Opening ${command.app}.`;
         return `${command.app} isn't installed on this phone.`;
       }

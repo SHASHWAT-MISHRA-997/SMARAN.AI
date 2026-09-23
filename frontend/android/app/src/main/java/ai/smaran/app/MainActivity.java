@@ -31,6 +31,9 @@ public class MainActivity extends BridgeActivity {
        collect it. A page still loading collects it when it starts. */
     @Override protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
+        if (intent != null && intent.getBooleanExtra(SmaranVoiceService.EXTRA_WAKE, false)) {
+            SmaranDevice.announceWake();
+        }
         String query = intent == null ? null : intent.getStringExtra(SmaranVoiceService.EXTRA_QUERY);
         if (query != null && !query.trim().isEmpty()) {
             SmaranDevice.setPendingQuery(query.trim());

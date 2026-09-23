@@ -4,7 +4,7 @@ import { API_BASE } from '../context/AuthContext';
 import GenerationProgress from './GenerationProgress';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
-import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening, startWakeListening, setPageListening, takePendingQuery, onDeviceEvent } from '../utils/deviceControl';
+import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening, startWakeListening, setPageListening, takePendingQuery, takePendingWake, onDeviceEvent } from '../utils/deviceControl';
 import { heySmaranOn, setHeySmaran, WAKE_GREETING } from '../utils/wakeSetting';
 import { detectCreateRequest, handOffToStudio } from '../utils/studioHandoff';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
@@ -2553,6 +2553,10 @@ const ChatArea = ({
     };
     // Opened by a question asked from elsewhere, before this page existed.
     collect();
+    // Or brought forward by "Hey SMARAN" itself: open the call and ask.
+    takePendingWake().then(({ woke, rest }) => {
+      if (alive && woke) wakeHandlersRef.current.woke(rest);
+    });
     // Switched on: start listening now. Stop on the notification is
     // respected, and the switch follows it rather than claiming otherwise.
     if (heySmaranOn()) {
@@ -2560,10 +2564,18 @@ const ChatArea = ({
         if (alive && result.reason === 'stopped-by-user') setHeySmaran(false);
       });
     }
+    // Every return to the screen checks the listener is really running. If
+    // Android killed SMARAN in the background, its restart has no microphone;
+    // this is the moment it can be started properly again.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && heySmaranOn()) startWakeListening({ auto: true });
+    };
+    document.addEventListener('visibilitychange', onVisible);
     const offWake = onDeviceEvent('wake', (event) => wakeHandlersRef.current.woke(event?.rest));
     const offQuery = onDeviceEvent('voiceQuery', collect);
     return () => {
       alive = false;
+      document.removeEventListener('visibilitychange', onVisible);
       offWake();
       offQuery();
     };

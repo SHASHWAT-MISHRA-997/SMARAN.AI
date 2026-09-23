@@ -34,7 +34,7 @@ test('what it says back names the app, and says so when it is missing', () => {
   const cmd = { action: 'music', query: 'kesariya', app: 'Spotify' };
   assert.equal(describeOutcome(cmd, { opened: true }), 'Playing kesariya on Spotify.');
   assert.equal(describeOutcome(cmd, { opened: true, mode: 'search' }),
-    'Opened kesariya in Spotify. Tap it to play.');
+    "Opened kesariya in Spotify. Tap it to play - or turn on SMARAN.AI in Android's Accessibility settings, and I'll press play for you.");
   assert.equal(describeOutcome(cmd, { opened: false, reason: 'not-installed' }), "Spotify isn't installed on this phone.");
 });
 
@@ -93,4 +93,15 @@ test('YouTube requests with "per", "ko" and the verb before the place', () => {
   assert.deepEqual(detectDeviceCommand('Sada Shiv boliye YouTube per play karo'), want);
   assert.deepEqual(detectDeviceCommand('Sada Shiv boliye ko YouTube par chalao'), want);
   assert.deepEqual(detectDeviceCommand('YouTube per kesariya chalao'), { action: 'youtube', query: 'kesariya', play: true });
+});
+
+// Reported: "Shiv Sadashiv Boliye Spotify par open karo aur play karo" went
+// to YouTube as a search for "... spotify par open karo and".
+test('opening and playing in one sentence is one request', () => {
+  const want = { action: 'music', query: 'shiv sadashiv boliye', app: 'Spotify' };
+  assert.deepEqual(detectDeviceCommand('shiv sadashiv boliye spotify par open karo aur play karo'), want);
+  assert.deepEqual(detectDeviceCommand('shiv sadashiv boliye spotify par open karo and play karo'), want);
+  assert.deepEqual(detectDeviceCommand('open spotify and play shiv sadashiv boliye'), want);
+  assert.deepEqual(detectDeviceCommand('spotify kholo aur kesariya chalao'), { action: 'music', query: 'kesariya', app: 'Spotify' });
+  assert.deepEqual(detectDeviceCommand('spotify kholo'), { action: 'app', name: 'spotify' });
 });

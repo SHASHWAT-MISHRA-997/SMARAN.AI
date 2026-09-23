@@ -55,6 +55,8 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Speak: the microphone. Screen vision: the camera. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- A short buzz when "Hey SMARAN" is heard, so waking is felt at once. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Listening while the app is not on screen.
          Without a foreground service the activity is stopped the moment another
          app opens, and a stopped activity hears nothing - so a second spoken
@@ -146,7 +148,7 @@
         <service
             android:name=".SmaranAccessibility"
             android:exported="false"
-            android:label="SMARAN.AI - skip ads when asked"
+            android:label="SMARAN.AI - skip ads and start Spotify songs when asked"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

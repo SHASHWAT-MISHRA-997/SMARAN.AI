@@ -1,6 +1,12 @@
 package ai.smaran.app;
 
 import android.content.Context;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import android.media.audiofx.AutomaticGainControl;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -8,8 +14,6 @@ import org.vosk.LibVosk;
 import org.vosk.LogLevel;
 import org.vosk.Model;
 import org.vosk.Recognizer;
-import org.vosk.android.RecognitionListener;
-import org.vosk.android.SpeechService;
 import org.vosk.android.StorageService;
 
 import java.io.IOException;
@@ -19,17 +23,29 @@ import java.io.IOException;
  *
  * Android's SpeechRecognizer takes audio focus every time it listens, so a
  * song pauses whenever it starts - which rules it out for listening all the
- * time. Vosk reads the microphone itself, recognises offline, and never asks
+ * time. Vosk recognises offline from the microphone directly and never asks
  * for focus: music plays on, and nothing leaves the phone until the wake
  * phrase has been heard.
  *
+ * The microphone is read here rather than through Vosk's SpeechService, so
+ * the audio can be worked on first. Tested on the owner's phone in a room
+ * with a TV on: an utterance only ended at the five-second silence timeout
+ * (so it answered late), and "Hey SMARAN" came out as a different English
+ * phrase every time. So: the platform's automatic gain control and an
+ * adaptive gain; 100 ms chunks for a quicker answer; words checked while
+ * they arrive (WakeWord.matchPartial); and the last three seconds kept for a
+ * second look at anything that starts like a greeting (lookAgain).
+ *
  * One model for the whole process, loaded once (a few seconds, the first
- * time: StorageService copies it out of the APK). Callbacks arrive on the
- * main thread.
+ * time: StorageService copies it out of the APK). Results are delivered on
+ * the main thread.
  */
-final class WakeSpotter implements RecognitionListener {
+final class WakeSpotter {
     private static final String TAG = "WakeSpotter";
-    private static final float RATE = 16000.0f;
+    private static final int RATE = 16000;
+    private static final int CHUNK = RATE / 10;          // 100 ms of samples
+    private static final double TARGET_RMS = 3000.0;     // where speech should sit
+    private static final double MAX_GAIN = 8.0;
 
     interface Listener {
         void onWake(WakeWord.Heard heard);
@@ -59,60 +75,210 @@ final class WakeSpotter implements RecognitionListener {
     }
 
     private final Listener listener;
-    private SpeechService speech;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private volatile boolean running;
+    private Thread thread;
+    private AudioRecord record;
+    private AutomaticGainControl agc;
+    private Recognizer recognizer;
+    /** The same model held to the wake phrases, for the second look at "Hey SMARAN". */
+    private Recognizer secondLook;
+    private String lastPartial = "";
 
     WakeSpotter(Listener listener) {
         this.listener = listener;
     }
 
-    boolean running() { return speech != null; }
+    boolean running() { return running; }
 
     boolean start() {
-        if (speech != null) return true;
+        if (running) return true;
         if (model == null) return false;
         try {
-            speech = new SpeechService(new Recognizer(model, RATE), RATE);
-            speech.startListening(this);
-            return true;
+            recognizer = new Recognizer(model, RATE);
+            secondLook = new Recognizer(model, RATE, WakeWord.secondLookGrammar());
+            int minimum = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT);
+            record = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                Math.max(minimum, RATE * 2));
+            if (record.getState() != AudioRecord.STATE_INITIALIZED) throw new IOException("microphone unavailable");
+            if (AutomaticGainControl.isAvailable()) {
+                agc = AutomaticGainControl.create(record.getAudioSessionId());
+                if (agc != null) agc.setEnabled(true);
+            }
+            record.startRecording();
+            if (record.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                throw new IOException("the microphone is in use");
+            }
         } catch (IOException | RuntimeException e) {
-            // The microphone is held by something else, or was refused.
+            // Held by something else (a call, another recorder), or refused.
             Log.w(TAG, "could not start spotting", e);
-            stop();
+            release();
             return false;
         }
+        running = true;
+        lastPartial = "";
+        thread = new Thread(this::listen, "wake-spotter");
+        thread.start();
+        return true;
     }
 
     void stop() {
-        if (speech == null) return;
-        try {
-            speech.stop();
-            speech.shutdown();
-        } catch (RuntimeException ignored) {
-            // Already released.
+        if (!running && record == null) return;
+        running = false;
+        Thread t = thread;
+        thread = null;
+        if (t != null) {
+            try {
+                t.join(500);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
         }
-        speech = null;
+        release();
     }
 
-    @Override
-    public void onResult(String hypothesis) {
-        WakeWord.Heard heard = WakeWord.match(textOf(hypothesis));
-        if (heard != null && speech != null) listener.onWake(heard);
+    private void release() {
+        if (record != null) {
+            try { record.stop(); } catch (RuntimeException ignored) { }
+            record.release();
+            record = null;
+        }
+        if (agc != null) {
+            agc.release();
+            agc = null;
+        }
+        if (recognizer != null) {
+            recognizer.close();
+            recognizer = null;
+        }
+        if (secondLook != null) {
+            secondLook.close();
+            secondLook = null;
+        }
     }
 
-    @Override public void onPartialResult(String hypothesis) { }
-    @Override public void onFinalResult(String hypothesis) { onResult(hypothesis); }
-
-    @Override
-    public void onError(Exception e) {
-        Log.w(TAG, "spotting stopped", e);
-        stop();
+    /** The recording loop: read, level, recognise, report. Its own thread. */
+    private void listen() {
+        short[] buffer = new short[CHUNK];
+        // The last three seconds, for the second look.
+        short[] ring = new short[RATE * 3];
+        int ringPos = 0;
+        boolean ringFull = false;
+        // Words still arriving that have stopped changing: in a noisy room the
+        // utterance may never end, so a short greeting-like phrase that holds
+        // still for 700 ms gets its second look without waiting for the end.
+        String settling = "";
+        long settledSince = 0;
+        boolean looked = false;
+        double level = TARGET_RMS;   // smoothed speech level, for the gain
+        while (running) {
+            AudioRecord source = record;
+            Recognizer decoder = recognizer;
+            if (source == null || decoder == null) break;
+            int read = source.read(buffer, 0, buffer.length);
+            if (read <= 0) {
+                if (read < 0) break;
+                continue;
+            }
+            double rms = rms(buffer, read);
+            // Follow loud sound fast and quiet sound slowly, so a word lifts
+            // the gain's reference at once while silence does not pump it up.
+            level = rms > level ? level * 0.6 + rms * 0.4 : level * 0.995 + rms * 0.005;
+            double gain = Math.max(1.0, Math.min(MAX_GAIN, TARGET_RMS / Math.max(level, 1.0)));
+            if (gain > 1.01) amplify(buffer, read, gain);
+            long now = System.currentTimeMillis();
+            for (int i = 0; i < read; i++) {
+                ring[ringPos++] = buffer[i];
+                if (ringPos == ring.length) { ringPos = 0; ringFull = true; }
+            }
+            final boolean done = decoder.acceptWaveForm(buffer, read);
+            final String out = done ? decoder.getResult() : decoder.getPartialResult();
+            String words = field(out, done ? "text" : "partial");
+            boolean smaran = false;
+            if (done) {
+                if (WakeWord.match(words) == null && WakeWord.worthSecondLook(words)) {
+                    smaran = lookAgain(ring, ringPos, ringFull);
+                }
+                settling = "";
+                looked = false;
+            } else if (!words.equals(settling)) {
+                settling = words;
+                settledSince = now;
+                looked = false;
+            } else if (!looked && now - settledSince >= 700 && WakeWord.matchPartial(words) == null
+                    && WakeWord.worthSecondLook(words)) {
+                looked = true;
+                smaran = lookAgain(ring, ringPos, ringFull);
+            }
+            if (smaran) {
+                main.post(() -> {
+                    if (running) listener.onWake(new WakeWord.Heard("smaran", ""));
+                });
+                continue;
+            }
+            main.post(() -> {
+                if (done) onResult(out); else onPartialResult(out);
+            });
+        }
     }
 
-    @Override public void onTimeout() { }
+    /** Decode the last three seconds again against the wake phrases alone. */
+    private boolean lookAgain(short[] ring, int pos, boolean full) {
+        Recognizer look = secondLook;
+        if (look == null) return false;
+        int length = full ? ring.length : pos;
+        short[] audio = new short[length];
+        if (full) {
+            System.arraycopy(ring, pos, audio, 0, ring.length - pos);
+            System.arraycopy(ring, 0, audio, ring.length - pos, pos);
+        } else {
+            System.arraycopy(ring, 0, audio, 0, pos);
+        }
+        look.reset();
+        look.acceptWaveForm(audio, audio.length);
+        String result = field(look.getFinalResult(), "text");
+        return WakeWord.secondLookSaysSmaran(result);
+    }
 
-    private static String textOf(String hypothesis) {
+    private static double rms(short[] samples, int count) {
+        double sum = 0;
+        for (int i = 0; i < count; i++) sum += (double) samples[i] * samples[i];
+        return Math.sqrt(sum / Math.max(count, 1));
+    }
+
+    private static void amplify(short[] samples, int count, double gain) {
+        for (int i = 0; i < count; i++) {
+            double v = samples[i] * gain;
+            samples[i] = (short) Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, v));
+        }
+    }
+
+    private void onResult(String hypothesis) {
+        if (!running) return;
+        String text = field(hypothesis, "text");
+        lastPartial = "";
+        WakeWord.Heard heard = WakeWord.match(text);
+        if (heard != null) listener.onWake(heard);
+    }
+
+    /** Words still arriving: a strong greeting and a name wakes at once (WakeWord.matchPartial). */
+    private void onPartialResult(String hypothesis) {
+        if (!running) return;
+        String text = field(hypothesis, "partial");
+        if (text.equals(lastPartial)) return;
+        lastPartial = text;
+        WakeWord.Heard heard = WakeWord.matchPartial(text);
+        if (heard != null) {
+            lastPartial = "";
+            listener.onWake(heard);
+        }
+    }
+
+    private static String field(String json, String name) {
         try {
-            return new JSONObject(hypothesis).optString("text", "");
+            return new JSONObject(json).optString(name, "");
         } catch (Exception e) {
             return "";
         }
