@@ -3040,13 +3040,14 @@ canvas[data-neon-grid] {
 .status-wait::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 10px #fbbf24; }
 .status-row + .status-row { padding-top: 14px; }
 
-/* Pricing: three plans, all included during the launch period. */
+/* Pricing: two plans, both included during the launch period. */
 .launch-strip { display: inline-flex; align-items: center; gap: 10px; margin-top: 22px; padding: 8px 16px;
   border-radius: 999px; border: 1px solid rgba(239, 68, 68, .35); background: rgba(239, 68, 68, .08);
   font-family: var(--mono); font-size: .7rem; letter-spacing: .14em; color: #fecaca; }
 .launch-strip i { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 10px #4ade80;
   animation: hud-blink 2s ease-in-out infinite; }
-.price-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; align-items: stretch; }
+.price-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; align-items: stretch;
+  max-width: 860px; margin: 0 auto; }
 .plan { position: relative; display: flex; flex-direction: column; padding: 30px 28px 28px; border-radius: 18px;
   border: 1px solid var(--line-soft); background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(255, 255, 255, .01));
   overflow: hidden; transition: transform .35s var(--ease), border-color .35s, box-shadow .35s; }
