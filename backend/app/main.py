@@ -1902,10 +1902,10 @@ _MEMORY_CATEGORIES = {
 # When the model returns a plain fact with no label, the wording itself is a
 # reasonable signal. Without this every memory landed in "Durable Record".
 _MEMORY_CATEGORY_HINTS = (
-    ("identity_core", re.compile(r"(name is|called|lives? in|from|age|years old|works? as|role|job|student|engineer|developer)", re.I)),
-    ("active_projects", re.compile(r"(project|building|working on|developing|app|startup|thesis|assignment)", re.I)),
-    ("relationships", re.compile(r"(brother|sister|mother|father|wife|husband|friend|colleague|team|partner|son|daughter|behen|bhai)", re.I)),
-    ("behaviours_habits", re.compile(r"(likes?|loves?|prefers?|enjoys?|hates?|dislikes?|usually|every day|habit|routine|wakes? up)", re.I)),
+    ("identity_core", re.compile(r"\b(name is|called|lives? in|from|age|years old|works? as|role|job|student|engineer|developer)\b", re.I)),
+    ("active_projects", re.compile(r"\b(project|building|working on|developing|app|startup|thesis|assignment)\b", re.I)),
+    ("relationships", re.compile(r"\b(brother|sister|mother|father|wife|husband|friend|colleague|team|partner|son|daughter|behen|bhai)\b", re.I)),
+    ("behaviours_habits", re.compile(r"\b(likes?|loves?|prefers?|enjoys?|hates?|dislikes?|usually|every day|habit|routine|wakes? up)\b", re.I)),
 )
 
 
@@ -2770,7 +2770,7 @@ def _auto_route_model(prompt: str, installed: list[str]) -> str:
     #   Between the rest, more parameters is the better guess. qwen2.5-coder:3b
     #   over qwen3:0.6b is not a close call.
     def _params_in_tag(model_id: str) -> float:
-        found = re.search(r"(\d+(?:\.\d+)?)\s*b", (model_id or "").lower())
+        found = re.search(r"(\d+(?:\.\d+)?)\s*b\b", (model_id or "").lower())
         return float(found.group(1)) if found else 0.0
 
     def _rank_key(pair):
@@ -7753,66 +7753,65 @@ async def ask_screen_endpoint(request: Request,
                               current_user: User = Depends(get_current_user)):
     """Answer a question about what is on screen right now.
 
-    Takes a screenshot and gives it to a vision model with the question. If no
-    model that can see is installed it says so, and says what to install,
-    rather than answering from the question alone - which would read as though
-    it had looked.
+    A local model that can see is used when there is one; otherwise a provider
+    already set up in Settings (app.screen_vision). With neither it says so,
+    and what to set up, rather than answering from the question alone - which
+    would read as though it had looked.
     """
     body = await request.json()
     question = (body.get("question") or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="Ask something about the screen.")
+    result = await _look_at_screen(question)
+    if result.get("error"):
+        raise HTTPException(status_code=409, detail=result["error"])
+    return {"question": question, "answer": result["answer"], "model": result["model"],
+            "where": result["where"], "note": "Answered from a screenshot taken just now."}
 
-    base = settings.OLLAMA_URL.rstrip("/")
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=3.0)) as client:
-            tags = await client.get(f"{base}/api/tags")
-            installed = [m.get("name", "") for m in (tags.json().get("models") or [])]
-    except Exception:
-        raise HTTPException(status_code=503,
-                            detail="The local model server is not answering. Start Ollama and try again.")
 
-    seeing = next((m for m in installed
-                   if any(hint in m.lower() for hint in VISION_MODEL_HINTS)), None)
-    if not seeing:
-        raise HTTPException(
-            status_code=409,
-            detail=("No model that can see is installed, so I cannot look at your "
-                    "screen. Install one from Model Hub - llava:7b needs about 4.7 GB, "
-                    "or moondream about 1.7 GB on a smaller machine."))
+from app import paint_draw  # noqa: E402 - beside the routes that use it
 
-    # Imported here rather than relying on the module-level import further
-    # down the file, which lands after this function is defined.
+
+async def _look_at_screen(question: str) -> dict:
+    """Screenshot now, and ask a model that can see. Shared by typing and voice."""
     from app.desktop_agent import DesktopAgent as _Agent
+    from app import screen_vision
 
-    shot = _Agent._action_take_screenshot({})
+    shot = await asyncio.to_thread(_Agent._action_take_screenshot, {})
     if not shot.get("success") or not shot.get("screenshot_base64"):
-        raise HTTPException(status_code=500,
-                            detail="The screen could not be captured: %s"
-                                   % shot.get("error", "unknown reason"))
+        return {"error": "The screen could not be captured: %s" % shot.get("error", "unknown reason")}
+    return await asyncio.to_thread(screen_vision.ask, question, shot["screenshot_base64"])
 
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=5.0)) as client:
-            response = await client.post(f"{base}/api/chat", json={
-                "model": seeing,
-                "messages": [{
-                    "role": "user",
-                    "content": question,
-                    "images": [shot["screenshot_base64"]],
-                }],
-                "stream": False,
-            })
-        if response.status_code != 200:
-            raise HTTPException(status_code=502,
-                                detail="%s returned HTTP %d" % (seeing, response.status_code))
-        answer = ((response.json().get("message") or {}).get("content") or "").strip()
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not ask %s: %s" % (seeing, str(exc)[:120]))
 
-    return {"question": question, "answer": answer, "model": seeing,
-            "note": "Answered from a screenshot taken just now."}
+#: "What's on my screen?", "screen par kya hai?", "can you see my screen?" -
+#: a question about the screen, in the ways it is asked.
+_SCREEN_QUESTION = re.compile(
+    r"\bwhat(?:'s|\s+is)\s+(?:on|in)\s+(?:my|the|this)\s+screen\b"
+    r"|\bwhat\s+(?:do|can)\s+you\s+see\b|\bcan\s+you\s+see\s+(?:my|the|this)\s+screen\b"
+    r"|\b(?:look\s+at|read|describe|check)\s+(?:my|the|this)\s+screen\b"
+    r"|\b(?:on|in)\s+(?:my|the|this)\s+screen\b.*\?"
+    r"|\b(?:mere|meri|mera|is|iss|ye|yeh)\s+screen\s+(?:par|pe|per|mein|me|mai|ko)\b"
+    r"|\bscreen\s+(?:par|pe|per|mein|me)\s+(?:kya|kaun|kaunsa|kitna)\b"
+    r"|\bscreen\s+(?:dekh(?:o|kar|ke|\s+ke)?|padh(?:o|kar|ke)?)\b"
+    r"|स्क्रीन\s+(?:पर|पे|में)|स्क्रीन\s+देख",
+    re.I,
+)
+
+#: Said right after a screen question - "and this button?", "ye error kya hai" -
+#: it is about the same screen, and gets a fresh look at it.
+_ABOUT_WHAT_IS_SHOWN = re.compile(
+    r"\b(?:this|that|these|here|there|it|button|window|error|message|icon|tab|page|popup|ye|yeh|is|isme|iska|uska|wo|woh|yahan|wahan)\b",
+    re.I,
+)
+
+
+def is_screen_question(text: str, follow_up: bool = False) -> bool:
+    text = (text or "").strip()
+    if not text:
+        return False
+    if _SCREEN_QUESTION.search(text):
+        return True
+    return follow_up and bool(_ABOUT_WHAT_IS_SHOWN.search(text))
 
 
 @app.post("/api/terminal/run")
@@ -8075,6 +8074,12 @@ class VoiceCommandRequest(PydanticBaseModel):
     text: str
     language: str = "auto"
     confirmed: bool = False
+    # The previous spoken turn asked about the screen, so "and this button?"
+    # is about the same screen.
+    screen_followup: bool = False
+    # The previous turn asked a question of its own ("What should I draw?"),
+    # and this is the answer to it.
+    followup: str = ""
 
 
 # Spoken commands that drive the app's own workspace rather than the operating
@@ -8210,6 +8215,32 @@ async def desktop_voice_command_endpoint(
                 "That page could not be opened.", req.language,
             ),
         }
+
+    # "Paint kholo aur ghar banao", "draw a star" - and the answer to "What
+    # should I draw?". Drawn in Paint, stroke by stroke, where it can be seen.
+    if text and (req.followup == "paint" or paint_draw.is_draw_request(text)):
+        request_text = text if paint_draw.is_draw_request(text) else f"draw {text}"
+        drawn = await asyncio.to_thread(paint_draw.draw, request_text)
+        if drawn.get("ask"):
+            return {"handled": True, "success": False, "action": "paint_draw", "followup": "paint",
+                    "message": _localize_spoken(drawn["ask"], req.language)}
+        return {"handled": True, "success": bool(drawn.get("success")), "action": "paint_draw",
+                "message": _localize_spoken(drawn.get("message") or drawn.get("error") or "Done.",
+                                            req.language)}
+
+    # "What's on my screen?" - and the question straight after it, which is
+    # about the same screen. Answered by looking, never from the words alone.
+    if text and is_screen_question(text, follow_up=req.screen_followup):
+        looked = await _look_at_screen(text)
+        if looked.get("error"):
+            return {"handled": True, "success": False, "action": "ask_screen",
+                    "message": _localize_spoken(looked["error"], req.language)}
+        answer = looked["answer"]
+        return {"handled": True, "success": True, "action": "ask_screen",
+                "model": looked["model"], "where": looked["where"],
+                # Spoken as the model wrote it: it already answers in the
+                # language of the question, and translating twice garbles it.
+                "message": answer}
 
     intent = detect_desktop_intent(text) if text else None
     if not intent:

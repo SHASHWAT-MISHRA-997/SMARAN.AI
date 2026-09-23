@@ -4206,6 +4206,13 @@ const ChatArea = ({
   // Try to handle the utterance as a desktop/OS control command. Returns true if
   // it was handled (executed or a confirmation was requested), so the caller can
   // skip the conversational model.
+  // When the screen was last looked at for a spoken question. The question
+  // straight after it - "and this button?" - is about the same screen.
+  const lastScreenLookRef = useRef(0);
+  // A question the desktop asked back ("What should I draw?"): the next thing
+  // said answers it. Used once, and only within a minute.
+  const desktopFollowupRef = useRef({ kind: '', at: 0 });
+
   const tryVoiceDesktopCommand = async (queryText) => {
     const voiceSession = voiceSessionRef.current;
     const sessionActive = () => isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current;
@@ -4247,10 +4254,19 @@ const ChatArea = ({
       const res = await fetch(`${API_BASE}/api/desktop/voice-command`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ text: queryText, language: selectedLanguage, confirmed: false }),
+        body: JSON.stringify({
+          text: queryText,
+          language: selectedLanguage,
+          confirmed: false,
+          screen_followup: Date.now() - lastScreenLookRef.current < 90000,
+          followup: Date.now() - desktopFollowupRef.current.at < 60000 ? desktopFollowupRef.current.kind : '',
+        }),
       });
+      desktopFollowupRef.current = { kind: '', at: 0 };
       if (!res.ok) return false;
       const data = await res.json();
+      lastScreenLookRef.current = data?.action === 'ask_screen' && data?.success ? Date.now() : 0;
+      if (data?.followup) desktopFollowupRef.current = { kind: data.followup, at: Date.now() };
           if (!sessionActive()) return true;
       if (!data?.handled) return false;
       if (data.ui_action) {
