@@ -96,7 +96,7 @@ const CONTROLS = [
   ['pause', /^(?:pause(?:\s+karo|\s+kar\s+do|\s+it)?|pause\s+(?:the\s+)?(?:music|song|video|gaana)|ruko|ruk\s+jao|roko|rok\s+do|(?:gaana|music|song|video)\s+(?:roko|rok\s+do|pause\s+karo)|रुको|रोको|रोक\s+दो|पॉज़?(?:\s+करो)?)$/i],
   ['stop', /^(?:stop(?:\s+(?:the\s+)?(?:music|song|video|playing))?|(?:gaana|music|song|video)\s+band\s+karo|band\s+karo\s+(?:gaana|music)|गाना\s+बंद\s+करो)$/i],
   ['play', /^(?:resume|continue|play|play\s+karo|resume\s+karo|chalao|chalu\s+karo\s+(?:gaana|music)|phir\s+se\s+chalao|wapas\s+chalao|(?:gaana|music|song|video)\s+(?:chalao|resume\s+karo|play\s+karo|wapas\s+chalao)|चलाओ|फिर\s+से\s+चलाओ)$/i],
-  ['next', /^(?:next(?:\s+(?:song|track|video|gaana))?|skip(?:\s+(?:this|it|song))?|agla(?:\s+(?:gaana|song|video))?|next\s+karo|अगला(?:\s+गाना)?)$/i],
+  ['next', /^(?:next(?:\s+(?:song|track|video|gaana))?|skip(?:\s+(?:this|it|(?:this\s+|the\s+)?(?:song|track|video|gaana)))?|agla(?:\s+(?:gaana|song|video))?|next\s+karo|अगला(?:\s+गाना)?)$/i],
   ['previous', /^(?:previous(?:\s+(?:song|track|video))?|pichla(?:\s+(?:gaana|song|video))?|last\s+song|पिछला(?:\s+गाना)?)$/i],
   ['volume_up', /^(?:volume\s+(?:up|badhao|increase|tez\s+karo|zyada\s+karo)|(?:increase|raise|turn\s+up)\s+(?:the\s+)?volume|a+wa+z\s+(?:badhao|tez\s+karo)|louder|आवाज़?\s+बढ़ाओ)$/i],
   ['volume_down', /^(?:volume\s+(?:down|kam\s+karo|ghatao|decrease|dheere\s+karo)|(?:decrease|lower|turn\s+down)\s+(?:the\s+)?volume|a+wa+z\s+(?:kam\s+karo|dheere\s+karo|ghatao)|quieter|आवाज़?\s+कम\s+करो)$/i],
@@ -200,6 +200,8 @@ const MONEY_ACT = new RegExp([
   '\\brecharge\\s+(?:karo|kar\\s*do|kardo|my|the)\\b|\\brecharge\\b.*\\d',
   'पैसे\\s+भेजो|भेज\\s+दो|खरीदो|ऑर्डर\\s+करो',
 ].join('|'), 'i');
+
+const SKIP_AD = /^(?:skip\s+(?:the\s+|this\s+)?ads?|ads?\s+skip\s*(?:karo|kar\s*do|kardo)?|skip\s+ads?\s+karo|ads?\s+hatao|ads?\s+band\s+karo|विज्ञापन\s+(?:छोड़ो|हटाओ)|ऐड\s+स्किप\s+करो)[.!]?$/i;
 
 export function detectMoneyRequest(text) {
   if (!MONEY_ACT.test(text)) return null;
@@ -328,6 +330,9 @@ export function detectDeviceCommand(utterance) {
   const text = stripPoliteness(stripWakePhrase(raw));
   if (!text) return null;
 
+  // "Skip ad": the phone presses the Skip button in the app in front.
+  if (SKIP_AD.test(text)) return { action: 'skip_ad' };
+
   const money = detectMoneyRequest(text);
   if (money) return money;
 
@@ -443,6 +448,8 @@ export function describeOutcome(command, result) {
   switch (command?.action) {
     case 'say':
       return MONEY_LINE;
+    case 'skip_ad':
+      return result?.said || (result?.skipped ? 'Skipped.' : 'There\'s no Skip button yet.');
     case 'app':
       if (ok && command.money) return `Opened ${result.label || command.name}. ${MONEY_LINE}`;
       if (ok) return `Opening ${result.label || command.name}.`;

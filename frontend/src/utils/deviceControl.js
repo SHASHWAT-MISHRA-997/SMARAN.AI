@@ -173,6 +173,7 @@ export async function runDeviceCommand(command) {
   //
   // And never when the user has turned the floating window off in Settings.
   const pressesKey = command.action === 'media' || command.action === 'music'
+    || command.action === 'skip_ad'
     || (command.action === 'youtube' && Boolean(command.play))
     || !floatsAtAll();
   if (!pressesKey) await armFloating();
@@ -196,6 +197,10 @@ export async function runDeviceCommand(command) {
       case 'url':
         result = await device.openUrl({ url: command.url });
         break;
+      case 'skip_ad':
+        // Nothing opens and nothing floats: a button pressed in the app in front.
+        result = await device.skipAd();
+        return { spoken: describeOutcome(command, result), floated: false, startsPlayback: false };
       case 'say':
         // Nothing to do on the phone, only something to say: a request to
         // pay or buy with no app named.

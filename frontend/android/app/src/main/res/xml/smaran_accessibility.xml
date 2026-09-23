@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Skipping an ad when asked to (SmaranAccessibility).
+
+     No event types are subscribed beyond the minimum Android requires, and
+     none are handled: the service does nothing until "skip ad" is said, and
+     then looks at the app in front once. canRetrieveWindowContent is what
+     lets it find the Skip button at that moment. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/accessibility_description"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="1000" />

@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">SMARAN.AI</string>
     <string name="title_activity_main">SMARAN.AI</string>
+    <string name="accessibility_description">Lets SMARAN.AI press the Skip button on an ad when you say \"skip ad\". Only then does it look at the app in front, just to find that button. It keeps nothing, sends nothing anywhere, and never presses any other button.</string>
 </resources>

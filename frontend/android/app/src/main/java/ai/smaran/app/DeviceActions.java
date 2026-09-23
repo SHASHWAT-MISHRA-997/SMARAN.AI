@@ -100,7 +100,7 @@ final class DeviceActions {
         {"play", Pattern.compile("^(?:resume|continue|play|play\\s+karo|resume\\s+karo|chalao|chalu\\s+karo\\s+(?:gaana|music)|phir\\s+se\\s+chalao"
             + "|wapas\\s+chalao|(?:gaana|music|song|video)\\s+(?:chalao|resume\\s+karo|play\\s+karo|wapas\\s+chalao)"
             + "|\u091a\u0932\u093e\u0913|\u092b\u093f\u0930\\s+\u0938\u0947\\s+\u091a\u0932\u093e\u0913)$", Pattern.CASE_INSENSITIVE)},
-        {"next", Pattern.compile("^(?:next(?:\\s+(?:song|track|video|gaana))?|skip(?:\\s+(?:this|it|song))?|agla(?:\\s+(?:gaana|song|video))?"
+        {"next", Pattern.compile("^(?:next(?:\\s+(?:song|track|video|gaana))?|skip(?:\\s+(?:this|it|(?:this\\s+|the\\s+)?(?:song|track|video|gaana)))?|agla(?:\\s+(?:gaana|song|video))?"
             + "|next\\s+karo|\u0905\u0917\u0932\u093e(?:\\s+\u0917\u093e\u0928\u093e)?)$", Pattern.CASE_INSENSITIVE)},
         {"previous", Pattern.compile("^(?:previous(?:\\s+(?:song|track|video))?|pichla(?:\\s+(?:gaana|song|video))?|last\\s+song"
             + "|\u092a\u093f\u091b\u0932\u093e(?:\\s+\u0917\u093e\u0928\u093e)?)$", Pattern.CASE_INSENSITIVE)},
@@ -468,6 +468,12 @@ final class DeviceActions {
         return say;
     }
 
+    static final Pattern SKIP_AD = Pattern.compile(
+        "^(?:skip\\s+(?:the\\s+|this\\s+)?ads?|ads?\\s+skip\\s*(?:karo|kar\\s*do|kardo)?|skip\\s+ads?\\s+karo"
+        + "|ads?\\s+hatao|ads?\\s+band\\s+karo|\u0935\u093f\u091c\u094d\u091e\u093e\u092a\u0928\\s+(?:\u091b\u094b\u0921\u093c\u094b|\u0939\u091f\u093e\u0913)"
+        + "|\u0910\u0921\\s+\u0938\u094d\u0915\u093f\u092a\\s+\u0915\u0930\u094b)[.!]?$",
+        Pattern.CASE_INSENSITIVE);
+
     /** What this line is asking the phone to do, or null. */
     static Command detect(String utterance) {
         if (utterance == null) return null;
@@ -486,6 +492,10 @@ final class DeviceActions {
         if (control != null) return control;
 
         // First: "YouTube Music" would otherwise be taken for YouTube.
+        // "Skip ad": the Skip button in the app in front, through the
+        // accessibility service the user switched on.
+        if (SKIP_AD.matcher(text).matches()) return new Command("skip_ad", "");
+
         // Money and shopping first: opened if named, never done.
         Command money = moneyRequest(text);
         if (money != null) return money;
@@ -686,6 +696,11 @@ final class DeviceActions {
             }
             case "url":     return openUrl(context, command.argument);
             case "say":     return command.argument;
+            case "skip_ad": {
+                String result = SmaranAccessibility.skipAd();
+                if ("not-enabled".equals(result)) SmaranAccessibility.openSettings(context);
+                return SmaranAccessibility.describe(result);
+            }
             default:        return "";
         }
     }

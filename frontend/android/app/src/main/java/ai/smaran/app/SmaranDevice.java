@@ -113,6 +113,17 @@ public class SmaranDevice extends Plugin {
         call.resolve(new JSObject().put("listening", listening));
     }
 
+    /** Press the Skip button on an ad, if the accessibility service is on. */
+    @PluginMethod
+    public void skipAd(PluginCall call) {
+        String result = SmaranAccessibility.skipAd();
+        if ("not-enabled".equals(result)) SmaranAccessibility.openSettings(getContext());
+        call.resolve(new JSObject()
+            .put("skipped", "skipped".equals(result))
+            .put("result", result)
+            .put("said", SmaranAccessibility.describe(result)));
+    }
+
     /** A question said to "Hey SMARAN" while the app was away, if one is waiting. */
     @PluginMethod
     public void takePendingQuery(PluginCall call) {

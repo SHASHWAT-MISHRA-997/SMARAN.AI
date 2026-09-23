@@ -34,6 +34,7 @@ const MemoryPreferences = () => {
   const [importError, setImportError] = useState('');
   const [importSuccess, setImportSuccess] = useState('');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [helpTopic, setHelpTopic] = useState('');
 
   const EXPORT_PROMPT = `Please export all your remembered facts, user preferences, personal context, project details, and working guidelines about me as clean JSON in the following exact format:
 {
@@ -160,6 +161,12 @@ const MemoryPreferences = () => {
     setTimeout(() => setCopiedPrompt(false), 2000);
   };
 
+  const helpText = {
+    search: { title: 'Search and reference chats', body: 'When enabled, SMARAN can look for relevant details in your previous conversations while answering. You can turn this off at any time.' },
+    sensitive: { title: 'Sensitive topics in memory', body: 'When enabled, memory may include sensitive details that you explicitly share, such as health or belief preferences. Keep this off if you do not want those details saved.' },
+    import: { title: 'Import memory from another AI', body: 'Copy the provider prompt, paste it into ChatGPT, Claude, or Gemini, then paste the returned JSON here. SMARAN validates the JSON before importing it.' },
+  };
+
   const handleExecuteImport = async () => {
     setImportError('');
     setImportSuccess('');
@@ -212,7 +219,7 @@ const MemoryPreferences = () => {
           <p className="text-sm font-bold">Search and reference chats</p>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
             Allow SMARAN to search for relevant details in past chats.{' '}
-            <a href="#learn-more" className="text-indigo-500 hover:underline">Learn more ↗</a>
+            <button type="button" onClick={() => setHelpTopic('search')} className="text-indigo-500 hover:underline">Learn more ↗</button>
           </p>
         </div>
         <button
@@ -265,7 +272,7 @@ const MemoryPreferences = () => {
           <p className="text-sm font-bold">Include sensitive topics in memory</p>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
             Allow SMARAN to save details about sensitive topics like health conditions or religious beliefs to memory.{' '}
-            <a href="#learn-more" className="text-indigo-500 hover:underline">Learn more ↗</a>
+            <button type="button" onClick={() => setHelpTopic('sensitive')} className="text-indigo-500 hover:underline">Learn more ↗</button>
           </p>
         </div>
         <button
@@ -292,7 +299,7 @@ const MemoryPreferences = () => {
           <p className="text-sm font-bold">Import memory from other AI providers</p>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
             Bring relevant context and data from another AI provider to SMARAN. We&rsquo;ll provide a prompt you can use to fetch the memory from your other account.{' '}
-            <a href="#learn-more" className="text-indigo-500 hover:underline">Learn more ↗</a>
+            <button type="button" onClick={() => setHelpTopic('import')} className="text-indigo-500 hover:underline">Learn more ↗</button>
           </p>
         </div>
         <button
@@ -402,6 +409,21 @@ const MemoryPreferences = () => {
         )}
       </form>
 
+      {helpTopic && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs" role="dialog" aria-modal="true" aria-labelledby="memory-help-title">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <h4 id="memory-help-title" className="text-base font-black">{helpText[helpTopic].title}</h4>
+              <button type="button" onClick={() => setHelpTopic('')} className="rounded-lg p-1 text-zinc-400 hover:text-zinc-900 dark:hover:text-white" aria-label="Close help">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{helpText[helpTopic].body}</p>
+            <button type="button" onClick={() => setHelpTopic('')} className="mt-5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500">Got it</button>
+          </div>
+        </div>
+      )}
+
       {/* Import Modal */}
       {importModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs animate-fadeIn">
@@ -420,15 +442,15 @@ const MemoryPreferences = () => {
             </div>
 
             {/* Provider selector */}
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold text-zinc-400">Source Provider:</span>
-              <div className="flex gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 text-xs font-bold text-zinc-400">Source Provider:</span>
+              <div className="flex min-w-0 flex-1 gap-1.5">
                 {['chatgpt', 'claude', 'gemini'].map((p) => (
                   <button
                     key={p}
                     type="button"
                     onClick={() => setImportProvider(p)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold uppercase transition ${
+                    className={`min-w-0 flex-1 truncate px-1.5 py-1 rounded-lg text-xs font-bold uppercase transition sm:px-3 ${
                       importProvider === p
                         ? 'bg-indigo-600 text-white'
                         : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-white'

@@ -83,6 +83,9 @@ export async function startOAuth(provider, { signal = new AbortController().sign
   // Open synchronously on the click so popup blockers do not eat an async window.open.
   const desktopBrowser = window.pywebview?.api?.open_sign_in;
   const popup = desktopBrowser ? null : window.open('about:blank', 'smaran-sign-in', 'width=560,height=720');
+  if (!desktopBrowser && !popup) {
+    throw new Error('Google sign-in window was blocked. Allow popups for SMARAN.AI and try again.');
+  }
   if (popup) popup.opener = null;
   let flow;
   try {
@@ -93,6 +96,9 @@ export async function startOAuth(provider, { signal = new AbortController().sign
     const deadline = Date.now() + flow.expires_in * 1000;
     let interval = flow.interval;
     while (Date.now() < deadline) {
+      if (popup?.closed) {
+        throw new Error('Google sign-in window was closed before sign-in completed.');
+      }
       await waitForPoll(interval * 1000, signal);
       const result = await api('direct/poll', { ticket: flow.ticket }, signal);
       if (result.status === 'complete') return { ...result, provider };
