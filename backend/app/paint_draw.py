@@ -315,33 +315,64 @@ def _cursor() -> tuple[int, int]:
     return point.x, point.y
 
 
-def draw_strokes(strokes: list[list[tuple[int, int]]],
+def to_absolute(x: int, y: int, screen: tuple[int, int]) -> tuple[int, int]:
+    """Screenshot pixels as the 0..65535 range absolute mouse input uses.
+
+    Absolute input is a fraction of the screen, so it lands on the same spot
+    whatever the display scaling. SetCursorPos works in scaled units instead:
+    on a 125% display the screenshot is 1920 wide and the cursor space 1536,
+    and the first drawing landed a quarter too far right and down - mostly
+    off the canvas.
+    """
+    width, height = screen
+    return (round(x * 65535 / max(1, width - 1)), round(y * 65535 / max(1, height - 1)))
+
+
+def draw_strokes(strokes: list[list[tuple[int, int]]], screen: tuple[int, int],
                  in_front: Callable[[], bool] = _paint_in_front,
-                 pause: float = 0.004) -> int:
-    """Drag each stroke. Returns how many were drawn; raises Interrupted if taken over."""
+                 pause: float = 0.006) -> int:
+    """Drag each stroke. Returns how many were drawn; raises Interrupted if taken over.
+
+    `screen` is the screenshot's size in pixels, which the strokes are in.
+    Moves are sent as real mouse input (MOVE | ABSOLUTE) rather than cursor
+    jumps: the current Paint draws from input events, and jumping the cursor
+    left only the points where the button went down.
+    """
     import ctypes
 
     user32 = ctypes.windll.user32
-    down, up = 0x0002, 0x0004
+    move, absolute, down, up = 0x0001, 0x8000, 0x0002, 0x0004
+    # Where the cursor should be afterwards, in the units GetCursorPos reports.
+    logical = (user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
+    scale_x, scale_y = logical[0] / screen[0], logical[1] / screen[1]
+
+    def go(x: int, y: int) -> None:
+        ax, ay = to_absolute(x, y, screen)
+        user32.mouse_event(move | absolute, ax, ay, 0, 0)
+
+    def moved_away(x: int, y: int) -> bool:
+        cx, cy = _cursor()
+        return abs(cx - x * scale_x) > 4 or abs(cy - y * scale_y) > 4
+
     drawn = 0
     for stroke in strokes:
         points = densify(stroke)
         if not in_front():
             raise Interrupted("Paint is no longer the window in front")
-        user32.SetCursorPos(*points[0])
+        go(*points[0])
         time.sleep(0.03)
         user32.mouse_event(down, 0, 0, 0, 0)
         try:
             for x, y in points[1:]:
-                user32.SetCursorPos(x, y)
+                go(x, y)
                 time.sleep(pause)
                 # Not where it was put: someone moved it. Stop, and let go.
-                cx, cy = _cursor()
-                if abs(cx - x) > 3 or abs(cy - y) > 3:
+                if moved_away(x, y):
                     raise Interrupted("the mouse was moved")
         finally:
             user32.mouse_event(up, 0, 0, 0, 0)
         drawn += 1
+        time.sleep(0.02)
     return drawn
 
 
@@ -349,13 +380,18 @@ def _open_paint_maximised(timeout: float = 12.0) -> bool:
     """Start Paint and bring it to the front, maximised. True once it is in front."""
     import ctypes
 
-    subprocess.Popen(["mspaint.exe"])
     user32 = ctypes.windll.user32
+    # The window in front now is not the one being opened - even if it is
+    # Paint. With a Paint window already in front, "Paint is in front" was
+    # true at once, and that old window was maximised instead of the new one.
+    before = user32.GetForegroundWindow()
+    subprocess.Popen(["mspaint.exe"])
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(0.4)
-        if _paint_in_front():
-            user32.ShowWindow(user32.GetForegroundWindow(), 3)  # SW_MAXIMIZE
+        front = user32.GetForegroundWindow()
+        if front != before and _paint_in_front():
+            user32.ShowWindow(front, 3)  # SW_MAXIMIZE
             time.sleep(1.2)  # let it lay itself out before looking for the canvas
             return True
     return False
@@ -399,15 +435,20 @@ def draw(text: str) -> dict:
         return {"success": False, "error": "Paint did not open in front, so I didn't draw anything."}
     shot = DesktopAgent._action_take_screenshot({})
     canvas = None
+    screen = None
     if shot.get("success") and shot.get("screenshot_base64"):
-        canvas = find_canvas(base64.b64decode(shot["screenshot_base64"]))
+        from PIL import Image
+
+        png = base64.b64decode(shot["screenshot_base64"])
+        screen = Image.open(io.BytesIO(png)).size
+        canvas = find_canvas(png)
     if not canvas:
         return {"success": False, "error": "I opened Paint but couldn't find its canvas, so I didn't draw."}
     strokes = []
     for slot, group in enumerate(groups):
         strokes.extend(fit(group, canvas, slot=slot, slots=len(groups)))
     try:
-        draw_strokes(strokes)
+        draw_strokes(strokes, screen)
     except Interrupted as stopped:
         return {"success": False, "error": f"I stopped drawing because {stopped} - the mouse is yours again."}
     return {"success": True, "message": f"Drew {_article(what)} in Paint.", "subjects": subjects}

@@ -91,7 +91,7 @@ def test_every_built_in_shape_is_drawable():
 @pytest.mark.skipif(sys.platform != "win32", reason="the mouse is driven only on Windows")
 def test_drawing_stops_when_paint_is_no_longer_in_front(monkeypatch):
     with pytest.raises(paint_draw.Interrupted):
-        paint_draw.draw_strokes([[(10, 10), (20, 20)]], in_front=lambda: False)
+        paint_draw.draw_strokes([[(10, 10), (20, 20)]], (1920, 1080), in_front=lambda: False)
 
 
 def test_voice_route_asks_then_draws_the_answer(monkeypatch):
