@@ -54,9 +54,9 @@ def main() -> None:
 
     io.open(ROOT / "index.html", "w", encoding="utf-8", newline="").write(raw)
     print(f"styles.css?v={css}\nmain.js?v={js}")
-    # About and Join use the home page's stylesheet and script, so they need
+    # About, Join and Refunds use the home page's stylesheet and script, so they need
     # the same stamp or they serve last deploy's layout for an hour.
-    for page in ("about.html", "join.html"):
+    for page in ("about.html", "join.html", "refund.html"):
         path = ROOT / page
         text = io.open(path, "r", encoding="utf-8", newline="").read()
         text, a = re.subn(r'href="styles\.css(?:\?v=[^"]*)?"', f'href="styles.css?v={css}"', text)

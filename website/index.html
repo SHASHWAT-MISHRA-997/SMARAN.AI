@@ -97,7 +97,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=64cf0784d3" />
+<link rel="stylesheet" href="styles.css?v=f92d3f22d0" />
 </head>
 
 <body>
@@ -687,12 +687,13 @@
         <a class="btn btn-ghost lg" href="#download">Download free</a>
       </article>
 
-      <article class="plan featured reveal" data-delay="1">
+      <article class="plan featured reveal" data-delay="1" data-pro-plan>
         <span class="plan-badge">MOST COMPLETE</span>
         <h3>Pro</h3>
         <p class="plan-for">SMARAN on every device, with creation and control by voice.</p>
-        <div class="plan-price"><strong>&#8377;0</strong><span>/ month</span></div>
-        <p class="plan-note">INCLUDED DURING LAUNCH</p>
+        <div class="plan-price"><strong data-pro-price>&#8377;0</strong><span>/ month</span></div>
+        <p class="plan-note" data-pro-note>INCLUDED DURING LAUNCH</p>
+        <p class="plan-later" data-pro-later>&#8377;700 / month after launch &middot; about US$8, billed in INR</p>
         <ul>
           <li>Everything in Personal</li>
           <li>Android app, paired with your PC</li>
@@ -702,7 +703,7 @@
           <li>Cloud models with your own API keys</li>
           <li>SMARAN.AI Codex for VS Code</li>
         </ul>
-        <a class="btn btn-primary lg no-lift" href="#download">Get Pro free</a>
+        <a class="btn btn-primary lg no-lift" href="#download" data-pro-cta>Get Pro free</a>
       </article>
     </div>
 
@@ -1417,6 +1418,7 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
         <a class="fl" href="#faq">FAQ</a>
         <a class="fl" href="#privacy">Privacy</a>
         <a class="fl" href="terms.html">Terms</a>
+        <a class="fl" href="refund.html">Cancellation &amp; refunds</a>
       </nav>
       <nav aria-label="Ecosystem">
         <h5>ECOSYSTEM</h5>
@@ -1446,5 +1448,6 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
 <script src="hero-trails.js?v=2" defer></script>
 <script src="neon-grid.js?v=1" defer></script>
 <script src="site-status.js?v=1" defer></script>
+<script src="billing.js?v=1" defer></script>
 </body>
 </html>

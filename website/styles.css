@@ -3090,3 +3090,27 @@ html.light .plan-price strong, html.light .plan h3 { color: #111; }
   .nav-toggle { display: flex; }
   .mobile-menu:not([hidden]) { display: flex; }
 }
+
+/* Pro: the post-launch price line and the checkout dialog (billing.js). */
+.plan-later { margin: -14px 0 22px; color: var(--muted); font-size: .8rem; }
+.page-hero-short { min-height: 56vh; }
+.pay-dialog { width: min(440px, calc(100vw - 32px)); padding: 0; border: 1px solid rgba(239, 68, 68, .45); border-radius: 18px;
+  background: linear-gradient(180deg, #17090b, #0b0a0d); color: var(--text); box-shadow: 0 30px 90px rgba(239, 68, 68, .25); }
+.pay-dialog::backdrop { background: rgba(4, 4, 6, .72); backdrop-filter: blur(6px); }
+.pay-form { position: relative; display: grid; gap: 12px; padding: 30px 28px 24px; }
+.pay-x { position: absolute; top: 12px; right: 14px; width: 34px; height: 34px; border: 0; border-radius: 50%;
+  background: rgba(255, 255, 255, .06); color: var(--text); font-size: 1.3rem; cursor: pointer; }
+.pay-eyebrow { font-family: var(--mono); font-size: .64rem; letter-spacing: .22em; color: var(--red-hot); }
+.pay-form h3 { margin: 0; font-size: 1.7rem; }
+.pay-sub, .pay-fine { margin: 0; color: var(--muted); font-size: .88rem; line-height: 1.6; }
+.pay-fine { font-size: .76rem; text-align: center; }
+.pay-label { margin-top: 6px; font-size: .82rem; color: var(--text); }
+.pay-form input[type=email], .pay-key { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line-soft);
+  background: rgba(255, 255, 255, .04); color: var(--text); font: inherit; }
+.pay-key { font-family: var(--mono); font-size: .72rem; word-break: break-all; resize: none; }
+.pay-form input[type=email]:focus { outline: 2px solid rgba(239, 68, 68, .6); outline-offset: 1px; }
+.pay-agree { display: flex; gap: 10px; align-items: flex-start; font-size: .82rem; color: var(--muted); line-height: 1.5; }
+.pay-agree input { margin-top: 3px; accent-color: #ef4444; }
+.pay-msg { min-height: 1.2em; margin: 0; font-size: .84rem; color: #86efac; }
+.pay-msg.bad { color: #fca5a5; }
+.pay-go:disabled { opacity: .6; cursor: progress; }
