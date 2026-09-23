@@ -43,15 +43,25 @@ import java.io.IOException;
 final class WakeSpotter {
     private static final String TAG = "WakeSpotter";
     private static final int RATE = 16000;
-    private static final int CHUNK = RATE / 10;          // 100 ms of samples
+    // 80 ms: the size openWakeWord is fed in; Vosk takes any size.
+    private static final int CHUNK = OwwDetector.CHUNK;
     private static final double TARGET_RMS = 3000.0;     // where speech should sit
     private static final double MAX_GAIN = 8.0;
+
+    /* What was heard, in the log - only when a developer asks for it over USB
+       (`adb shell setprop log.tag.WakeSpotter DEBUG`). Off on every phone by
+       default: transcripts of a room have no business in a system log. It is
+       how "Hey SMARAN" was tuned on the owner's own voice. */
+    private static boolean verbose() {
+        return Log.isLoggable(TAG, Log.DEBUG);
+    }
 
     interface Listener {
         void onWake(WakeWord.Heard heard);
     }
 
     private static Model model;
+    private static Context appContext;
     private static boolean loading;
     private static boolean failed;
 
@@ -63,6 +73,7 @@ final class WakeSpotter {
         if (model != null || failed) { done.run(); return; }
         if (loading) return;
         loading = true;
+        appContext = context.getApplicationContext();
         LibVosk.setLogLevel(LogLevel.WARNINGS);
         StorageService.unpack(context.getApplicationContext(), "vosk-en-in", "vosk-en-in",
             loaded -> { model = loaded; loading = false; done.run(); },
@@ -83,6 +94,8 @@ final class WakeSpotter {
     private Recognizer recognizer;
     /** The same model held to the wake phrases, for the second look at "Hey SMARAN". */
     private Recognizer secondLook;
+    /** "Hey Jarvis" by openWakeWord; null if its models could not be loaded. */
+    private OwwDetector oww;
     private String lastPartial = "";
 
     WakeSpotter(Listener listener) {
@@ -97,6 +110,13 @@ final class WakeSpotter {
         try {
             recognizer = new Recognizer(model, RATE);
             secondLook = new Recognizer(model, RATE, WakeWord.secondLookGrammar());
+            try {
+                oww = appContext == null ? null : new OwwDetector(appContext);
+            } catch (Exception e) {
+                // Vosk still listens for every name; only the stronger Jarvis detector is lost.
+                Log.w(TAG, "openWakeWord could not be loaded", e);
+                oww = null;
+            }
             int minimum = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT);
             record = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE,
@@ -157,6 +177,10 @@ final class WakeSpotter {
             secondLook.close();
             secondLook = null;
         }
+        if (oww != null) {
+            oww.close();
+            oww = null;
+        }
     }
 
     /** The recording loop: read, level, recognise, report. Its own thread. */
@@ -193,13 +217,37 @@ final class WakeSpotter {
                 ring[ringPos++] = buffer[i];
                 if (ringPos == ring.length) { ringPos = 0; ringFull = true; }
             }
+            // "Hey Jarvis", first, by the detector trained for it.
+            OwwDetector detector = oww;
+            if (detector != null) {
+                float score;
+                try {
+                    score = detector.feed(buffer, read);
+                } catch (Exception e) {
+                    score = 0f;
+                }
+                if (verbose() && score > 0.2f) Log.d(TAG, String.format("hey jarvis score %.2f", score));
+                if (score >= OwwDetector.THRESHOLD) {
+                    detector.reset();
+                    decoder.reset();
+                    settling = "";
+                    looked = false;
+                    main.post(() -> {
+                        if (running) listener.onWake(new WakeWord.Heard("jarvis", ""));
+                    });
+                    continue;
+                }
+            }
             final boolean done = decoder.acceptWaveForm(buffer, read);
             final String out = done ? decoder.getResult() : decoder.getPartialResult();
             String words = field(out, done ? "text" : "partial");
-            boolean smaran = false;
+            if (verbose() && (done || !words.equals(settling)) && !words.isEmpty()) {
+                Log.d(TAG, (done ? "final: " : "partial: ") + words + String.format(" (level %.0f, gain %.1f)", rms, gain));
+            }
+            String named = null;
             if (done) {
                 if (WakeWord.match(words) == null && WakeWord.worthSecondLook(words)) {
-                    smaran = lookAgain(ring, ringPos, ringFull);
+                    named = lookAgain(ring, ringPos, ringFull, words);
                 }
                 settling = "";
                 looked = false;
@@ -210,11 +258,12 @@ final class WakeSpotter {
             } else if (!looked && now - settledSince >= 700 && WakeWord.matchPartial(words) == null
                     && WakeWord.worthSecondLook(words)) {
                 looked = true;
-                smaran = lookAgain(ring, ringPos, ringFull);
+                named = lookAgain(ring, ringPos, ringFull, words);
             }
-            if (smaran) {
+            if (named != null) {
+                final String name = named;
                 main.post(() -> {
-                    if (running) listener.onWake(new WakeWord.Heard("smaran", ""));
+                    if (running) listener.onWake(new WakeWord.Heard(name, ""));
                 });
                 continue;
             }
@@ -225,9 +274,9 @@ final class WakeSpotter {
     }
 
     /** Decode the last three seconds again against the wake phrases alone. */
-    private boolean lookAgain(short[] ring, int pos, boolean full) {
+    private String lookAgain(short[] ring, int pos, boolean full, String firstPass) {
         Recognizer look = secondLook;
-        if (look == null) return false;
+        if (look == null) return null;
         int length = full ? ring.length : pos;
         short[] audio = new short[length];
         if (full) {
@@ -239,7 +288,8 @@ final class WakeSpotter {
         look.reset();
         look.acceptWaveForm(audio, audio.length);
         String result = field(look.getFinalResult(), "text");
-        return WakeWord.secondLookSaysSmaran(result);
+        if (verbose()) Log.d(TAG, "second look: " + result);
+        return WakeWord.secondLookName(result, firstPass);
     }
 
     private static double rms(short[] samples, int count) {

@@ -285,7 +285,11 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
 
     @Override
     public void onWake(WakeWord.Heard heard) {
-        if (stopping || pageListening || conversing) return;
+        if (stopping || pageListening || conversing) {
+            Log.i(TAG, "wake ignored: stopping=" + stopping + " pageListening=" + pageListening
+                + " conversing=" + conversing);
+            return;
+        }
         spotter.stop();
         conversing = true;
         Log.i(TAG, "woken: " + heard.name);

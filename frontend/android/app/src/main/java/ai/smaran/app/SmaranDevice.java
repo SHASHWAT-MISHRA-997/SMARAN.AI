@@ -94,7 +94,29 @@ public class SmaranDevice extends Plugin {
         SmaranDevice plugin = active;
         if (plugin == null || !plugin.hasListeners("wake")) return;
         String rest = takeWake();
-        if (rest != null) plugin.notifyListeners("wake", new JSObject().put("rest", rest));
+        if (rest != null) {
+            plugin.notifyListeners("wake", new JSObject().put("rest", rest).put("fromBackground", true));
+        }
+    }
+
+    /**
+     * Back to whatever was in front before "Hey SMARAN" brought this app up.
+     *
+     * Not closed, and not killed: this phone kills an app outright when it is
+     * swiped away from the recent apps, background listening and all, and
+     * swiping was the only way back - so the wake word died after every use.
+     */
+    @PluginMethod
+    public void moveToBack(PluginCall call) {
+        android.app.Activity activity = getActivity();
+        if (activity == null) {
+            call.resolve(new JSObject().put("moved", false));
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            boolean moved = activity.moveTaskToBack(true);
+            call.resolve(new JSObject().put("moved", moved));
+        });
     }
 
     /** A wake waiting for the page, if any: {woke, rest}. */

@@ -110,6 +110,16 @@ export async function takePendingWake() {
   }
 }
 
+/** Send the app to the background, back to whatever was in front before. */
+export async function moveAppToBack() {
+  if (!isNativeApp()) return false;
+  try {
+    return Boolean((await device.moveToBack())?.moved);
+  } catch {
+    return false;
+  }
+}
+
 /** Subscribe to an event from the native plugin. Returns the unsubscribe. */
 export function onDeviceEvent(name, callback) {
   if (!isNativeApp()) return () => {};

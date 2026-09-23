@@ -90,6 +90,18 @@ public class WakeWordTest {
     }
 
     @Test
+    public void theOwnersHeyMyraWithTheHeyLost() {
+        assertEquals("myra", WakeWord.match("myra").name);
+        // A lone greeting, then the second look finds the name.
+        assertEquals("myra", WakeWord.secondLookName("hey myra", "hello"));
+        assertEquals("jarvis", WakeWord.secondLookName("[unk] hey jarvis", "hey"));
+        // Two words heard first ("hey man"): only SMARAN may come from the second look.
+        assertNull(WakeWord.secondLookName("hey myra", "hey man"));
+        assertEquals("smaran", WakeWord.secondLookName("hey small run", "hey man"));
+        assertNull(WakeWord.match("my ra is here"));
+    }
+
+    @Test
     public void theOwnersVoiceSaidSmaranAsHeresMoreOn() {
         assertEquals("smaran", WakeWord.match("here's more on").name);
         assertEquals("smaran", WakeWord.match("he's more on").name);

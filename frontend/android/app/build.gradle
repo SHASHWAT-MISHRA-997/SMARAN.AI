@@ -103,6 +103,10 @@ dependencies {
     // listens - Android's own recogniser pauses it every time.
     implementation 'com.alphacephei:vosk-android:0.3.47@aar'
     implementation 'net.java.dev.jna:jna:5.13.0@aar'
+    // openWakeWord's models run on ONNX Runtime: a detector built for "Hey
+    // ...", where Vosk is a transcriber doing its best with names it has no
+    // words for.
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.22.0'
 }
 
 /* The wake-word model, packaged into the APK.
@@ -164,6 +168,61 @@ tasks.register('prepareWakeWordModel') {
 
 android.sourceSets.main.assets.srcDir(voskAssets)
 tasks.named('preBuild').configure { dependsOn 'prepareWakeWordModel' }
+
+/* openWakeWord (github.com/dscripka/openWakeWord, v0.5.1): the audio features
+   and the "hey jarvis" detector. Code Apache-2.0; the pretrained wake model is
+   CC BY-NC-SA 4.0 - free for SMARAN as a non-commercial app, and to be replaced
+   by a model trained in-house if it is ever sold. See assets/oww/NOTICE. */
+def owwModels = [
+    'melspectrogram.onnx' : 'ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f',
+    'embedding_model.onnx': '70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f',
+    'hey_jarvis_v0.1.onnx': '94a13cfe60075b132f6a472e7e462e8123ee70861bc3fb58434a73712ee0d2cb',
+]
+def owwAssets = layout.buildDirectory.dir('generated/oww-assets')
+
+tasks.register('prepareOpenWakeWord') {
+    def outDir = owwAssets.get().dir('oww').asFile
+    inputs.property('models', owwModels.toString())
+    outputs.dir(outDir)
+    doLast {
+        def sha = { File f ->
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+            f.withInputStream { stream ->
+                byte[] buffer = new byte[1 << 16]
+                int n
+                while ((n = stream.read(buffer)) > 0) digest.update(buffer, 0, n)
+            }
+            digest.digest().encodeHex().toString()
+        }
+        outDir.mkdirs()
+        owwModels.each { name, expected ->
+            def cached = rootProject.file(".vosk-cache/oww/${name}")
+            if (!cached.exists() || sha(cached) != expected) {
+                cached.parentFile.mkdirs()
+                def url = "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/${name}"
+                logger.lifecycle("Downloading ${url}")
+                def part = new File(cached.path + '.part')
+                new URL(url).withInputStream { input -> part.withOutputStream { it << input } }
+                def got = sha(part)
+                if (got != expected) {
+                    part.delete()
+                    throw new GradleException("openWakeWord ${name} checksum mismatch: ${got}")
+                }
+                if (cached.exists()) cached.delete()
+                part.renameTo(cached)
+            }
+            project.copy { from cached; into outDir }
+        }
+        new File(outDir, 'NOTICE').text = """openWakeWord models, from https://github.com/dscripka/openWakeWord (v0.5.1).
+melspectrogram.onnx and embedding_model.onnx: Apache License 2.0.
+hey_jarvis_v0.1.onnx: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC BY-NC-SA 4.0),
+by David Scripka. Used unmodified in a free, non-commercial app.
+"""
+    }
+}
+
+android.sourceSets.main.assets.srcDir(owwAssets)
+tasks.named('preBuild').configure { dependsOn 'prepareOpenWakeWord' }
 
 apply from: 'capacitor.build.gradle'
 

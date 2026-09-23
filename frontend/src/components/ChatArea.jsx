@@ -4,7 +4,7 @@ import { API_BASE } from '../context/AuthContext';
 import GenerationProgress from './GenerationProgress';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
-import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening, startWakeListening, setPageListening, takePendingQuery, takePendingWake, onDeviceEvent } from '../utils/deviceControl';
+import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening, startWakeListening, setPageListening, takePendingQuery, takePendingWake, onDeviceEvent, moveAppToBack } from '../utils/deviceControl';
 import { heySmaranOn, setHeySmaran, WAKE_GREETING } from '../utils/wakeSetting';
 import { detectCreateRequest, handOffToStudio } from '../utils/studioHandoff';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
@@ -2188,6 +2188,14 @@ const ChatArea = ({
   };
 
   const closeVoiceMode = () => {
+    // A call that "Hey SMARAN" brought up over another app ends by going
+    // back to that app, the way an assistant gets out of the way. Otherwise
+    // the only way back was swiping SMARAN out of the recent apps - and on
+    // this phone that kills it, wake word included.
+    if (wakeBroughtUpRef.current) {
+      wakeBroughtUpRef.current = false;
+      moveAppToBack();
+    }
     setIsVoiceModeOpen(false);
     voiceSessionRef.current += 1;
     isVoiceModeOpenRef.current = false;
@@ -2524,11 +2532,16 @@ const ChatArea = ({
      was away - and both are answered by the voice call, character and all.
      The latest handlers sit in a ref so the listeners are registered once. */
   const wakeHandlersRef = useRef({});
+  // The current call was opened by "Hey SMARAN" from outside the app.
+  const wakeBroughtUpRef = useRef(false);
   wakeHandlersRef.current = {
     // Woken: open the call and ask, or act on what was said with the name.
-    woke: (rest = '') => {
+    woke: (rest = '', fromBackground = false) => {
       const said = String(rest || '').trim();
-      if (!isVoiceModeOpenRef.current) openVoiceMode();
+      if (!isVoiceModeOpenRef.current) {
+        openVoiceMode();
+        wakeBroughtUpRef.current = Boolean(fromBackground);
+      }
       if (said.split(/\s+/).length >= 2) {
         setTimeout(() => handleSendVoicePrompt(said), 250);
       } else {
@@ -2555,7 +2568,7 @@ const ChatArea = ({
     collect();
     // Or brought forward by "Hey SMARAN" itself: open the call and ask.
     takePendingWake().then(({ woke, rest }) => {
-      if (alive && woke) wakeHandlersRef.current.woke(rest);
+      if (alive && woke) wakeHandlersRef.current.woke(rest, true);
     });
     // Switched on: start listening now. Stop on the notification is
     // respected, and the switch follows it rather than claiming otherwise.
@@ -2571,7 +2584,7 @@ const ChatArea = ({
       if (document.visibilityState === 'visible' && heySmaranOn()) startWakeListening({ auto: true });
     };
     document.addEventListener('visibilitychange', onVisible);
-    const offWake = onDeviceEvent('wake', (event) => wakeHandlersRef.current.woke(event?.rest));
+    const offWake = onDeviceEvent('wake', (event) => wakeHandlersRef.current.woke(event?.rest, Boolean(event?.fromBackground)));
     const offQuery = onDeviceEvent('voiceQuery', collect);
     return () => {
       alive = false;

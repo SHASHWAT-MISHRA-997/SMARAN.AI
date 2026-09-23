@@ -67,7 +67,7 @@ final class WakeWord {
        room with a TV on. Whole utterance only - never in words still arriving,
        where "here's more on..." is how a news anchor starts a sentence. */
     private static final Pattern ALONE = Pattern.compile(
-        "^(?:jarvis\\b(.*)|(?:here's|he's|his|hey's) (?:more on|marin|morning|more ron)$)");
+        "^(?:jarvis\\b(.*)|(?:here's|he's|his|hey's) (?:more on|marin|morning|more ron)$|(myra|mira)$)");
 
     /* While words are still arriving. The model ends an utterance only after a
        clear pause, and with music or a TV on that pause may never come - so
@@ -124,10 +124,32 @@ final class WakeWord {
 
     /** Whether the second look's result is a SMARAN phrase ([unk] around it ignored). */
     static boolean secondLookSaysSmaran(String result) {
-        if (result == null) return false;
+        return "smaran".equals(secondLookName(result, ""));
+    }
+
+    private static final Pattern LONE_GREETING = Pattern.compile("^(?:hey|hi|hello|a|okay|ok|hay)$");
+
+    /*
+     * Which name the second look heard, or null.
+     *
+     * SMARAN is taken whenever it is heard. The other names only when the
+     * first pass caught nothing but a greeting - "hello", "hey" - which is
+     * what the owner's "Hey Myra" sometimes came out as: the name was lost, and
+     * the second look found it. "hey man", two words, stays refused.
+     */
+    static String secondLookName(String result, String firstPass) {
+        if (result == null) return null;
         String core = result.toLowerCase(Locale.ROOT).replace("[unk]", " ").replaceAll("\\s+", " ").trim();
-        for (String phrase : SMARAN_PHRASES) if (phrase.equals(core)) return true;
-        return false;
+        for (String phrase : SMARAN_PHRASES) if (phrase.equals(core)) return "smaran";
+        String first = firstPass == null ? "" : firstPass.toLowerCase(Locale.ROOT).trim();
+        if (!LONE_GREETING.matcher(first).matches()) return null;
+        for (String phrase : OTHER_PHRASES) {
+            if (!phrase.equals(core)) continue;
+            if (phrase.contains("jarvis")) return "jarvis";
+            if (phrase.contains("maria") || phrase.contains("amalia")) return "amarya";
+            return "myra";
+        }
+        return null;
     }
 
     /** A strong greeting and a name among the latest words, or null. */
@@ -161,6 +183,9 @@ final class WakeWord {
         }
         Matcher alone = ALONE.matcher(text);
         if (!alone.find()) return null;
-        return alone.group(1) != null ? new Heard("jarvis", alone.group(1)) : new Heard("smaran", "");
+        if (alone.group(1) != null) return new Heard("jarvis", alone.group(1));
+        // "Hey Myra" with the "hey" lost: the owner's voice came out as "myra".
+        if (alone.group(2) != null) return new Heard("myra", "");
+        return new Heard("smaran", "");
     }
 }
