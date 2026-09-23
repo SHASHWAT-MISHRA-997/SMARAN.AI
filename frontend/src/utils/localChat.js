@@ -100,7 +100,10 @@ export const saveFacts = (facts) => {
 export const addFact = (text) => {
   const clean = String(text || '').trim();
   if (!clean) return loadFacts();
-  const all = [...loadFacts(), { id: `f-${Date.now()}`, content: clean }];
+  // Time alone is not an id: an import adds dozens in one millisecond, and
+  // facts sharing an id were all deleted together.
+  const id = `f-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const all = [...loadFacts(), { id, content: clean }];
   saveFacts(all);
   return loadFacts();
 };

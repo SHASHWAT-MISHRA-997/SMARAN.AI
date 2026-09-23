@@ -177,6 +177,25 @@ const MemoryPreferences = () => {
         setImportError('No facts array found in JSON. Format should be: { "facts": [{ "fact": "..." }] }');
         return;
       }
+      const providerName = { chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini' }[importProvider] || importProvider;
+      // A phone with no computer paired keeps its memory itself; posting to a
+      // server that is not there failed every import.
+      if (noBackend()) {
+        const texts = rawFacts
+          .map((f) => (typeof f === 'string' ? f : f?.fact))
+          .filter((t) => typeof t === 'string' && t.trim())
+          .map((t) => t.trim().slice(0, 500));
+        let updated = facts;
+        texts.forEach((t) => { updated = localChat.addFact(t); });
+        setFacts(updated || []);
+        setImportSuccess(`Imported ${texts.length} memories from ${providerName}.`);
+        setTimeout(() => {
+          setImportModalOpen(false);
+          setImportJsonText('');
+          setImportSuccess('');
+        }, 1500);
+        return;
+      }
       const res = await fetchWithAuth(`${API_BASE}/api/memory/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -187,7 +206,7 @@ const MemoryPreferences = () => {
       });
       if (res.ok) {
         const result = await res.json();
-        setImportSuccess(`Successfully imported ${result.imported_count || rawFacts.length} memories from ${importProvider.toUpperCase()}!`);
+        setImportSuccess(`Imported ${result.imported_count || rawFacts.length} memories from ${providerName}.`);
         await loadFacts();
         setTimeout(() => {
           setImportModalOpen(false);
@@ -441,22 +460,28 @@ const MemoryPreferences = () => {
               </button>
             </div>
 
-            {/* Provider selector */}
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 text-xs font-bold text-zinc-400">Source Provider:</span>
-              <div className="flex min-w-0 flex-1 gap-1.5">
-                {['chatgpt', 'claude', 'gemini'].map((p) => (
+            {/* Provider selector.
+                The label sat beside the three buttons, and on a phone -
+                especially with a larger system font - Gemini ran off the
+                edge of the dialog. The label gets its own line, and the
+                buttons share the full width equally, so all three always fit. */}
+            <div className="space-y-2" role="radiogroup" aria-label="Source provider">
+              <span className="block text-xs font-bold text-zinc-400">Source provider</span>
+              <div className="grid grid-cols-3 gap-2">
+                {[['chatgpt', 'ChatGPT'], ['claude', 'Claude'], ['gemini', 'Gemini']].map(([p, label]) => (
                   <button
                     key={p}
                     type="button"
+                    role="radio"
+                    aria-checked={importProvider === p}
                     onClick={() => setImportProvider(p)}
-                    className={`min-w-0 flex-1 truncate px-1.5 py-1 rounded-lg text-xs font-bold uppercase transition sm:px-3 ${
+                    className={`min-w-0 px-2 py-2 rounded-xl text-sm font-bold transition ${
                       importProvider === p
                         ? 'bg-indigo-600 text-white'
-                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-white'
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
                     }`}
                   >
-                    {p}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -464,8 +489,8 @@ const MemoryPreferences = () => {
 
             {/* Step 1: Copy Prompt */}
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-zinc-300">Step 1: Copy Prompt to paste into {importProvider.toUpperCase()}</span>
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                <span className="text-xs font-bold text-zinc-300">Step 1: Copy the prompt and paste it into {({ chatgpt: 'ChatGPT', claude: 'Claude', gemini: 'Gemini' })[importProvider]}</span>
                 <button
                   type="button"
                   onClick={handleCopyPrompt}
