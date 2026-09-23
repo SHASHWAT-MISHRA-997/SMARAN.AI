@@ -58,10 +58,10 @@
       "mainEntity": [
         {
           "@type": "Question",
-          "name": "Is SMARAN.AI really free, or free-for-now?",
+          "name": "Is SMARAN.AI free?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Free. There is no paid tier, no usage cap and no card anywhere in the app. A local model you download runs on your own hardware, so there is nothing to bill you for."
+            "text": "Free during the launch period, with every feature unlocked. There is no paid tier today, no usage cap and no card anywhere in the app. Paid plans will be announced on the Pricing section first, and nothing is ever charged unless you choose a plan."
           }
         },
         {
@@ -97,7 +97,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=2a770f0a4e" />
+<link rel="stylesheet" href="styles.css?v=e698547c89" />
 </head>
 
 <body>
@@ -117,7 +117,6 @@
 <nav class="side-rail" aria-label="SMARAN.AI elsewhere">
   <a href="#download" class="accent" data-label="Download SMARAN.AI" aria-label="Download SMARAN.AI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></a>
   <a href="https://www.youtube.com/@ShashwatMishra-997" data-label="YouTube" aria-label="YouTube" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 17a24 24 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49 49 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24 24 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49 49 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/></svg></a>
-  <a href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI" data-label="Source on GitHub" aria-label="Source on GitHub" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex" data-label="VS Code extension" aria-label="VS Code extension" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg></a>
   <a href="https://www.linkedin.com/in/sm980/" data-label="LinkedIn" aria-label="LinkedIn" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6z"/><rect width="4" height="12" x="2" y="9"/><circle cx="4" cy="4" r="2"/></svg></a>
 </nav>
@@ -130,10 +129,10 @@
     </a>
 
     <nav class="nav-links" aria-label="Primary">
-      <a href="#top">Home</a>
       <a href="#features">Features</a>
       <a href="#showcase">In action</a>
       <a href="#how">How it works</a>
+      <a href="#pricing">Pricing</a>
       <a href="#download">Download</a>
       <a href="#install">Install</a>
       <a href="docs.html">Docs</a>
@@ -164,6 +163,7 @@
     <a href="#features">Features</a>
     <a href="#showcase">In action</a>
     <a href="#how">How it works</a>
+    <a href="#pricing">Pricing</a>
     <a href="#download">Download</a>
     <a href="#install">Install</a>
     <a href="docs.html">Docs</a>
@@ -185,6 +185,7 @@
 
 <!-- ============================ HERO ============================ -->
 <section class="hero" id="top">
+  <canvas data-neon-grid aria-hidden="true"></canvas>
   <canvas id="trails" aria-hidden="true"></canvas>
   <div class="wrap hero-inner">
 
@@ -281,14 +282,48 @@
     </div>
   </div>
 
+  <!-- HUD: what the app is made of, not made-up telemetry. The release rows
+       are filled from the real latest release by site-status.js. -->
+  <div class="hud" aria-hidden="true">
+    <div class="hud-panel hud-boot">
+      <h4>BOOT SEQUENCE</h4>
+      <p>core &middot; loopback only <b>OK</b></p>
+      <p>models &middot; ollama bridge <b>OK</b></p>
+      <p>voice &middot; wake word armed <b>OK</b></p>
+      <p>memory &middot; this device <b>OK</b></p>
+      <p>cloud &middot; your keys, optional <b>OK</b></p>
+      <p class="caret">ready</p>
+    </div>
+    <div class="hud-panel">
+      <h4>LIVE RELEASE</h4>
+      <div class="hud-meter"><span>Windows <em data-live-version>v1.0.11</em></span><i></i></div>
+      <div class="hud-meter"><span>Linux <em data-live-version>v1.0.11</em></span><i></i></div>
+      <div class="hud-meter"><span>Android <em data-live-version>v1.0.11</em></span><i></i></div>
+    </div>
+    <div class="hud-panel hud-caps">
+      <h4>CAPABILITIES</h4>
+      <ul>
+        <li>Talks and listens</li>
+        <li>Understands your screen</li>
+        <li>Controls your PC, asks first</li>
+        <li>Builds sites, images, video</li>
+        <li>Works offline</li>
+      </ul>
+    </div>
+    <div class="hud-panel">
+      <h4>RUNS ON</h4>
+      <div class="hud-hex"><span>WIN</span><span class="core">AI</span><span>LNX</span><span>AND</span><span>VSC</span><span>CLI</span></div>
+    </div>
+  </div>
+
   <div class="marquee" aria-hidden="true">
     <div class="marquee-track">
       <span>LOCAL MODELS</span><i>◆</i><span>VOICE</span><i>◆</i><span>VISION</span><i>◆</i>
       <span>YOUR DOCUMENTS</span><i>◆</i><span>PHONE PAIRING</span><i>◆</i>
-      <span>NO SUBSCRIPTION</span><i>◆</i><span>OFFLINE CAPABLE</span><i>◆</i>
+      <span>PRIVATE BY DESIGN</span><i>◆</i><span>OFFLINE CAPABLE</span><i>◆</i>
       <span>LOCAL MODELS</span><i>◆</i><span>VOICE</span><i>◆</i><span>VISION</span><i>◆</i>
       <span>YOUR DOCUMENTS</span><i>◆</i><span>PHONE PAIRING</span><i>◆</i>
-      <span>NO SUBSCRIPTION</span><i>◆</i><span>OFFLINE CAPABLE</span><i>◆</i>
+      <span>PRIVATE BY DESIGN</span><i>◆</i><span>OFFLINE CAPABLE</span><i>◆</i>
     </div>
   </div>
 </section>
@@ -623,13 +658,80 @@
   </div>
 </section>
 
+<!-- =========================== PRICING =========================== -->
+<!-- One download holds every feature; the plans say who each part is for.
+     While the launch period lasts, every plan costs nothing and nothing in the
+     app asks for a card. No checkout exists, so none is pretended. -->
+<section class="section" id="pricing">
+  <div class="wrap">
+    <header class="head reveal">
+      <span class="eyebrow">Pricing</span>
+      <h2>Every plan, <span class="grad">free during launch.</span></h2>
+      <p>SMARAN.AI is in its launch period. Until it ends, every plan below is included at no cost, with every feature unlocked and no card asked for. Paid plans will be announced on this page before the launch period ends.</p>
+      <span class="launch-strip"><i></i>LAUNCH ACCESS &middot; &#8377;0 / MONTH ON EVERY PLAN</span>
+    </header>
+
+    <div class="price-grid">
+      <article class="plan reveal">
+        <h3>Personal</h3>
+        <p class="plan-for">Your own AI assistant, on your own computer.</p>
+        <div class="plan-price"><strong>&#8377;0</strong><span>/ month</span></div>
+        <p class="plan-note">INCLUDED DURING LAUNCH</p>
+        <ul>
+          <li>Desktop app for Windows and Linux</li>
+          <li>Local models through Ollama, fully offline</li>
+          <li>Chat, voice and vision</li>
+          <li>Memory and history kept on your machine</li>
+        </ul>
+        <a class="btn btn-ghost lg" href="#download">Download free</a>
+      </article>
+
+      <article class="plan featured reveal" data-delay="1">
+        <span class="plan-badge">MOST COMPLETE</span>
+        <h3>Pro</h3>
+        <p class="plan-for">SMARAN on every device, with creation and control by voice.</p>
+        <div class="plan-price"><strong>&#8377;0</strong><span>/ month</span></div>
+        <p class="plan-note">INCLUDED DURING LAUNCH</p>
+        <ul>
+          <li>Everything in Personal</li>
+          <li>Android app, paired with your PC</li>
+          <li>&ldquo;Hey SMARAN&rdquo; wake word on phone and PC</li>
+          <li>Websites, images and video by voice</li>
+          <li>PC control by voice, always confirmed first</li>
+          <li>Cloud models with your own API keys</li>
+          <li>SMARAN.AI Codex for VS Code</li>
+        </ul>
+        <a class="btn btn-primary lg no-lift" href="#download">Get Pro free</a>
+      </article>
+
+      <article class="plan reveal" data-delay="2">
+        <h3>Team</h3>
+        <p class="plan-for">For a group or an organisation that wants its AI in-house.</p>
+        <div class="plan-price"><strong>&#8377;0</strong><span>/ month</span></div>
+        <p class="plan-note">INCLUDED DURING LAUNCH</p>
+        <ul>
+          <li>Everything in Pro, on every machine</li>
+          <li>Data stays on your own hardware</li>
+          <li>MIT-licensed: inspect, deploy and adapt it</li>
+          <li>Setup help from the developer</li>
+        </ul>
+        <a class="btn btn-ghost lg" href="#feedback">Talk to us</a>
+      </article>
+    </div>
+
+    <p class="price-foot reveal">
+      Today every plan is <b>the same download</b>, and every feature is in it. Cloud providers you connect bill you directly under your own key; SMARAN.AI adds nothing on top. Before any paid plan starts, it will be announced here, and nothing will be charged unless you choose a plan.
+    </p>
+  </div>
+</section>
+
 <!-- ========================== DOWNLOAD =========================== -->
 <section class="section" id="download">
   <div class="wrap">
     <header class="head reveal">
       <span class="eyebrow">Download</span>
-      <h2>Free, and <span class="grad">actually free.</span></h2>
-      <p>No trial period, no locked features, no card. Local models you download are yours to keep and cost nothing to run.</p>
+      <h2>Free during <span class="grad">launch.</span></h2>
+      <p>Every feature unlocked, no card. Local models you download are yours to keep and cost nothing to run.</p>
       <div class="release-banner" style="margin-top: 14px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 9999px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); font-size: 0.82rem; font-weight: 700; color: #ef4444; letter-spacing: 0.02em;">
         <span style="width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e;"></span>
         <span>Latest Release: <strong id="liveReleaseVersion">v1.0.11</strong> (Stable)</span>
@@ -678,8 +780,8 @@
           <li>Webcam only if you want vision</li>
           <li>Ollama runs local models; the app can install it for you</li>
         </ul>
-        <p class="dl-note">
-          <strong>Smart App Control / Error 4551 note:</strong> If Windows 11 Smart App Control blocks the installer, use the <b>Download Portable (.zip)</b> option above. Extract the zip to any folder and run <code>SMARAN.AI.exe</code> directly — no installer, no temp folder extraction, 100% bypasses SAC policy!
+        <p class="dl-note" data-label="WINDOWS · SMART APP CONTROL">
+          If Windows 11 blocks the installer with <b>Smart App Control</b> (error 4551), try <b>Download Portable (.zip)</b> above: extract it to any folder and run <code>SMARAN.AI.exe</code>. SMARAN.AI is not code-signed yet, so Smart App Control can block that too; its settings are in <b>Windows Security &rarr; App &amp; browser control</b>.
         </p>
         <!-- A second amber panel stood here saying the download is unsigned
              and that reputation and device policy still apply. The panel above
@@ -738,7 +840,7 @@
           <li>Chats stay on the device, and read aloud</li>
           <li>Pair a PC for documents, local models and control</li>
         </ul>
-        <p class="dl-info">
+        <p class="dl-info" data-label="ANDROID · INSTALLING">
           Android will ask you to allow installing from your browser. When download finishes, swipe down your notification shade or open your phone's <b>Downloads</b> app to tap and install.
         </p>
       </article>
@@ -769,7 +871,7 @@
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 2c-2 0-3.2 1.6-3.2 3.6 0 1.3.2 2 .2 2.8 0 .9-.8 1.7-1.6 3-.8 1.2-1.7 2.6-2.2 4-.3.9-.3 1.8.1 2.4.4.6 1.1.9 1.9.9.5 0 .8.3 1.2.7.5.5 1.2 1 2.6 1h2c1.4 0 2.1-.5 2.6-1 .4-.4.7-.7 1.2-.7.8 0 1.5-.3 1.9-.9.4-.6.4-1.5.1-2.4-.5-1.4-1.4-2.8-2.2-4-.8-1.3-1.6-2.1-1.6-3 0-.8.2-1.5.2-2.8C15.2 3.6 14 2 12 2Zm-1.6 3.1c.4 0 .7.4.7 1 0 .5-.3.9-.7.9-.4 0-.7-.4-.7-1 0-.5.3-.9.7-.9Zm3.2 0c.4 0 .7.4.7 1 0 .5-.3.9-.7.9-.4 0-.7-.4-.7-1 0-.5.3-.9.7-.9ZM12 8.2c.8 0 1.7.4 2.2.9.3.3.2.6-.2.8l-1.7.8c-.2.1-.4.1-.6 0l-1.7-.8c-.4-.2-.5-.5-.2-.8.5-.5 1.4-.9 2.2-.9Z"/></svg>
           <span>Download AppImage</span>
         </a>
-        <p class="dl-info">
+        <p class="dl-info" data-label="LINUX · APPIMAGE">
           One file. Make it executable and run it &mdash; no package manager,
           no install:<br>
           <code>chmod +x SMARAN.AI-x86_64.AppImage &amp;&amp; ./SMARAN.AI-x86_64.AppImage</code>
@@ -782,7 +884,7 @@
           <li>No package installation is required. Chats, models and settings
             are stored separately and remain when you delete the AppImage.</li>
         </ul>
-        <p class="dl-info">
+        <p class="dl-info" data-label="LINUX · PACKAGES">
           Prefer your package manager? Same app, same build:
           <a href="https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/smaran-ai_amd64.deb">.deb</a>
           for Debian and Ubuntu,
@@ -796,7 +898,7 @@
              Windows; the Linux equivalent cannot be bundled portably, and
              pretending otherwise would mean a package that fails on half the
              distributions it is offered to. -->
-        <p class="dl-note">
+        <p class="dl-note" data-label="LINUX · GOOD TO KNOW">
           <b>One difference from the Windows build.</b> On Linux the app opens
           in a browser window with no address bar and no tabs, rather than in a
           native window. Windows has a webview built into the system; the Linux
@@ -837,7 +939,7 @@
           <li>Local discovery uses loopback and your device account</li>
           <li>One file. Put it on your PATH and it works</li>
         </ul>
-        <p class="dl-info">
+        <p class="dl-info" data-label="HOW IT CONNECTS">
           It is a client, not a second copy of SMARAN.AI. Model routing, your
           provider keys and the history stay in the app, so the two can never
           disagree about which model answered.
@@ -1212,8 +1314,8 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
 
     <div class="faq">
       <details class="reveal">
-        <summary>Is it really free, or free-for-now?</summary>
-        <p>Free. There is no paid tier, no usage cap and no card anywhere in the app. A local model you download runs on your own hardware, so there is nothing to bill you for. If you connect a cloud provider, that provider bills you directly — nothing to do with this app.</p>
+        <summary>Is it free?</summary>
+        <p>Free during the launch period, with every feature unlocked. There is no paid tier today, no usage cap and no card anywhere in the app. Paid plans will be announced on the Pricing section first, and nothing is ever charged unless you choose a plan. If you connect a cloud provider, that provider bills you directly — nothing to do with this app.</p>
       </details>
       <details class="reveal">
         <summary>Do I need internet?</summary>
@@ -1309,32 +1411,53 @@ smaran chat              <span class="c"># keep asking, in one conversation</spa
 
 </main>
 
-<footer class="foot">
-  <div class="wrap foot-inner">
-    <div>
-      <a class="brand" href="#top">
-        <span class="brand-mark"><img src="assets/logo.png" alt="" width="28" height="28" /></span>
-        <span class="brand-text">SMARAN<span class="dot">.</span>AI</span>
-      </a>
-      <p class="foot-note">A private AI assistant that runs on your own machine.<br />Built by Shashwat Mishra.</p>
+<footer class="foot2">
+  <div class="wrap">
+    <div class="foot2-grid">
+      <div class="foot2-brand">
+        <a class="brand" href="#top">
+          <span class="brand-mark"><img src="assets/logo.png" alt="" width="28" height="28" /></span>
+          <span class="brand-text">SMARAN<span class="dot">.</span>AI</span>
+        </a>
+        <span class="foot2-tag">PRIVATE &middot; LOCAL &middot; YOURS</span>
+        <p>A private AI assistant that runs on your own machine. Built by Shashwat Mishra.</p>
+        <div class="foot2-social"><a href="https://www.youtube.com/@ShashwatMishra-997" aria-label="YouTube" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 17a24 24 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49 49 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24 24 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49 49 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/></svg></a><a href="https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex" aria-label="VS Code extension" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg></a><a href="https://www.linkedin.com/in/sm980/" aria-label="LinkedIn" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6z"/><rect width="4" height="12" x="2" y="9"/><circle cx="4" cy="4" r="2"/></svg></a></div>
+      </div>
+      <nav aria-label="Resources">
+        <h5>RESOURCES</h5>
+        <a class="fl" href="docs.html">Documentation</a>
+        <a class="fl" href="#install">Install guide</a>
+        <a class="fl" href="#faq">FAQ</a>
+        <a class="fl" href="#privacy">Privacy</a>
+        <a class="fl" href="terms.html">Terms</a>
+      </nav>
+      <nav aria-label="Ecosystem">
+        <h5>ECOSYSTEM</h5>
+        <a class="fl" href="#download">Desktop &amp; Android</a>
+        <a class="fl" href="#pricing">Pricing</a>
+        <a class="fl" href="#extension">VS Code extension</a>
+        <a class="fl" href="about.html">About</a>
+        <a class="fl" href="join.html">Join the community</a>
+      </nav>
+      <div>
+        <h5>SYSTEM STATUS</h5>
+        <div class="status-card">
+          <div class="status-row"><span>WEBSITE</span><span class="status-ok">OPERATIONAL</span></div>
+          <div class="status-row"><span>DOWNLOADS</span><span class="status-wait" data-status="downloads">CHECKING</span></div>
+          <div class="status-ver">LATEST RELEASE<strong data-live-version>v1.0.11</strong></div>
+        </div>
+      </div>
     </div>
-    <nav class="foot-links" aria-label="Footer">
-      <a href="#features">Features</a>
-      <a href="#download">Download</a>
-      <a href="#install">Install</a>
-      <a href="docs.html">Docs</a>
-      <a href="terms.html">Terms</a>
-      <a href="#privacy">Privacy</a>
-      <a href="#faq">FAQ</a>
-      <a href="https://www.linkedin.com/in/sm980/" target="_blank" rel="noopener">LinkedIn</a>
-    </nav>
-  </div>
-  <div class="wrap foot-bottom">
-    <span>© <span id="year">2026</span> Shashwat Mishra</span>
+    <div class="foot2-bottom">
+      <span>&copy; <span id="year">2026</span> Shashwat Mishra</span>
+      <span>Runs on your machine, not ours. <b>SMARAN.AI</b></span>
+    </div>
   </div>
 </footer>
 
 <script src="main.js?v=79119a1d09"></script>
-<script src="hero-trails.js?v=1" defer></script>
+<script src="hero-trails.js?v=2" defer></script>
+<script src="neon-grid.js?v=1" defer></script>
+<script src="site-status.js?v=1" defer></script>
 </body>
 </html>

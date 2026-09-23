@@ -14,7 +14,10 @@
   if (!canvas || !canvas.getContext) return;
   const ctx = canvas.getContext('2d', { alpha: true });
   const hero = canvas.closest('.hero') || document.body;
-  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // The page opts into full motion (main.js, html.motion-full); only without it
+  // does the system's reduced-motion setting freeze the trails.
+  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    && !document.documentElement.classList.contains('motion-full');
   const small = window.matchMedia('(max-width: 760px)').matches;
 
   const COLORS = ['#ff4fd8', '#c026d3', '#8b5cf6', '#3b82f6', '#22d3ee', '#2dd4bf', '#6366f1'];
