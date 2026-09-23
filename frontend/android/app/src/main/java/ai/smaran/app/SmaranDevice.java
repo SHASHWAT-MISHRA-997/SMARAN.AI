@@ -219,15 +219,17 @@ public class SmaranDevice extends Plugin {
     @PluginMethod
     public void playMusic(PluginCall call) {
         String query = call.getString("query", "");
-        Intent play = new Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
-        if (query != null && !query.trim().isEmpty()) {
-            play.putExtra(SearchManager.QUERY, query.trim());
-            play.putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*");
-        }
-        boolean ok = launch(play);
+        // Named by the person ("... Spotify par play karo"): that app only. A
+        // service that is not installed is said plainly rather than handed to
+        // whichever other player happens to answer.
+        String app = call.getString("app", "");
+        String pkg = DeviceActions.musicPackage(app);
+        boolean ok = launch(DeviceActions.musicIntent(query, pkg));
         call.resolve(ok
             ? new JSObject().put("opened", true)
-            : new JSObject().put("opened", false).put("reason", "no-music-app"));
+                .put("mode", DeviceActions.opensSearch(pkg, query) ? "search" : "play")
+            : new JSObject().put("opened", false)
+                .put("reason", pkg != null ? "not-installed" : "no-music-app"));
     }
 
     /**
@@ -247,6 +249,32 @@ public class SmaranDevice extends Plugin {
      * failed here and reported no YouTube on a phone that plainly has it.
      * Trying the launch and catching the failure asks the real question.
      */
+    /** Play/pause/stop/next/previous/volume for whatever app holds playback. */
+    @PluginMethod
+    public void mediaControl(PluginCall call) {
+        String control = call.getString("control", "");
+        String said = DeviceActions.performMedia(getContext(), control == null ? "" : control);
+        call.resolve(new JSObject().put("opened", !said.isEmpty() && !said.startsWith("Nothing"))
+            .put("said", said));
+    }
+
+    /** The top YouTube result for the words, opened so it plays. Falls back to search. */
+    @PluginMethod
+    public void playYouTube(PluginCall call) {
+        String query = call.getString("query", "");
+        new Thread(() -> {
+            String id = DeviceActions.firstYouTubeVideo(query);
+            if (id != null && launch(DeviceActions.youTubeVideo(id))) {
+                call.resolve(new JSObject().put("opened", true).put("mode", "play").put("videoId", id));
+                return;
+            }
+            Intent search = new Intent(Intent.ACTION_SEARCH)
+                .setPackage("com.google.android.youtube").putExtra("query", query == null ? "" : query.trim());
+            boolean ok = launch(search);
+            call.resolve(new JSObject().put("opened", ok).put("mode", "search"));
+        }, "youtube-lookup").start();
+    }
+
     @PluginMethod
     public void openYouTube(PluginCall call) {
         String query = call.getString("query", "");

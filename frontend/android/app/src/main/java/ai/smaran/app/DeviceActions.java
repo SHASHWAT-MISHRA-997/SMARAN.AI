@@ -8,7 +8,14 @@ import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.provider.MediaStore;
 import android.util.Log;
+import android.view.KeyEvent;
+import android.media.AudioManager;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.util.List;
 import java.util.Locale;
@@ -38,10 +45,203 @@ final class DeviceActions {
     static final class Command {
         final String action;   // app | youtube | music | url
         final String argument; // may be empty
+        final String app;      // music only: the service named, or empty
         Command(String action, String argument) {
+            this(action, argument, "");
+        }
+        Command(String action, String argument, String app) {
             this.action = action;
             this.argument = argument == null ? "" : argument;
+            this.app = app == null ? "" : app;
         }
+    }
+
+    /* Music in a named service: "kesariya Spotify par play karo", "play X on
+       Spotify", "Spotify pe X bajao".
+
+       None of these matched before - the music rules want the word "gaana" or
+       "song" - so the sentence went to the language model, which answered "I
+       cannot directly open Spotify" with a link to search it yourself. Asked
+       by name, the play request now goes to that app's package, and Spotify
+       starts playing the top match rather than opening a search. */
+    static final String[][] MUSIC_SERVICES = {
+        // name, package, spoken forms
+        {"Spotify", "com.spotify.music", "spotify|\u0938\u094d\u092a\u0949\u091f\u093f\u092b\u093e\u0908|\u0938\u094d\u092a\u094b\u091f\u093f\u092b\u093e\u0908"},
+        {"YouTube Music", "com.google.android.apps.youtube.music", "youtube\\s*music|yt\\s*music"},
+        {"Wynk", "tv.accedo.airtel.wynk", "wynk(?:\\s*music)?"},
+        {"JioSaavn", "com.jio.media.jiobeats", "jio\\s*saavn|saavn"},
+        {"Apple Music", "com.apple.android.music", "apple\\s*music"},
+    };
+
+    /** The package for a music service by its display name, or null. */
+    static String musicPackage(String name) {
+        if (name == null) return null;
+        for (String[] service : MUSIC_SERVICES) {
+            if (service[0].equalsIgnoreCase(name.trim())) return service[1];
+        }
+        return null;
+    }
+
+    /* Play, pause, stop, next, previous, volume - of whatever is playing.
+
+       "Pause" said to the phone while Spotify played reached the language
+       model, which explained how to pause Spotify. Media keys are how Android
+       lets one app control another's playback, the same thing a headset
+       button does, and they need no permission. Anchored short phrases only,
+       so "play despacito" is still a request for a song. */
+    private static final Object[][] CONTROLS = {
+        {"pause", Pattern.compile("^(?:pause(?:\\s+karo|\\s+kar\\s+do|\\s+it)?|pause\\s+(?:the\\s+)?(?:music|song|video|gaana)"
+            + "|ruko|ruk\\s+jao|roko|rok\\s+do|(?:gaana|music|song|video)\\s+(?:roko|rok\\s+do|pause\\s+karo)"
+            + "|\u0930\u0941\u0915\u094b|\u0930\u094b\u0915\u094b|\u0930\u094b\u0915\\s+\u0926\u094b|\u092a\u0949\u091c\u093c?(?:\\s+\u0915\u0930\u094b)?)$", Pattern.CASE_INSENSITIVE)},
+        {"stop", Pattern.compile("^(?:stop(?:\\s+(?:the\\s+)?(?:music|song|video|playing))?|(?:gaana|music|song|video)\\s+band\\s+karo"
+            + "|band\\s+karo\\s+(?:gaana|music)|\u0917\u093e\u0928\u093e\\s+\u092c\u0902\u0926\\s+\u0915\u0930\u094b)$", Pattern.CASE_INSENSITIVE)},
+        {"play", Pattern.compile("^(?:resume|continue|play|play\\s+karo|resume\\s+karo|chalao|chalu\\s+karo\\s+(?:gaana|music)|phir\\s+se\\s+chalao"
+            + "|wapas\\s+chalao|(?:gaana|music|song|video)\\s+(?:chalao|resume\\s+karo|play\\s+karo|wapas\\s+chalao)"
+            + "|\u091a\u0932\u093e\u0913|\u092b\u093f\u0930\\s+\u0938\u0947\\s+\u091a\u0932\u093e\u0913)$", Pattern.CASE_INSENSITIVE)},
+        {"next", Pattern.compile("^(?:next(?:\\s+(?:song|track|video|gaana))?|skip(?:\\s+(?:this|it|song))?|agla(?:\\s+(?:gaana|song|video))?"
+            + "|next\\s+karo|\u0905\u0917\u0932\u093e(?:\\s+\u0917\u093e\u0928\u093e)?)$", Pattern.CASE_INSENSITIVE)},
+        {"previous", Pattern.compile("^(?:previous(?:\\s+(?:song|track|video))?|pichla(?:\\s+(?:gaana|song|video))?|last\\s+song"
+            + "|\u092a\u093f\u091b\u0932\u093e(?:\\s+\u0917\u093e\u0928\u093e)?)$", Pattern.CASE_INSENSITIVE)},
+        {"volume_up", Pattern.compile("^(?:volume\\s+(?:up|badhao|increase|tez\\s+karo|zyada\\s+karo)|(?:increase|raise|turn\\s+up)\\s+(?:the\\s+)?volume"
+            + "|a+wa+z\\s+(?:badhao|tez\\s+karo)|louder|\u0906\u0935\u093e\u091c\u093c?\\s+\u092c\u0922\u093c\u093e\u0913)$", Pattern.CASE_INSENSITIVE)},
+        {"volume_down", Pattern.compile("^(?:volume\\s+(?:down|kam\\s+karo|ghatao|decrease|dheere\\s+karo)|(?:decrease|lower|turn\\s+down)\\s+(?:the\\s+)?volume"
+            + "|a+wa+z\\s+(?:kam\\s+karo|dheere\\s+karo|ghatao)|quieter|\u0906\u0935\u093e\u091c\u093c?\\s+\u0915\u092e\\s+\u0915\u0930\u094b)$", Pattern.CASE_INSENSITIVE)},
+        {"mute", Pattern.compile("^(?:mute|mute\\s+karo|volume\\s+mute\\s+karo)$", Pattern.CASE_INSENSITIVE)},
+    };
+
+    static Command mediaControl(String text) {
+        String t = text.trim().replaceAll("[.!?]+$", "");
+        for (Object[] control : CONTROLS) {
+            if (((Pattern) control[1]).matcher(t).matches()) return new Command("media", (String) control[0]);
+        }
+        return null;
+    }
+
+    /** Press a media key for whatever app holds playback. */
+    static String performMedia(Context context, String control) {
+        AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        if (audio == null) return "I couldn't reach the phone's audio.";
+        switch (control) {
+            case "volume_up":
+                audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI);
+                return "Volume up.";
+            case "volume_down":
+                audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI);
+                return "Volume down.";
+            case "mute":
+                audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI);
+                return "Muted.";
+            default:
+                break;
+        }
+        int code;
+        String said;
+        switch (control) {
+            case "pause":    code = KeyEvent.KEYCODE_MEDIA_PAUSE;    said = "Paused."; break;
+            case "stop":     code = KeyEvent.KEYCODE_MEDIA_STOP;     said = "Stopped."; break;
+            case "play":     code = KeyEvent.KEYCODE_MEDIA_PLAY;     said = "Playing."; break;
+            case "next":     code = KeyEvent.KEYCODE_MEDIA_NEXT;     said = "Next one."; break;
+            case "previous": code = KeyEvent.KEYCODE_MEDIA_PREVIOUS; said = "Previous one."; break;
+            default: return "";
+        }
+        if (!audio.isMusicActive() && !"play".equals(control)) {
+            // Nothing is playing; pressing pause would do nothing and say "Paused".
+            if ("pause".equals(control) || "stop".equals(control)) return "Nothing is playing right now.";
+        }
+        audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, code));
+        audio.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, code));
+        return said;
+    }
+
+    /* YouTube, playing - not a page of results.
+
+       "Kesariya YouTube par chalao" opened a search and stopped there. The top
+       result's id is in the search page itself, so it is read from there and
+       the video is opened directly, which starts it. Network, so never on the
+       main thread; on any failure the search is opened instead, as before. */
+    static String firstYouTubeVideo(String query) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL("https://www.youtube.com/results?hl=en&search_query="
+                + Uri.encode(query == null ? "" : query.trim()));
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(4000);
+            connection.setReadTimeout(5000);
+            // A desktop browser's name, deliberately. Asked as a phone, YouTube
+            // redirects to m.youtube.com, whose page carries no video ids at
+            // all - measured: 0 ids there, 234 on the desktop page - so the
+            // lookup always failed and a search opened instead of the song.
+            connection.setRequestProperty("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36");
+            connection.setRequestProperty("Accept-Language", "en");
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+                Pattern id = Pattern.compile(
+                    "\"videoId\":\"([A-Za-z0-9_-]{11})\"|\\\\x22videoId\\\\x22:\\\\x22([A-Za-z0-9_-]{11})\\\\x22");
+                String line;
+                int read = 0;
+                while ((line = reader.readLine()) != null && read < 3_000_000) {
+                    read += line.length();
+                    Matcher m = id.matcher(line);
+                    if (m.find()) return m.group(1) != null ? m.group(1) : m.group(2);
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "could not look up the top YouTube result", e);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+        return null;
+    }
+
+    static Intent youTubeVideo(String videoId) {
+        // The watch link with CLEAR_TOP, not vnd.youtube: plus the usual flags.
+        // With YouTube already open, that combination brought its previous
+        // screen - a page of search results - back to the front and never
+        // opened the video. Tested on the phone: this starts it playing even
+        // when YouTube is already open on something else.
+        Intent app = new Intent(Intent.ACTION_VIEW,
+            Uri.parse("https://www.youtube.com/watch?v=" + videoId));
+        app.setPackage("com.google.android.youtube");
+        app.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        return app;
+    }
+
+    /** True when the words ask for it to play rather than to be looked for. */
+    static boolean wantsPlay(String text) {
+        return Pattern.compile("\\b(?:play|bajao|baja\\s+do|chalao|chala\\s+do|sunao|lagao|laga\\s+do)\\b"
+            + "|\u092c\u091c\u093e\u0913|\u091a\u0932\u093e\u0913|\u0938\u0941\u0928\u093e\u0913|\u0932\u0917\u093e\u0913",
+            Pattern.CASE_INSENSITIVE).matcher(text == null ? "" : text).find();
+    }
+
+    private static final String ON_WORD = "(?:on|in|pe|par|mein|mai|men|\u092a\u0930|\u092a\u0947|\u092e\u0947\u0902)";
+
+    private static Command musicInService(String text) {
+        for (String[] service : MUSIC_SERVICES) {
+            String app = "(?:" + service[2] + ")";
+            Pattern[] shapes = {
+                // "kesariya spotify par play karo"
+                Pattern.compile("^(.+?)\\s+(?:" + ON_WORD + "\\s+)?" + app + "\\s+(?:" + ON_WORD + "\\s+)?"
+                    + "(?:" + PLAY_LAST + "|play|" + OPEN_LAST + ")\\s*$", Pattern.CASE_INSENSITIVE),
+                // "play kesariya on spotify", "kesariya bajao spotify par"
+                Pattern.compile("^(?:" + PLAY_FIRST + "|play)\\s+(.+?)\\s+" + ON_WORD + "\\s+" + app + "\\s*$",
+                    Pattern.CASE_INSENSITIVE),
+                Pattern.compile("^(.+?)\\s+(?:" + PLAY_LAST + ")\\s+" + app + "\\s+" + ON_WORD + "\\s*$",
+                    Pattern.CASE_INSENSITIVE),
+                // "spotify par kesariya bajao"
+                Pattern.compile("^" + app + "\\s+" + ON_WORD + "\\s+(.+?)\\s+(?:" + PLAY_LAST + "|play)\\s*$",
+                    Pattern.CASE_INSENSITIVE),
+            };
+            for (Pattern shape : shapes) {
+                Matcher m = shape.matcher(text);
+                if (m.find()) {
+                    String query = m.group(1).replaceAll(
+                        "(?i)\\s*(?:song|gaana|gana|gaane|\u0917\u093e\u0928\u093e)\\s*$", "").trim();
+                    if (!query.isEmpty()) return new Command("music", query, service[0]);
+                }
+            }
+        }
+        return null;
     }
 
     // Talking *about* a command rather than giving one. The same three shapes
@@ -146,7 +346,19 @@ final class DeviceActions {
         String text = stripPoliteness(raw);
         if (text.isEmpty()) return null;
 
-        Command found = firstMatch(YOUTUBE_QUERY, text, "youtube", true);
+        // Control of whatever is already playing, before anything else: a
+        // bare "pause" or "agla gaana" is never an app name or a song.
+        Command control = mediaControl(text);
+        if (control != null) return control;
+
+        // First: "YouTube Music" would otherwise be taken for YouTube.
+        Command found = musicInService(text);
+        if (found == null) {
+            found = firstMatch(YOUTUBE_QUERY, text, "youtube", true);
+            if (found != null && wantsPlay(text) && !found.argument.isEmpty()) {
+                found = new Command("youtube_play", found.argument);
+            }
+        }
         if (found == null) found = firstMatch(YOUTUBE_BARE, text, "youtube", false);
         if (found == null) found = firstMatch(MUSIC_BARE, text, "music", false);
         if (found == null) found = firstMatch(MUSIC_QUERY, text, "music", true);
@@ -228,13 +440,51 @@ final class DeviceActions {
     }
 
     static String playMusic(Context context, String query) {
+        return playMusic(context, query, "");
+    }
+
+    static final String SPOTIFY = "com.spotify.music";
+
+    /** True when Spotify is asked: it opens its search rather than playing. */
+    static boolean opensSearch(String packageName, String query) {
+        return SPOTIFY.equals(packageName) && query != null && !query.trim().isEmpty();
+    }
+
+    /** The system's "play this", addressed to one app when one was named. */
+    static Intent musicIntent(String query, String packageName) {
+        // Spotify ignores MEDIA_PLAY_FROM_SEARCH from other apps - tested on
+        // a phone with Spotify both running and stopped: delivered, no change,
+        // still paused on the previous track. Its own search link does work,
+        // and lands on the song as the top result, one tap from playing. That
+        // is what is sent, and what is said back, rather than a claim that it
+        // is playing.
+        if (opensSearch(packageName, query)) {
+            Intent search = new Intent(Intent.ACTION_VIEW,
+                Uri.parse("spotify:search:" + Uri.encode(query.trim())));
+            search.setPackage(SPOTIFY);
+            return search;
+        }
         Intent play = new Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
         String text = query == null ? "" : query.trim();
         if (!text.isEmpty()) {
             play.putExtra(SearchManager.QUERY, text);
             play.putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*");
         }
-        if (!launch(context, play)) return "No music app answered on this phone.";
+        if (packageName != null && !packageName.isEmpty()) play.setPackage(packageName);
+        return play;
+    }
+
+    static String playMusic(Context context, String query, String app) {
+        String text = query == null ? "" : query.trim();
+        String pkg = musicPackage(app);
+        if (pkg != null) {
+            if (!launch(context, musicIntent(text, pkg))) {
+                return app + " isn't installed on this phone.";
+            }
+            if (opensSearch(pkg, text)) return "Opened " + text + " in " + app + ". Tap it to play.";
+            return text.isEmpty() ? "Opening " + app + "." : "Playing " + text + " on " + app + ".";
+        }
+        if (!launch(context, musicIntent(text, null))) return "No music app answered on this phone.";
         return text.isEmpty() ? "Playing music." : "Playing " + text + ".";
     }
 
@@ -257,7 +507,19 @@ final class DeviceActions {
         switch (command.action) {
             case "app":     return openApp(context, command.argument);
             case "youtube": return openYouTube(context, command.argument);
-            case "music":   return playMusic(context, command.argument);
+            case "music":   return playMusic(context, command.argument, command.app);
+            case "media":   return performMedia(context, command.argument);
+            case "youtube_play": {
+                // Speech results arrive on the main thread, where Android forbids
+                // network access, so the lookup runs on its own thread and the
+                // reply is said straight away.
+                final String query = command.argument;
+                new Thread(() -> {
+                    String id = firstYouTubeVideo(query);
+                    if (id == null || !launch(context, youTubeVideo(id))) openYouTube(context, query);
+                }, "youtube-lookup").start();
+                return "Playing " + query + " on YouTube.";
+            }
             case "url":     return openUrl(context, command.argument);
             default:        return "";
         }

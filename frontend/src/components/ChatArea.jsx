@@ -3644,13 +3644,21 @@ const ChatArea = ({
       // reported. Opening the call first puts the character in the window, and
       // keeps the microphone live inside it, which is the other half of what
       // was asked for.
-      if (deviceOutcome.floated && !isVoiceModeOpenRef.current) {
+      // Not when something just started playing: a call greets and listens,
+      // both take audio focus, and the song paused itself before it began.
+      if (deviceOutcome.floated && !isVoiceModeOpenRef.current && !deviceOutcome.startsPlayback) {
         setIsVoiceModeOpen(true);
       }
       // Said aloud, and shown. emitVoiceReply fills the call bubble, which is
       // not on screen when the command was typed - so without the second line
       // a typed command would answer with nothing visible at all.
-      emitVoiceReply(deviceOutcome.spoken);
+      // Same reason as the call path: nothing may speak over, or listen over,
+      // something that has just started playing.
+      if (deviceOutcome.startsPlayback) {
+        if (isVoiceModeOpenRef.current) closeVoiceMode();
+      } else {
+        emitVoiceReply(deviceOutcome.spoken);
+      }
       window.dispatchEvent(new CustomEvent('smaran:pet-state', {
         detail: { state: 'waving', message: deviceOutcome.spoken },
       }));
@@ -4210,7 +4218,16 @@ const ChatArea = ({
     if (!isVoiceModeOpenRef.current || voiceSession !== voiceSessionRef.current) return;
     if (onDevice) {
       setVoiceAiResponse(onDevice.spoken);
-      speakNativeText(onDevice.spoken);
+      // A song or video just started. Speaking the confirmation, or leaving
+      // the call listening, takes audio focus and pauses it - the video that
+      // was asked for stopped four seconds in. So the call steps aside, the
+      // way an assistant goes quiet after "play X"; "pause" or "next"
+      // said later works the moment the mic is opened again.
+      if (onDevice.startsPlayback) {
+        closeVoiceMode();
+      } else {
+        speakNativeText(onDevice.spoken);
+      }
       return;
     }
 

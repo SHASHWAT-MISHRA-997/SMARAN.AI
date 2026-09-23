@@ -67,6 +67,73 @@ const PLAY_LAST = '(?:bajao|baja\\s+do|chalao|chala\\s+do|sunao|suna\\s+do|lagao
 const YT = '(?:youtube|यूट्यूब)';
 const ON = '(?:pe|par|mein|mai|men|पर|पे|में)';
 
+/* Music in a service the person names: "kesariya Spotify par play karo",
+   "play X on Spotify", "Spotify pe X bajao".
+
+   None of these matched: the music rules want the word "gaana" or "song".
+   So "Shiv Sadashiv Boliye Spotify par play karo" went to the language model,
+   which replied "I cannot directly open Spotify" and a link to search it
+   yourself - on a phone that has Spotify installed. Named, it now goes to
+   that app, which plays the top match. Checked before YouTube, because
+   "YouTube Music" would otherwise be read as YouTube. */
+const MUSIC_SERVICES = [
+  { name: 'Spotify', spoken: 'spotify|स्पॉटिफाई|स्पोटिफाई' },
+  { name: 'YouTube Music', spoken: 'youtube\\s*music|yt\\s*music|यूट्यूब\\s*म्यूजिक' },
+  { name: 'Wynk', spoken: 'wynk(?:\\s*music)?|विंक' },
+  { name: 'JioSaavn', spoken: 'jio\\s*saavn|saavn|सावन' },
+  { name: 'Apple Music', spoken: 'apple\\s*music' },
+];
+const ON_ANY = '(?:on|in|pe|par|mein|mai|men|पर|पे|में)';
+
+/* Play, pause, stop, next, previous and volume - of whatever is playing.
+
+   Said while Spotify or YouTube played, "pause" reached the language model,
+   which explained how to pause it. Media keys are how Android lets one app
+   control another's playback (DeviceActions.performMedia), instantly and with
+   no permission. Anchored, short phrases only: "play despacito" is still a
+   request for a song, not a press of the play key. */
+const CONTROLS = [
+  ['pause', /^(?:pause(?:\s+karo|\s+kar\s+do|\s+it)?|pause\s+(?:the\s+)?(?:music|song|video|gaana)|ruko|ruk\s+jao|roko|rok\s+do|(?:gaana|music|song|video)\s+(?:roko|rok\s+do|pause\s+karo)|रुको|रोको|रोक\s+दो|पॉज़?(?:\s+करो)?)$/i],
+  ['stop', /^(?:stop(?:\s+(?:the\s+)?(?:music|song|video|playing))?|(?:gaana|music|song|video)\s+band\s+karo|band\s+karo\s+(?:gaana|music)|गाना\s+बंद\s+करो)$/i],
+  ['play', /^(?:resume|continue|play|play\s+karo|resume\s+karo|chalao|chalu\s+karo\s+(?:gaana|music)|phir\s+se\s+chalao|wapas\s+chalao|(?:gaana|music|song|video)\s+(?:chalao|resume\s+karo|play\s+karo|wapas\s+chalao)|चलाओ|फिर\s+से\s+चलाओ)$/i],
+  ['next', /^(?:next(?:\s+(?:song|track|video|gaana))?|skip(?:\s+(?:this|it|song))?|agla(?:\s+(?:gaana|song|video))?|next\s+karo|अगला(?:\s+गाना)?)$/i],
+  ['previous', /^(?:previous(?:\s+(?:song|track|video))?|pichla(?:\s+(?:gaana|song|video))?|last\s+song|पिछला(?:\s+गाना)?)$/i],
+  ['volume_up', /^(?:volume\s+(?:up|badhao|increase|tez\s+karo|zyada\s+karo)|(?:increase|raise|turn\s+up)\s+(?:the\s+)?volume|a+wa+z\s+(?:badhao|tez\s+karo)|louder|आवाज़?\s+बढ़ाओ)$/i],
+  ['volume_down', /^(?:volume\s+(?:down|kam\s+karo|ghatao|decrease|dheere\s+karo)|(?:decrease|lower|turn\s+down)\s+(?:the\s+)?volume|a+wa+z\s+(?:kam\s+karo|dheere\s+karo|ghatao)|quieter|आवाज़?\s+कम\s+करो)$/i],
+  ['mute', /^(?:mute|mute\s+karo|volume\s+mute\s+karo)$/i],
+];
+
+export function detectMediaControl(text) {
+  const t = String(text || '').trim().replace(/[.!?]+$/, '');
+  for (const [control, pattern] of CONTROLS) {
+    if (pattern.test(t)) return { action: 'media', control };
+  }
+  return null;
+}
+
+// "... YouTube par chalao" means play it, "... YouTube par search karo" means
+// look for it. Same words either way until now, and both only searched.
+const WANTS_PLAY = /\b(?:play|bajao|baja\s+do|chalao|chala\s+do|sunao|lagao|laga\s+do)\b|बजाओ|चलाओ|सुनाओ|लगाओ/i;
+
+export function detectMusicInService(text) {
+  for (const service of MUSIC_SERVICES) {
+    const app = `(?:${service.spoken})`;
+    const shapes = [
+      new RegExp(`^(.+?)\\s+(?:${ON_ANY}\\s+)?${app}\\s+(?:${ON_ANY}\\s+)?(?:${PLAY_LAST}|play|${OPEN_LAST})\\s*$`, 'i'),
+      new RegExp(`^(?:${PLAY_FIRST}|play)\\s+(.+?)\\s+${ON_ANY}\\s+${app}\\s*$`, 'i'),
+      new RegExp(`^(.+?)\\s+(?:${PLAY_LAST})\\s+${app}\\s+${ON_ANY}\\s*$`, 'i'),
+      new RegExp(`^${app}\\s+${ON_ANY}\\s+(.+?)\\s+(?:${PLAY_LAST}|play)\\s*$`, 'i'),
+    ];
+    for (const shape of shapes) {
+      const match = shape.exec(text);
+      if (!match) continue;
+      const query = tidy(match[1]).replace(/\s*(?:song|gaana|gana|gaane|गाना)\s*$/i, '').trim();
+      if (query) return { action: 'music', query, app: service.name };
+    }
+  }
+  return null;
+}
+
 const RULES = [
   // YouTube, before the generic "play", so "YouTube pe X chalao" is a video
   // and not a song handed to the music app.
@@ -170,6 +237,12 @@ export function detectDeviceCommand(utterance) {
   const text = stripPoliteness(raw);
   if (!text) return null;
 
+  const control = detectMediaControl(text);
+  if (control) return control;
+
+  const inService = detectMusicInService(text);
+  if (inService) return inService;
+
   for (const rule of RULES) {
     for (const pattern of rule.patterns) {
       const match = pattern.exec(text);
@@ -183,7 +256,24 @@ export function detectDeviceCommand(utterance) {
       if (!value) continue;
       // A single letter or a stray number is not an app anybody named.
       if (rule.action === 'app' && value.length < 2) continue;
+      if (rule.action === 'youtube' && WANTS_PLAY.test(text)) {
+        return { action: 'youtube', query: value, play: true };
+      }
       return { action: rule.action, [rule.argument]: value };
+    }
+  }
+
+  // "Play despacito", "kesariya bajao", "tum hi ho sunao" - a song with no
+  // service named. It went to the model, which offered instructions. YouTube is
+  // the one service another app can actually start on a chosen song
+  // (DeviceActions.firstYouTubeVideo), so that is where it plays - the way an
+  // assistant picks a default rather than asking where.
+  const song = /^(?:play|सुनाओ)\s+(.+)$/i.exec(text)
+    || /^(.+?)\s+(?:bajao|baja\s+do|sunao|suna\s+do|play\s+karo|play\s+kar\s+do|बजाओ|सुनाओ)$/i.exec(text);
+  if (song) {
+    const query = tidy(song[1]).replace(/\s*(?:song|gaana|gana|गाना)\s*$/i, '').trim();
+    if (query.length > 1 && !/^(?:koi|kuch|कोई|कुछ)$/i.test(query)) {
+      return { action: 'youtube', query, play: true };
     }
   }
   return null;
@@ -205,12 +295,22 @@ export function describeOutcome(command, result) {
         return `I can't find ${command.name} on this phone.`;
       }
       return `I couldn't open ${command.name}.`;
+    case 'media':
+      return result?.said || (ok ? 'Done.' : 'Nothing is playing right now.');
     case 'youtube':
       if (!ok) return 'I couldn\'t open YouTube.';
+      if (result?.mode === 'play') return `Playing ${command.query} on YouTube.`;
       return command.query
         ? `Searching YouTube for ${command.query}.`
         : 'Opening YouTube.';
     case 'music':
+      if (command.app) {
+        // Spotify will not let another app start a song; it opens on the
+        // search with the song on top. Said as it is, not as "playing".
+        if (ok && result?.mode === 'search') return `Opened ${command.query} in ${command.app}. Tap it to play.`;
+        if (ok) return command.query ? `Playing ${command.query} on ${command.app}.` : `Opening ${command.app}.`;
+        return `${command.app} isn't installed on this phone.`;
+      }
       if (ok) return command.query ? `Playing ${command.query}.` : 'Playing music.';
       return 'No music app answered on this phone.';
     case 'url':

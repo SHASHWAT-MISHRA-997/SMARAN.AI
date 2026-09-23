@@ -97,17 +97,34 @@ export async function runDeviceCommand(command) {
   // It does not fire for every app: YouTube forwards the search intent on to
   // its own main activity, bringing an existing task forward, and this one
   // never leaves in the way auto-enter watches for.
-  await armFloating();
+  //
+  // Not for a media key: pressing pause opens nothing, and shrinking the app
+  // into a window for it would be a surprise with no reason behind it.
+  //
+  // Nor for anything meant to start playing. Floating into picture-in-picture
+  // at the moment YouTube opened the video paused and resumed YouTube's
+  // screen just as playback was due to begin, and it never began: the right
+  // video sat stopped on its first frame. Launched without the float, the
+  // same link played at once.
+  const pressesKey = command.action === 'media' || command.action === 'music'
+    || (command.action === 'youtube' && Boolean(command.play));
+  if (!pressesKey) await armFloating();
   try {
     switch (command.action) {
       case 'app':
         result = await device.openApp({ name: command.name });
         break;
       case 'youtube':
-        result = await device.openYouTube({ query: command.query || '' });
+        result = command.play && command.query
+          ? await device.playYouTube({ query: command.query })
+          : await device.openYouTube({ query: command.query || '' });
         break;
       case 'music':
-        result = await device.playMusic({ query: command.query || '' });
+        result = await device.playMusic({ query: command.query || '', app: command.app || '' });
+        break;
+      case 'media':
+        // Pressing pause is not a reason to shrink the app into a window.
+        result = await device.mediaControl({ control: command.control });
         break;
       case 'url':
         result = await device.openUrl({ url: command.url });
@@ -128,8 +145,8 @@ export async function runDeviceCommand(command) {
   // guarantee - a paused activity is refused - so the result is checked rather
   // than assumed, and a refusal only means the app stayed full size behind
   // whatever opened.
-  let floated = Boolean(result?.opened) && await isFloating();
-  if (result?.opened && !floated) {
+  let floated = !pressesKey && Boolean(result?.opened) && await isFloating();
+  if (!pressesKey && result?.opened && !floated) {
     await new Promise((resolve) => setTimeout(resolve, 350));
     try {
       floated = Boolean((await device.enterFloating())?.floating);
@@ -137,7 +154,14 @@ export async function runDeviceCommand(command) {
       // Older phone, or refused. Neither is a failure of the command.
     }
   }
-  return { spoken: describeOutcome(command, result), floated };
+  // Something began playing. The caller must not then speak over it or keep
+  // a microphone open: either takes audio focus, and the song that just
+  // started pauses itself - measured, four seconds in, every time.
+  const startsPlayback = Boolean(result?.opened) && (
+    command.action === 'music'
+    || (command.action === 'youtube' && result?.mode === 'play')
+    || (command.action === 'media' && ['play', 'next', 'previous'].includes(command.control)));
+  return { spoken: describeOutcome(command, result), floated, startsPlayback };
 }
 
 /**

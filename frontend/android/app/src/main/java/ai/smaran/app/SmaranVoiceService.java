@@ -258,6 +258,20 @@ public class SmaranVoiceService extends Service {
         if (manager != null && !spoken.isEmpty()) {
             manager.notify(NOTIFICATION_ID, buildNotification(spoken));
         }
+        // Something just started playing. Speaking over it, or listening on,
+        // takes audio focus and the song pauses itself a few seconds in -
+        // measured on a phone. So the listener goes quiet and stops, the way
+        // an assistant does after "play X"; the notification says what happened.
+        boolean startsPlayback = "music".equals(command.action)
+            || "youtube_play".equals(command.action)
+            || ("media".equals(command.action) && ("play".equals(command.argument)
+                || "next".equals(command.argument) || "previous".equals(command.argument)));
+        if (startsPlayback) {
+            stopping = true;
+            main.removeCallbacksAndMessages(null);
+            main.postDelayed(this::stopSelf, 400);
+            return;
+        }
         say(spoken);
     }
 

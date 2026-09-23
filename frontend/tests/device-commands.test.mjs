@@ -32,11 +32,14 @@ test('the word "app" is not part of the name', () => {
 
 test('a YouTube search is a YouTube search, not a song', () => {
   assert.deepEqual(detectDeviceCommand('play on youtube arijit singh'),
-    { action: 'youtube', query: 'arijit singh' });
+    { action: 'youtube', query: 'arijit singh', play: true });
   assert.deepEqual(detectDeviceCommand('youtube pe arijit singh chalao'),
-    { action: 'youtube', query: 'arijit singh' });
+    { action: 'youtube', query: 'arijit singh', play: true });
   assert.deepEqual(detectDeviceCommand('play despacito on youtube'),
-    { action: 'youtube', query: 'despacito' });
+    { action: 'youtube', query: 'despacito', play: true });
+  // Asking to find it is still a search.
+  assert.deepEqual(detectDeviceCommand('youtube par arijit singh search karo'),
+    { action: 'youtube', query: 'arijit singh' });
 });
 
 test('opening YouTube with nothing to search for', () => {
