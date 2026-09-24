@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { takeStudioPrompt } from '../utils/studioHandoff';
-import { Film, Loader2, AlertCircle, Download, Sparkles, RefreshCw, HardDriveDownload } from 'lucide-react';
+import { Film, Loader2, AlertCircle, Download, Sparkles, RefreshCw } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
+import { isNativeApp } from '../utils/hostLink';
+import MediaPackages from './MediaPackages';
 
 /**
  * A screen for making short clips.
@@ -23,13 +25,11 @@ import { API_BASE, fetchWithAuth } from '../context/AuthContext';
  */
 
 const POLL_MS = 2000;
-const INSTALL_POLL_MS = 1500;
 
 const card = 'rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60';
 const field = 'w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 '
   + 'px-3 py-2.5 text-sm text-zinc-900 dark:text-white outline-none focus:border-indigo-500';
 
-const gb = (bytes) => (bytes ? `${(bytes / 1e9).toFixed(1)} GB` : '—');
 
 const VideoStudio = () => {
   const [install, setInstall] = useState(null);
@@ -47,7 +47,6 @@ const VideoStudio = () => {
   const [made, setMade] = useState([]);
 
   const polling = useRef(null);
-  const installPolling = useRef(null);
 
   const readState = useCallback(async () => {
     setLoadError('');
@@ -62,7 +61,7 @@ const VideoStudio = () => {
       if (capRes.ok) setCapability(await capRes.json());
       if (sugRes.ok) setSuggested(await sugRes.json());
     } catch {
-      setLoadError(API_BASE
+      setLoadError((API_BASE || !isNativeApp())
         ? 'Could not reach the video engine. Is SMARAN.AI running on this machine?'
         : 'Making video needs the SMARAN.AI desktop app. This device has no engine to ask.');
     }
@@ -71,39 +70,7 @@ const VideoStudio = () => {
   useEffect(() => { readState(); }, [readState]);
   useEffect(() => () => {
     window.clearTimeout(polling.current);
-    window.clearTimeout(installPolling.current);
   }, []);
-
-  /* While an install runs the status is polled, because pip reports bytes as
-     it goes and a multi-gigabyte download with no number moving looks broken. */
-  const watchInstall = useCallback(() => {
-    const tick = async () => {
-      try {
-        const res = await fetchWithAuth(`${API_BASE}/api/video/install`);
-        if (!res.ok) return;
-        const state = await res.json();
-        setInstall(state);
-        if (state.status === 'running') {
-          installPolling.current = window.setTimeout(tick, INSTALL_POLL_MS);
-        } else {
-          readState();
-        }
-      } catch { /* the next manual refresh will pick it up */ }
-    };
-    tick();
-  }, [readState]);
-
-  const startInstall = async () => {
-    setError('');
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/video/install`, { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || 'The install could not start.');
-      watchInstall();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
 
   const watch = useCallback((jobId) => {
     const tick = async () => {
@@ -151,7 +118,6 @@ const VideoStudio = () => {
 
   const running = job?.status === 'running';
   const done = job?.status === 'completed' ? job : null;
-  const installing = install?.status === 'running';
   const ready = install?.installed;
 
   useEffect(() => {
@@ -190,7 +156,7 @@ const VideoStudio = () => {
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="flex-1">
               <p>{loadError}</p>
-              {API_BASE && (
+              {(API_BASE || !isNativeApp()) && (
                 <button type="button" onClick={readState}
                         className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold underline">
                   <RefreshCw className="h-3 w-3" /> Try again
@@ -219,49 +185,11 @@ const VideoStudio = () => {
           </div>
         )}
 
-        {install && !ready && (
-          <div className={`${card} space-y-3 p-4 sm:p-5`}>
-            <div className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-white">
-              <HardDriveDownload className="h-4 w-4 text-indigo-500" />
-              The video packages are not installed yet
-            </div>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              About {install.approx_download_gb} GB is downloaded once. It is
-              kept on this machine and never fetched again.
-              {install.free_space_gb !== undefined && install.free_space_gb !== null
-                ? ` ${install.free_space_gb.toFixed(1)} GB is free.`
-                : ''}
-            </p>
-            {install.blocker && (
-              <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
-                {install.blocker}
-              </p>
-            )}
-            {installing ? (
-              <>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                  <div className="h-full rounded-full bg-indigo-500 transition-all"
-                       style={{ width: `${install.approx_percent || 0}%` }} />
-                </div>
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  {gb(install.obtained_bytes)} of about {gb(install.approx_total_bytes)}
-                  {' · '}{install.approx_percent || 0}%
-                </p>
-                <ul className="space-y-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-                  {(install.messages || []).slice(-4).map((line, i) => <li key={i}>{line}</li>)}
-                </ul>
-              </>
-            ) : (
-              <button type="button" onClick={startInstall} disabled={!install.can_install}
-                      className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50">
-                Install the video packages
-              </button>
-            )}
-            {install.error && (
-              <p className="text-xs text-red-600 dark:text-red-400">{install.error}</p>
-            )}
-          </div>
-        )}
+        {/* One installer for images and video (MediaPackages). */}
+        <MediaPackages onStatus={(state) => {
+          setInstall(state);
+          if (state?.installed && !ready) readState();
+        }} />
 
         {ready && (
           <form onSubmit={generate} className={`${card} space-y-4 p-4 sm:p-5`}>

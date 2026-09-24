@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Globe, Loader2, AlertCircle, Square, Play, ShieldCheck, ExternalLink, X } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
+import { isNativeApp } from '../utils/hostLink';
 
 /* Live browsing: SMARAN opens a real browser window on the computer and works
    through a task in it - opening pages, reading, clicking, typing - while each
@@ -42,7 +43,10 @@ export default function LiveBrowser() {
   const endRef = useRef(null);
 
   useEffect(() => {
-    if (!API_BASE) {
+    // No computer to drive only on the phone app with nothing paired. In the
+    // desktop app the page is served by the backend itself, so API_BASE is
+    // empty by design - and this told the desktop app to "pair this phone".
+    if (!API_BASE && isNativeApp()) {
       setStatusError('Live browsing drives a browser on your computer, so it needs the SMARAN.AI '
         + 'desktop app. Pair this phone with your computer in Settings, and it will drive that '
         + 'computer\'s browser.');

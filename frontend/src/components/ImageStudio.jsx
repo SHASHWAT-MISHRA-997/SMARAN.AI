@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { takeStudioPrompt } from '../utils/studioHandoff';
 import { Image as ImageIcon, Loader2, AlertCircle, Download, Sparkles, ChevronDown, RefreshCw } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
+import { isNativeApp } from '../utils/hostLink';
+import MediaPackages from './MediaPackages';
 
 /**
  * A screen for making pictures.
@@ -77,7 +79,7 @@ const ImageStudio = () => {
         }
       }
     } catch {
-      setLoadError(API_BASE
+      setLoadError((API_BASE || !isNativeApp())
         ? 'Could not reach the image engine. Is SMARAN.AI running on this machine?'
         : 'Making pictures needs the SMARAN.AI desktop app. This device has no engine to ask.');
     }
@@ -191,7 +193,7 @@ const ImageStudio = () => {
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="flex-1">
               <p>{loadError}</p>
-              {API_BASE && (
+              {(API_BASE || !isNativeApp()) && (
                 <button type="button" onClick={loadModels}
                         className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold underline">
                   <RefreshCw className="h-3 w-3" /> Try again
@@ -200,6 +202,12 @@ const ImageStudio = () => {
             </div>
           </div>
         )}
+
+        {/* The packages the models need, with the installer; the models
+            are read again once they are in. */}
+        <MediaPackages onStatus={(state) => {
+          if (state?.installed && !(catalogue?.models || []).some((m) => m.runnable)) loadModels();
+        }} />
 
         {catalogue && (
           <form onSubmit={generate} className={`${card} space-y-4 p-4 sm:p-5`}>

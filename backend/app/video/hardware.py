@@ -101,9 +101,9 @@ def probe(model_dir: str = ".") -> Hardware:
             compute_capability=None, supports_bfloat16=False,
             torch_version="", torch_is_cuda_build=False, disk_free_gb=disk_free, **system,
             reason=(
-                "The video packages are not installed yet. They are about 3 GB "
-                "and are fetched on request rather than shipped to everyone, "
-                "since most installs never generate a video."
+                "The image and video packages are not installed yet (about 3 GB, "
+                "kept on this machine once downloaded). Install them from the "
+                "Images or Video page."
             ),
         )
 
