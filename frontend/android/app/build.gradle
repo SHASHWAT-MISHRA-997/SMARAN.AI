@@ -7,8 +7,8 @@ android {
         applicationId "ai.smaran.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 21073
-        versionName "1.0.13"
+        versionCode 21074
+        versionName "1.0.14"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Vosk (the offline "Hey SMARAN" listener) is the only native code in
         // the app, and every phone sold in years is arm64 or armv7. x86_64 (Intel
