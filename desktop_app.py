@@ -561,7 +561,13 @@ def _open_window(url: str) -> bool:
             register_window(window)
         except Exception:
             logger.info("Picture-in-picture is unavailable: the window could not be registered.")
-        webview.start()
+        # Not private. pywebview's default is private_mode=True, which throws
+        # away the WebView's cookies and storage when the window closes: every
+        # launch signed the person out and forgot every setting kept in the
+        # page (theme, wake word, what the float shows). Stored beside the
+        # rest of this app's data instead.
+        webview.start(private_mode=False,
+                      storage_path=os.path.join(_user_data_dir(), "webview"))
         return True
     except Exception:
         pass
