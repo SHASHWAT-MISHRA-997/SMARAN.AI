@@ -4,8 +4,9 @@ import { API_BASE } from '../context/AuthContext';
 import GenerationProgress from './GenerationProgress';
 import { asList, parseJsonResponse } from '../utils/api';
 import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '../utils/hostLink';
-import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening, startWakeListening, setPageListening, takePendingQuery, takePendingWake, onDeviceEvent, moveAppToBack } from '../utils/deviceControl';
+import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening, startWakeListening, setPageListening, setPageSpeaking, takePendingQuery, takePendingWake, onDeviceEvent, moveAppToBack } from '../utils/deviceControl';
 import { heySmaranOn, setHeySmaran, WAKE_GREETING } from '../utils/wakeSetting';
+import { setSpeaking } from '../utils/speakingState';
 import { detectCreateRequest, handOffToStudio } from '../utils/studioHandoff';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
 import { voicePersonaRule } from '../utils/voicePersona';
@@ -2537,8 +2538,17 @@ const ChatArea = ({
   const wakeBroughtUpRef = useRef(false);
   wakeHandlersRef.current = {
     // Woken: open the call and ask, or act on what was said with the name.
-    woke: (rest = '', fromBackground = false) => {
+    woke: (rest = '', fromBackground = false, interrupt = false) => {
       const said = String(rest || '').trim();
+      // Said over SMARAN's own answer: stop talking, drop the rest of that
+      // answer, and listen. The call restarts its microphone by itself the
+      // moment speech stops (HackerVoiceAssistant), so nothing else is needed.
+      if (interrupt && isVoiceModeOpenRef.current) {
+        voiceSessionRef.current += 1;
+        stopSpeaking();
+        setVoiceAiResponse('');
+        return;
+      }
       if (!isVoiceModeOpenRef.current) {
         openVoiceMode();
         wakeBroughtUpRef.current = Boolean(fromBackground);
@@ -2585,7 +2595,7 @@ const ChatArea = ({
       if (document.visibilityState === 'visible' && heySmaranOn()) startWakeListening({ auto: true });
     };
     document.addEventListener('visibilitychange', onVisible);
-    const offWake = onDeviceEvent('wake', (event) => wakeHandlersRef.current.woke(event?.rest, Boolean(event?.fromBackground)));
+    const offWake = onDeviceEvent('wake', (event) => wakeHandlersRef.current.woke(event?.rest, Boolean(event?.fromBackground), Boolean(event?.interrupt)));
     const offQuery = onDeviceEvent('voiceQuery', collect);
     return () => {
       alive = false;
@@ -2600,6 +2610,13 @@ const ChatArea = ({
   useEffect(() => {
     setPageListening(isVoiceModeOpen || isDictating);
   }, [isVoiceModeOpen, isDictating]);
+
+  // While the call speaks, "Hey SMARAN" / "Hey Jarvis" can cut in, and the
+  // floating character (PipCompanion) talks along.
+  useEffect(() => {
+    setPageSpeaking(isVoiceModeOpen && isSpeakingAudio);
+    setSpeaking(isSpeakingAudio);
+  }, [isVoiceModeOpen, isSpeakingAudio]);
 
   useEffect(() => {
     localStorage.setItem('sm_wake_enabled', String(wakeWordEnabled));

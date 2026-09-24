@@ -147,12 +147,32 @@ public class SmaranDevice extends Plugin {
         active = this;
         // "Hey SMARAN" heard while the app is on screen: the page's own voice
         // call takes it from there, character and model included.
-        SmaranVoiceService.pageSink = rest -> {
-            SmaranDevice plugin = active;
-            if (plugin == null || !plugin.hasListeners("wake")) return false;
-            plugin.notifyListeners("wake", new JSObject().put("rest", rest));
-            return true;
+        SmaranVoiceService.pageSink = new SmaranVoiceService.PageSink() {
+            @Override
+            public boolean onWake(String rest) {
+                SmaranDevice plugin = active;
+                if (plugin == null || !plugin.hasListeners("wake")) return false;
+                plugin.notifyListeners("wake", new JSObject().put("rest", rest));
+                return true;
+            }
+
+            @Override
+            public boolean onInterrupt(String name) {
+                SmaranDevice plugin = active;
+                if (plugin == null || !plugin.hasListeners("wake")) return false;
+                plugin.notifyListeners("wake", new JSObject().put("rest", "").put("interrupt", true).put("name", name));
+                return true;
+            }
         };
+    }
+
+    /** The call is speaking an answer: the wake listener may interrupt it. */
+    @PluginMethod
+    public void setPageSpeaking(PluginCall call) {
+        boolean speaking = Boolean.TRUE.equals(call.getBoolean("speaking", false));
+        new android.os.Handler(android.os.Looper.getMainLooper())
+            .post(() -> SmaranVoiceService.setPageSpeaking(speaking));
+        call.resolve();
     }
 
     /** The page opened or closed its microphone; the wake listener steps aside meanwhile. */

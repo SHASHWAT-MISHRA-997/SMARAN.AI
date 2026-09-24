@@ -29,6 +29,8 @@ async function setup({ floating = false, refused = false, microphone = true, flo
     describeOutcome: () => 'App opened',
     answerFollowUp: (asked, answer) => (answer === 'kesariya' ? { action: 'music', query: 'kesariya', app: asked.app } : null),
     cancelledLine: () => 'Okay.',
+    // Time / weather / news answers (liveAnswers.js) are tested on their own.
+    answerLiveQuestion: async () => null,
     ensureMicrophone: async () => microphone,
     floatsAtAll: () => floats,
   };

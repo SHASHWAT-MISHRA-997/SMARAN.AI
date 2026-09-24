@@ -1,6 +1,7 @@
 import { device } from './devicePlugin';
 import { isNativeApp } from './hostLink';
 import { detectDeviceCommand, describeOutcome, answerFollowUp, cancelledLine } from './deviceCommands';
+import { answerLiveQuestion } from './liveAnswers';
 import { ensureMicrophone } from './nativeSpeech';
 import { floatsAtAll } from './floatView';
 
@@ -77,6 +78,14 @@ export async function startWakeListening({ auto = false } = {}) {
 }
 
 /** The page opened or closed its own microphone; the wake listener steps aside meanwhile. */
+/** The call is speaking: "Hey SMARAN" said over it interrupts (SmaranVoiceService). */
+export async function setPageSpeaking(speaking) {
+  if (!isNativeApp()) return;
+  try {
+    await device.setPageSpeaking({ speaking: Boolean(speaking) });
+  } catch { /* an older app without it: nothing to interrupt with */ }
+}
+
 export async function setPageListening(listening) {
   if (!isNativeApp()) return;
   try {
@@ -268,14 +277,19 @@ export async function runDeviceCommand(command) {
  * Handle an utterance if it is something the phone should do itself.
  *
  * Returns null when it is not, so the caller carries on to the model exactly
- * as before. Only ever acts inside the Android app: in a desktop browser the
- * plugin does not exist, and the desktop build has its own path for this
- * through the backend.
+ * as before. Device commands only ever act inside the Android app: in a
+ * desktop browser the plugin does not exist, and the desktop build has its own
+ * path for this through the backend. Time and date are answered everywhere;
+ * weather and news inside the app (liveAnswers.js).
  *
  * @returns {Promise<{spoken: string, floated: boolean}|null>}
  */
 export async function handleIfDeviceCommand(utterance) {
-  if (!isNativeApp()) return null;
+  if (!isNativeApp()) {
+    // The desktop page still knows the time; the model does not.
+    const spoken = await answerLiveQuestion(utterance, new Date(), { network: false });
+    return spoken ? { spoken, floated: false, startsPlayback: false } : null;
+  }
   // The answer to a question just asked - "which song?" - completes it.
   // Only the very next thing said, and only for a minute: anything later
   // is a new conversation, not a reply.
@@ -290,8 +304,12 @@ export async function handleIfDeviceCommand(utterance) {
   }
   asked = null;
   const command = detectDeviceCommand(utterance);
-  if (!command) return null;
-  return runDeviceCommand(command);
+  if (command) return runDeviceCommand(command);
+  // Time, date, weather, news: from the phone's clock and the internet. The
+  // model answered "check the clock on your device". Checked after device
+  // commands, so "weather app kholo" still opens the app.
+  const spoken = await answerLiveQuestion(utterance);
+  return spoken ? { spoken, floated: false, startsPlayback: false } : null;
 }
 
 /** Forget a question nobody answered - the call ended, the chat moved on. */

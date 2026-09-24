@@ -4,6 +4,7 @@ import AvatarMMD from './AvatarMMD';
 import EnergyCore from './EnergyCore';
 import { isNativeApp } from '../utils/hostLink';
 import { FLOAT_VIEW_EVENT, drawsFigure, getFloatView } from '../utils/floatView';
+import { isSpeakingNow, onSpeaking } from '../utils/speakingState';
 
 /**
  * The character, alone, in the phone's floating window.
@@ -25,6 +26,10 @@ const floatingNow = () => (
 export default function PipCompanion() {
   const [floating, setFloating] = useState(floatingNow);
   const [view, setView] = useState(getFloatView);
+  // Talking while floating: the character moves as it does in the full call.
+  const [speaking, setSpeakingState] = useState(isSpeakingNow);
+
+  useEffect(() => onSpeaking(setSpeakingState), []);
 
   useEffect(() => {
     if (!isNativeApp()) return undefined;
@@ -62,11 +67,11 @@ export default function PipCompanion() {
       aria-label="SMARAN"
       data-testid="pip-companion"
     >
-      {view === 'myra' && <AvatarVideo characterId="anime-girl" className="w-full h-full" />}
-      {view === 'amarya' && <AvatarMMD characterId="evelyn" />}
+      {view === 'myra' && <AvatarVideo characterId="anime-girl" isSpeaking={speaking} className="w-full h-full" />}
+      {view === 'amarya' && <AvatarMMD characterId="evelyn" isSpeaking={speaking} />}
       {view === 'core' && (
         <div className="w-full h-full flex items-center justify-center">
-          <EnergyCore voiceState="idle" micVolume={0} />
+          <EnergyCore voiceState={speaking ? 'speaking' : 'idle'} micVolume={0} />
         </div>
       )}
     </div>

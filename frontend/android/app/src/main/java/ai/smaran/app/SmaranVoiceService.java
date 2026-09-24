@@ -78,6 +78,8 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
     interface PageSink {
         /** True if the page took it. */
         boolean onWake(String rest);
+        /** A wake phrase said over SMARAN's own answer: stop talking and listen. */
+        boolean onInterrupt(String name);
     }
     static PageSink pageSink;
 
@@ -95,6 +97,21 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
     /** The page opened or closed its own microphone: a call, or dictation. */
     static void setPageListening(boolean listening) {
         pageListening = listening;
+        if (instance != null) instance.conditionsChanged();
+    }
+
+    /*
+     * The call is speaking its answer. The page stops its own recogniser for
+     * that (it would hear the answer), which left nothing listening at all:
+     * "Hey SMARAN" said over a long reply was ignored and the reply carried
+     * on. While the page speaks, the wake listener runs - trained detectors
+     * only - and a wake stops the answer so the call listens again.
+     */
+    private static boolean pageSpeaking = false;
+
+    static void setPageSpeaking(boolean speaking) {
+        if (speaking != pageSpeaking) Log.i(TAG, "page speaking: " + speaking);
+        pageSpeaking = speaking;
         if (instance != null) instance.conditionsChanged();
     }
 
@@ -233,9 +250,25 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
     private void conditionsChanged() {
         if (stopping) return;
         if (pageListening) {
+            if (pageSpeaking && uiVisible && WakeSpotter.ready()) {
+                // Over SMARAN's own answer: only the trained detectors. The page
+                // releases its recogniser at about the same moment, so the
+                // microphone can still be busy; try again shortly until it is
+                // free or the answer ends.
+                main.removeCallbacks(resumeTask);
+                spotter.setTrainedOnly(true);
+                if (!spotter.running() && !spotter.start()) {
+                    main.postDelayed(this::conditionsChanged, 300);
+                } else {
+                    Log.i(TAG, "listening over the answer");
+                }
+                return;
+            }
+            spotter.setTrainedOnly(false);
             hush();
             return;
         }
+        spotter.setTrainedOnly(false);
         if (conversing) return; // it resumes itself when the exchange is over
         main.removeCallbacks(resumeTask);
         main.postDelayed(resumeTask, 600);
@@ -285,6 +318,14 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
 
     @Override
     public void onWake(WakeWord.Heard heard) {
+        if (!stopping && pageListening && pageSpeaking && pageSink != null) {
+            spotter.stop();
+            spotter.setTrainedOnly(false);
+            Log.i(TAG, "interrupted by: " + heard.name);
+            buzz();
+            pageSink.onInterrupt(heard.name);
+            return;
+        }
         if (stopping || pageListening || conversing) {
             Log.i(TAG, "wake ignored: stopping=" + stopping + " pageListening=" + pageListening
                 + " conversing=" + conversing);

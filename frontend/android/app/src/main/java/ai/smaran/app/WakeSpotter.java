@@ -88,6 +88,12 @@ final class WakeSpotter {
     private final Listener listener;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean running;
+    /**
+     * Only the trained detectors ("hey smaran", "hey jarvis"), not the
+     * transcriber. Used while SMARAN itself is talking: its own voice saying
+     * "Myra" in an answer would otherwise count as the wake word.
+     */
+    private volatile boolean trainedOnly;
     private Thread thread;
     private AudioRecord record;
     private AutomaticGainControl agc;
@@ -103,6 +109,8 @@ final class WakeSpotter {
     }
 
     boolean running() { return running; }
+
+    void setTrainedOnly(boolean only) { trainedOnly = only; }
 
     boolean start() {
         if (running) return true;
@@ -245,6 +253,7 @@ final class WakeSpotter {
                     continue;
                 }
             }
+            if (trainedOnly) continue;
             final boolean done = decoder.acceptWaveForm(buffer, read);
             final String out = done ? decoder.getResult() : decoder.getPartialResult();
             String words = field(out, done ? "text" : "partial");
