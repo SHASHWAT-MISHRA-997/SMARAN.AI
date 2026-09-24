@@ -217,6 +217,9 @@ tasks.register('prepareOpenWakeWord') {
 melspectrogram.onnx and embedding_model.onnx: Apache License 2.0.
 hey_jarvis_v0.1.onnx: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC BY-NC-SA 4.0),
 by David Scripka. Used unmodified in a free, non-commercial app.
+hey_smaran.onnx (in src/main/assets/oww): trained for SMARAN.AI with openWakeWord's
+training code; its negative data (ACAV100M features) is CC BY-NC-SA 4.0, so it is
+non-commercial too until retrained on commercially licensed data.
 """
     }
 }

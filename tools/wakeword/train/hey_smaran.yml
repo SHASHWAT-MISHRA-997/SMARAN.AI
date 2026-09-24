@@ -1,0 +1,93 @@
+# openWakeWord training config for "Hey SMARAN". Paths are relative to
+# ~/wwtrain, where train.sh runs (see README.md).
+model_name: "hey_smaran"
+
+# Four spellings, because the US English voice says "Smaran" as SMAR-en, and
+# an Indian speaker says it closer to "smuh-run". The phonemes espeak produces:
+#   hey smaran   -> heɪ smæɹən
+#   hey smarun   -> heɪ smɑːɹʌn
+#   hey smuh run -> heɪ smʌ ɹʌn
+#   hey smarn    -> heɪ smɑːɹn
+target_phrase:
+  - "hey smaran"
+  - "hey smarun"
+  - "hey smuh run"
+  - "hey smarn"
+  # With a pause after "hey": v1 scored ~0 on "Hey, Smaran!" because no
+  # training clip had one.
+  - "hey, smaran"
+  - "hey, smarun"
+
+# Near misses it must stay quiet for: the other wake names SMARAN answers to
+# (they have their own detectors), other assistants, and sound-alikes.
+custom_negative_phrases:
+  - "hey myra"
+  - "hey amarya"
+  - "hey jarvis"
+  - "hey siri"
+  - "hey google"
+  - "hey sarah"
+  - "hey samaran"
+  - "hey summer"
+  - "hey sermon"
+  - "hey smart one"
+  - "smart run"
+  - "hey man"
+  - "hey marin"
+  - "hey karan"
+  - "hey sharan"
+  - "hey maran"
+  - "smaran"
+  - "hey"
+  # v1 woke on "Hey Sarah" and "Hey Siri": every "hey S..." it could meet.
+  - "hey sara"
+  - "hey sir"
+  - "hey sam"
+  - "hey saran"
+  - "hey sarang"
+  - "hey simran"
+  - "hey suman"
+  - "hey salman"
+  - "hey sun"
+  - "hey son"
+  - "hey smart"
+  - "hey smarty"
+  - "hey alexa"
+  - "hey aman"
+  - "hey ramen"
+  - "hey sermon"
+  - "hey siri, what time is it"
+  - "hey sarah, how are you"
+
+# train.py adds each custom phrase once among ~12000 negatives, which v1
+# showed is far too few; train.sh repeats each this many times.
+custom_negative_repeat: 150
+
+n_samples: 15000
+n_samples_val: 2000
+tts_batch_size: 40
+augmentation_batch_size: 16
+piper_sample_generator_path: "./piper-sample-generator"
+output_dir: "./out"
+
+rir_paths:
+  - "./data/rir"
+background_paths:
+  - "./data/background"
+background_paths_duplication_rate:
+  - 1
+
+false_positive_validation_data_path: "./data/validation_set_features.npy"
+augmentation_rounds: 1
+feature_data_files:
+  "ACAV100M_sample": "./data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+batch_n_per_class:
+  "ACAV100M_sample": 1024
+  "adversarial_negative": 50
+  "positive": 50
+
+model_type: "dnn"
+layer_size: 32
+steps: 50000
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2

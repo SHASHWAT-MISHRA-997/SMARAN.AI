@@ -1,4 +1,4 @@
-"""'Hey Jarvis' on the computer: real speech audio through the real socket."""
+"""The computer's wake words: real speech audio through the real socket."""
 import wave
 from pathlib import Path
 
@@ -38,11 +38,24 @@ def test_hey_jarvis_wakes_it_over_the_socket():
     assert message["wake"] == "jarvis" and message["score"] >= pc_wake.THRESHOLD
 
 
-@pytest.mark.parametrize("name", ["travis.wav", "weather.wav", "mirror.wav"])
+def test_hey_smaran_wakes_it_over_the_socket():
+    # SMARAN's own model (tools/wakeword/train), on a voice it was not trained on.
+    client = TestClient(app, client=("127.0.0.1", 50125))
+    with client.websocket_connect("/ws/wake") as ws:
+        _stream(ws, _pcm("hey_smaran.wav"))
+        message = ws.receive_json()
+    assert message["wake"] == "smaran", message
+
+
+def test_both_models_are_loaded():
+    assert set(pc_wake.names()) == {"jarvis", "smaran"}
+
+
+# "Hey Sarah" and "Hey Siri" woke the first "Hey SMARAN" model; they must not.
+@pytest.mark.parametrize("name", ["travis.wav", "weather.wav", "mirror.wav", "hey_sarah.wav", "hey_siri.wav"])
 def test_ordinary_speech_does_not(name):
     detector = pc_wake.Detector()
-    best = detector.feed(_pcm(name)) or 0.0
-    assert best < pc_wake.THRESHOLD, (name, best)
+    assert detector.heard(_pcm(name)) is None, (name, detector.scores(b""))
 
 
 def test_a_detector_that_has_woken_starts_afresh():

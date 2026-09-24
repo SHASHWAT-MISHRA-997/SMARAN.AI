@@ -217,23 +217,30 @@ final class WakeSpotter {
                 ring[ringPos++] = buffer[i];
                 if (ringPos == ring.length) { ringPos = 0; ringFull = true; }
             }
-            // "Hey Jarvis", first, by the detector trained for it.
+            // "Hey Jarvis" and "Hey SMARAN", first, by the detectors trained for them.
             OwwDetector detector = oww;
             if (detector != null) {
-                float score;
+                String heard;
                 try {
-                    score = detector.feed(buffer, read);
+                    heard = detector.feed(buffer, read);
                 } catch (Exception e) {
-                    score = 0f;
+                    heard = null;
                 }
-                if (verbose() && score > 0.2f) Log.d(TAG, String.format("hey jarvis score %.2f", score));
-                if (score >= OwwDetector.THRESHOLD) {
+                if (verbose()) {
+                    for (int m = 0; m < Math.min(detector.count(), detector.lastScores.length); m++) {
+                        if (detector.lastScores[m] > 0.2f) {
+                            Log.d(TAG, String.format("hey %s score %.2f", detector.name(m), detector.lastScores[m]));
+                        }
+                    }
+                }
+                if (heard != null) {
+                    final String name = heard;
                     detector.reset();
                     decoder.reset();
                     settling = "";
                     looked = false;
                     main.post(() -> {
-                        if (running) listener.onWake(new WakeWord.Heard("jarvis", ""));
+                        if (running) listener.onWake(new WakeWord.Heard(name, ""));
                     });
                     continue;
                 }

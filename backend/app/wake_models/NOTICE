@@ -4,3 +4,10 @@ melspectrogram.onnx, embedding_model.onnx: Apache License 2.0.
 hey_jarvis_v0.1.onnx: Creative Commons Attribution-NonCommercial-ShareAlike 4.0
 (CC BY-NC-SA 4.0), by David Scripka. Used unmodified, in a free non-commercial app.
 If SMARAN.AI is ever sold, replace hey_jarvis with a model trained in-house.
+
+hey_smaran.onnx: trained for SMARAN.AI with openWakeWord's training code
+(Apache 2.0); recipe in tools/wakeword/train. Positive clips were synthesised
+with piper-sample-generator's LibriTTS-R voice (CC BY 4.0). Its negative
+training data, openWakeWord's ACAV100M features, is CC BY-NC-SA 4.0, so treat
+this model as non-commercial too: retrain on commercially licensed negatives
+before SMARAN.AI is sold.

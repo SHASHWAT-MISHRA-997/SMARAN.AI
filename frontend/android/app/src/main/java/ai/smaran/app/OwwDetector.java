@@ -14,7 +14,9 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 
 /**
- * "Hey Jarvis", detected by a model trained for exactly that (openWakeWord).
+ * "Hey Jarvis" and "Hey SMARAN", each detected by a model trained for exactly
+ * that phrase (openWakeWord). Both share one audio front end, so the second
+ * phrase costs one small extra model per 80 ms.
  *
  * Vosk is a transcriber: it writes down what it thinks was said, and with a
  * TV on, or from across the room, "Hey Jarvis" came out as "i" or "oh". This
@@ -26,18 +28,25 @@ import ai.onnxruntime.OrtSession;
  * The pipeline is openWakeWord's own, fed 80 ms at a time:
  *   audio -> mel spectrogram (32 bins) -> embedding of the last 76 frames
  *   (96 values) -> the wake model over the last 16 embeddings -> a score.
+ * "hey smaran" is SMARAN's own model (tools/wakeword/train), loaded when
+ * assets/oww/hey_smaran.onnx is present.
  * Not thread-safe; used only from WakeSpotter's recording thread.
  */
 final class OwwDetector implements AutoCloseable {
     static final int CHUNK = 1280;                 // 80 ms at 16 kHz
     private static final int CONTEXT = CHUNK + 480; // the mel model needs 3 frames of overlap
-    static final float THRESHOLD = 0.6f;
+    static final float THRESHOLD = 0.6f;          // "hey jarvis"
+    static final float SMARAN_THRESHOLD = 0.5f;   // "hey smaran"
 
     private final OrtEnvironment env = OrtEnvironment.getEnvironment();
     private final OrtSession mel;
     private final OrtSession embedding;
-    private final OrtSession wake;
-    private final String wakeInput;
+    private final java.util.List<String> names = new java.util.ArrayList<>();
+    private final java.util.List<OrtSession> wakes = new java.util.ArrayList<>();
+    private final java.util.List<String> inputs = new java.util.ArrayList<>();
+    private final java.util.List<Float> thresholds = new java.util.ArrayList<>();
+    /** Each model's score for the latest chunk, for developer logging. */
+    final float[] lastScores = new float[2];
 
     private final float[] audio = new float[CONTEXT];
     private int filled = 0;
@@ -52,10 +61,25 @@ final class OwwDetector implements AutoCloseable {
         options.setInterOpNumThreads(1);
         mel = env.createSession(asset(context, "oww/melspectrogram.onnx"), options);
         embedding = env.createSession(asset(context, "oww/embedding_model.onnx"), options);
-        wake = env.createSession(asset(context, "oww/hey_jarvis_v0.1.onnx"), options);
-        wakeInput = wake.getInputNames().iterator().next();
+        addWake("jarvis", env.createSession(asset(context, "oww/hey_jarvis_v0.1.onnx"), options), THRESHOLD);
+        try {
+            addWake("smaran", env.createSession(asset(context, "oww/hey_smaran.onnx"), options), SMARAN_THRESHOLD);
+        } catch (IOException missing) {
+            // Built without the model: "Hey SMARAN" is left to the transcriber.
+        }
         for (float[] frame : melFrames) java.util.Arrays.fill(frame, 1f);   // openWakeWord starts from ones
     }
+
+    private void addWake(String name, OrtSession session, float threshold) throws OrtException {
+        names.add(name);
+        wakes.add(session);
+        inputs.add(session.getInputNames().iterator().next());
+        thresholds.add(threshold);
+    }
+
+    String name(int index) { return names.get(index); }
+
+    int count() { return names.size(); }
 
     private static byte[] asset(Context context, String name) throws IOException {
         try (InputStream in = context.getAssets().open(name);
@@ -67,14 +91,18 @@ final class OwwDetector implements AutoCloseable {
         }
     }
 
-    /** Feed exactly CHUNK samples. Returns the wake score, 0 while it warms up. */
-    float feed(short[] samples, int count) throws OrtException {
-        if (count != CHUNK) return 0f;
+    /**
+     * Feed exactly CHUNK samples. Returns the name of the phrase whose score
+     * crossed its threshold by the widest margin ("jarvis", "smaran"), or null.
+     */
+    String feed(short[] samples, int count) throws OrtException {
+        java.util.Arrays.fill(lastScores, 0f);
+        if (count != CHUNK) return null;
         System.arraycopy(audio, CHUNK, audio, 0, CONTEXT - CHUNK);
         for (int i = 0; i < CHUNK; i++) audio[CONTEXT - CHUNK + i] = samples[i];
         if (filled < CONTEXT) {
             filled += CHUNK;
-            if (filled < CONTEXT) return 0f;
+            if (filled < CONTEXT) return null;
         }
 
         // Mel spectrogram of the latest audio, transformed as openWakeWord does.
@@ -106,17 +134,29 @@ final class OwwDetector implements AutoCloseable {
         embeddings[15] = vector;
         if (embeddingCount < 16) {
             embeddingCount++;
-            if (embeddingCount < 16) return 0f;
+            if (embeddingCount < 16) return null;
         }
 
-        // The wake model over the last 16 embeddings.
+        // Each wake model over the last 16 embeddings.
         float[] window = new float[16 * 96];
         for (int i = 0; i < 16; i++) System.arraycopy(embeddings[i], 0, window, i * 96, 96);
-        try (OnnxTensor in = OnnxTensor.createTensor(env, FloatBuffer.wrap(window), new long[] {1, 16, 96});
-             OrtSession.Result out = wake.run(Collections.singletonMap(wakeInput, in))) {
-            float[][] score = (float[][]) out.get(0).getValue();
-            return score[0][0];
+        String best = null;
+        float margin = 0f;
+        try (OnnxTensor in = OnnxTensor.createTensor(env, FloatBuffer.wrap(window), new long[] {1, 16, 96})) {
+            for (int m = 0; m < wakes.size(); m++) {
+                float score;
+                try (OrtSession.Result out = wakes.get(m).run(Collections.singletonMap(inputs.get(m), in))) {
+                    score = ((float[][]) out.get(0).getValue())[0][0];
+                }
+                if (m < lastScores.length) lastScores[m] = score;
+                float over = score - thresholds.get(m);
+                if (over >= 0f && (best == null || over > margin)) {
+                    best = names.get(m);
+                    margin = over;
+                }
+            }
         }
+        return best;
     }
 
     /** Forget the audio so far - after a wake, so the same phrase does not wake it twice. */
@@ -130,6 +170,8 @@ final class OwwDetector implements AutoCloseable {
     public void close() {
         try { mel.close(); } catch (OrtException ignored) { }
         try { embedding.close(); } catch (OrtException ignored) { }
-        try { wake.close(); } catch (OrtException ignored) { }
+        for (OrtSession wake : wakes) {
+            try { wake.close(); } catch (OrtException ignored) { }
+        }
     }
 }

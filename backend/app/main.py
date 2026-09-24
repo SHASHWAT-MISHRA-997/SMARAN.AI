@@ -6658,10 +6658,10 @@ def websocket_caller_allowed(websocket: WebSocket) -> bool:
 
 @app.websocket("/ws/wake")
 async def websocket_wake(websocket: WebSocket):
-    """'Hey Jarvis' heard on this computer.
+    """A wake phrase ("hey jarvis", "hey smaran") heard on this computer.
 
     The page streams 16 kHz int16 mono PCM as binary frames; this answers
-    {"wake": "jarvis", "score": ...} when openWakeWord hears the phrase
+    {"wake": "jarvis" | "smaran", "score": ...} when openWakeWord hears one
     (app.pc_wake). Same caller rule as every other socket: this computer, a
     paired phone, or a signed-in session. Nothing is stored.
     """
@@ -6679,10 +6679,11 @@ async def websocket_wake(websocket: WebSocket):
     try:
         while True:
             frame = await websocket.receive_bytes()
-            score = await asyncio.to_thread(detector.feed, frame)
-            if score is not None and score >= pc_wake.THRESHOLD:
+            heard = await asyncio.to_thread(detector.heard, frame)
+            if heard is not None:
                 detector.reset()
-                await websocket.send_json({"wake": "jarvis", "score": round(score, 2)})
+                name, score = heard
+                await websocket.send_json({"wake": name, "score": round(score, 2)})
     except WebSocketDisconnect:
         pass
     except Exception as exc:
