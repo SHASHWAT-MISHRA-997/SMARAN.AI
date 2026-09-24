@@ -77,6 +77,8 @@ jobs:
           npm run build
 
       - name: Build the executable
+        env:
+          SMARAN_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.GOOGLE_DESKTOP_CLIENT_SECRET }}
         run: python build_exe.py
 
       # The two things whose absence has silently broken the voice before.
@@ -175,6 +177,8 @@ jobs:
           npm run build
 
       - name: Freeze the application against glibc 2.28
+        env:
+          SMARAN_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.GOOGLE_DESKTOP_CLIENT_SECRET }}
         run: |
           chmod +x packaging/linux/freeze_in_container.sh
           packaging/linux/freeze_in_container.sh

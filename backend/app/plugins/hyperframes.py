@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import asyncio
 import subprocess
 import tempfile
 from pathlib import Path
@@ -59,20 +60,28 @@ class HyperFramesPlugin(ToolPlugin):
 
     def __init__(self, config: PluginConfig, metadata: PluginMetadata):
         super().__init__(config, metadata)
+        # Only where the command is; asking it for its version waits for it
+        # to start (up to two minutes), and this runs at import, before the
+        # server is up. initialize() asks, on a worker thread.
         self.cli = _find_cli()
         self.version = ""
-        if self.cli:
-            try:
-                result = subprocess.run([self.cli, "--version"],
-                                        capture_output=True, text=True, timeout=120)
-                if result.returncode == 0:
-                    self.version = (result.stdout or "").strip()[:20]
-                else:
-                    self.cli = None
-            except Exception:
+
+    def _probe(self) -> None:
+        if not self.cli:
+            return
+        try:
+            result = subprocess.run([self.cli, "--version"],
+                                    capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                self.version = (result.stdout or "").strip()[:20]
+            else:
                 self.cli = None
+        except Exception:
+            self.cli = None
 
     async def initialize(self, app_context: Dict[str, Any]) -> bool:
+        if self.cli and not self.version:
+            await asyncio.to_thread(self._probe)
         if self.cli:
             logger.info("HyperFrames %s found at %s", self.version, self.cli)
             return True

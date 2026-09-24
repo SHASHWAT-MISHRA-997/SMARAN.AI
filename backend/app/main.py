@@ -317,7 +317,11 @@ _add_memory_source_document()
 async def lifespan(application: FastAPI):
     # Providers must be restored before enabled plugins try to use them.
     await _restore_saved_provider_keys()
-    await _load_enabled_plugins()
+    # In the background: the window used to wait for every plugin to find
+    # its external tool first, which on a machine with a slow npm CLI was
+    # minutes of a blank app. A plugin still loading reports as not ready.
+    application.state.plugin_loading = asyncio.create_task(_load_enabled_plugins())
+    threading.Thread(target=rag_pipeline.get, name="rag-warmup", daemon=True).start()
     await _warm_speech_recognition()
     try:
         from app.agent.scheduler import AutomationScheduler
@@ -871,7 +875,31 @@ _model_latencies = {}
 _model_download_in_progress: set = set()
 
 # Initialize RAG Pipeline
-rag_pipeline = RAGPipeline()
+class _LazyRagPipeline:
+    """The document index, built on first use instead of at import.
+
+    Creating it imports chromadb and opens the store - about sixteen seconds
+    on the owner's PC, spent before the server could answer anything, so the
+    app window sat blank. It is warmed on a thread after startup (lifespan),
+    so the first search does not pay for it either.
+    """
+
+    def __init__(self):
+        self._real = None
+        self._lock = threading.Lock()
+
+    def get(self):
+        if self._real is None:
+            with self._lock:
+                if self._real is None:
+                    self._real = RAGPipeline()
+        return self._real
+
+    def __getattr__(self, name):
+        return getattr(self.get(), name)
+
+
+rag_pipeline = _LazyRagPipeline()
 
 # Async Semaphore to serialize inference requests and prevent VRAM OOM crashes
 inference_semaphore = asyncio.Semaphore(1)

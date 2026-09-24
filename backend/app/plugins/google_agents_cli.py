@@ -33,11 +33,9 @@ class GoogleAgentsCLIPlugin(ToolPlugin):
         # what it can do costs a subprocess launch each time. Discovered once,
         # after the path is known.
         self._commands: Optional[List[Dict[str, str]]] = None
-        # This used to run in a background thread while initialize() read the
-        # result, which is a race it usually lost: the plugin reported the CLI
-        # missing on a machine that had it. Looking for a file is fast enough
-        # to just do.
-        self._check_installation()
+        # Looked for in initialize(), awaited there, so it cannot race - and
+        # not here: construction happens at import, before the server starts,
+        # and the check runs the CLI ("--version"), which held up startup.
 
     @staticmethod
     def _candidates():
@@ -130,7 +128,7 @@ class GoogleAgentsCLIPlugin(ToolPlugin):
         do nothing.
         """
         if not self.agents_cli_path:
-            self._check_installation()
+            await asyncio.to_thread(self._check_installation)
 
         if self.agents_cli_path:
             logger.info("Google Agents CLI found at %s", self.agents_cli_path)

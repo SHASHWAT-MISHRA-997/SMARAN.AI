@@ -55,6 +55,7 @@ docker run --rm \
     -e SMARAN_BUILD_SUBDIR="${BUILD_ROOT#"$ROOT"}" \
     -e SMARAN_ANALYTICS_URL="${SMARAN_ANALYTICS_URL:-}" \
     -e SMARAN_ANALYTICS_KEY="${SMARAN_ANALYTICS_KEY:-}" \
+    -e SMARAN_GOOGLE_DESKTOP_CLIENT_SECRET="${SMARAN_GOOGLE_DESKTOP_CLIENT_SECRET:-}" \
     "$IMAGE" bash packaging/linux/container_build.sh
 
 # The container runs as root, so everything it just wrote into the mounted

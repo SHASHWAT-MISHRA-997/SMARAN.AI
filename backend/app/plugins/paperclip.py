@@ -21,7 +21,10 @@ class PaperclipPlugin(ToolPlugin):
     def __init__(self, config: PluginConfig, metadata: PluginMetadata):
         super().__init__(config, metadata)
         self.paperclip_path = None
-        self._check_installation()
+        # Not looked for here. Constructing the plugin happens at import,
+        # before the server starts, and "paperclipai --version" through npm
+        # took long enough that the app window sat blank for minutes.
+        # initialize() looks, on a worker thread, after startup.
     
     def _check_installation(self):
         """Whether the Paperclip CLI is on this machine, asked of the machine.
@@ -51,7 +54,7 @@ class PaperclipPlugin(ToolPlugin):
         for candidate in filter(None, candidates):
             try:
                 result = subprocess.run([candidate, "--version"],
-                                        capture_output=True, text=True, timeout=60)
+                                        capture_output=True, text=True, timeout=20)
                 if result.returncode == 0:
                     self.paperclip_path = candidate
                     logger.info("Paperclip CLI found at %s (%s)",
@@ -66,7 +69,7 @@ class PaperclipPlugin(ToolPlugin):
     async def initialize(self, app_context: Dict[str, Any]) -> bool:
         """Initialize the plugin."""
         if self.paperclip_path is None:
-            self._check_installation()
+            await asyncio.to_thread(self._check_installation)
         
         if self.paperclip_path is not None:
             logger.info("Paperclip plugin initialized")

@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import hashlib
+import logging
 import os
 import secrets
 import time
@@ -14,19 +15,46 @@ from pydantic import BaseModel, Field
 
 GOOGLE_DESKTOP_CLIENT_ID = "656427300466-d1fetqra2pv352klkociveaem72kvpdr.apps.googleusercontent.com"
 LOOPBACK = {"localhost", "127.0.0.1", "::1", "::ffff:127.0.0.1"}
+logger = logging.getLogger(__name__)
 
 
 def desktop_client_id():
     return os.environ.get("SMARAN_GOOGLE_DESKTOP_CLIENT_ID", GOOGLE_DESKTOP_CLIENT_ID).strip()
 
 
+def desktop_client_secret():
+    """Google requires the desktop client's secret to finish sign-in.
+
+    Without it the token endpoint answers "client_secret is missing" after
+    the person has already chosen an account. Baked in at build time
+    (app/oauth_config.py) or given in the environment; never logged.
+    """
+    value = os.environ.get("SMARAN_GOOGLE_DESKTOP_CLIENT_SECRET", "").strip()
+    if value:
+        return value
+    try:
+        from app.oauth_config import GOOGLE_DESKTOP_CLIENT_SECRET
+    except ImportError:
+        return ""
+    return str(GOOGLE_DESKTOP_CLIENT_SECRET or "").strip()
+
+
 async def provider_json(client, method, url, **kwargs):
     try:
         reply = await client.request(method, url, **kwargs)
         data = reply.json()
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError as exc:
+        logger.warning("OAuth provider request failed %s (%s)", method, type(exc).__name__)
+        raise HTTPException(502, "The sign-in provider could not be reached. Please retry.")
+    except ValueError:
+        logger.warning("OAuth provider returned a non-JSON response for %s", method)
         raise HTTPException(502, "The sign-in provider could not be reached. Please retry.")
     if reply.status_code >= 400:
+        # Provider responses can contain tokens or account identifiers. Keep
+        # the diagnostic useful without ever logging the response body.
+        logger.warning("OAuth provider rejected %s with HTTP %s (%s)",
+                       method, reply.status_code,
+                       data.get("error") if isinstance(data, dict) else "unknown")
         raise HTTPException(401, "The provider could not verify this sign-in. Please retry.")
     return data
 
@@ -71,8 +99,10 @@ def make_router(get_db, finish_login, web_client_id):
             raise HTTPException(429, "Too many pending sign-ins. Please retry shortly.")
         if request.headers.get("sec-fetch-site") == "cross-site":
             raise HTTPException(403, "Start sign-in from SMARAN.AI.")
-        if not desktop_client_id():
-            raise HTTPException(503, "Google desktop sign-in is not configured.")
+        if not desktop_client_id() or not desktop_client_secret():
+            # Said before the browser opens, not after an account is chosen.
+            raise HTTPException(503, "Google sign-in is not set up in this build. "
+                                     "Use a SMARAN.AI account on this computer for now.")
         if request.url.hostname not in LOOPBACK or not request.client or request.client.host not in LOOPBACK:
             raise HTTPException(400, "Open SMARAN.AI on this computer using localhost to sign in with Google.")
         ticket = secrets.token_urlsafe(32)
@@ -107,7 +137,8 @@ def make_router(get_db, finish_login, web_client_id):
                     raise HTTPException(401, "Google sign-in was cancelled. Please try again.")
                 async with httpx.AsyncClient(timeout=15) as client:
                     tokens = await provider_json(client, "POST", "https://oauth2.googleapis.com/token", data={
-                        "client_id": flow["client_id"], "code": code, "code_verifier": flow["verifier"],
+                        "client_id": flow["client_id"], "client_secret": desktop_client_secret(),
+                        "code": code, "code_verifier": flow["verifier"],
                         "redirect_uri": flow["redirect"], "grant_type": "authorization_code"})
                     if not tokens.get("id_token"):
                         raise HTTPException(401, "Google did not return an identity token.")
@@ -125,8 +156,25 @@ def make_router(get_db, finish_login, web_client_id):
             finally:
                 flow.pop("verifier", None)
         message = "Sign-in completed. Return to SMARAN.AI." if flow["status"] == "complete" else "Sign-in could not finish. Return to SMARAN.AI and try again."
-        return HTMLResponse("<!doctype html><html><title>SMARAN.AI sign-in</title><body><h1>SMARAN.AI</h1><p>" + message + "</p></body></html>",
-                            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+        heading = "Google sign-in complete" if flow["status"] == "complete" else "Google sign-in could not finish"
+        html = f"""<!doctype html>
+<html lang=\"en\">
+  <head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+    <title>SMARAN.AI sign-in</title>
+    <style>
+      :root {{ color-scheme: dark; font-family: system-ui, sans-serif; }}
+      body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #070709; color: #f4f4f5; }}
+      main {{ width: min(420px, calc(100vw - 48px)); box-sizing: border-box; padding: 32px; border: 1px solid #7f1d1d; border-radius: 20px; background: #111114; text-align: center; box-shadow: 0 0 48px rgba(239,68,68,.16); }}
+      h1 {{ margin: 0 0 10px; font-size: 22px; }}
+      p {{ margin: 0 0 24px; color: #d4d4d8; line-height: 1.5; }}
+      button {{ border: 0; border-radius: 10px; padding: 11px 18px; background: #dc2626; color: white; font: inherit; cursor: pointer; }}
+    </style>
+  </head>
+  <body><main><h1>{heading}</h1><p>{message}</p><button type=\"button\" onclick=\"window.close()\">Close this window</button></main></body>
+</html>"""
+        return HTMLResponse(html, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
     @router.post("/poll")
     async def poll(body: PollRequest, response: Response, request: Request, db=Depends(get_db)):
