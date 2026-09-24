@@ -29,6 +29,9 @@ const request = async (path, options = {}) => {
   return payload;
 };
 
+// The desktop's lock answer from the last successful check (phone only uses it).
+const LAST_KNOWN_KEY = 'sm_lock_last_known';
+
 const PinLock = ({ children }) => {
   const [state, setState] = useState('checking'); // checking | unavailable | locked | open
   const [checkAttempt, setCheckAttempt] = useState(0);
@@ -72,11 +75,22 @@ const PinLock = ({ children }) => {
         if (cancelled) return;
         if (typeof data.enabled !== 'boolean') throw new Error('Invalid lock status.');
         setLockEnabled(data.enabled);
+        // Remembered for when the desktop cannot be reached (below).
+        try { localStorage.setItem(LAST_KNOWN_KEY, String(data.enabled)); } catch { /* private mode */ }
         setState(data.enabled ? 'locked' : 'open');
         if (data.locked_out_for) setCooldown(data.locked_out_for);
       })
       .catch(() => {
-        if (!cancelled) setState('unavailable');
+        if (cancelled) return;
+        /* A paired phone away from home cannot reach the desktop, and this
+           kept the whole phone app behind "Cannot check the app lock" - its
+           own features included. The phone opens when the desktop's last known
+           answer was "no PIN"; with a PIN, or never checked, it stays shut, so
+           turning Wi-Fi off is not a way past a PIN. The desktop is unchanged:
+           its workspace stays hidden until the check succeeds. */
+        let lastKnown = null;
+        try { lastKnown = localStorage.getItem(LAST_KNOWN_KEY); } catch { /* private mode */ }
+        setState(isNativeApp() && lastKnown === 'false' ? 'open' : 'unavailable');
       });
     return () => { cancelled = true; };
   }, [checkAttempt]);

@@ -6,6 +6,10 @@ import { ThemeProvider } from './context/ThemeContext.jsx';
 import { ensureDeviceUser, getCurrentUser } from './context/AuthContext.jsx';
 import './index.css';
 import { isHandheld } from './utils/device';
+import { installCompanionFetch } from './utils/companionAuth';
+
+// The paired phone proves itself on every request to its desktop, chat included.
+installCompanionFetch();
 
 // Phones and tablets get the still versions of the decorations (index.css,
 // `html.is-handheld`). Set by device, before the first render, rather than

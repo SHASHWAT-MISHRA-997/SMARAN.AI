@@ -1,4 +1,4 @@
-import { loadLink } from './hostLink';
+import { loadLink } from './hostLink.js';
 
 /**
  * The pairing token, as a header, when this browser is a paired device.
@@ -22,4 +22,42 @@ export function companionHeaders() {
   } catch {
     return {};
   }
+}
+
+/**
+ * Every request from the paired phone to its desktop carries the pairing token.
+ *
+ * companionHeaders() was only added where a caller remembered to - fetchWithAuth
+ * and a few settings screens - while the chat itself used plain fetch. On the
+ * desktop that is fine (same machine, cookie); on the paired phone every chat
+ * request reached the PC with no proof and was refused: "Sign in to use
+ * SMARAN.AI from another device", with the phone showing paired.
+ *
+ * So the phone app adds it once, at the fetch layer, for requests whose origin
+ * is the paired host - and only those. A request to any other address never
+ * sees the token. Returns the wrapped fetch (also installed on window).
+ */
+export function withCompanionToken(baseFetch, getLink = loadLink) {
+  return function fetchWithCompanion(input, init) {
+    try {
+      const link = getLink();
+      if (!link?.token || !link?.url) return baseFetch(input, init);
+      const url = new URL(typeof input === 'string' ? input : input?.url || String(input), window.location.href);
+      const host = new URL(link.url);
+      if (url.origin !== host.origin) return baseFetch(input, init);
+      const headers = new Headers(init?.headers || (typeof input !== 'string' && input?.headers) || undefined);
+      if (!headers.has('X-Companion-Token')) headers.set('X-Companion-Token', link.token);
+      return baseFetch(input, { ...(init || {}), headers });
+    } catch {
+      return baseFetch(input, init);
+    }
+  };
+}
+
+export function installCompanionFetch() {
+  const capacitor = typeof window !== 'undefined' ? window.Capacitor : null;
+  const native = Boolean(capacitor?.isNativePlatform?.() ?? capacitor?.isNative);
+  if (!native || window.__smCompanionFetch) return;
+  window.__smCompanionFetch = true;
+  window.fetch = withCompanionToken(window.fetch.bind(window));
 }
