@@ -87,6 +87,9 @@ public class MainActivity extends BridgeActivity {
     public void onPictureInPictureModeChanged(boolean inPictureInPicture,
                                               android.content.res.Configuration config) {
         super.onPictureInPictureModeChanged(inPictureInPicture, config);
+        // A floating window cannot use the speech recogniser; the service
+        // listens meanwhile (SmaranVoiceService.setFloating).
+        SmaranVoiceService.setFloating(inPictureInPicture);
         if (getBridge() == null || getBridge().getWebView() == null) return;
         getBridge().getWebView().evaluateJavascript(
             "document.documentElement.classList.toggle('sm-pip', " + inPictureInPicture + ");"

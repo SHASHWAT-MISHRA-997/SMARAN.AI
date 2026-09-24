@@ -90,13 +90,36 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
         // the microphone - and its JavaScript is paused, so the call ending
         // behind Spotify never got to say so, and the wake word stayed deaf
         // until SMARAN was opened again.
-        if (!visible) pageListening = false;
+        if (!visible) {
+            pageAsked = false;
+            pageListening = false;
+        }
         if (instance != null) instance.conditionsChanged();
     }
 
     /** The page opened or closed its own microphone: a call, or dictation. */
     static void setPageListening(boolean listening) {
-        pageListening = listening;
+        pageAsked = listening;
+        pageListening = pageAsked && !floating;
+        if (instance != null) instance.conditionsChanged();
+    }
+
+    /*
+     * SMARAN shrunk into its floating window. Android hands a floating app's
+     * speech recogniser silence, not the microphone: the call in the float
+     * "listened" - onBeginningOfSpeech, then error 7, no match, over and over -
+     * while the wake listener stood aside for it. After "open YouTube", nothing
+     * heard the next command at all. So while floating, the page is not
+     * counted as listening; this service listens, and a wake brings SMARAN back
+     * to full screen, where the call can hear.
+     */
+    private static boolean pageAsked = false;
+    private static boolean floating = false;
+
+    static void setFloating(boolean isFloating) {
+        if (isFloating != floating) Log.i(TAG, "floating: " + isFloating);
+        floating = isFloating;
+        pageListening = pageAsked && !floating;
         if (instance != null) instance.conditionsChanged();
     }
 
@@ -268,7 +291,7 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
             hush();
             return;
         }
-        spotter.setTrainedOnly(false);
+        spotter.setTrainedOnly(floating && pageSpeaking);
         if (conversing) return; // it resumes itself when the exchange is over
         main.removeCallbacks(resumeTask);
         main.postDelayed(resumeTask, 600);
@@ -318,6 +341,15 @@ public class SmaranVoiceService extends Service implements WakeSpotter.Listener 
 
     @Override
     public void onWake(WakeWord.Heard heard) {
+        if (!stopping && floating) {
+            spotter.stop();
+            spotter.setTrainedOnly(false);
+            Log.i(TAG, "woken while floating: " + heard.name);
+            buzz();
+            if (pageSpeaking && pageSink != null) pageSink.onInterrupt(heard.name);
+            if (!openCall(heard.rest)) main.postDelayed(resumeTask, 600);
+            return;
+        }
         if (!stopping && pageListening && pageSpeaking && pageSink != null) {
             spotter.stop();
             spotter.setTrainedOnly(false);
