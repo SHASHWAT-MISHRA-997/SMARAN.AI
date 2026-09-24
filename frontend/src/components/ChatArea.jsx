@@ -2618,6 +2618,30 @@ const ChatArea = ({
     setSpeaking(isSpeakingAudio);
   }, [isVoiceModeOpen, isSpeakingAudio]);
 
+  /* The same on the computer. The wake listener below stands down while a
+     call is open (the call has the microphone), so nothing could stop a long
+     answer: "Hey SMARAN" said over it was not heard. During a call the
+     backend's detector (app/pc_wake.py) listens too - with the browser's echo
+     cancellation, so SMARAN's own voice from the speakers is taken out - and a
+     wake while it is speaking stops the answer; the call then listens again
+     by itself. A wake while the call is listening is left to the call. */
+  const speakingNowRef = useRef(false);
+  speakingNowRef.current = isSpeakingAudio;
+  useEffect(() => {
+    if (isNativeApp() || !isVoiceModeOpen) return undefined;
+    const stop = startPcWake({
+      apiBase: API_BASE,
+      onWake: () => {
+        if (!speakingNowRef.current || !isVoiceModeOpenRef.current) return;
+        voiceSessionRef.current += 1;
+        stopSpeaking();
+        setVoiceAiResponse('');
+      },
+      onError: (message) => console.warn('Interrupt listener:', message),
+    });
+    return stop;
+  }, [isVoiceModeOpen, stopSpeaking]);
+
   useEffect(() => {
     localStorage.setItem('sm_wake_enabled', String(wakeWordEnabled));
     localStorage.setItem('sm_wake_phrase', wakePhrase);
