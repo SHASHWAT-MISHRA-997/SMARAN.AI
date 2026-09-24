@@ -444,6 +444,13 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
   const isSpeakingRef = useRef(false);
   const voiceStateRef = useRef('idle');
   const isMutedRef = useRef(false);
+  /* Floating (picture-in-picture): Android gives a floating app's speech
+     recogniser silence, so this listened to nothing and restarted every five
+     seconds - while holding the microphone the wake listener needed. While
+     floating the call does not listen; "Hey SMARAN" brings it back full
+     screen (SmaranVoiceService) and listening resumes. */
+  const floatingRef = useRef(typeof document !== 'undefined'
+    && document.documentElement.classList.contains('sm-pip'));
   /* Whether the call is still on screen, readable from callbacks that were
    * created once and outlive a close - the delayed restarts and the wait for a
    * final transcript both continue running after the screen has gone
@@ -635,7 +642,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
   }, []);
 
   const startRecognition = useCallback(() => {
-    if (!isOpen || isMutedRef.current) return;
+    if (!isOpen || isMutedRef.current || floatingRef.current) return;
     stopRecognition();
 
     /* There is no microphone on this origin. SpeechRecognition is still
@@ -1003,6 +1010,26 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
       }, 150);
     }
   }, [isSpeakingAudio, isOpen, finalizeRecordedAudio, startFreshRecorder, startRecognition, stopRecognition]);
+
+  useEffect(() => {
+    if (!isNativeApp()) return undefined;
+    const onPip = (event) => {
+      const floating = Boolean(event?.detail?.floating);
+      floatingRef.current = floating;
+      if (floating) {
+        stopRecognition();
+      } else if (isOpen && !isMutedRef.current && !isSpeakingRef.current) {
+        setTimeout(() => {
+          if (!floatingRef.current) {
+            startFreshRecorder();
+            startRecognition();
+          }
+        }, 300);
+      }
+    };
+    window.addEventListener('smaran:pip', onPip);
+    return () => window.removeEventListener('smaran:pip', onPip);
+  }, [isOpen, startFreshRecorder, startRecognition, stopRecognition]);
 
   // Backend Audio Transcription Fallback (Whisper)
   const transcribeBackendAudio = useCallback(async () => {
