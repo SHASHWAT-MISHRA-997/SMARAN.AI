@@ -43,6 +43,8 @@ import { WakeWordListener, WAKE_PHRASE_DEFAULT, wakeRest } from '../utils/wakeWo
 import { startPcWake } from '../utils/pcWake';
 import { detectClientDevice, isDesktopApp } from './RightPanel';
 import { Maya3DCanvas } from './CodePreviewVisualizer';
+import AgentSteps from './AgentSteps';
+import { applyAgentEvent, summarize } from '../utils/agentEvents.js';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
@@ -957,6 +959,7 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
             </div>
           ) : (
             <>
+              {msg.agentSteps && <AgentSteps steps={msg.agentSteps} runId={msg.agentRunId} live={msg.isLoading} />}
               <MarkdownText text={msg.content} />
 
               {!msg.isLoading && msg.content && (() => {
@@ -3815,6 +3818,97 @@ const ChatArea = ({
   // which is registered once, always calls the current implementation.
   useEffect(() => { handleSendRef.current = handleSend; });
 
+  /* Code mode with a folder open: run the coding agent and show its steps.
+   * The model is whatever is selected - a local Ollama model, or a cloud one
+   * (the backend uses the key saved on this machine; one kept only in this
+   * browser is passed along). */
+  const runCodeAgent = async ({ userPrompt, assistantId, sessionId }) => {
+    const started = performance.now();
+    const cloud = getCloudRoutingPayload();
+    const local = selectedModel && !selectedModel.startsWith('cloud:') && selectedModel !== 'auto' ? selectedModel : '';
+    const history = messages
+      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content && !m.isLoading)
+      .slice(-8)
+      .map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) }));
+    const update = (fn) => setMessages((prev) => prev.map((m) => (m.id === assistantId ? fn(m) : m)));
+    update((m) => ({ ...m, agentSteps: [], agentRunId: null, content: '' }));
+
+    let said = '';
+    let failure = '';
+    let steps = [];
+    try {
+      const res = await fetch(`${API_BASE}/api/agent/run`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          task: userPrompt,
+          model: cloud.cloud_model || local,
+          provider: cloud.cloud_provider || '',
+          api_key: cloud.cloud_api_key || '',
+          root: workspaceStatus?.root || '',
+          history,
+          ask_for_approval: askForApproval,
+        }),
+      });
+      if (!res.ok || !res.body) throw new Error(`SMARAN Code could not start (HTTP ${res.status}).`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let event;
+          try { event = JSON.parse(line); } catch { continue; }
+          if (event.type === 'run') {
+            update((m) => ({ ...m, agentRunId: event.id }));
+          } else if (event.type === 'message') {
+            said = said ? `${said}\n\n${event.text}` : event.text;
+            update((m) => ({ ...m, content: said }));
+          } else if (event.type === 'error') {
+            failure = event.message;
+          } else if (['tool_call', 'approval_needed', 'approval', 'tool_result'].includes(event.type)) {
+            steps = applyAgentEvent(steps, event);
+            const snapshot = steps;
+            update((m) => ({ ...m, agentSteps: snapshot }));
+          }
+        }
+      }
+    } catch (err) {
+      failure = err.message || String(err);
+    }
+
+    const changed = steps.filter((s) => s.status === 'done' && ['write_file', 'edit_file'].includes(s.name))
+      .map((s) => s.arguments?.path).filter(Boolean);
+    const actions = steps.map((s) => `- ${s.status === 'declined' ? '~~' : ''}${summarize(s.name, s.arguments)}${s.status === 'declined' ? '~~ (declined)' : ''}`);
+    let content = said || (failure ? '' : 'Done.');
+    if (failure) content = `${content ? `${content}\n\n` : ''}**Stopped:** ${failure}`;
+    if (changed.length) content += `\n\n**Files changed:** ${[...new Set(changed)].map((p) => `\`${p}\``).join(', ')}`;
+    const elapsed = Math.round(performance.now() - started);
+    update((m) => ({ ...m, content, isLoading: false, response_time_ms: elapsed }));
+    setStreaming(false);
+    streamingRef.current = false;
+
+    // Kept in the conversation like any other turn - steps as a list.
+    if (sessionId) {
+      const record = actions.length ? `${content}\n\n**Steps:**\n${actions.join('\n')}` : content;
+      fetch(`${API_BASE}/api/chat/sessions/${sessionId}/messages`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ messages: [
+          { role: 'user', content: userPrompt },
+          { role: 'assistant', content: record, model_used: cloud.cloud_model || local || 'auto', response_time_ms: elapsed },
+        ] }),
+      }).catch(() => {});
+    }
+  };
+
   const handleSend = async (e, directPrompt = null, isVoicePrompt = false) => {
     const voiceSession = voiceSessionRef.current;
     if (e && e.preventDefault) e.preventDefault();
@@ -3980,6 +4074,19 @@ const ChatArea = ({
         spoken: isVoiceTurn,
         voiceSession,
       });
+      return;
+    }
+
+    /* SMARAN Code: the coding agent, not a chat reply.
+     *
+     * Code mode used to send the prompt to /api/chat with a different system
+     * prompt, so it answered exactly like Chat - code in a message, nothing
+     * read, nothing changed, nothing run. With a folder open it now runs the
+     * agent loop (/api/agent/run): it reads the files, edits them, runs the
+     * tests and reads the output, step by step, each step shown as it
+     * happens. With "Ask for approval" on, every change waits for Allow. */
+    if (activeSection === 'code' && workspaceStatus?.open && !isVoiceTurn) {
+      await runCodeAgent({ userPrompt, assistantId: assistantMessage.id, sessionId: targetSessionId });
       return;
     }
 

@@ -66,6 +66,21 @@ OPENAI_COMPATIBLE = {
     "openrouter": "https://openrouter.ai/api/v1",
     "deepseek": "https://api.deepseek.com/v1",
     "nvidia": "https://integrate.api.nvidia.com/v1",
+    "together": "https://api.together.xyz/v1",
+    "cerebras": "https://api.cerebras.ai/v1",
+    "sambanova": "https://api.sambanova.ai/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "huggingface": "https://router.huggingface.co/v1",
+}
+
+#: Where each provider's saved key is found. The Model Hub stores keys on the
+#: backend and loads them into these at start, so the agent can use the key the
+#: owner already saved instead of needing it passed in every request.
+KEY_ENV = {
+    "openai": "OPENAI_API_KEY", "groq": "GROQ_API_KEY", "openrouter": "OPENROUTER_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY", "nvidia": "NVIDIA_API_KEY", "together": "TOGETHER_API_KEY",
+    "cerebras": "CEREBRAS_API_KEY", "sambanova": "SAMBANOVA_API_KEY", "mistral": "MISTRAL_API_KEY",
+    "huggingface": "HUGGINGFACE_API_KEY", "gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
 }
 
 
@@ -149,6 +164,13 @@ async def complete(messages: List[Dict], model: str = "",
     an extra three seconds first. Everything else leaves it alone and keeps
     the retry described below.
     """
+
+    if provider and not api_key and provider in KEY_ENV:
+        import os
+        api_key = os.getenv(KEY_ENV[provider], "")
+        if not api_key:
+            raise ProviderError("No %s key is saved on this computer. Add one in Model Hub -> Cloud Provider Keys."
+                                % provider, kind="http")
 
     def call() -> str:
         if provider in OPENAI_COMPATIBLE:

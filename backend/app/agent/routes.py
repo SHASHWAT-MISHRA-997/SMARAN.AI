@@ -12,6 +12,7 @@ Provides endpoints for:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import secrets
@@ -36,6 +37,8 @@ class AgentRequest(BaseModel):
     provider: str = ""
     api_key: str = ""
     root: str = ""
+    # Code mode's "Ask for approval": every change waits for the person.
+    ask_for_approval: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -92,19 +95,58 @@ async def agent_plan(request: AgentRequest):
         raise HTTPException(status_code=503, detail=str(exc)[:300]) from exc
 
 
+#: Decisions a running agent is waiting for, keyed "run_id:step".
+_approvals: Dict[str, "asyncio.Future"] = {}
+
+
+class ApprovalDecision(BaseModel):
+    run_id: str = Field(..., min_length=8, max_length=64)
+    step: int = Field(..., ge=1, le=1000)
+    approve: bool
+
+
+@router.post("/approve")
+async def agent_approve(decision: ApprovalDecision):
+    """Allow or refuse the change a running agent is waiting on."""
+    future = _approvals.get(f"{decision.run_id}:{decision.step}")
+    if future is None or future.done():
+        raise HTTPException(status_code=404, detail="Nothing is waiting for that decision.")
+    future.set_result(decision.approve)
+    return {"ok": True, "approved": decision.approve}
+
+
 @router.post("/run")
 async def agent_run(request: AgentRequest):
     """Carry out the task, streaming each step as it happens."""
+    run_id = secrets.token_urlsafe(12)
+
+    async def approve(step: int) -> bool:
+        future = asyncio.get_running_loop().create_future()
+        _approvals[f"{run_id}:{step}"] = future
+        try:
+            # Ten minutes to decide; silence is a no.
+            return bool(await asyncio.wait_for(future, timeout=600))
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            _approvals.pop(f"{run_id}:{step}", None)
 
     async def stream():
+        yield json.dumps({"type": "run", "id": run_id, "asks_first": request.ask_for_approval}) + "\n"
         try:
             async for event in loop.run(request.task, request.model, request.history,
                                         request.provider, request.api_key,
-                                        request.root):
+                                        request.root,
+                                        approve=approve if request.ask_for_approval else None):
                 yield json.dumps(event) + "\n"
         except Exception as exc:  # noqa: BLE001
             logger.exception("agent run failed")
             yield json.dumps({"type": "error", "message": str(exc)[:300]}) + "\n"
+        finally:
+            for key in [k for k in _approvals if k.startswith(run_id + ":")]:
+                future = _approvals.pop(key, None)
+                if future and not future.done():
+                    future.set_result(False)
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 

@@ -155,7 +155,8 @@ async def plan(task: str, model: str = "", provider: str = "",
 async def run(task: str, model: str = "",
               history: Optional[List[Dict]] = None,
               provider: str = "", api_key: str = "",
-              root: str = "") -> AsyncIterator[Dict]:
+              root: str = "",
+              approve=None) -> AsyncIterator[Dict]:
     """Carry out a task, reporting each step as it happens.
 
     Yields dicts the caller can show: 'message' when the agent says something,
@@ -164,6 +165,12 @@ async def run(task: str, model: str = "",
 
     `root` is the folder to work in. The editor extension passes the project
     the person has open; the desktop app passes nothing and gets its own.
+
+    `approve`, when given, is awaited before every tool that changes something
+    (writing, editing, running a command, git, restoring a snapshot) with the
+    step number; it answers True to go ahead. An 'approval_needed' event is
+    yielded first so the person can see exactly what is about to happen. A
+    refusal is told to the model, which can then take another route.
     """
     try:
         workspace = toolbox.workspace_for(root)
@@ -263,7 +270,18 @@ async def run(task: str, model: str = "",
         yield {"type": "tool_call", "name": call["name"],
                "arguments": call["arguments"], "step": step}
 
-        result = toolbox.execute(call["name"], call["arguments"], workspace)
+        declined = False
+        if approve is not None and call["name"] in toolbox.MUTATING:
+            yield {"type": "approval_needed", "name": call["name"],
+                   "arguments": call["arguments"], "step": step}
+            declined = not await approve(step)
+            yield {"type": "approval", "step": step, "approved": not declined}
+
+        if declined:
+            result = ("The person declined this action, so it was not carried out. "
+                      "Do not repeat it; choose another approach or ask what they want.")
+        else:
+            result = toolbox.execute(call["name"], call["arguments"], workspace)
         performed.append(call["name"])
         yield {"type": "tool_result", "name": call["name"],
                "result": result, "step": step}

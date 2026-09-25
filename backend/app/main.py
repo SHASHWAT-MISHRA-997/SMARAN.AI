@@ -1883,6 +1883,47 @@ def get_session_messages(session_id: str, db: Session = Depends(get_db), current
     return messages
 
 
+class AppendMessage(PydanticBaseModel):
+    role: str
+    content: str
+    model_used: Optional[str] = None
+    response_time_ms: Optional[float] = None
+
+
+class AppendMessages(PydanticBaseModel):
+    messages: List[AppendMessage]
+
+
+@app.post("/api/chat/sessions/{session_id}/messages")
+def append_session_messages(session_id: str, body: AppendMessages, db: Session = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    """Keep a turn that did not go through /api/chat.
+
+    Code mode runs the coding agent (/api/agent/run), which streams steps
+    rather than a chat reply and saved nothing - so a finished run vanished
+    from the conversation on reload. The page sends the prompt and the
+    agent's report here once the run ends.
+    """
+    session = db.query(ChatSession).filter(ChatSession.id == session_id,
+                                           ChatSession.user_id == current_user.id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="No such conversation.")
+    if not 1 <= len(body.messages) <= 4:
+        raise HTTPException(status_code=400, detail="Send one to four messages.")
+    saved = []
+    for item in body.messages:
+        if item.role not in ("user", "assistant") or not item.content.strip():
+            raise HTTPException(status_code=400, detail="Each message needs a role and some text.")
+        row = ChatMessage(session_id=session.id, role=item.role, content=item.content[:200_000],
+                          model_used=(item.model_used or "")[:200] or None,
+                          response_time_ms=item.response_time_ms)
+        db.add(row)
+        saved.append(row)
+    session.updated_at = datetime.now()
+    db.commit()
+    return {"saved": [row.id for row in saved]}
+
+
 class MessageEditRequest(PydanticBaseModel):
     content: str
 
