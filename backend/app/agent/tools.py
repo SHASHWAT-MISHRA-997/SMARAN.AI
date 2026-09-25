@@ -182,6 +182,12 @@ def run_command(workspace, command: str) -> str:
     restricted commands, and environment isolation.
     """
     root = str(workspace.root)
+    # The owner's Git rules, for git typed here as much as for the git tool.
+    from app.agent import git_policy
+    try:
+        command = git_policy.apply(command)
+    except git_policy.GitRefused as refused:
+        return "Refused: %s" % refused
     try:
         from app.agent.sandbox import get_sandbox
         res = get_sandbox().run_command(command, cwd=root)

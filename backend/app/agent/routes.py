@@ -17,11 +17,12 @@ import logging
 import secrets
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.agent import loop
+from app.companion import get_current_user_dep
 
 logger = logging.getLogger("agent.routes")
 
@@ -40,6 +41,29 @@ class AgentRequest(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 # Core Agent & Tools
 # ─────────────────────────────────────────────────────────────────────────────
+
+class GitPreferencesUpdate(BaseModel):
+    branch_prefix: Optional[str] = Field(None, max_length=40)
+    merge_method: Optional[str] = None
+    draft_prs: Optional[bool] = None
+
+
+@router.get("/git-preferences")
+async def get_git_preferences(_user=Depends(get_current_user_dep)):
+    """What Settings -> SMARAN Code -> Git shows, and the rules the agent is given."""
+    from app.agent import git_policy
+    return {"preferences": git_policy.load(), "rules": git_policy.describe()}
+
+
+@router.put("/git-preferences")
+async def put_git_preferences(update: GitPreferencesUpdate, _user=Depends(get_current_user_dep)):
+    from app.agent import git_policy
+    try:
+        prefs = git_policy.save(update.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"preferences": prefs, "rules": git_policy.describe(prefs)}
+
 
 @router.get("/tools")
 async def list_tools():

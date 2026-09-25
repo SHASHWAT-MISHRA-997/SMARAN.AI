@@ -75,6 +75,14 @@ One tool per message. You will be given the result and can then continue.
 When the work is complete, reply normally with no tool call, and summarise \
 what you changed and what you verified."""
 
+def _git_rules() -> str:
+    try:
+        from app.agent import git_policy
+        return git_policy.describe()
+    except Exception:  # preferences unreadable: the enforcement still applies
+        return ""
+
+
 PLAN_SYSTEM = """You are SMARAN.AI's coding agent. Before doing anything, say \
 what you intend to do.
 
@@ -187,7 +195,7 @@ async def run(task: str, model: str = "",
         logger.debug("Memory retrieval skipped: %s", exc)
 
     messages: List[Dict] = [
-        {"role": "system", "content": (SYSTEM % toolbox.describe_tools()) + learning_context},
+        {"role": "system", "content": (SYSTEM % toolbox.describe_tools()) + "\n\n" + _git_rules() + learning_context},
     ]
     messages.extend(history or [])
     messages.append({"role": "user", "content": task})
