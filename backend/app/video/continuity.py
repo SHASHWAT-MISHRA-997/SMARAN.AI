@@ -41,7 +41,7 @@ _FFMPEG_TIMEOUT = 600
 # minutes on a 6 GB card is a couple of hundred chunks and many days of
 # compute; the estimate says so and the choice stays with the user. This only
 # stops the planning loop itself from running away.
-_MAX_CHUNKS = 600
+_MAX_CHUNKS = 2500
 
 # Below this, a trailing chunk is not worth a pipeline pass of its own.
 _MIN_TAIL_SECONDS = 0.5
@@ -363,8 +363,27 @@ def _duration_text(seconds: float, chunks: int, bound: str = "at most") -> str:
     else:
         amount = "%.1f hours" % (seconds / 3600.0)
     qualifier = ", at most" if bound == "at most" else ""
-    return ("About %s in total%s - %d clip%s, one after another."
-            % (amount, qualifier, chunks, "" if chunks == 1 else "s"))
+    if chunks == 1:
+        return "About %s%s - one clip." % (amount, qualifier)
+    return "About %s in total%s - %d clips, one after another." % (amount, qualifier, chunks)
+
+
+def _part(work_dir: str, index: int) -> str:
+    return os.path.join(work_dir, "part%04d.mp4" % index)
+
+
+def resume_dir(prompt: str, plan: dict, aspect: str, seed: Optional[int], guidance_scale: float) -> str:
+    """The folder for one request's clips: the same request finds the same folder."""
+    import hashlib
+    import json as _json
+    from app.config import settings
+
+    key = _json.dumps([prompt.strip(), plan["chunk_durations"], plan["width"], plan["height"],
+                       plan["fps"], plan["steps"], aspect, seed, guidance_scale], sort_keys=True)
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:20]
+    path = os.path.join(settings.DATA_DIR, "video-work", digest)
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def generate_sequence(
@@ -375,8 +394,16 @@ def generate_sequence(
     seed: Optional[int] = None,
     guidance_scale: float = 3.0,
     progress: Optional[Callable[[str], None]] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> dict:
-    """Render a chain of continuing clips and join them into one file."""
+    """Render a chain of continuing clips and join them into one file.
+
+    A long chain runs for hours or days, so finished clips are kept on disk
+    (under DATA_DIR/video-work, one folder per request) rather than in a temp
+    folder that vanished with the first failure. Asking again with the same
+    prompt, length, shape and seed carries on from the last finished clip. A
+    stop request is honoured between clips; nothing already rendered is lost.
+    """
     from .ltx_engine import generate
 
     def note(message: str) -> None:
@@ -391,16 +418,32 @@ def generate_sequence(
     if plan["caveat"]:
         note(plan["caveat"])
 
-    work_dir = tempfile.mkdtemp(prefix="smaran-video-")
+    work_dir = resume_dir(prompt, plan, aspect, seed, guidance_scale)
     parts: List[str] = []
     still: Optional[str] = None
+    kept = sum(1 for i in range(plan["chunks"]) if os.path.isfile(_part(work_dir, i)))
+    if kept:
+        note("Carrying on: %d of %d clips were already rendered." % (kept, plan["chunks"]))
+    finished = False
     try:
         for index, length in enumerate(plan["chunk_durations"]):
-            part_path = os.path.join(work_dir, "part%03d.mp4" % index)
+            part_path = _part(work_dir, index)
+            if os.path.isfile(part_path):
+                parts.append(part_path)
+                continue
+            if should_stop and should_stop():
+                raise ContinuityError(
+                    "Stopped after %d of %d clips. They are kept - ask for the same video again "
+                    "to carry on from here." % (len(parts), plan["chunks"]))
+            if parts and still is None:
+                still = last_frame(parts[-1], os.path.join(work_dir, "still%04d.png" % (index - 1)))
             note("Clip %d of %d." % (index + 1, plan["chunks"]))
+            # Rendered under another name and renamed when complete, so a
+            # clip cut off half way is never mistaken for a finished one.
+            partial = part_path + ".partial.mp4"
             generate(
                 prompt=prompt,
-                output_path=part_path,
+                output_path=partial,
                 # Every clip after the first starts from the previous clip's
                 # final frame. That is what makes this a continuation instead
                 # of the same clip repeated, which is what a naive
@@ -420,14 +463,19 @@ def generate_sequence(
                 seed=None if seed is None else int(seed) + index,
                 progress=progress,
             )
+            os.replace(partial, part_path)
             parts.append(part_path)
             if index + 1 < len(plan["chunk_durations"]):
-                still = last_frame(part_path, os.path.join(work_dir, "still%03d.png" % index))
+                still = last_frame(part_path, os.path.join(work_dir, "still%04d.png" % index))
 
         note("Joining %d clips." % len(parts))
         concatenate(parts, output_path)
+        finished = True
     finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        # Kept unless the whole video was made: that is what lets a chain
+        # that failed or was stopped on clip 30 of 35 resume at clip 30.
+        if finished:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     return {
         "path": output_path,

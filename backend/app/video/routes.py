@@ -33,7 +33,10 @@ _jobs_lock = threading.Lock()
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     image_path: Optional[str] = None
-    seconds: float = Field(1.0, gt=0, le=60)
+    # Up to an hour. Past a couple of seconds this is a chain of continuing
+    # clips, and on a small card an hour is weeks of rendering - the plan says
+    # so before anything starts, and the chain can be stopped and resumed.
+    seconds: float = Field(1.0, gt=0, le=3600)
     # Left unset, these are chosen from the machine's own VRAM by
     # planner.suggest(). They were once fixed at 960x576 and 40 steps for
     # everybody, so a 6 GB card was asked for exactly what a 24 GB card was
@@ -250,6 +253,7 @@ def _add_sound_and_size(req: GenerateRequest, out_path: str, result: dict,
 
 
 def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
+    from .continuity import ContinuityError
     from .ltx_engine import VideoError, generate, release
 
     def note(message: str) -> None:
@@ -337,6 +341,7 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
                 seed=req.seed,
                 guidance_scale=req.guidance_scale,
                 progress=note,
+                should_stop=lambda: _jobs.get(job_id, {}).get("stop_requested", False),
             )
         else:
             result = generate(
@@ -362,6 +367,10 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
         # passed through rather than replaced with something generic.
         with _jobs_lock:
             _jobs[job_id].update(status="failed", error=str(exc), updated=time.time())
+    except ContinuityError as exc:
+        stopped = bool(_jobs.get(job_id, {}).get("stop_requested"))
+        with _jobs_lock:
+            _jobs[job_id].update(status="stopped" if stopped else "failed", error=str(exc), updated=time.time())
     except Exception as exc:
         logger.exception("video job %s crashed", job_id)
         with _jobs_lock:
@@ -425,6 +434,20 @@ async def file(job_id: str):
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="That video is not on disk.")
     return FileResponse(path, media_type="video/mp4")
+
+
+@router.post("/job/{job_id}/stop")
+async def stop(job_id: str):
+    """Stop a long video after the clip being rendered now. Finished clips are kept."""
+    with _jobs_lock:
+        record = _jobs.get(job_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="No such job.")
+        if record["status"] != "running":
+            return {"status": record["status"]}
+        record["stop_requested"] = True
+        record["messages"].append("Stopping after the current clip - finished clips are kept.")
+    return {"status": "stopping"}
 
 
 @router.get("/job/{job_id}")

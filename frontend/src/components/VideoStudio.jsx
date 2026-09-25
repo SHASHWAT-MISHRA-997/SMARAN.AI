@@ -24,6 +24,7 @@ import MediaPackages from './MediaPackages';
  * result on a different computer and nothing explains why.
  */
 
+const UNIT_SECONDS = { seconds: 1, minutes: 60, hours: 3600 };
 const POLL_MS = 2000;
 
 const card = 'rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60';
@@ -41,7 +42,14 @@ const VideoStudio = () => {
   // the video packages are installed.
   const [prompt, setPrompt] = useState(() => takeStudioPrompt('videos'));
   const autoStart = useRef(Boolean(prompt));
-  const [seconds, setSeconds] = useState(2);
+  // Length as a number and a unit, up to an hour. Past one pass (a couple of
+  // seconds on a small card) the clip is a chain of continuing clips; the
+  // plan below says how many and how long before anything starts.
+  const [amount, setAmount] = useState(2);
+  const [unit, setUnit] = useState('seconds');
+  const seconds = Math.min(3600, Math.max(1, Number(amount || 0) * UNIT_SECONDS[unit]));
+  const [plan, setPlan] = useState(null);
+  const [accepted, setAccepted] = useState(false);
   const [job, setJob] = useState(null);
   const [error, setError] = useState('');
   const [made, setMade] = useState([]);
@@ -83,7 +91,7 @@ const VideoStudio = () => {
           setMade((all) => [{ id: jobId, prompt }, ...all].slice(0, 12));
           return;
         }
-        if (record.status === 'failed') {
+        if (record.status === 'failed' || record.status === 'stopped') {
           setError(record.error || 'The clip could not be made.');
           return;
         }
@@ -116,6 +124,25 @@ const VideoStudio = () => {
     }
   };
 
+  // What this length will take on this machine, asked before starting.
+  useEffect(() => {
+    if (!install?.installed) return undefined;
+    setAccepted(false);
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await fetchWithAuth(`${API_BASE}/api/video/sequence/plan?seconds=${seconds}`);
+        setPlan(res.ok ? await res.json() : null);
+      } catch { setPlan(null); }
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [seconds, install?.installed]);
+  const longRender = (plan?.estimate_seconds || 0) > 3600;
+
+  const stop = async () => {
+    if (!job?.id) return;
+    await fetchWithAuth(`${API_BASE}/api/video/job/${job.id}/stop`, { method: 'POST' }).catch(() => {});
+  };
+
   const running = job?.status === 'running';
   const done = job?.status === 'completed' ? job : null;
   const ready = install?.installed;
@@ -146,7 +173,7 @@ const VideoStudio = () => {
             <Film className="h-5 w-5 text-indigo-500" /> Video
           </h1>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Short clips rendered on this machine. Nothing is uploaded, and the
+            Videos rendered on this machine, from a few seconds up to an hour. Nothing is uploaded, and the
             weights stay on your disk once fetched.
           </p>
         </div>
@@ -200,19 +227,44 @@ const VideoStudio = () => {
               placeholder="Describe the shot — what moves, and how the camera sees it."
               className={`${field} resize-y`}
             />
-            <label className="block">
-              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-zinc-500">
-                Length · {seconds} second{Number(seconds) === 1 ? '' : 's'}
-              </span>
-              <input type="range" min="1" max="10" step="1" value={seconds}
-                     onChange={(e) => setSeconds(e.target.value)} className="w-full accent-indigo-500" />
-              <span className="mt-1 block text-[11px] text-zinc-400 dark:text-zinc-500">
-                Longer clips take proportionally longer and need more memory.
-              </span>
-            </label>
+            <div className="space-y-2">
+              <span className="block text-[11px] font-bold uppercase tracking-wide text-zinc-500">Length</span>
+              <div className="flex gap-2">
+                <input type="number" min="1" max={unit === 'hours' ? 1 : unit === 'minutes' ? 60 : 3600} step="1" value={amount}
+                       onChange={(e) => setAmount(e.target.value)} aria-label="Length"
+                       className={`${field} w-28`} />
+                <select value={unit} onChange={(e) => { setUnit(e.target.value); setAmount(1); }} aria-label="Unit"
+                        className={`${field} w-36`}>
+                  <option value="seconds">seconds</option>
+                  <option value="minutes">minutes</option>
+                  <option value="hours">hours</option>
+                </select>
+              </div>
+              {Number(amount) * UNIT_SECONDS[unit] > 3600 && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-300">The longest video here is one hour.</p>
+              )}
+              {plan && (
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-[11px] text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300">
+                  {plan.possible ? (
+                    <>
+                      <p className="font-bold">{plan.chunks > 1 ? `${plan.chunks} clips of about ${plan.chunk_seconds} s, joined` : 'One clip'} · {plan.width}×{plan.height} at {plan.fps} fps</p>
+                      <p className="mt-1">On this machine: {plan.estimate_text}</p>
+                      {plan.caveat && <p className="mt-1 text-zinc-500">{plan.caveat}</p>}
+                      {plan.chunks > 1 && <p className="mt-1 text-zinc-500">Finished clips are kept: if you stop it or the app closes, ask for the same video again and it carries on.</p>}
+                    </>
+                  ) : <p className="text-amber-600 dark:text-amber-300">{plan.reason}</p>}
+                </div>
+              )}
+              {longRender && (
+                <label className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300">
+                  <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-0.5" />
+                  I understand this will keep the graphics card busy for {plan.estimate_text.replace(/^About /, 'about ').replace(/ in total.*$/, '')}.
+                </label>
+              )}
+            </div>
             <button
               type="submit"
-              disabled={running || !prompt.trim()}
+              disabled={running || !prompt.trim() || (longRender && !accepted) || plan?.possible === false}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
             >
               {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
@@ -232,6 +284,11 @@ const VideoStudio = () => {
           <div className={`${card} p-4`}>
             <div className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-white">
               <Loader2 className="h-4 w-4 animate-spin text-indigo-500" /> Rendering
+              {job?.id && (
+                <button type="button" onClick={stop} className="ml-auto rounded-lg border border-zinc-300 px-2.5 py-1 text-[11px] font-bold dark:border-zinc-700">
+                  Stop after this clip
+                </button>
+              )}
             </div>
             <ul className="mt-2 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">
               {(job.messages || []).slice(-6).map((line, i) => <li key={i}>{line}</li>)}
