@@ -17,7 +17,6 @@ import GoogleAuthGate, { getSavedGoogleUser, signOutEverywhere } from './compone
 import { couldBePinned, isPhone, isHandheld } from './utils/device';
 import UpdateNotice from './components/UpdateNotice';
 import ExtensionsHub from './components/ExtensionsHub';
-import SitesHub from './components/SitesHub';
 import DesktopPet from './components/DesktopPet';
 import PipCompanion from './components/PipCompanion';
 import NoticeToast from './components/NoticeToast';
@@ -552,7 +551,7 @@ const App = () => {
   // 'scheduled' is absent on a phone or tablet: cron belongs to the machine
   // hosting SMARAN, and the sidebar no longer offers it there. Listed here too
   // so a saved view, or a link, cannot land on a screen with nothing in it.
-  const RENDERABLE_VIEWS = new Set(['chat', 'collections', 'sites', 'plugins', 'design', 'dispatch',
+  const RENDERABLE_VIEWS = new Set(['chat', 'collections', 'plugins', 'design', 'dispatch',
     // Images and video are offered on a phone too: one paired to a computer
     // reaches that computer's engine perfectly well, and a standalone one
     // says so on the screen rather than being refused the destination.
@@ -661,8 +660,7 @@ const App = () => {
               <span aria-hidden="true">←</span> Back
             </button>
             <span className="text-xs uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-              {activeView === 'sites' ? 'Sites'
-                : activeView === 'plugins' ? 'Plugins & Skills'
+              {activeView === 'plugins' ? 'Plugins & Skills'
                 : activeView === 'collections' ? 'Collections'
                 : activeView === 'design' ? 'SMARAN Design'
                 : activeView === 'scheduled' ? 'Scheduled Tasks'
@@ -705,7 +703,6 @@ const App = () => {
         {activeView === 'collections' && (
           <CollectionManager />
         )}
-        {activeView === 'sites' && <SitesHub />}
         {activeView === 'images' && <ImageStudio />}
         {activeView === 'videos' && <VideoStudio />}
         {activeView === 'browser' && <LiveBrowser />}

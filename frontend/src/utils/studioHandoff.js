@@ -10,7 +10,7 @@
 const CREATE = '(?:make|create|build|design|generate|produce|craft|bana(?:o|\\s*do|iye|\\s*ke\\s*do|\\s*dijiye)|taiyar\\s*karo|बनाओ|बना\\s*दो|बनाइए)';
 const KINDS = [
   { view: 'videos', noun: '(?:video|clip|animation|reel|वीडियो)' },
-  { view: 'sites', noun: '(?:website|web\\s*site|webpage|web\\s*page|landing\\s*page|site|वेबसाइट)' },
+  { view: 'design', noun: '(?:website|web\\s*site|webpage|web\\s*page|landing\\s*page|site|वेबसाइट)' },
   { view: 'images', noun: '(?:image|picture|photo|pic|tasveer|tasvir|poster|logo|wallpaper|illustration|artwork|तस्वीर|फोटो|इमेज)' },
 ];
 // Asking about one, or playing one, is not asking for a new one.
@@ -20,7 +20,7 @@ const WAKE = /^\s*(?:(?:hey|hi|ok|okay|hello)\s+)?(?:smaran|amarya|myra|jarvis)\
 /**
  * The studio this sentence asks something of, and the prompt to give it.
  *
- * @returns {{view: 'sites'|'images'|'videos', prompt: string}|null}
+ * @returns {{view: 'design'|'images'|'videos', prompt: string}|null}
  */
 export function detectCreateRequest(utterance) {
   const text = String(utterance || '').replace(WAKE, '').trim();
@@ -35,18 +35,6 @@ export function detectCreateRequest(utterance) {
   return best ? { view: best.view, prompt: text } : null;
 }
 
-/** A short name for a site, from what was asked: "a website for my bakery" -> "My Bakery". */
-export function siteNameFrom(prompt) {
-  const about = String(prompt || '')
-    .replace(new RegExp(`\\b${CREATE}\\b`, 'gi'), ' ')
-    .replace(/\b(?:a|an|the|me|please|for|website|web\s*site|webpage|landing\s*page|site|ek|mere|liye|ke|ki|ka|chahiye)\b/gi, ' ')
-    .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const words = about.split(' ').filter(Boolean).slice(0, 4);
-  if (!words.length) return 'My Website';
-  return words.map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
-}
 
 let pending = null;
 const FRESH_MS = 60000;

@@ -5,12 +5,12 @@ import { test } from 'node:test';
 
 globalThis.window ??= { dispatchEvent: () => {} };
 globalThis.CustomEvent ??= class extends Event { constructor(t, i) { super(t); this.detail = i?.detail; } };
-const { detectCreateRequest, siteNameFrom, handOffToStudio, takeStudioPrompt } = await import('../src/utils/studioHandoff.js');
+const { detectCreateRequest, handOffToStudio, takeStudioPrompt } = await import('../src/utils/studioHandoff.js');
 
 test('each kind goes to its studio', () => {
   for (const [said, view] of [
-    ['make a website for my bakery', 'sites'],
-    ['meri photography ke liye website bana do', 'sites'],
+    ['make a website for my bakery', 'design'],
+    ['meri photography ke liye website bana do', 'design'],
     ['Hey SMARAN, ek sunset ki image banao', 'images'],
     ['design a logo for my coffee shop', 'images'],
     ['generate a picture of a cat astronaut', 'images'],
@@ -34,13 +34,11 @@ test('the wake phrase is not part of the prompt', () => {
 });
 
 test('a site gets a short name from what was asked', () => {
-  assert.equal(siteNameFrom('make a website for my bakery'), 'My Bakery');
-  assert.equal(siteNameFrom('website bana do'), 'My Website');
 });
 
 test('the prompt waits for its studio, once', () => {
   handOffToStudio('images', 'a red fox');
-  assert.equal(takeStudioPrompt('sites'), '');
+  assert.equal(takeStudioPrompt('design'), '');
   assert.equal(takeStudioPrompt('images'), 'a red fox');
   assert.equal(takeStudioPrompt('images'), '');
 });

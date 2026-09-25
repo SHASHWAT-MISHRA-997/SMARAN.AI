@@ -4598,7 +4598,7 @@ const ChatArea = ({
     // studio can be seen, and the job starts there with these words.
     const creation = detectCreateRequest(query);
     if (creation) {
-      const studio = { sites: 'Sites', images: 'Image Studio', videos: 'Video Studio' }[creation.view];
+      const studio = { design: 'SMARAN Design', images: 'Image Studio', videos: 'Video Studio' }[creation.view];
       window.dispatchEvent(new CustomEvent('smaran:pet-state', {
         detail: { state: 'waving', message: `Making it in ${studio}.` },
       }));

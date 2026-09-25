@@ -579,7 +579,6 @@ const Sidebar = ({
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
       <div className={`shrink-0 ${expanded ? 'px-2 pb-2 space-y-0.5' : 'px-2 py-2 flex flex-col items-center gap-1'}`}>
         {expanded ? <>
-          <button onClick={() => onNavigate('sites')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'sites' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Globe2 className="h-4 w-4"/> Sites</button>
           <button onClick={() => onNavigate('design')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'design' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Palette className="h-4 w-4"/> Design</button>
           <button onClick={() => onNavigate('plugins')} className={`nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${activeView === 'plugins' ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-950 dark:text-white' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white'}`}><Blocks className="h-4 w-4"/> Plugins</button>
           <button onClick={() => onNavigate('terminal')} className="nav-neon sheen w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800/70 hover:text-zinc-950 dark:hover:text-white"><Terminal className="h-4 w-4"/> Terminal</button>
@@ -608,7 +607,6 @@ const Sidebar = ({
             </>
           )}
         </> : <>
-          <RailBtn icon={<Globe2 className="h-5 w-5"/>} label="Sites" active={activeView === 'sites'} onClick={() => onNavigate('sites')}/>
           <RailBtn icon={<Blocks className="h-5 w-5"/>} label="Plugins & Skills" active={activeView === 'plugins'} onClick={() => onNavigate('plugins')}/>
           <RailBtn icon={<Terminal className="h-5 w-5"/>} label="Terminal" onClick={() => onNavigate('terminal')}/>
           <RailBtn icon={<ImageIcon className="h-5 w-5"/>} label="Images" onClick={() => onNavigate('images')}/>
@@ -921,7 +919,6 @@ const Sidebar = ({
             explain why they were empty. */}
         {!isNativeApp() && (
         <nav className="px-3 pb-3 space-y-1 border-b border-zinc-200 dark:border-zinc-800">
-          <button onClick={() => { onNavigate('sites'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'sites' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Globe2 className="h-4 w-4"/> Sites</button>
           <button onClick={() => { onNavigate('plugins'); setMobileOpen(false); }} className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-black ${activeView === 'plugins' ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}><Blocks className="h-4 w-4"/> Plugins & Skills</button>
           {/* Design Studio, Terminal and Scheduled were reachable only from
               the desktop rail, which lives in an <aside> carrying

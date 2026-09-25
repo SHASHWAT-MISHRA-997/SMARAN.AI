@@ -443,8 +443,6 @@ async def _warm_speech_recognition() -> None:
 from app.plugin_routes import router as plugin_router
 from app.plugin_system import plugin_manager, PluginConfig
 app.include_router(plugin_router)
-from app.sites_routes import router as sites_router
-app.include_router(sites_router)
 from app.agent.routes import router as agent_router
 app.include_router(agent_router)
 from .coding_sync import router as coding_sync_router
@@ -4756,6 +4754,10 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 route, _, why = entry.partition(': ')
                 if 'HTTP 401' in why or 'HTTP 403' in why:
                     return f'{route} rejected the key (wrong, expired, or lacking access)'
+                if 'HTTP 402' in why:
+                    return f'{route} needs credit - the account has no balance or payment method (add it on the provider\'s billing page)'
+                if 'HTTP 404' in why:
+                    return f'{route} does not offer that model (it may be retired or renamed - pick another)'
                 if 'HTTP 429' in why:
                     return f'{route} is rate-limited right now'
                 if 'HTTP 5' in why:

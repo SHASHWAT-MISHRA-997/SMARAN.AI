@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import GenerationProgress, { htmlProgress } from './GenerationProgress';
+import { takeStudioPrompt } from '../utils/studioHandoff';
 import { Sparkles, Plus, Code2, ArrowUp, FileText, Smartphone, Presentation, LayoutGrid, Film, Monitor, User, Box, Search, Mail, Palette, BookOpen, ChevronDown, X, Check, RefreshCw, ArrowRight } from 'lucide-react';
 
 export const DESIGN_SYSTEMS = [
@@ -302,10 +303,27 @@ async function discoverModels() {
   return models;
 }
 
+const LAST_DESIGN_KEY = 'sm_design_last';
+
+/** The last finished design, so it is still here after leaving the page. */
+function lastDesign() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAST_DESIGN_KEY) || '{}');
+    return { prompt: String(saved.prompt || ''), result: String(saved.result || '') };
+  } catch {
+    return { prompt: '', result: '' };
+  }
+}
+
 // `onNavigate` and `onClose` are still passed by App but no longer read:
 // generating keeps you on this screen instead of sending you to chat.
 export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
-  const [prompt, setPrompt] = useState('');
+  // A request handed over from a voice call ("make a website for my bakery")
+  // starts by itself once the models are known.
+  const handed = useRef(null);
+  if (handed.current === null) handed.current = takeStudioPrompt('design');
+  const [prompt, setPrompt] = useState(() => handed.current || lastDesign().prompt);
+  const autoStart = useRef(Boolean(handed.current));
   const [selectedSystem, setSelectedSystem] = useState(DESIGN_SYSTEMS[0]);
   const [isSystemOpen, setIsSystemOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('sm_selected_model') || '');
@@ -321,8 +339,26 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
      Generating used to build a prompt, hand it to ChatArea and navigate away,
      so the one screen built for designing was the one screen that never showed
      a design. Everything below keeps it in place. */
-  const [result, setResult] = useState('');
+  const [result, setResult] = useState(() => lastDesign().result);
   const [generating, setGenerating] = useState(false);
+
+  // Keep the finished design, so leaving the page does not lose it.
+  useEffect(() => {
+    if (!generating && result) {
+      try { localStorage.setItem(LAST_DESIGN_KEY, JSON.stringify({ prompt, result: result.slice(0, 400000) })); } catch { /* storage full: not worth failing over */ }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generating, result]);
+
+  // A voice request that arrives while this page is already open.
+  useEffect(() => {
+    const arrived = () => {
+      const next = takeStudioPrompt('design');
+      if (next) { setPrompt(next); autoStart.current = true; }
+    };
+    window.addEventListener('smaran:studio-prompt', arrived);
+    return () => window.removeEventListener('smaran:studio-prompt', arrived);
+  }, []);
   const [liveModel, setLiveModel] = useState('');
   const [liveSource, setLiveSource] = useState('');
   const [genError, setGenError] = useState('');
@@ -379,6 +415,15 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
     const bare = /^\s*(?:<!DOCTYPE html|<html[\s>])/i.test(source);
     return bare ? { lang: 'html', code: source } : null;
   };
+
+  // Start a handed-over request once a model to run it is known.
+  useEffect(() => {
+    if (autoStart.current && prompt.trim() && models.length && selectedModel && !generating) {
+      autoStart.current = false;
+      handleCreate();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prompt, models.length, selectedModel]);
 
   const handleCreate = async () => {
     if (!prompt.trim() || abortRef.current) return;
@@ -574,15 +619,12 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
           What should we create?
         </h2>
 
-        {/* Which of the two this is.
-            Sites and Design Studio both turn a brief into a page and both open
-            with a gallery of templates, so on screen they read as the same
-            feature twice - the difference is only what happens afterwards, and
-            nothing said it. This is a scratchpad: the result lives here until
-            you leave. Sites keeps projects, and can refine and publish them. */}
+        {/* Sites was removed: it turned a brief into a page exactly as this
+            does, and two screens for one job read as the same feature twice.
+            What Sites added - keeping the result - is kept here instead. */}
         <p className="-mt-3 mb-6 max-w-xl text-center text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-          A scratchpad for trying a design out — copy the result or preview it, but nothing is kept
-          once you leave. For a page you want to save, refine later and publish, use Sites.
+          Describe a website, app screen, slide deck or document. SMARAN builds it here - preview it, copy it,
+          or download it as an HTML file. Your last design stays here when you come back.
         </p>
 
         {/* Main Floating Prompt Card */}
@@ -622,7 +664,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                 </button>
 
                 {isSystemOpen && (
-                  <div className="absolute top-full mt-1.5 left-0 w-72 bg-white dark:bg-[#1a1b1e] border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 max-h-72 overflow-y-auto">
+                  <div className="absolute top-full mt-1.5 left-0 w-72 bg-white dark:bg-[#1a1b1e] border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 max-h-72 overflow-y-auto overscroll-contain">
                     <div className="px-2 py-1 text-[10px] font-black uppercase text-zinc-400">
                       Select Design System
                     </div>
@@ -696,8 +738,11 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                 </button>
 
                 {isModelOpen && (
-                  <div className="absolute top-full mt-1.5 right-0 w-64 bg-white dark:bg-[#1a1b1e] border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
-                    <div className="px-2 py-1 text-[10px] font-black uppercase text-zinc-400">
+                  <div className="absolute top-full mt-1.5 right-0 w-72 max-h-[min(60vh,440px)] overflow-y-auto overscroll-contain bg-white dark:bg-[#1a1b1e] border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    {/* The list scrolls by itself; the page behind it stays put.
+                        With every provider's models it ran off the screen and
+                        scrolling moved the whole page instead. */}
+                    <div className="sticky -top-1.5 z-10 bg-white px-2 py-1 text-[10px] font-black uppercase text-zinc-400 dark:bg-[#1a1b1e]">
                       Select Generation Model
                     </div>
                     {models.map((m) => (
@@ -789,6 +834,23 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                     className="px-2.5 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 text-[11px] font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
                   >
                     Copy
+                  </button>
+                )}
+                {!!result && !generating && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const code = firstCodeBlock(result)?.code || result;
+                      const url = URL.createObjectURL(new Blob([code], { type: 'text/html' }));
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.download = `${(prompt || 'design').slice(0, 40).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'design'}.html`;
+                      link.click();
+                      setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    }}
+                    className="px-2.5 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 text-[11px] font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                  >
+                    Download .html
                   </button>
                 )}
                 <button
