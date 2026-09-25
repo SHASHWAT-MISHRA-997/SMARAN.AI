@@ -38,7 +38,7 @@ MODES = ("manual", "smart", "off")
 DEFAULTS = {"approval_mode": "smart", "allowlist": [], "redact_secrets": True}
 _lock = threading.Lock()
 
-READ_ONLY = {"list_files", "read_file", "search", "search_memory"}
+READ_ONLY = {"list_files", "read_file", "search", "search_memory", "web_search"}
 FILE_CHANGES = {"write_file", "edit_file"}
 
 #: Files whose change should always be seen by a person, even in smart mode.

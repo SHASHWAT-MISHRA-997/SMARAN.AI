@@ -228,7 +228,8 @@ async def run(task: str, model: str = "",
               root: str = "",
               approve=None,
               mode: Optional[str] = None,
-              run_id: str = "") -> AsyncIterator[Dict]:
+              run_id: str = "",
+              max_steps: int = MAX_STEPS) -> AsyncIterator[Dict]:
     """Carry out a task, reporting each step as it happens.
 
     Yields dicts the caller can show: 'message' when the agent says something,
@@ -289,7 +290,7 @@ async def run(task: str, model: str = "",
     performed: List[str] = []
     repairs = 0
 
-    for step in range(1, MAX_STEPS + 1):
+    for step in range(1, max_steps + 1):
         try:
             reply = await _ask_model(messages, model, provider, api_key)
         except Exception as exc:  # noqa: BLE001 - reported, not swallowed
@@ -412,5 +413,5 @@ async def run(task: str, model: str = "",
     yield {
         "type": "error",
         "message": ("Stopped after %d steps without finishing. The work so far "
-                    "has been done; ask again to carry on." % MAX_STEPS),
+                    "has been done; ask again to carry on." % max_steps),
     }

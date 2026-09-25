@@ -545,6 +545,27 @@ def queue_command(
     return {"queued": True, "pending": len(queue)}
 
 
+def notify_paired_devices(text: str) -> int:
+    """Queue a notice for every paired device; returns how many were reached.
+
+    For work that finishes with nobody watching the desktop - a scheduled job -
+    so the result shows up on the phone the next time it polls.
+    """
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        devices = db.query(PairedDevice).all()
+        for device in devices:
+            queue = _command_queues.setdefault(device.id, [])
+            queue.append({"id": secrets.token_urlsafe(8), "action": "notify",
+                          "params": {"text": text[:500]}, "queued_at": datetime.now().isoformat()})
+            del queue[:-_MAX_QUEUED_COMMANDS]
+        return len(devices)
+    finally:
+        db.close()
+
+
 @router.get("/commands")
 def collect_commands(request: Request, token: str = Query(""), db: Session = Depends(get_db)):
     """Device -> desktop poll. Returns and clears anything waiting.

@@ -14,7 +14,6 @@ import AgentSafetySettings from './AgentSafetySettings';
 import CoworkPreferences from './CoworkPreferences';
 import DesktopGeneralPreferences from './DesktopGeneralPreferences';
 import MemoryPreferences from './MemoryPreferences';
-import SchedulerView from './SchedulerView';
 import GatewayPreferences from './GatewayPreferences';
 import SandboxPreferences from './SandboxPreferences';
 
@@ -640,7 +639,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
      tapped Settings. */
   useEffect(() => {
     if (isMobile && ["updates", "shortcuts", "computer_use", "git"].includes(activeTab)) setActiveTab("general");
-    if (onHandheld && ["scheduler", "gateway", "sandbox"].includes(activeTab)) setActiveTab("general");
+    if (onHandheld && ["gateway", "sandbox"].includes(activeTab)) setActiveTab("general");
   }, [isMobile, onHandheld, activeTab]);
 
   // Hooks MUST stay above the early return below so React's hook count
@@ -674,7 +673,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
     // as a server. A phone or tablet is a client of that machine, so these
     // three opened there and did nothing at all; they are gone rather than
     // disabled, because a dead control is worse than an absent one.
-    ...(onHandheld ? [] : [{ id: "scheduler", label: "Automations (Cron)", category: "Customize", icon: Terminal }]),
     ...(onHandheld ? [] : [{ id: "gateway", label: "Gateway & Bots", category: "Customize", icon: Globe }]),
     ...(onHandheld ? [] : [{ id: "sandbox", label: "Sandbox & Security", category: "Customize", icon: Lock }]),
     { id: "connections", label: "Connectors & Devices", category: "Customize", icon: Wifi },
@@ -795,7 +793,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
             {activeTab === 'cowork' && <CoworkPreferences />}
             {activeTab === 'desktop_general' && <DesktopGeneralPreferences />}
             {activeTab === 'memory' && <MemoryPreferences />}
-            {activeTab === 'scheduler' && !onHandheld && <SchedulerView />}
             {activeTab === 'gateway' && !onHandheld && <GatewayPreferences />}
             {activeTab === 'sandbox' && !onHandheld && <SandboxPreferences />}
             {activeTab === "general" && (

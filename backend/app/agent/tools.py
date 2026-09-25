@@ -207,6 +207,20 @@ def run_command(workspace, command: str) -> str:
             raise ToolError("The command could not start: %s" % exc) from exc
 
 
+def web_search(workspace, query: str) -> str:
+    """Search the live web: titles, addresses and a snippet of each result."""
+    from app.web_search import perform_web_search
+
+    results = perform_web_search(str(query or "").strip()[:300], max_results=6)
+    if not results:
+        return "No results for %r." % query
+    lines = []
+    for i, item in enumerate(results, 1):
+        lines.append("%d. %s\n   %s\n   %s" % (i, item.get("title", "").strip(), item.get("url", ""),
+                                             str(item.get("snippet", "")).strip()[:400]))
+    return _clip("\n".join(lines))
+
+
 def search_memory(workspace, query: str) -> str:
     """Search cross-session persistent agent memory for past solutions, preferences, or notes."""
     try:
@@ -299,6 +313,8 @@ TOOLS: Dict[str, tuple] = {
                          "Run a shell command in the workspace inside sandbox and read output."),
     "git":              (git,              ["subcommand"],
                          "Run a git command, for example: status, add -A, commit -m \"...\", push."),
+    "web_search":       (web_search,       ["query"],
+                         "Search the live web for current information: news, prices, weather, documentation."),
     "search_memory":    (search_memory,    ["query"],
                          "Search cross-session memory for past context, user preferences, or notes."),
     "save_memory":      (save_memory,      ["content"],

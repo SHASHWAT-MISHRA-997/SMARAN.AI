@@ -344,6 +344,26 @@ async def run_scheduled_job_now(job_id: str):
     return JSONResponse(result, status_code=202)
 
 
+@router.get("/scheduler/blueprints")
+async def scheduler_blueprints():
+    """Ready-made jobs to start from. {placeholders} are filled in by the person."""
+    from app.agent.scheduler import BLUEPRINTS
+    return {"blueprints": BLUEPRINTS}
+
+
+class JobToggle(BaseModel):
+    enabled: bool
+
+
+@router.patch("/scheduler/jobs/{job_id}")
+async def toggle_scheduled_job(job_id: str, body: JobToggle):
+    """Pause or resume a job without deleting it."""
+    from app.agent.scheduler import AutomationScheduler
+    if not AutomationScheduler.get_instance().store.toggle_job(job_id, body.enabled):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, "enabled": body.enabled}
+
+
 @router.get("/scheduler/jobs/{job_id}/history")
 async def get_job_history(job_id: str):
     """Fetch execution history for a scheduled task."""

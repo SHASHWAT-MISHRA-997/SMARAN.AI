@@ -48,10 +48,35 @@ class ScheduledJob:
     created_at: float = 0.0
 
 
+_DAYS = {"sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3, "thursday": 4, "friday": 5, "saturday": 6,
+         "sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
+_WEEKLY = re.compile(r"^(?:every\s+)?(weekdays|weekends|[a-z]+?)s?\s+at\s+(\d{1,2}):(\d{2})$")
+
+
+def _weekly_as_cron(expr: str) -> str:
+    """'every monday at 09:00', 'weekdays at 08:30' -> the same schedule as cron.
+
+    Weekly schedules are what a weekly review or a workday reminder needs, and
+    the parser only knew intervals, daily times and raw cron.
+    """
+    match = _WEEKLY.match(expr)
+    if not match:
+        return expr
+    word, hour, minute = match.group(1), int(match.group(2)), int(match.group(3))
+    if hour > 23 or minute > 59:
+        return expr
+    days = {"weekdays": "1-5", "weekends": "0,6"}.get(word)
+    if days is None:
+        if word not in _DAYS:
+            return expr
+        days = str(_DAYS[word])
+    return "%d %d * * %s" % (minute, hour, days)
+
+
 def _parse_schedule_to_next_ts(expr: str, after_ts: Optional[float] = None) -> float:
     """Parses a cron expression or natural language schedule into the next run epoch timestamp."""
     base_dt = datetime.fromtimestamp(time.time() if after_ts is None else after_ts)
-    expr = expr.strip().lower()
+    expr = _weekly_as_cron(expr.strip().lower())
 
     # 1. Natural Language matching
     # every X minutes
@@ -182,6 +207,90 @@ def _cron_match(dt: datetime, parts: List[str]) -> bool:
     return True
 
 
+_NEEDS_WEB = re.compile(
+    r"\b(search|news|headline|latest|today|current|price|weather|stock|score|update|trend|release|web)\b", re.I)
+
+RESEARCH_SYSTEM = (
+    "You write short, accurate briefings for one person. Use ONLY the search results given - never invent "
+    "facts, names, numbers or links. Name the source for each point. If the results do not answer the "
+    "request, say so plainly. Reply with the briefing itself, no preamble."
+)
+
+
+async def research_answer(prompt: str, model: str = "", provider: str = "") -> str:
+    """A job that needs no project: search the web if it asks for anything current, then answer once.
+
+    The coding agent's tool loop was too much for this with a small local model:
+    it searched once and then replied with a stray tag instead of the digest.
+    Searching first and asking for one answer over the results is how the
+    chat's web mode works, and it is reliable at any model size.
+    """
+    from app.agent import models as backends
+
+    context = ""
+    if _NEEDS_WEB.search(prompt):
+        from app.web_search import perform_web_search
+
+        results = await asyncio.to_thread(perform_web_search, prompt[:200], 6)
+        lines = ["%d. %s (%s)\n%s" % (i, r.get("title", "").strip(), r.get("url", ""),
+                                      str(r.get("snippet", "")).strip()[:700])
+                 for i, r in enumerate(results, 1)]
+        context = ("\n\nSearch results, fetched %s:\n" % datetime.now().strftime("%d %B %Y, %H:%M")
+                   + ("\n\n".join(lines) if lines else "(the search returned nothing)"))
+    chosen = model
+    if not provider and not chosen:
+        from app.main import _auto_route_model, _installed_ollama_models
+
+        chosen = _auto_route_model(prompt, _installed_ollama_models())
+        if not chosen:
+            raise RuntimeError("No local model is installed and no cloud model was chosen for this job.")
+    messages = [{"role": "system", "content": RESEARCH_SYSTEM},
+                {"role": "user", "content": "Today is %s.\n\n%s%s" % (datetime.now().strftime("%A %d %B %Y"),
+                                                                      prompt, context)}]
+    return (await backends.complete(messages, chosen, provider)).strip()
+
+
+def _job_folder(job_id: str) -> str:
+    from app.config import settings
+
+    safe = re.sub(r"[^A-Za-z0-9_-]", "", job_id)[:40] or "job"
+    path = os.path.join(settings.DATA_DIR, "automations", safe)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+#: Ready-made jobs. The prompt is what the agent is asked each time; it has
+#: web search, so briefings and watches work without a project folder.
+BLUEPRINTS = [
+    {"id": "morning-briefing", "name": "Morning briefing", "schedule": "daily at 08:00", "channel": "phone",
+     "prompt": "Give me a short morning briefing for today: the date, the weather where I live ({city}), "
+               "and the three most important news headlines in India with one line each. Use web_search. "
+               "Keep it under 120 words."},
+    {"id": "topic-news", "name": "Topic news digest", "schedule": "daily at 19:00", "channel": "phone",
+     "prompt": "Search the web for today's most important news about {topic}. Give five bullet points, each "
+               "with the source name. Skip anything older than two days."},
+    {"id": "weekly-review", "name": "Weekly review", "schedule": "every friday at 18:00", "channel": "ui",
+     "prompt": "Give me a short weekly review to fill in: three prompts for wins, three for what did not go "
+               "well, three for next week's priorities, and one reflective question."},
+    {"id": "workday-start", "name": "Workday start reminder", "schedule": "weekdays at 09:00", "channel": "phone",
+     "prompt": "Remind me to start the workday: suggest planning the top three tasks, and give one short "
+               "productivity tip. Under 60 words."},
+    {"id": "price-watch", "name": "Price & availability watch", "schedule": "every 6 hours", "channel": "phone",
+     "prompt": "Search the web for the current price and availability of {product}. Report the lowest price "
+               "you find with the shop name. Say clearly if you could not find a reliable price."},
+    {"id": "competitor-watch", "name": "Competitor news watch", "schedule": "daily at 10:00", "channel": "ui",
+     "prompt": "Search the web for news from the last day about {company}. Summarise anything new in up to "
+               "five bullets with sources, or say there was nothing new."},
+    {"id": "learning-drip", "name": "Daily learning drip", "schedule": "daily at 20:00", "channel": "phone",
+     "prompt": "Teach me one small, practical thing about {subject} in under 100 words, with a tiny example."},
+    {"id": "hydration", "name": "Hydration & movement nudge", "schedule": "every 2 hours", "channel": "phone",
+     "prompt": "Give a one-line friendly reminder to drink water and stretch for a minute."},
+    {"id": "repo-health", "name": "Project health check", "schedule": "daily at 09:30", "channel": "ui",
+     "prompt": "In this project folder, run the test suite and git status. Report failing tests and uncommitted "
+               "changes in a few lines. Do not change any files."},
+]
+
+
 class SchedulerStore:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or _DEFAULT_DB_PATH
@@ -233,7 +342,7 @@ class SchedulerStore:
         now = time.time()
         if not name.strip() or not task_prompt.strip():
             raise ValueError("Name and task instruction are required")
-        if target_channel not in {"ui", "telegram", "discord", "webhook"}:
+        if target_channel not in {"ui", "phone", "telegram", "discord", "webhook"}:
             raise ValueError("Unsupported delivery channel")
         job_id = f"job_{uuid.uuid4().hex[:10]}"
         next_run = _parse_schedule_to_next_ts(schedule_expr, now)
@@ -332,6 +441,13 @@ class SchedulerStore:
     def toggle_job(self, job_id: str, enabled: bool) -> bool:
         with self._get_conn() as conn:
             cur = conn.execute("UPDATE jobs SET enabled = ? WHERE id = ?", (1 if enabled else 0, job_id))
+            if enabled and cur.rowcount:
+                # A job paused for days has a next run in the past; resuming it
+                # must not fire it at once, but at its next scheduled time.
+                row = conn.execute("SELECT schedule_expr FROM jobs WHERE id = ?", (job_id,)).fetchone()
+                if row:
+                    conn.execute("UPDATE jobs SET next_run_ts = ? WHERE id = ?",
+                                 (_parse_schedule_to_next_ts(row[0]), job_id))
             conn.commit()
             return cur.rowcount > 0
 
@@ -455,17 +571,30 @@ class AutomationScheduler:
         try:
             from app.agent import loop as agent_loop
 
-            async for event in agent_loop.run(
-                task=job.task_prompt,
-                model=job.model,
-                provider=job.provider,
-                root=job.workspace_root
-            ):
-                if event.get("type") == "message":
-                    output_messages.append(event.get("text", ""))
-                elif event.get("type") == "error":
-                    status = "error"
-                    output_messages.append(f"Error: {event.get('message')}")
+            if not job.workspace_root:
+                # No project: a briefing, a digest, a reminder. Searched and
+                # answered in one pass - see research_answer. (It used to run
+                # the coding agent, which needed a folder and got lost.)
+                output_messages.append(await research_answer(job.task_prompt, job.model, job.provider))
+            else:
+                # Work on a project. Nobody is watching, so nothing can be
+                # approved: smart mode with no approver runs reading, searching,
+                # edits (checkpointed) and known-safe commands, and declines
+                # anything that needs a person. It used to run every command
+                # unchecked. The step cap keeps a confused model from looping.
+                async for event in agent_loop.run(
+                    task=job.task_prompt,
+                    model=job.model,
+                    provider=job.provider,
+                    root=job.workspace_root,
+                    mode="smart",
+                    max_steps=15,
+                ):
+                    if event.get("type") == "message":
+                        output_messages.append(event.get("text", ""))
+                    elif event.get("type") == "error":
+                        status = "error"
+                        output_messages.append(f"Error: {event.get('message')}")
 
             final_output = "\n".join(output_messages).strip() or "Task completed with no text output."
         except Exception as exc:
@@ -481,6 +610,12 @@ class AutomationScheduler:
         # Route result to gateway or webhook if configured
         if job.target_channel in ("telegram", "discord", "webhook"):
             await self._dispatch_to_channel(job, final_output)
+        elif job.target_channel == "phone":
+            try:
+                from app.companion import notify_paired_devices
+                notify_paired_devices("%s: %s" % (job.name, final_output))
+            except Exception as exc:  # noqa: BLE001 - delivery must not fail the job
+                logger.warning("Could not notify the phone for job %s: %s", job.id, exc)
 
         return {
             "status": status,
