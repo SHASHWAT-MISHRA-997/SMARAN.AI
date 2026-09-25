@@ -7,15 +7,12 @@ import { isNativeApp, loadLink } from '../utils/hostLink';
 const noBackend = () => isNativeApp() && !loadLink()?.url;
 
 const MemoryPreferences = () => {
-  const [searchAndReference, setSearchAndReference] = useState(
-    () => localStorage.getItem('sm_mem_search_reference') === 'true'
-  );
-  const [generateMemory, setGenerateMemory] = useState(
-    () => localStorage.getItem('sm_mem_generate') !== 'false'
-  );
-  const [sensitiveTopics, setSensitiveTopics] = useState(
-    () => localStorage.getItem('sm_mem_sensitive') === 'true'
-  );
+  // Enforced by the chat backend (app/memory_prefs.py). They used to be
+  // written to the browser only, where nothing read them.
+  const [searchAndReference, setSearchAndReference] = useState(true);
+  const [generateMemory, setGenerateMemory] = useState(true);
+  const [sensitiveTopics, setSensitiveTopics] = useState(false);
+  const [prefsError, setPrefsError] = useState('');
 
   const [facts, setFacts] = useState([]);
   const [newFact, setNewFact] = useState('');
@@ -64,20 +61,37 @@ const MemoryPreferences = () => {
     loadFacts();
   }, []);
 
-  const handleToggleSearchRef = (v) => {
-    setSearchAndReference(v);
-    localStorage.setItem('sm_mem_search_reference', String(v));
+  useEffect(() => {
+    if (noBackend()) return;
+    fetchWithAuth(`${API_BASE}/api/memory/preferences`).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!d?.preferences) return;
+      setSearchAndReference(d.preferences.search_chats);
+      setGenerateMemory(d.preferences.generate);
+      setSensitiveTopics(d.preferences.sensitive);
+    }).catch(() => {});
+  }, []);
+
+  const savePrefs = async (update) => {
+    setPrefsError('');
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/memory/preferences`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(update),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      setSearchAndReference(data.preferences.search_chats);
+      setGenerateMemory(data.preferences.generate);
+      setSensitiveTopics(data.preferences.sensitive);
+    } catch (e) {
+      setPrefsError(`Not saved: ${e.message}`);
+    }
   };
 
-  const handleToggleGenerate = (v) => {
-    setGenerateMemory(v);
-    localStorage.setItem('sm_mem_generate', String(v));
-  };
-
-  const handleToggleSensitive = (v) => {
-    setSensitiveTopics(v);
-    localStorage.setItem('sm_mem_sensitive', String(v));
-  };
+  const handleToggleSearchRef = (v) => { setSearchAndReference(v); savePrefs({ search_chats: v }); };
+  const handleToggleGenerate = (v) => { setGenerateMemory(v); savePrefs({ generate: v }); };
+  const handleToggleSensitive = (v) => { setSensitiveTopics(v); savePrefs({ sensitive: v }); };
 
   const handleAddFact = async (e) => {
     e?.preventDefault();
@@ -284,6 +298,8 @@ const MemoryPreferences = () => {
       </div>
 
       <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
+
+      {prefsError && <p className="text-xs text-rose-500">{prefsError}</p>}
 
       {/* 3. Include sensitive topics in memory */}
       <div className="flex items-start justify-between gap-4 py-2">

@@ -45,6 +45,7 @@ import { detectClientDevice, isDesktopApp } from './RightPanel';
 import { Maya3DCanvas } from './CodePreviewVisualizer';
 import AgentSteps from './AgentSteps';
 import { applyAgentEvent, summarize } from '../utils/agentEvents.js';
+import { chosenVoice, continuousDictation, openMicrophone } from '../utils/voiceSettings.js';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
@@ -1812,7 +1813,11 @@ const ChatArea = ({
           const exactLocale = pool.filter((v) => v.lang.toLowerCase() === targetLang.toLowerCase());
           const preferred = exactLocale.length ? exactLocale : pool;
           const natural = preferred.find((v) => /natural|neural|online|google/i.test(v.name));
-          const matching = natural || preferred[0];
+          // The voice picked in Settings -> Voice, when it speaks this reply's
+          // language; otherwise the automatic choice above.
+          const picked = chosenVoice(voices);
+          const pickedFits = picked && picked.lang.toLowerCase().slice(0, 2) === targetLang.toLowerCase().slice(0, 2);
+          const matching = (pickedFits ? picked : null) || natural || preferred[0];
           if (matching) utterance.voice = matching;
         }
 
@@ -2240,6 +2245,15 @@ const ChatArea = ({
     setVoiceAiResponse('');
   };
 
+  // The Start/End Voice Call keyboard shortcut (App -> utils/shortcuts).
+  const voiceToggleRef = useRef(null);
+  voiceToggleRef.current = () => (isVoiceModeOpenRef.current ? closeVoiceMode() : openVoiceMode());
+  useEffect(() => {
+    const toggle = () => voiceToggleRef.current?.();
+    window.addEventListener('smaran:toggle-voice', toggle);
+    return () => window.removeEventListener('smaran:toggle-voice', toggle);
+  }, []);
+
   // The Android shell asks the page before finishing the Activity. Register
   // the voice surface as a topmost layer so Back closes it predictably.
   // One history entry survives tools -> Speak transitions. Separate hooks let
@@ -2280,7 +2294,7 @@ const ChatArea = ({
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await openMicrophone();
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
         const recorder = new MediaRecorder(stream, { mimeType });
         const startingText = inputValueRef.current.trim();
@@ -2432,7 +2446,8 @@ const ChatArea = ({
       }
       const recognition = new Recognition();
       recognition.lang = getRecognitionLang(selectedLanguage);
-      recognition.continuous = true;
+      // Settings -> Voice: keep listening through pauses, or stop at the first one.
+      recognition.continuous = continuousDictation();
       recognition.interimResults = true;
       const startingText = inputValueRef.current.trim();
       recognition.onresult = (event) => {

@@ -1,3 +1,4 @@
+import { openMicrophone } from './voiceSettings.js';
 /**
  * "Hey Jarvis" on the computer: the microphone, streamed to the local backend.
  *
@@ -55,9 +56,7 @@ export function startPcWake({ apiBase = '', onWake, onError } = {}) {
 
   (async () => {
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      stream = await openMicrophone({ channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true });
       if (stopped) { stream.getTracks().forEach((t) => t.stop()); return; }
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       context = new AudioCtx({ sampleRate: 16000 });

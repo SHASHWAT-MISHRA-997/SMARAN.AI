@@ -1,3 +1,4 @@
+import { openMicrophone } from './voiceSettings.js';
 /**
  * Always-listening wake phrase.
  *
@@ -268,7 +269,7 @@ export class WakeWordListener {
     this.recognition = null;
 
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.stream = await openMicrophone();
     } catch (err) {
       this.localRunning = false;
       this.running = false;

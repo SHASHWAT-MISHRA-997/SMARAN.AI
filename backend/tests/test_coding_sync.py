@@ -224,7 +224,7 @@ async def test_computer_use_policy_enforcement():
     blocked_res = await DesktopAgent.execute("open_website", {"name": "google", "computer_use_enabled": False})
     assert blocked_res["success"] is False
     assert blocked_res.get("blocked") is True
-    assert "disabled in settings" in blocked_res["error"]
+    assert "switched off" in blocked_res["error"]
 
     # 2. Destructive action blocked by allow_destructive policy
     destructive_res = await DesktopAgent.execute("empty_recycle_bin", {"allow_destructive": "block"}, confirmed=True)
@@ -286,7 +286,9 @@ def test_memory_crud_and_search_and_export(sync_db):
     assert all(m["id"] != mem_id for m in res_search_after.json())
 
 
-def test_cowork_desktop_settings_and_memory_import(sync_db):
+def test_cowork_desktop_settings_and_memory_import(sync_db, tmp_path, monkeypatch):
+    from app.config import settings as app_settings
+    monkeypatch.setattr(app_settings, "DATA_DIR", str(tmp_path))
     client = TestClient(app)
     headers = {"Authorization": "Bearer token_user_1"}
 
@@ -311,9 +313,12 @@ def test_cowork_desktop_settings_and_memory_import(sync_db):
     assert res_cowork_get.status_code == 200
     assert "dispatch_enabled" in res_cowork_get.json()
 
-    res_cowork_put = client.put("/api/cowork/settings", json={"dispatch_enabled": False, "preferred_browser": "builtin"}, headers=headers)
+    res_cowork_put = client.put("/api/cowork/settings", json={"dispatch_enabled": False, "preferred_browser": "edge"}, headers=headers)
     assert res_cowork_put.status_code == 200
-    assert res_cowork_put.json()["settings"]["dispatch_enabled"] is False
+    assert res_cowork_put.json()["dispatch_enabled"] is False
+    assert res_cowork_put.json()["preferred_browser"] == "edge"
+    # An unknown browser is refused rather than stored.
+    assert client.put("/api/cowork/settings", json={"preferred_browser": "builtin"}, headers=headers).status_code == 400
 
     # 4. Desktop settings
     res_desktop_get = client.get("/api/desktop/settings", headers=headers)

@@ -33,6 +33,7 @@ import AvatarMMD, { MMD_CHARACTERS } from './AvatarMMD';
 import CyberStage from './CyberStage';
 import { classifyTranscriptionFailure, pollFinalTranscript, silenceWindowMs, voiceOutcomeKind } from '../utils/voiceStatus';
 import { captionScrollTop, captionSplit } from '../utils/spokenProgress';
+import { openMicrophone } from '../utils/voiceSettings.js';
 
 /* Prebuilt Gemini Live voices, grouped so a user can simply pick male or
    female. The service decides the exact timbre; these are its own voices. */
@@ -1352,9 +1353,7 @@ export const HackerVoiceAssistant = ({ isOpen, onClose, onSendQuery, isSpeakingA
           try { audioContextRef.current.close(); } catch  {}
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
+        const stream = await openMicrophone({ echoCancellation: true, noiseSuppression: true, autoGainControl: true });
 
         if (!isMounted) {
           stream.getTracks().forEach((t) => t.stop());

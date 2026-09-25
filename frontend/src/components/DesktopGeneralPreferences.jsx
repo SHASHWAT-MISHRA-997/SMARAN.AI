@@ -1,176 +1,123 @@
 import React, { useEffect, useState } from 'react';
-import { Laptop, Check, X } from 'lucide-react';
+import { Laptop, Check } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
+import { comboFromEvent } from '../utils/shortcuts';
+
+/**
+ * Settings -> General (Desktop). Every switch is applied by the backend
+ * (app/desktop_prefs.py) and this shows what is actually in effect. It used
+ * to save a file nothing read - and showed a made-up version when offline.
+ */
+
+function Toggle({ on, disabled, onChange, label }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled}
+            onClick={() => onChange(!on)}
+            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'} disabled:cursor-not-allowed disabled:opacity-40`}>
+      <span className={`absolute top-1 block h-4 w-4 rounded-full bg-white transition-transform ${on ? 'left-6' : 'left-1'}`} />
+    </button>
+  );
+}
+
+function Row({ title, children, note, control }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-t border-zinc-200 py-4 dark:border-zinc-800/80">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold">{title}</p>
+        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{children}</p>
+        {note && <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-300">{note}</p>}
+      </div>
+      {control}
+    </div>
+  );
+}
 
 const DesktopGeneralPreferences = () => {
-  const [settings, setSettings] = useState({
-    version: '1.49585.0',
-    run_on_startup: false,
-    quick_entry_shortcut: 'Ctrl+Alt+Space',
-    system_tray: true,
-    keep_awake: false,
-  });
-  const [savedNotice, setSavedNotice] = useState(false);
-
-  const fetchSettings = async () => {
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/desktop/settings`);
-      if (res.ok) {
-        const data = await res.json();
-        setSettings((prev) => ({ ...prev, ...data }));
-      }
-    } catch {
-      // Offline fallback
-    }
-  };
+  const [s, setS] = useState(null);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [recording, setRecording] = useState(false);
 
   useEffect(() => {
-    fetchSettings();
+    fetchWithAuth(`${API_BASE}/api/desktop/settings`)
+      .then((r) => r.json().then((d) => (r.ok ? d : Promise.reject(new Error(d.detail || `HTTP ${r.status}`)))))
+      .then(setS)
+      .catch((e) => setError(`Could not load: ${e.message}`));
   }, []);
 
-  const updateSetting = async (key, value) => {
-    const updated = { ...settings, [key]: value };
-    setSettings(updated);
+  const update = async (change) => {
+    setError('');
     try {
-      await fetchWithAuth(`${API_BASE}/api/desktop/settings`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/desktop/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
+        body: JSON.stringify(change),
       });
-      setSavedNotice(true);
-      setTimeout(() => setSavedNotice(false), 2000);
-    } catch {
-      // Offline fallback
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      setS(data);
+      if (data.errors?.length) setError(data.errors.join(' '));
+      else { setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    } catch (e) {
+      setError(`Not saved: ${e.message}`);
     }
   };
 
+  if (!s) return <div className="text-sm text-zinc-500">{error || 'Loading…'}</div>;
+  const sup = s.supports || {};
+  const onlyInstalled = 'Works in the installed SMARAN.AI app.';
+
   return (
-    <div className="space-y-6 text-zinc-900 dark:text-zinc-100 max-w-2xl">
-      <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+    <div className="max-w-2xl space-y-2 text-zinc-900 dark:text-zinc-100">
+      <div className="flex items-center justify-between pb-2">
         <div>
-          <h3 className="text-lg font-black flex items-center gap-2">
-            <Laptop className="w-5 h-5 text-indigo-500" /> General desktop settings
-          </h3>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Startup, system tray, keyboard shortcut, and local browser automation preferences.
-          </p>
+          <h3 className="flex items-center gap-2 text-lg font-black"><Laptop className="h-5 w-5 text-indigo-500" /> General desktop settings</h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Starting with the computer, the Quick Entry shortcut, and staying awake for scheduled jobs.</p>
         </div>
-        {savedNotice && (
-          <span className="text-xs font-bold text-emerald-500 flex items-center gap-1 animate-fadeIn">
-            <Check className="w-4 h-4" /> Saved
-          </span>
-        )}
+        {saved && <span className="flex items-center gap-1 text-xs font-bold text-emerald-500"><Check className="h-4 w-4" /> Saved</span>}
       </div>
 
-      {/* Desktop app version */}
-      <div className="flex items-center justify-between py-2">
+      <div className="flex items-center justify-between border-t border-zinc-200 py-3 dark:border-zinc-800/80">
         <span className="text-sm font-bold">Desktop app version</span>
-        <span className="font-mono text-sm text-zinc-400">{settings.version || '1.49585.0'}</span>
+        <span className="font-mono text-sm text-zinc-400">{s.version}</span>
       </div>
 
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
+      <Row title="Run on startup" note={!sup.run_on_startup ? onlyInstalled : (s.run_on_startup && !s.startup_registered ? 'Saved, but the startup entry is missing - switch it off and on again.' : '')}
+           control={<Toggle label="Run on startup" on={Boolean(s.run_on_startup)} disabled={!sup.run_on_startup} onChange={(v) => update({ run_on_startup: v })} />}>
+        Start SMARAN automatically when you sign in to this computer.
+      </Row>
 
-      {/* Run on startup */}
-      <div className="flex items-start justify-between gap-4 py-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Run on startup</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Automatically start SMARAN when you log in to your computer.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => updateSetting('run_on_startup', !settings.run_on_startup)}
-          className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
-            settings.run_on_startup ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-          }`}
-          aria-label="Toggle Run on startup"
-        >
-          <span
-            className={`block w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
-              settings.run_on_startup ? 'left-6' : 'left-1'
-            }`}
-          />
-        </button>
-      </div>
+      <Row title="Quick Entry keyboard shortcut"
+           note={!sup.quick_entry ? (s.platform === 'win32' ? onlyInstalled : 'Available on Windows.') : s.quick_entry_error}
+           control={(
+             <input
+               readOnly
+               disabled={!sup.quick_entry && s.platform !== 'win32'}
+               value={recording ? 'Press the keys…' : (s.quick_entry_shortcut || 'Off')}
+               onFocus={() => setRecording(true)}
+               onBlur={() => setRecording(false)}
+               onKeyDown={(e) => {
+                 if (e.key === 'Tab') return;
+                 e.preventDefault();
+                 if (e.key === 'Escape') { e.currentTarget.blur(); return; }
+                 if (e.key === 'Backspace' || e.key === 'Delete') { update({ quick_entry_shortcut: '' }); e.currentTarget.blur(); return; }
+                 const combo = comboFromEvent(e);
+                 if (combo) { update({ quick_entry_shortcut: combo.replace(/ \+ /g, '+') }); e.currentTarget.blur(); }
+               }}
+               className="w-44 rounded-xl border border-zinc-300 bg-zinc-100 px-3 py-1.5 text-center font-mono text-xs font-bold dark:border-zinc-700 dark:bg-zinc-900"
+               title="Click, then press the new combination. Backspace turns it off."
+             />
+           )}>
+        Brings SMARAN to the front from any app. Click the box and press a new combination; Backspace turns it off.
+      </Row>
 
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
+      <Row title="Keep computer awake" note={!sup.keep_awake ? 'Available on Windows.' : ''}
+           control={<Toggle label="Keep computer awake" on={Boolean(s.keep_awake)} disabled={!sup.keep_awake} onChange={(v) => update({ keep_awake: v })} />}>
+        Stop this computer idle-sleeping while SMARAN is open, so scheduled jobs run on time. The screen can still turn off,
+        and closing a laptop lid still puts it to sleep.
+      </Row>
 
-      {/* Quick Entry keyboard shortcut */}
-      <div className="flex items-start justify-between gap-4 py-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Quick Entry keyboard shortcut</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Quickly open SMARAN from anywhere.
-          </p>
-        </div>
-        <div className="relative">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900 font-mono text-xs font-bold text-zinc-800 dark:text-zinc-200">
-            <span>{settings.quick_entry_shortcut || 'Ctrl+Alt+Space'}</span>
-            <button
-              type="button"
-              onClick={() => updateSetting('quick_entry_shortcut', 'Ctrl+Alt+Space')}
-              className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
-
-      {/* System tray */}
-      <div className="flex items-start justify-between gap-4 py-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">System tray</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Keep SMARAN running in the system tray.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => updateSetting('system_tray', !settings.system_tray)}
-          className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
-            settings.system_tray ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-          }`}
-          aria-label="Toggle System tray"
-        >
-          <span
-            className={`block w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
-              settings.system_tray ? 'left-6' : 'left-1'
-            }`}
-          />
-        </button>
-      </div>
-
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
-
-      {/* Keep computer awake */}
-      <div className="flex items-start justify-between gap-4 py-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Keep computer awake</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Prevent your computer from idle-sleeping while SMARAN is open so scheduled tasks can run. Your display can still turn off. Closing the laptop lid will still put it to sleep.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => updateSetting('keep_awake', !settings.keep_awake)}
-          className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
-            settings.keep_awake ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-          }`}
-          aria-label="Toggle Keep computer awake"
-        >
-          <span
-            className={`block w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
-              settings.keep_awake ? 'left-6' : 'left-1'
-            }`}
-          />
-        </button>
-      </div>
-
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
+      {error && <p className="text-xs text-rose-500">{error}</p>}
     </div>
   );
 };

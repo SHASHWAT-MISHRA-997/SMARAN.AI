@@ -1,24 +1,9 @@
 import React, { useState } from 'react';
-
-const DEFAULT_SHORTCUTS = [
-  { id: 'new_chat', name: 'New Conversation', keys: 'Ctrl + Alt + N', scope: 'In-App', description: 'Start a fresh chat session.' },
-  { id: 'open_settings', name: 'Open Settings', keys: 'Ctrl + Alt + S', scope: 'In-App', description: 'Open the settings and preferences panel.' },
-  { id: 'toggle_panel', name: 'Toggle Right Panel', keys: 'Ctrl + Alt + P', scope: 'In-App', description: 'Show or hide the right telemetry and companion panel.' },
-  { id: 'toggle_terminal', name: 'Open Terminal', keys: 'Ctrl + `', scope: 'In-App', description: 'Toggle the integrated terminal workspace.' },
-  { id: 'voice_speak', name: 'Start/End Voice Call', keys: 'Ctrl + Alt + V', scope: 'In-App', description: 'Open hands-free Speak voice session.' },
-  { id: 'stop_control', name: 'Stop Desktop Agent', keys: 'Ctrl + Alt + X', scope: 'In-App', description: 'Immediately halt active computer control sessions.' },
-  { id: 'mute_audio', name: 'Toggle Mute', keys: 'Ctrl + Alt + M', scope: 'System', description: 'Mute or unmute host system audio.' },
-];
+import { comboFromEvent, DEFAULT_SHORTCUTS, loadShortcuts, parseCombo, saveShortcuts } from '../utils/shortcuts';
 
 export default function ShortcutsPreferences() {
   const [search, setSearch] = useState('');
-  const [shortcuts, setShortcuts] = useState(() => {
-    const saved = localStorage.getItem('sm_shortcuts');
-    if (saved) {
-      try { return JSON.parse(saved); } catch {}
-    }
-    return DEFAULT_SHORTCUTS;
-  });
+  const [shortcuts, setShortcuts] = useState(() => loadShortcuts());
   const [editingId, setEditingId] = useState(null);
   const [editKeys, setEditKeys] = useState('');
   const [conflictNotice, setConflictNotice] = useState('');
@@ -36,21 +21,26 @@ export default function ShortcutsPreferences() {
   };
 
   const saveEdit = (id) => {
-    const conflict = shortcuts.find(s => s.id !== id && s.keys.toLowerCase() === editKeys.toLowerCase().trim());
+    const keys = editKeys.trim();
+    if (!parseCombo(keys).key) {
+      setConflictNotice('Press a key together with Ctrl, Alt or Meta.');
+      return;
+    }
+    const conflict = shortcuts.find(s => s.id !== id && s.keys.toLowerCase() === keys.toLowerCase());
     if (conflict) {
       setConflictNotice(`Conflict detected with "${conflict.name}" (${conflict.keys}).`);
       return;
     }
-    const updated = shortcuts.map(s => s.id === id ? { ...s, keys: editKeys.trim() } : s);
+    const updated = shortcuts.map(s => s.id === id ? { ...s, keys } : s);
     setShortcuts(updated);
-    localStorage.setItem('sm_shortcuts', JSON.stringify(updated));
+    saveShortcuts(updated);            // the app applies it at once
     setEditingId(null);
     setConflictNotice('');
   };
 
   const resetDefaults = () => {
     setShortcuts(DEFAULT_SHORTCUTS);
-    localStorage.removeItem('sm_shortcuts');
+    saveShortcuts(DEFAULT_SHORTCUTS);
     setEditingId(null);
     setConflictNotice('Reset to factory default shortcuts.');
   };
@@ -107,10 +97,21 @@ export default function ShortcutsPreferences() {
                   <div className="flex items-center gap-1.5">
                     <input
                       type="text"
+                      readOnly
+                      autoFocus
                       value={editKeys}
-                      onChange={e => setEditKeys(e.target.value)}
-                      className="w-32 rounded-lg border border-indigo-500 bg-sunken px-2 py-1 text-xs font-mono text-ink text-center outline-none"
-                      placeholder="e.g. Ctrl + Shift + K"
+                      onKeyDown={(e) => {
+                        // Record the combination as it is pressed.
+                        if (e.key === 'Tab') return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (e.key === 'Escape') { setEditingId(null); return; }
+                        if (e.key === 'Enter') { saveEdit(sc.id); return; }
+                        const combo = comboFromEvent(e);
+                        if (combo) setEditKeys(combo);
+                      }}
+                      className="w-40 rounded-lg border border-indigo-500 bg-sunken px-2 py-1 text-xs font-mono text-ink text-center outline-none"
+                      placeholder="Press the keys…"
                     />
                     <button
                       type="button"

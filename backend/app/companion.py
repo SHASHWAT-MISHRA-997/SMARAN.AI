@@ -462,6 +462,7 @@ def dispatch_to_device(
     current_user: User = Depends(get_current_user_dep),
 ):
     """Dispatch action/prompt to one or all paired companion devices."""
+    _require_dispatch()
     target_id = payload.device_id
     action = payload.action
     params = payload.data or {}
@@ -523,6 +524,7 @@ def queue_command(
     current_user: User = Depends(get_current_user_dep),
 ):
     """Desktop -> device. The command waits until the device next polls."""
+    _require_dispatch()
     if command.action not in ALLOWED_REMOTE_ACTIONS:
         raise HTTPException(status_code=400, detail=f"'{command.action}' is not a permitted remote action.")
 
@@ -545,14 +547,24 @@ def queue_command(
     return {"queued": True, "pending": len(queue)}
 
 
+def _require_dispatch() -> None:
+    """Settings -> Cowork -> Dispatch off: no work passes between phone and desktop."""
+    from app import cowork_prefs
+    if not cowork_prefs.dispatch_enabled():
+        raise HTTPException(status_code=403, detail="Dispatch is switched off in Settings -> Cowork on the computer.")
+
+
 def notify_paired_devices(text: str) -> int:
     """Queue a notice for every paired device; returns how many were reached.
 
     For work that finishes with nobody watching the desktop - a scheduled job -
     so the result shows up on the phone the next time it polls.
     """
+    from app import cowork_prefs
     from app.database import SessionLocal
 
+    if not cowork_prefs.dispatch_enabled():
+        return 0
     db = SessionLocal()
     try:
         devices = db.query(PairedDevice).all()
@@ -592,6 +604,7 @@ class DeviceRequest(BaseModel):
 async def command_from_device(payload: DeviceRequest, db: Session = Depends(get_db)):
     """Device -> desktop. Runs a vetted action on this machine right away."""
     _device_from_token(db, payload.token)
+    _require_dispatch()
     if payload.action not in ALLOWED_REMOTE_ACTIONS:
         raise HTTPException(status_code=400, detail=f"'{payload.action}' is not a permitted remote action.")
 

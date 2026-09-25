@@ -359,6 +359,11 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
             )
 
         result = _add_sound_and_size(req, out_path, result, note)
+        from app import cowork_prefs
+        final = result.get("path", out_path) if isinstance(result, dict) else out_path
+        kept = cowork_prefs.keep_artifact(final, "Videos", req.prompt)
+        if kept and isinstance(result, dict):
+            result = {**result, "saved_copy": kept}
 
         with _jobs_lock:
             _jobs[job_id].update(status="completed", result=result, updated=time.time())

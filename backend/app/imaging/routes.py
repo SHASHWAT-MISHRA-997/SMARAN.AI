@@ -82,6 +82,12 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
         if req.negative_prompt:
             kwargs["negative_prompt"] = req.negative_prompt
         result = generate(**kwargs)
+        # A copy in Settings -> Cowork's files folder, where it can be found.
+        from app import cowork_prefs
+        final = result.get("path", out_path) if isinstance(result, dict) else out_path
+        kept = cowork_prefs.keep_artifact(final, "Images", req.prompt)
+        if kept and isinstance(result, dict):
+            result = {**result, "saved_copy": kept}
         with _jobs_lock:
             _jobs[job_id].update(status="completed", result=result, updated=time.time())
     except ImageError as exc:

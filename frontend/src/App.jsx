@@ -23,6 +23,7 @@ import NoticeToast from './components/NoticeToast';
 import TerminalPanel from './components/TerminalPanel';
 import SmaranDesignView from './components/SmaranDesignView';
 import ScheduledTasksView from './components/ScheduledTasksView';
+import { loadShortcuts, matches, SHORTCUTS_EVENT } from './utils/shortcuts';
 import ImageStudio from './components/ImageStudio';
 import LiveBrowser from './components/LiveBrowser';
 import VideoStudio from './components/VideoStudio';
@@ -201,24 +202,37 @@ const App = () => {
   useEffect(() => { localStorage.setItem('sm_performance_position', performancePosition); }, [performancePosition]);
   useEffect(() => { localStorage.setItem('sm_selected_model', selectedModel); }, [selectedModel]);
 
-  // Keyboard Shortcuts
+  // Keyboard shortcuts - whatever Settings -> Shortcuts has saved (utils/shortcuts).
   useEffect(() => {
+    let list = loadShortcuts();
+    const reload = () => { list = loadShortcuts(); };
+    const actions = {
+      new_chat: () => handleCreateSession(),
+      open_settings: () => setIsSettingsOpen((prev) => !prev),
+      toggle_panel: () => setShowRightPanel((prev) => !prev),
+      toggle_terminal: () => setIsTerminalOpen((prev) => !prev),
+      voice_speak: () => window.dispatchEvent(new CustomEvent('smaran:toggle-voice')),
+      stop_control: () => fetch(`${API_BASE}/api/control/stop`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      }).catch(() => {}),
+      mute_audio: () => fetch(`${API_BASE}/api/desktop/execute`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle_mute', params: {}, confirmed: false }),
+      }).catch(() => {}),
+    };
     const handleKeyDown = (e) => {
-      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        handleCreateSession();
-      }
-      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        setIsSettingsOpen(prev => !prev);
-      }
-      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'p') {
-        e.preventDefault();
-        setShowRightPanel(prev => !prev);
-      }
+      const hit = list.find((s) => matches(e, s.keys));
+      if (!hit || !actions[hit.id]) return;
+      e.preventDefault();
+      actions[hit.id]();
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener(SHORTCUTS_EVENT, reload);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener(SHORTCUTS_EVENT, reload);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Every control in the composer - the text box, Speak, RAG, Web, attach

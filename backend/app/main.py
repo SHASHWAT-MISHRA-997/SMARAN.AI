@@ -321,6 +321,13 @@ async def lifespan(application: FastAPI):
     # its external tool first, which on a machine with a slow npm CLI was
     # minutes of a blank app. A plugin still loading reports as not ready.
     application.state.plugin_loading = asyncio.create_task(_load_enabled_plugins())
+    # Settings -> General (Desktop): the Quick Entry hotkey and "keep awake"
+    # last only as long as the process, so they are re-applied each start.
+    try:
+        from app import desktop_prefs
+        desktop_prefs.apply_at_start()
+    except Exception:  # noqa: BLE001
+        logger.info("Desktop settings were not applied at start", exc_info=True)
     threading.Thread(target=rag_pipeline.get, name="rag-warmup", daemon=True).start()
     await _warm_speech_recognition()
     try:
@@ -2226,8 +2233,11 @@ async def _extract_and_save_memory(user_id: int, session_id: str, user_prompt: s
         db_mem = SessionLocal()
         try:
             existing_facts = {m.fact for m in db_mem.query(UserMemory).filter(UserMemory.user_id == user_id).all()}
+            from app import memory_prefs
             for fact in facts_to_save:
                 fact_clean = fact.strip().lower()
+                if not memory_prefs.may_save(fact):
+                    continue      # Settings -> Memory: generation off, or a sensitive fact
                 if not any(ef.strip().lower() == fact_clean for ef in existing_facts):
                     label, _, remainder = fact.partition(":")
                     category = _MEMORY_CATEGORIES.get(label.strip().lower())
@@ -2350,6 +2360,27 @@ async def create_user_memory(body: dict, db: Session = Depends(get_db), current_
         "category_label": MEMORY_CATEGORY_LABELS.get(mem.category or "durable_record", "Durable Record"),
         "created_at": mem.created_at,
     }
+
+
+# Declared before /api/memory/{memory_id}: a later literal route would be
+# swallowed by that parameter route and could never be reached.
+class MemoryPrefsUpdate(PydanticBaseModel):
+    search_chats: Optional[bool] = None
+    generate: Optional[bool] = None
+    sensitive: Optional[bool] = None
+
+
+@app.get("/api/memory/preferences", dependencies=[Depends(_signed_in)])
+async def get_memory_preferences():
+    """Settings -> Memory switches, as the chat backend enforces them."""
+    from app import memory_prefs
+    return {"preferences": memory_prefs.load()}
+
+
+@app.put("/api/memory/preferences", dependencies=[Depends(_signed_in)])
+async def put_memory_preferences(update: MemoryPrefsUpdate):
+    from app import memory_prefs
+    return {"preferences": memory_prefs.save(update.model_dump(exclude_none=True))}
 
 
 @app.put("/api/memory/{memory_id}")
@@ -2479,63 +2510,35 @@ async def import_user_memory(
 
 @app.get("/api/cowork/settings")
 async def get_cowork_settings(current_user: User = Depends(get_current_user)):
-    user_home = Path.home()
-    default_cowork = str(user_home / "SMARAN" / "Cowork")
-    settings_file = Path(os.getenv("DATA_DIR") or "data") / f"cowork_{current_user.id}.json"
-    if settings_file.exists():
-        try:
-            return json.loads(settings_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {
-        "trusted_devices_required": True,
-        "dispatch_enabled": True,
-        "cowork_files_path": default_cowork,
-        "trusted_folders": [default_cowork],
-        "only_on_this_computer": False,
-        "preferred_browser": "chrome",
-        "open_links_in_builtin_browser": False,
-    }
+    """Settings -> Cowork, as enforced (see app/cowork_prefs)."""
+    from app import cowork_prefs
+    prefs = cowork_prefs.load()
+    return {**prefs, "browsers": {b: cowork_prefs.browser_available(b) for b in cowork_prefs.BROWSERS}}
 
 
 @app.put("/api/cowork/settings")
 async def update_cowork_settings(payload: dict, current_user: User = Depends(get_current_user)):
-    settings_dir = Path(os.getenv("DATA_DIR") or "data")
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    settings_file = settings_dir / f"cowork_{current_user.id}.json"
-    settings_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return {"status": "ok", "settings": payload}
+    from app import cowork_prefs
+    try:
+        prefs = cowork_prefs.save({k: v for k, v in (payload or {}).items() if k in cowork_prefs.defaults()})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {**prefs, "browsers": {b: cowork_prefs.browser_available(b) for b in cowork_prefs.BROWSERS}}
 
 
 @app.get("/api/desktop/settings")
 async def get_desktop_settings(current_user: User = Depends(get_current_user)):
-    settings_file = Path(os.getenv("DATA_DIR") or "data") / f"desktop_{current_user.id}.json"
-    if settings_file.exists():
-        try:
-            return json.loads(settings_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    # Read, not typed. A literal here is one more place a release has to
-    # remember to edit, and the one in the ping endpoint had already been left
-    # behind four versions before somebody noticed.
-    from app.updates import APP_VERSION
-
-    return {
-        "version": APP_VERSION,
-        "run_on_startup": False,
-        "quick_entry_shortcut": "Ctrl+Alt+Space",
-        "system_tray": True,
-        "keep_awake": False,
-    }
+    """Settings -> General (Desktop), with what is actually in effect."""
+    from app import desktop_prefs
+    return await asyncio.to_thread(desktop_prefs.status)
 
 
 @app.put("/api/desktop/settings")
 async def update_desktop_settings(payload: dict, current_user: User = Depends(get_current_user)):
-    settings_dir = Path(os.getenv("DATA_DIR") or "data")
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    settings_file = settings_dir / f"desktop_{current_user.id}.json"
-    settings_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return {"status": "ok", "settings": payload}
+    """Apply each switch for real (see app/desktop_prefs) and report anything that could not be."""
+    from app import desktop_prefs
+    allowed = {k: v for k, v in (payload or {}).items() if k in desktop_prefs.DEFAULTS}
+    return await asyncio.to_thread(desktop_prefs.save, allowed)
 
 
 @app.delete("/api/privacy/clear-all")
@@ -3834,7 +3837,8 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     # came out 96-99% identical whatever the seed or temperature. A brief is
     # meant to be answered on its own; the memory vault facts above (who the
     # person is, what they prefer) still apply.
-    if memory_is_active and req_section != "design":
+    from app import memory_prefs as _memory_prefs
+    if memory_is_active and req_section != "design" and _memory_prefs.load()["search_chats"]:
         from .conversation_memory import retrieve_conversations
         recalled = retrieve_conversations(db, current_user.id, session.id, chat_req.prompt, section=getattr(session, "section", "chat"))
         if recalled:
@@ -3865,7 +3869,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                     clean_fact = clean_fact[len(pfx):].strip().lstrip(":- ").strip()
                     break
             existing_fact = db.query(UserMemory).filter(UserMemory.user_id == current_user.id, UserMemory.fact == clean_fact).first()
-            if not existing_fact:
+            if not existing_fact and _memory_prefs.may_save(clean_fact):
                 cat = _categorise_fact(clean_fact) if "_categorise_fact" in globals() else "durable_record"
                 db.add(UserMemory(user_id=current_user.id, fact=clean_fact, category=cat, source_session_id=session.id))
                 db.commit()
@@ -8698,6 +8702,31 @@ app.mount("/api/static", StaticFiles(directory=settings.UPLOAD_DIR), name="stati
 # moment somebody wants control to stop is not the moment to ask them which
 # session they meant.
 from . import control_session as _control_session  # noqa: E402
+
+
+class ControlPrefsUpdate(PydanticBaseModel):
+    computer_use_enabled: Optional[bool] = None
+    confirm_changes: Optional[bool] = None
+
+
+@app.get("/api/control/preferences", tags=["control"], dependencies=[Depends(_signed_in)])
+async def get_control_preferences():
+    """Settings -> Capabilities: may SMARAN control this computer, and what asks first."""
+    from app import control_prefs
+    return {"preferences": control_prefs.load()}
+
+
+@app.put("/api/control/preferences", tags=["control"], dependencies=[Depends(_signed_in)])
+async def put_control_preferences(update: ControlPrefsUpdate):
+    from app import control_prefs
+    return {"preferences": control_prefs.save(update.model_dump(exclude_none=True))}
+
+
+@app.get("/api/control/capabilities", tags=["control"], dependencies=[Depends(_signed_in)])
+async def get_control_capabilities():
+    """What desktop control can do here, tested now - not a fixed 'Verified'."""
+    from app import control_prefs
+    return await asyncio.to_thread(control_prefs.capabilities)
 
 
 @app.post("/api/control/session", tags=["control"], dependencies=[Depends(_signed_in)])

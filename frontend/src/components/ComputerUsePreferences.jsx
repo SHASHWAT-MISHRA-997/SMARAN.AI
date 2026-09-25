@@ -2,8 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../context/AuthContext';
 
 export default function ComputerUsePreferences() {
-  const [enabled, setEnabled] = useState(() => localStorage.getItem('sm_computer_use_enabled') !== 'false');
-  const [confirmDestructive, setConfirmDestructive] = useState(() => localStorage.getItem('sm_confirm_destructive_ops') !== 'false');
+  // Stored and enforced by the backend (app/control_prefs.py). These used to
+  // be written to the browser's storage, where nothing ever read them.
+  const [enabled, setEnabled] = useState(true);
+  const [confirmDestructive, setConfirmDestructive] = useState(true);
+  const [caps, setCaps] = useState(null);
+  const [saveError, setSaveError] = useState('');
   const [activeSessions, setActiveSessions] = useState(0);
   const [stopNotice, setStopNotice] = useState('');
   const [isStopping, setIsStopping] = useState(false);
@@ -21,15 +25,38 @@ export default function ComputerUsePreferences() {
       .catch(() => {});
   }, []);
 
-  const handleToggleEnabled = (val) => {
-    setEnabled(val);
-    localStorage.setItem('sm_computer_use_enabled', String(val));
+  useEffect(() => {
+    fetch(`${API_BASE}/api/control/preferences`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.preferences) return;
+        setEnabled(d.preferences.computer_use_enabled);
+        setConfirmDestructive(d.preferences.confirm_changes);
+      }).catch(() => {});
+    fetch(`${API_BASE}/api/control/capabilities`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null)).then(setCaps).catch(() => {});
+  }, []);
+
+  const savePrefs = async (update) => {
+    setSaveError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/control/preferences`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(update),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      setEnabled(data.preferences.computer_use_enabled);
+      setConfirmDestructive(data.preferences.confirm_changes);
+    } catch (e) {
+      setSaveError(`Not saved: ${e.message}`);
+    }
   };
 
-  const handleToggleConfirm = (val) => {
-    setConfirmDestructive(val);
-    localStorage.setItem('sm_confirm_destructive_ops', String(val));
-  };
+  const handleToggleEnabled = (val) => { setEnabled(val); savePrefs({ computer_use_enabled: val }); };
+  const handleToggleConfirm = (val) => { setConfirmDestructive(val); savePrefs({ confirm_changes: val }); };
 
   const emergencyStop = async () => {
     setIsStopping(true);
@@ -51,8 +78,6 @@ export default function ComputerUsePreferences() {
       setIsStopping(false);
     }
   };
-
-  const isWin = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
 
   return (
     <section className="space-y-6 text-ink" aria-label="Computer use preferences">
@@ -81,17 +106,22 @@ export default function ComputerUsePreferences() {
         </label>
       </div>
 
-      {/* Platform Status */}
+      {/* Platform status: tested now, not a fixed "Verified". */}
       <div className="rounded-2xl border border-line bg-sunken p-4 space-y-2">
         <div className="text-xs font-bold text-ink flex items-center justify-between">
-          <span>Platform Adapter Status</span>
-          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-500/20 text-green-400">Verified</span>
+          <span>What works on this {caps?.platform || 'computer'}</span>
+          {caps && (
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${caps.ready ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'}`}>
+              {caps.ready ? 'All checks passed' : 'Some checks failed'}
+            </span>
+          )}
         </div>
-        <p className="text-xs text-ink-muted">
-          {isWin
-            ? 'Windows 11 / 10 Native Host Adapter active: Direct process observation, Win32 input events, and SendKeys typing supported.'
-            : 'Linux Platform Adapter: Executable resolution via PATH, xdg-open for folders, and X11 xdotool integration.'}
-        </p>
+        {!caps && <p className="text-xs text-ink-muted">Checking…</p>}
+        {caps?.checks.map((c) => (
+          <p key={c.name} className="text-xs text-ink-muted">
+            <span className={c.ok ? 'text-green-400' : 'text-amber-400'}>{c.ok ? '✓' : '✗'}</span> {c.name}{c.note ? ` - ${c.note}` : ''}
+          </p>
+        ))}
       </div>
 
       {/* Safety & Confirmation */}
@@ -100,7 +130,7 @@ export default function ComputerUsePreferences() {
           <div>
             <div className="text-xs font-bold text-ink">Require Confirmation for Destructive Actions</div>
             <div className="text-[11px] text-ink-muted">
-              Always prompt before file deletions, app terminations, workstation locking, or system configuration adjustments.
+              Ask before actions that change files, apps or settings. Sleep, restart, shut down and other high-risk actions always ask, even when this is off.
             </div>
           </div>
           <input
@@ -111,6 +141,8 @@ export default function ComputerUsePreferences() {
           />
         </label>
       </div>
+
+      {saveError && <p className="text-xs text-rose-400">{saveError}</p>}
 
       {/* Active Session & Emergency Stop */}
       <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-4 space-y-3">

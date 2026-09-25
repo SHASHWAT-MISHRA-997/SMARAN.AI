@@ -9,7 +9,11 @@ export default function VoicePreferences() {
   const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('sm_voice_mic') || 'default');
   const [voices, setVoices] = useState([]);
   const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem('sm_tts_voice') || '');
-  const [personaGender, setPersonaGender] = useState(() => localStorage.getItem('sm_persona_gender') || 'female');
+  // The same choice the voice call makes with its character switch: the drawn
+  // character speaks with a female voice, the Energy Core with a male one.
+  // (This used to save sm_persona_gender, which nothing read.)
+  const [personaGender, setPersonaGender] = useState(() =>
+    (localStorage.getItem('sm_show_avatar') === 'false' ? 'male' : (localStorage.getItem('sm_voice_gender') || 'female')));
   const [continuousDictation, setContinuousDictation] = useState(() => localStorage.getItem('sm_continuous_dictation') !== 'false');
   const [testNotice, setTestNotice] = useState('');
   const [floatView, setFloatViewState] = useState(getFloatView);
@@ -81,7 +85,9 @@ export default function VoicePreferences() {
 
   const handleGenderChange = (gender) => {
     setPersonaGender(gender);
-    localStorage.setItem('sm_persona_gender', gender);
+    localStorage.setItem('sm_voice_gender', gender);
+    localStorage.setItem('sm_show_avatar', String(gender === 'female'));
+    window.dispatchEvent(new CustomEvent('smaran:persona-changed', { detail: { gender } }));
   };
 
   const handleContinuousToggle = (val) => {

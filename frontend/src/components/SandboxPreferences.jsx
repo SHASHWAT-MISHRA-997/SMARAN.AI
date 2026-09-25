@@ -2,6 +2,74 @@ import React, { useState, useEffect } from 'react';
 import { Shield, RotateCcw, Camera, RefreshCw } from 'lucide-react';
 import { agentSettingsRequest } from '../utils/agentSettingsRequest';
 
+const MODE_TEXT = {
+  permissive: 'Commands run with a time limit and their output captured. They are not isolated from your files.',
+  strict: 'Commands run with a restricted environment and PATH. This is not operating-system isolation.',
+};
+
+/** SMARAN Code's safety at a glance, and the runs that changed files - each one undoable. */
+function AgentRuns() {
+  const [runs, setRuns] = useState(null);
+  const [safety, setSafety] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
+
+  const load = async () => {
+    const [r, sf] = await Promise.all([
+      agentSettingsRequest('/runs').catch(() => ({ runs: [] })),
+      agentSettingsRequest('/safety').catch(() => null),
+    ]);
+    setRuns(r.runs || []);
+    setSafety(sf?.preferences || null);
+  };
+  useEffect(() => { load(); }, []);
+
+  const undo = async (run) => {
+    if (!window.confirm(`Put back the ${run.files} file(s) this run changed in ${run.root}?`)) return;
+    setBusy(run.run_id);
+    setMessage('');
+    try {
+      const out = await agentSettingsRequest(`/runs/${run.run_id}/undo`, { method: 'POST' });
+      setMessage(`Undone: ${out.restored.length} restored, ${out.removed.length} removed${out.errors.length ? `, ${out.errors.length} failed` : ''}.`);
+      await load();
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4">
+      <h4 className="text-xs font-bold">SMARAN Code safety</h4>
+      {safety && (
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+          Approval mode: <b className="text-zinc-800 dark:text-zinc-200">{{ manual: 'Manual', smart: 'Smart', off: 'Off' }[safety.approval_mode]}</b> (switch it with the Approval button in Code).
+          Secrets hidden from the model: <b className="text-zinc-800 dark:text-zinc-200">{safety.redact_secrets ? 'yes' : 'no'}</b>.
+          Wiping a drive, formatting, deleting system folders and shutting down are refused in every mode.
+        </p>
+      )}
+      <h4 className="pt-1 text-xs font-bold">Recent runs that changed files</h4>
+      {runs === null && <p className="text-[11px] text-zinc-500">Loading…</p>}
+      {runs?.length === 0 && <p className="text-[11px] text-zinc-500">None yet. Each SMARAN Code run keeps the originals of the files it edits, so it can be undone here.</p>}
+      {runs?.map((run) => (
+        <div key={run.run_id} className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 px-3 py-2 text-[11px]">
+          <span className="min-w-0 truncate">
+            {new Date(run.modified * 1000).toLocaleString()} · {run.files} file{run.files === 1 ? '' : 's'} · <span className="font-mono">{run.root}</span>
+          </span>
+          {run.undone ? <span className="shrink-0 font-bold text-emerald-500">Undone</span> : (
+            <button type="button" disabled={busy === run.run_id} onClick={() => undo(run)}
+                    className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2 py-1 font-bold disabled:opacity-50">
+              {busy === run.run_id ? 'Undoing…' : 'Undo'}
+            </button>
+          )}
+        </div>
+      ))}
+      {message && <p className="text-[11px] text-indigo-500">{message}</p>}
+    </div>
+  );
+}
+
 export default function SandboxPreferences() {
   const [sandboxInfo, setSandboxInfo] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
@@ -70,6 +138,8 @@ export default function SandboxPreferences() {
         </div>
       )}
 
+      <AgentRuns />
+
       {/* Sandbox Policy Overview */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="p-3.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
@@ -77,6 +147,7 @@ export default function SandboxPreferences() {
           <p className="text-sm font-bold uppercase mt-1 text-indigo-500">
             {sandboxInfo?.mode || (loading ? 'Loading…' : 'Unavailable')}
           </p>
+          {sandboxInfo?.mode && <p className="mt-1 text-[10px] leading-snug text-zinc-500">{MODE_TEXT[sandboxInfo.mode]}</p>}
         </div>
         <div className="p-3.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
           <span className="text-[11px] font-semibold text-zinc-500">Execution Timeout</span>

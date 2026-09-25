@@ -31,6 +31,44 @@ from datetime import datetime
 
 import psutil
 
+
+#: File actions that may skip the question inside a trusted Cowork folder, and
+#: which of their parameters are paths. Deleting is deliberately not here.
+_TRUSTED_FILE_ACTIONS = {
+    "create_folder": ("path",),
+    "rename_file": ("old_path",),
+    "move_file": ("source", "destination"),
+    "copy_file": ("source", "destination"),
+}
+
+
+def _in_trusted_folders(action_id: str, params: Dict[str, Any]) -> bool:
+    """Settings -> Cowork -> Trusted folders: every path of this action is inside one."""
+    keys = _TRUSTED_FILE_ACTIONS.get(action_id)
+    if not keys or not isinstance(params, dict):
+        return False
+    try:
+        from app import cowork_prefs
+        return cowork_prefs.in_trusted_folder(*[str(params.get(k, "")) for k in keys])
+    except Exception:  # noqa: BLE001 - when in doubt, ask
+        return False
+
+
+def _browser_open(url: str) -> bool:
+    """Open a link in the browser chosen in Settings -> Cowork, else the system default."""
+    try:
+        from app import cowork_prefs
+        exe = cowork_prefs.browser_command()
+    except Exception:  # noqa: BLE001 - a setting must never stop a link opening
+        exe = None
+    if exe:
+        try:
+            subprocess.Popen([exe, url])
+            return True
+        except OSError:
+            pass
+    return webbrowser.open(url)
+
 import logging
 logger = logging.getLogger("smaran.desktop_agent")
 
@@ -810,13 +848,16 @@ class DesktopAgent:
 
         spec = DESKTOP_ACTION_CATALOG[action_id]
 
-        # Execution-time policy enforcement: sm_computer_use_enabled
-        if isinstance(params, dict) and params.get("computer_use_enabled") is False:
+        # The owner's switch, read from the backend - see app/control_prefs.
+        # (It used to be honoured only if the caller sent it along, and none did.)
+        from app import control_prefs
+        if not control_prefs.load()["computer_use_enabled"] or (
+                isinstance(params, dict) and params.get("computer_use_enabled") is False):
             return {
                 "success": False,
                 "blocked": True,
                 "action": action_id,
-                "error": "Computer use is disabled in settings. Enable it in Settings → Computer Use to permit desktop control.",
+                "error": "Computer use is switched off. Turn it on in Settings → Capabilities to let SMARAN control this computer.",
             }
 
         # Execution-time policy enforcement: sm_allow_destructive_actions == 'block'
@@ -828,8 +869,9 @@ class DesktopAgent:
                 "error": "Destructive system actions are blocked by your security settings.",
             }
 
-        # Check confirmation requirement
-        if spec.get("requires_confirmation") and not confirmed:
+        # Check confirmation requirement - the owner may switch it off for
+        # ordinary changes; power and high-risk actions always ask.
+        if control_prefs.must_confirm(spec) and not confirmed and not _in_trusted_folders(action_id, params):
             return {
                 "success": False,
                 "requires_confirmation": True,
@@ -952,7 +994,7 @@ class DesktopAgent:
             return {"success": False, "error": "No URL provided."}
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
-        if not webbrowser.open(url):
+        if not _browser_open(url):
             return {"success": False, "error": "No browser accepted the URL.", "url": url}
         return {"success": True, "message": "Sent the URL to the browser.", "url": url}
 
@@ -964,7 +1006,7 @@ class DesktopAgent:
         url = URL_REGISTRY.get(name)
         if not url:
             url = f"https://www.{name}.com"
-        if not webbrowser.open(url):
+        if not _browser_open(url):
             return {"success": False, "error": "No browser accepted the website.", "url": url}
         return {"success": True, "message": f"Opened {name} in browser.", "url": url}
 
@@ -980,7 +1022,7 @@ class DesktopAgent:
             url = f"https://www.youtube.com/@{safe_handle}"
         else:
             url = f"https://www.youtube.com/results?search_query={urlencode({'': channel_name})[1:]}&sp=EgIQAg%253D%253D"
-        if not webbrowser.open(url):
+        if not _browser_open(url):
             return {"success": False, "error": "No browser accepted the YouTube channel request.", "url": url}
         return {"success": True, "message": f"Opening YouTube channel '{channel_name}'.", "url": url, "is_channel": True}
 
@@ -1007,10 +1049,10 @@ class DesktopAgent:
         video_id = DesktopAgent._first_youtube_video_id(search_url)
         if video_id:
             watch_url = "https://www.youtube.com/watch?v=" + video_id
-            if webbrowser.open(watch_url):
+            if _browser_open(watch_url):
                 return {"success": True, "message": f"Playing on YouTube: {query}", "url": watch_url}
 
-        if not webbrowser.open(search_url):
+        if not _browser_open(search_url):
             return {"success": False, "error": "No browser accepted the YouTube search.", "url": search_url}
         return {"success": True, "message": f"Searching YouTube for: {query}", "url": search_url}
 
@@ -1188,7 +1230,7 @@ class DesktopAgent:
         if body:
             gmail_url += f"&body={body.replace(' ', '+')}"
 
-        webbrowser.open(gmail_url)
+        _browser_open(gmail_url)
         return {"success": True, "message": f"Opened Gmail compose{' to ' + to if to else ''}.", "url": gmail_url}
 
     # ---- File Operations ----

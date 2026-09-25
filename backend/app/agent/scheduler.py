@@ -250,15 +250,6 @@ async def research_answer(prompt: str, model: str = "", provider: str = "") -> s
     return (await backends.complete(messages, chosen, provider)).strip()
 
 
-def _job_folder(job_id: str) -> str:
-    from app.config import settings
-
-    safe = re.sub(r"[^A-Za-z0-9_-]", "", job_id)[:40] or "job"
-    path = os.path.join(settings.DATA_DIR, "automations", safe)
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
 #: Ready-made jobs. The prompt is what the agent is asked each time; it has
 #: web search, so briefings and watches work without a project folder.
 BLUEPRINTS = [

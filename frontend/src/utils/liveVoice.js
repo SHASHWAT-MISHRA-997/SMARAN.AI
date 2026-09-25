@@ -11,6 +11,7 @@
  */
 
 import { companionHeaders } from './companionAuth';
+import { openMicrophone } from './voiceSettings.js';
 
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
@@ -80,13 +81,11 @@ export class LiveVoiceSession {
 
     // 1. Microphone first: without it there is nothing to stream.
     try {
-      this.micStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+      this.micStream = await openMicrophone({
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
       });
     } catch (error) {
       this.handlers.onError?.(

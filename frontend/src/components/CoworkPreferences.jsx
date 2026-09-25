@@ -1,298 +1,134 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Folder, Check } from 'lucide-react';
+import { Users, Check, FolderOpen, X, ShieldCheck } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
-const CoworkPreferences = () => {
-  const [settings, setSettings] = useState({
-    trusted_devices_required: true,
-    dispatch_enabled: true,
-    cowork_files_path: 'C:\\Users\\shash\\SMARAN\\Cowork',
-    trusted_folders: ['C:\\Users\\shash\\SMARAN\\Cowork'],
-    only_on_this_computer: false,
-    preferred_browser: 'chrome',
-    open_links_in_builtin_browser: false,
-  });
-  const [, setLoading] = useState(true);
-  const [savedNotice, setSavedNotice] = useState(false);
-  const [managingFolders, setManagingFolders] = useState(false);
-  const [newFolderInput, setNewFolderInput] = useState('');
+/**
+ * Settings -> Cowork. Every setting is enforced by the backend
+ * (app/cowork_prefs.py). This tab used to save a file nothing read, and
+ * shipped one developer's home folder as everybody's default.
+ */
 
-  const fetchSettings = async () => {
-    try {
-      const res = await fetchWithAuth(`${API_BASE}/api/cowork/settings`);
-      if (res.ok) {
-        const data = await res.json();
-        setSettings((prev) => ({ ...prev, ...data }));
-      }
-    } catch {
-      // Offline fallback
-    } finally {
-      setLoading(false);
-    }
-  };
+const BROWSER_NAMES = { default: 'System default', chrome: 'Google Chrome', edge: 'Microsoft Edge', firefox: 'Firefox', brave: 'Brave' };
+
+function Row({ title, children, control }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-t border-zinc-200 py-4 dark:border-zinc-800/80">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold">{title}</p>
+        <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{children}</div>
+      </div>
+      {control}
+    </div>
+  );
+}
+
+const CoworkPreferences = () => {
+  const [s, setS] = useState(null);
+  const [newFolder, setNewFolder] = useState('');
+  const [editingPath, setEditingPath] = useState(false);
+  const [pathDraft, setPathDraft] = useState('');
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetchSettings();
+    fetchWithAuth(`${API_BASE}/api/cowork/settings`)
+      .then((r) => r.json().then((d) => (r.ok ? d : Promise.reject(new Error(d.detail || `HTTP ${r.status}`)))))
+      .then((d) => { setS(d); setPathDraft(d.cowork_files_path); })
+      .catch((e) => setError(`Could not load: ${e.message}`));
   }, []);
 
-  const updateSetting = async (key, value) => {
-    const updated = { ...settings, [key]: value };
-    setSettings(updated);
+  const update = async (change) => {
+    setError('');
     try {
-      await fetchWithAuth(`${API_BASE}/api/cowork/settings`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
+      const res = await fetchWithAuth(`${API_BASE}/api/cowork/settings`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change),
       });
-      setSavedNotice(true);
-      setTimeout(() => setSavedNotice(false), 2000);
-    } catch {
-      // Offline fallback
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      setS(data);
+      setPathDraft(data.cowork_files_path);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      return true;
+    } catch (e) {
+      setError(e.message);
+      return false;
     }
   };
 
-  const handleChangePath = () => {
-    const next = window.prompt('Enter new Cowork artifacts directory path:', settings.cowork_files_path);
-    if (next && next.trim()) {
-      updateSetting('cowork_files_path', next.trim());
-    }
-  };
-
-  const handleAddFolder = () => {
-    if (!newFolderInput.trim()) return;
-    const folders = [...(settings.trusted_folders || []), newFolderInput.trim()];
-    updateSetting('trusted_folders', folders);
-    setNewFolderInput('');
-  };
-
-  const handleRemoveFolder = (folder) => {
-    const folders = (settings.trusted_folders || []).filter((f) => f !== folder);
-    updateSetting('trusted_folders', folders);
-  };
+  if (!s) return <div className="text-sm text-zinc-500">{error || 'Loading…'}</div>;
 
   return (
-    <div className="space-y-6 text-zinc-900 dark:text-zinc-100 max-w-2xl">
-      <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+    <div className="max-w-2xl space-y-1 text-zinc-900 dark:text-zinc-100">
+      <div className="flex items-center justify-between pb-3">
         <div>
-          <h3 className="text-lg font-black flex items-center gap-2">
-            <Users className="w-5 h-5 text-indigo-500" /> Cowork
-          </h3>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Configure automated background tasks, computer control, and mobile dispatch permissions.
-          </p>
+          <h3 className="flex items-center gap-2 text-lg font-black"><Users className="h-5 w-5 text-indigo-500" /> Cowork</h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Working with your phone, where SMARAN keeps what it makes, and which folders it may change without asking.</p>
         </div>
-        {savedNotice && (
-          <span className="text-xs font-bold text-emerald-500 flex items-center gap-1 animate-fadeIn">
-            <Check className="w-4 h-4" /> Saved
-          </span>
-        )}
+        {saved && <span className="flex items-center gap-1 text-xs font-bold text-emerald-500"><Check className="h-4 w-4" /> Saved</span>}
       </div>
 
-      {/* 1. Require trusted devices */}
-      <div className="flex items-start justify-between gap-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Require trusted devices</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Verify each new device before it can connect to SMARAN on your computer remotely — applies to SMARAN Code Remote Control and Cowork.{' '}
-            <a href="#learn-more" className="text-indigo-500 hover:underline">Learn more ↗</a>
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => updateSetting('trusted_devices_required', !settings.trusted_devices_required)}
-          className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
-            settings.trusted_devices_required ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-          }`}
-          aria-label="Toggle trusted devices"
-        >
-          <span
-            className={`block w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
-              settings.trusted_devices_required ? 'left-6' : 'left-1'
-            }`}
-          />
+      <Row title="Trusted devices only" control={<span className="flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-500"><ShieldCheck className="h-3.5 w-3.5" /> Always on</span>}>
+        Only devices you have paired by scanning the code on this screen can reach SMARAN from the network. This cannot be switched off.
+      </Row>
+
+      <Row title="Dispatch" control={(
+        <button type="button" role="switch" aria-checked={s.dispatch_enabled} aria-label="Dispatch"
+                onClick={() => update({ dispatch_enabled: !s.dispatch_enabled })}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${s.dispatch_enabled ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
+          <span className={`absolute top-1 block h-4 w-4 rounded-full bg-white transition-transform ${s.dispatch_enabled ? 'left-6' : 'left-1'}`} />
         </button>
-      </div>
+      )}>
+        Send prompts and notices between this computer and your paired phone, including scheduled job results. Off: nothing passes either way.
+      </Row>
 
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
-
-      {/* 2. Dispatch (Beta) */}
-      <div className="flex items-start justify-between gap-4 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-bold">Dispatch</p>
-            <span className="text-[10px] font-black uppercase px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-500 dark:text-indigo-300">
-              Beta
-            </span>
+      <Row title="Cowork files" control={!editingPath && (
+        <button type="button" onClick={() => setEditingPath(true)} className="flex items-center gap-1.5 rounded-xl border border-zinc-300 px-3 py-1.5 text-xs font-bold dark:border-zinc-700">
+          <FolderOpen className="h-3.5 w-3.5" /> Change
+        </button>
+      )}>
+        Every image and video SMARAN makes is also saved here, in Images and Videos, named after what you asked for:
+        <span className="ml-1 font-mono text-indigo-500">{s.cowork_files_path}</span>
+        {editingPath && (
+          <div className="mt-2 flex gap-2">
+            <input value={pathDraft} onChange={(e) => setPathDraft(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-950" />
+            <button type="button" onClick={async () => { if (await update({ cowork_files_path: pathDraft })) setEditingPath(false); }} className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-bold text-white">Save</button>
+            <button type="button" onClick={() => { setEditingPath(false); setPathDraft(s.cowork_files_path); }} className="rounded-lg border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700">Cancel</button>
           </div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Let SMARAN work on tasks from your phone using this computer. When off, your phone won&rsquo;t be able to dispatch work here.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => updateSetting('dispatch_enabled', !settings.dispatch_enabled)}
-          className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
-            settings.dispatch_enabled ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-          }`}
-          aria-label="Toggle Dispatch"
-        >
-          <span
-            className={`block w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
-              settings.dispatch_enabled ? 'left-6' : 'left-1'
-            }`}
-          />
-        </button>
-      </div>
+        )}
+      </Row>
 
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
-
-      {/* 3. Cowork files */}
-      <div className="flex items-start justify-between gap-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Cowork files</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Your artifacts and scheduled tasks are stored at{' '}
-            <span className="font-mono text-indigo-500 underline decoration-dotted">{settings.cowork_files_path}</span>.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleChangePath}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-bold transition cursor-pointer"
-        >
-          <Folder className="w-3.5 h-3.5" />
-          <span>Change</span>
-        </button>
-      </div>
-
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
-
-      {/* 4. Trusted Cowork folders */}
-      <div className="flex items-start justify-between gap-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Trusted Cowork folders</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Cowork tasks may use these folders, and folders inside them, without asking you first.
-          </p>
-          {managingFolders && (
-            <div className="mt-3 p-3 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/60 space-y-2">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newFolderInput}
-                  onChange={(e) => setNewFolderInput(e.target.value)}
-                  placeholder="e.g. C:\Users\shash\Projects"
-                  className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddFolder}
-                  className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold"
-                >
-                  Add
-                </button>
-              </div>
-              <div className="space-y-1 max-h-32 overflow-y-auto">
-                {(settings.trusted_folders || []).map((f) => (
-                  <div key={f} className="flex items-center justify-between text-xs font-mono py-1 px-2 bg-white dark:bg-zinc-800 rounded">
-                    <span className="truncate">{f}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveFolder(f)}
-                      className="text-rose-500 text-[11px] font-bold hover:underline"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
+      <Row title="Trusted folders">
+        SMARAN may create, rename and move files inside these folders without asking. Deleting always asks.
+        <div className="mt-2 space-y-1.5">
+          {s.trusted_folders.map((f) => (
+            <div key={f} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 px-2 py-1 dark:border-zinc-800">
+              <span className="truncate font-mono text-[11px]">{f}</span>
+              <button type="button" aria-label={`Remove ${f}`} onClick={() => update({ trusted_folders: s.trusted_folders.filter((x) => x !== f) })} className="text-zinc-400 hover:text-rose-500"><X className="h-3.5 w-3.5" /></button>
             </div>
-          )}
+          ))}
+          <div className="flex gap-2">
+            <input value={newFolder} onChange={(e) => setNewFolder(e.target.value)} placeholder="C:\Users\you\Documents\Work"
+                   className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-2 py-1 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-950" />
+            <button type="button" disabled={!newFolder.trim()}
+                    onClick={async () => { if (await update({ trusted_folders: [...s.trusted_folders, newFolder.trim()] })) setNewFolder(''); }}
+                    className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-bold text-white disabled:opacity-50">Add</button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setManagingFolders(!managingFolders)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-bold transition cursor-pointer"
-        >
-          <span>{managingFolders ? 'Done' : 'Manage'}</span>
-        </button>
-      </div>
+      </Row>
 
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
-
-      {/* 5. Only on this computer */}
-      <div className="flex items-start justify-between gap-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Only on this computer</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Stops when the app closes or this computer sleeps.{' '}
-            <a href="#learn-more" className="text-indigo-500 hover:underline">Learn more about how SMARAN reads your files</a>
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => updateSetting('only_on_this_computer', !settings.only_on_this_computer)}
-          className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
-            settings.only_on_this_computer ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-          }`}
-          aria-label="Toggle Only on this computer"
-        >
-          <span
-            className={`block w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
-              settings.only_on_this_computer ? 'left-6' : 'left-1'
-            }`}
-          />
-        </button>
-      </div>
-
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
-
-      {/* 6. Preferred browser */}
-      <div className="flex items-start justify-between gap-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Preferred browser</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            SMARAN uses this browser by default unless you ask otherwise.
-          </p>
-        </div>
-        <select
-          value={settings.preferred_browser}
-          onChange={(e) => updateSetting('preferred_browser', e.target.value)}
-          className="px-3 py-1.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs font-semibold text-zinc-900 dark:text-zinc-100 outline-none cursor-pointer"
-        >
-          {/* Named the extension, which no longer exists. Chrome is still a
-              perfectly good choice of browser; it just is not driven by an
-              extension any more, so the label should not imply one. */}
-          <option value="chrome">Chrome</option>
-          <option value="builtin">Built-in browser</option>
+      <Row title="Preferred browser" control={(
+        <select value={s.preferred_browser} onChange={(e) => update({ preferred_browser: e.target.value })}
+                className="rounded-xl border border-zinc-300 bg-white px-3 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900" aria-label="Preferred browser">
+          {Object.entries(BROWSER_NAMES).map(([id, name]) => (
+            <option key={id} value={id} disabled={s.browsers && !s.browsers[id]}>{name}{s.browsers && !s.browsers[id] ? ' (not installed)' : ''}</option>
+          ))}
         </select>
-      </div>
+      )}>
+        Links SMARAN opens for you - "open YouTube", search results, websites - open in this browser.
+      </Row>
 
-      <div className="border-t border-zinc-200 dark:border-zinc-800/80" />
-
-      {/* 7. Open links in built-in browser */}
-      <div className="flex items-start justify-between gap-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Open links in built-in browser</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Links open in the built-in browser instead of your default browser.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => updateSetting('open_links_in_builtin_browser', !settings.open_links_in_builtin_browser)}
-          className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer shrink-0 ${
-            settings.open_links_in_builtin_browser ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-          }`}
-          aria-label="Toggle Open links in built-in browser"
-        >
-          <span
-            className={`block w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${
-              settings.open_links_in_builtin_browser ? 'left-6' : 'left-1'
-            }`}
-          />
-        </button>
-      </div>
+      {error && <p className="pt-2 text-xs text-rose-500">{error}</p>}
     </div>
   );
 };
