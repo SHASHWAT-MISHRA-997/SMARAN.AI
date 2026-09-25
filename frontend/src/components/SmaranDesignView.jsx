@@ -210,23 +210,42 @@ async function discoverModels() {
     }
   } catch { /* no local engine */ }
 
-  // 2. Downloaded Models from Model Matrix
+  /* 2. Hugging Face weights downloaded through the Model Matrix are not
+     listed: Ollama cannot serve them, so picking one always ended in "No live
+     AI model returned a response". */
+
+  // 3a. Providers whose key is saved on this installation's backend. Asked
+  //     for their live model list; the key itself never reaches the page.
   try {
-    const statusRes = await fetchWithAuth(`${API_BASE}/api/models/local-status`);
+    const statusRes = await fetchWithAuth(`${API_BASE}/api/cloud/keys-status`);
     if (statusRes.ok) {
-      const statusData = await statusRes.json();
-      (statusData.downloaded_models || []).forEach((m) => {
-        if (!models.some((x) => x.id === m.id)) {
-          models.push({
-            id: m.id,
-            name: m.name || m.id,
-            desc: `Downloaded weights · ${m.publisher || 'Model Matrix'}`,
-            local: true,
+      const { configured_providers: configured = [] } = await statusRes.json();
+      for (const provider of configured) {
+        let list = CURATED_CLOUD_MODELS[provider] || [];
+        try {
+          const res = await fetchWithAuth(`${API_BASE}/api/cloud/models`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider }),
           });
-        }
-      });
+          if (res.ok) {
+            const data = await res.json();
+            const live = (data.models || []).filter(Boolean);
+            if (live.length) list = live;
+          }
+        } catch { /* keep the curated list */ }
+        list
+          .filter((model) => !EMBEDDING_HINTS.some((hint) => model.toLowerCase().includes(hint)))
+          .slice(0, 8)
+          .forEach((model) => {
+            const id = `cloud:${provider}:${model}`;
+            if (!models.some((x) => x.id === id)) {
+              models.push({ id, name: `${model} (${provider.toUpperCase()})`, desc: `Cloud API · ${provider.toUpperCase()} · key saved in Settings`, provider, model });
+            }
+          });
+      }
     }
-  } catch { /* ignore local-status error */ }
+  } catch { /* no backend */ }
 
   // 3. Configured Cloud API Models
   try {
@@ -240,6 +259,7 @@ async function discoverModels() {
         : (CURATED_CLOUD_MODELS[provider] || []);
 
       providerList.slice(0, 8).forEach((model) => {
+        if (models.some((x) => x.id === `cloud:${provider}:${model}`)) return;
         models.push({
           id: `cloud:${provider}:${model}`,
           name: `${model} (${provider.toUpperCase()})`,

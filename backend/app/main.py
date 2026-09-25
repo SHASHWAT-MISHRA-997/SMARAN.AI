@@ -4449,6 +4449,13 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                 provider = str(candidate.get('provider', '')).lower().strip()
                 model = str(candidate.get('model', '')).strip()
                 api_key = str(candidate.get('api_key', '')).strip()
+                # The key this installation holds for the provider, when the
+                # caller sent none. Keys saved in the model catalogue live here,
+                # not in the browser, so Design Studio asking for a configured
+                # Gemini model sent no key - and the route was dropped with
+                # "No live AI model returned a response". It never leaves here.
+                if not api_key and provider in _CLOUD_PROVIDER_ENV_VARS:
+                    api_key = os.getenv(_CLOUD_PROVIDER_ENV_VARS[provider], "").strip()
                 route_key = (provider, model)
                 if not endpoints.get(provider) or not model or not api_key or route_key in seen_routes:
                     continue
