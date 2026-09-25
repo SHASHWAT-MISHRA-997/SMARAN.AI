@@ -959,7 +959,7 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
             </div>
           ) : (
             <>
-              {msg.agentSteps && <AgentSteps steps={msg.agentSteps} runId={msg.agentRunId} live={msg.isLoading} />}
+              {msg.agentSteps && <AgentSteps steps={msg.agentSteps} runId={msg.agentRunId} live={msg.isLoading} checkpoint={msg.agentCheckpoint} />}
               <MarkdownText text={msg.content} />
 
               {!msg.isLoading && msg.content && (() => {
@@ -1189,7 +1189,26 @@ const ChatArea = ({
 }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [askForApproval, setAskForApproval] = useState(true);
+  // SMARAN Code's approval mode - manual, smart or off - kept by the backend
+  // (/api/agent/safety) so every place that runs the agent agrees.
+  const [approvalMode, setApprovalMode] = useState('smart');
+  const askForApproval = approvalMode !== 'off';
+  useEffect(() => {
+    fetch(`${API_BASE}/api/agent/safety`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.preferences?.approval_mode) setApprovalMode(d.preferences.approval_mode); })
+      .catch(() => {});
+  }, []);
+  const cycleApprovalMode = () => {
+    const next = { manual: 'smart', smart: 'off', off: 'manual' }[approvalMode] || 'smart';
+    setApprovalMode(next);
+    fetch(`${API_BASE}/api/agent/safety`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approval_mode: next }),
+    }).catch(() => {});
+  };
   const handleSendRef = useRef(null);
   useEffect(() => {
     const applySkill = () => {
@@ -3848,7 +3867,7 @@ const ChatArea = ({
           api_key: cloud.cloud_api_key || '',
           root: workspaceStatus?.root || '',
           history,
-          ask_for_approval: askForApproval,
+          approval_mode: approvalMode,
         }),
       });
       if (!res.ok || !res.body) throw new Error(`SMARAN Code could not start (HTTP ${res.status}).`);
@@ -3867,6 +3886,8 @@ const ChatArea = ({
           try { event = JSON.parse(line); } catch { continue; }
           if (event.type === 'run') {
             update((m) => ({ ...m, agentRunId: event.id }));
+          } else if (event.type === 'checkpoint') {
+            update((m) => ({ ...m, agentCheckpoint: event.run_id }));
           } else if (event.type === 'message') {
             said = said ? `${said}\n\n${event.text}` : event.text;
             update((m) => ({ ...m, content: said }));
@@ -5141,16 +5162,22 @@ const ChatArea = ({
           {activeSection === 'code' && (
             <button
               type="button"
-              onClick={() => setAskForApproval((v) => !v)}
+              onClick={cycleApprovalMode}
               className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-semibold transition cursor-pointer ${
-                askForApproval
+                approvalMode === 'manual'
                   ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300'
-                  : 'border-zinc-700/80 bg-zinc-900/90 text-zinc-400'
+                  : approvalMode === 'smart'
+                    ? 'border-sky-500/60 bg-sky-950/40 text-sky-300'
+                    : 'border-amber-500/60 bg-amber-950/40 text-amber-300'
               }`}
-              title={askForApproval ? 'Requires user confirmation before applying code changes or running commands' : 'Auto-executes tasks without confirmation'}
+              title={{
+                manual: 'Manual: every file change and command waits for your Allow. Click to switch to Smart.',
+                smart: 'Smart: reads, file edits (undoable) and known-safe commands like tests run; anything else asks. Click to switch to Off.',
+                off: 'Off: nothing asks, except catastrophic commands are always refused. Click to switch to Manual.',
+              }[approvalMode]}
             >
-              <Shield className="h-3.5 w-3.5 text-emerald-400" />
-              <span>{askForApproval ? 'Ask for approval' : 'Auto-execute'}</span>
+              <Shield className="h-3.5 w-3.5" />
+              <span>Approval: {{ manual: 'Manual', smart: 'Smart', off: 'Off' }[approvalMode]}</span>
             </button>
           )}
         </div>

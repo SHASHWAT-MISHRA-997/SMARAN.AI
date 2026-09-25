@@ -24,10 +24,17 @@ export function applyAgentEvent(steps, event) {
     list.push({ step: event.step, name: event.name, arguments: event.arguments || {}, result: null, status: 'running' });
   } else if (event.type === 'approval_needed') {
     const i = at(event.step);
-    if (i >= 0) list[i] = { ...list[i], status: 'waiting' };
+    if (i >= 0) list[i] = { ...list[i], status: 'waiting', reason: event.reason || '' };
   } else if (event.type === 'approval') {
     const i = at(event.step);
-    if (i >= 0) list[i] = { ...list[i], status: event.approved ? 'running' : 'declined' };
+    if (i >= 0) {
+      list[i] = {
+        ...list[i],
+        status: event.approved ? 'running' : 'declined',
+        reason: event.reason || list[i].reason || '',
+        refused: Boolean(event.reason && !event.approved),
+      };
+    }
   } else if (event.type === 'tool_result') {
     const i = at(event.step);
     if (i >= 0) list[i] = { ...list[i], result: event.result, status: list[i].status === 'declined' ? 'declined' : 'done' };

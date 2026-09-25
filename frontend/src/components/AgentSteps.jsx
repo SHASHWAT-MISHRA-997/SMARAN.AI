@@ -94,10 +94,13 @@ function Step({ item, runId }) {
           )}
         </div>
       )}
+      {item.status === 'declined' && item.reason && (
+        <p className="border-t border-rose-500/20 px-3 py-1.5 text-[11px] text-rose-300">{item.reason}</p>
+      )}
       {/* Outside the collapsible part: a decision is never hidden. */}
       {waiting && (
         <div className="flex flex-wrap items-center gap-2 border-t border-amber-500/30 px-3 py-2">
-          <span className="text-[11px] font-bold text-amber-300">SMARAN Code wants to do this. Allow it?</span>
+          <span className="text-[11px] font-bold text-amber-300">SMARAN Code wants to do this. Allow it?{item.reason ? ` (${item.reason})` : ''}</span>
           <button type="button" disabled={busy} onClick={() => decide(true)} className="rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-black text-white hover:bg-emerald-500 disabled:opacity-50">Allow</button>
           <button type="button" disabled={busy} onClick={() => decide(false)} className="rounded-lg border border-rose-500/50 px-3 py-1 text-[11px] font-black text-rose-300 hover:bg-rose-600 hover:text-white disabled:opacity-50">Deny</button>
           {error && <span className="text-[11px] text-rose-400">{error}</span>}
@@ -107,11 +110,60 @@ function Step({ item, runId }) {
   );
 }
 
-export default function AgentSteps({ steps, runId, live }) {
+/** After a run that changed files: what changed, and one click to put it all back. */
+function UndoRun({ runId }) {
+  const [info, setInfo] = useState(null);
+  const [state, setState] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/agent/runs/${encodeURIComponent(runId)}/changes`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null)).then(setInfo).catch(() => {});
+  }, [runId]);
+
+  const undo = async () => {
+    if (!window.confirm('Put back every file this run wrote or edited, and delete the files it created?')) return;
+    setState('working');
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/agent/runs/${encodeURIComponent(runId)}/undo`, { method: 'POST', credentials: 'include' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      setState(`Undone: ${data.restored.length} restored, ${data.removed.length} removed${data.errors.length ? `, ${data.errors.length} could not be undone` : ''}.`);
+    } catch (e) {
+      setError(e.message);
+      setState('');
+    }
+  };
+
+  if (!info?.exists) return null;
+  const done = info.undone || state.startsWith('Undone');
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-[11px]">
+      <span className="text-zinc-300">
+        {info.files.length} file{info.files.length === 1 ? '' : 's'} changed:{' '}
+        <span className="font-mono text-zinc-400">{info.files.map((f) => `${f.path}${f.created ? ' (new)' : ''}`).join(', ')}</span>
+      </span>
+      {done ? (
+        <span className="ml-auto font-bold text-emerald-300">{state || 'Already undone.'}</span>
+      ) : (
+        <button type="button" onClick={undo} disabled={state === 'working'}
+                className="ml-auto rounded-lg border border-zinc-600 px-2.5 py-1 font-bold text-zinc-200 hover:bg-zinc-800 disabled:opacity-50">
+          {state === 'working' ? 'Undoing…' : 'Undo this run'}
+        </button>
+      )}
+      <span className="w-full text-[10px] text-zinc-500">Covers files SMARAN Code wrote or edited. Changes made by commands it ran are not tracked.</span>
+      {error && <span className="w-full text-rose-400">{error}</span>}
+    </div>
+  );
+}
+
+export default function AgentSteps({ steps, runId, live, checkpoint }) {
   if (!steps?.length) return live ? <p className="flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="h-3.5 w-3.5 animate-spin" /> SMARAN Code is reading the task…</p> : null;
   return (
     <div className="mb-3 space-y-1.5" aria-label="SMARAN Code steps">
       {steps.map((item) => <Step key={item.step} item={item} runId={runId} />)}
+      {checkpoint && !live && <UndoRun runId={checkpoint} />}
     </div>
   );
 }

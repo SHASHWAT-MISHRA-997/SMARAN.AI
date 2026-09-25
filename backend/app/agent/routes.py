@@ -39,6 +39,9 @@ class AgentRequest(BaseModel):
     root: str = ""
     # Code mode's "Ask for approval": every change waits for the person.
     ask_for_approval: bool = False
+    # manual | smart | off. Left empty, the saved setting is used; the older
+    # ask_for_approval flag still means manual.
+    approval_mode: Optional[str] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,6 +69,54 @@ async def put_git_preferences(update: GitPreferencesUpdate, _user=Depends(get_cu
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"preferences": prefs, "rules": git_policy.describe(prefs)}
+
+
+class SafetyUpdate(BaseModel):
+    approval_mode: Optional[str] = None
+    allowlist: Optional[List[str]] = None
+    redact_secrets: Optional[bool] = None
+
+
+@router.get("/safety")
+async def get_safety(_user=Depends(get_current_user_dep)):
+    """Approval mode, the owner's allowed commands, and secret masking."""
+    from app.agent import safety
+    return {"preferences": safety.load()}
+
+
+@router.put("/safety")
+async def put_safety(update: SafetyUpdate, _user=Depends(get_current_user_dep)):
+    from app.agent import safety
+    try:
+        return {"preferences": safety.save(update.model_dump(exclude_none=True))}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/runs")
+async def recent_runs(_user=Depends(get_current_user_dep)):
+    """Recent runs that changed files, newest first."""
+    from app.agent import checkpoints
+    return {"runs": checkpoints.list_runs()}
+
+
+@router.get("/runs/{run_id}/changes")
+async def run_changes(run_id: str, _user=Depends(get_current_user_dep)):
+    from app.agent import checkpoints
+    try:
+        return checkpoints.changes(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/runs/{run_id}/undo")
+async def undo_run(run_id: str, _user=Depends(get_current_user_dep)):
+    """Put back every file the run wrote or edited; delete the ones it created."""
+    from app.agent import checkpoints
+    try:
+        return checkpoints.undo(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/tools")
@@ -119,6 +170,11 @@ async def agent_approve(decision: ApprovalDecision):
 async def agent_run(request: AgentRequest):
     """Carry out the task, streaming each step as it happens."""
     run_id = secrets.token_urlsafe(12)
+    from app.agent import safety
+
+    mode = request.approval_mode or ("manual" if request.ask_for_approval else safety.load()["approval_mode"])
+    if mode not in safety.MODES:
+        raise HTTPException(status_code=400, detail="Approval mode is manual, smart or off.")
 
     async def approve(step: int) -> bool:
         future = asyncio.get_running_loop().create_future()
@@ -132,12 +188,12 @@ async def agent_run(request: AgentRequest):
             _approvals.pop(f"{run_id}:{step}", None)
 
     async def stream():
-        yield json.dumps({"type": "run", "id": run_id, "asks_first": request.ask_for_approval}) + "\n"
+        yield json.dumps({"type": "run", "id": run_id, "mode": mode}) + "\n"
         try:
             async for event in loop.run(request.task, request.model, request.history,
                                         request.provider, request.api_key,
                                         request.root,
-                                        approve=approve if request.ask_for_approval else None):
+                                        approve=approve, mode=mode, run_id=run_id):
                 yield json.dumps(event) + "\n"
         except Exception as exc:  # noqa: BLE001
             logger.exception("agent run failed")

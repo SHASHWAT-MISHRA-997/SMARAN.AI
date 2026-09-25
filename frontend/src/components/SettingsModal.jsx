@@ -10,6 +10,7 @@ import VoicePreferences from './VoicePreferences';
 import ComputerUsePreferences from './ComputerUsePreferences';
 import ShortcutsPreferences from './ShortcutsPreferences';
 import GitPreferences from './GitPreferences';
+import AgentSafetySettings from './AgentSafetySettings';
 import CoworkPreferences from './CoworkPreferences';
 import DesktopGeneralPreferences from './DesktopGeneralPreferences';
 import MemoryPreferences from './MemoryPreferences';
@@ -790,7 +791,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = "general", currentUser: p
             {activeTab === 'voice' && <VoicePreferences />}
             {activeTab === 'computer_use' && <ComputerUsePreferences />}
             {activeTab === 'shortcuts' && !isMobile && <ShortcutsPreferences />}
-            {activeTab === 'git' && <GitPreferences />}
+            {activeTab === 'git' && (<div className="space-y-10"><GitPreferences /><AgentSafetySettings /></div>)}
             {activeTab === 'cowork' && <CoworkPreferences />}
             {activeTab === 'desktop_general' && <DesktopGeneralPreferences />}
             {activeTab === 'memory' && <MemoryPreferences />}

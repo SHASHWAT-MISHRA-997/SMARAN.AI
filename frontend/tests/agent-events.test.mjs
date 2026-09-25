@@ -30,3 +30,11 @@ test('steps read as plain actions', () => {
   assert.equal(summarize('run_command', { command: 'npm test' }), 'Run npm test');
   assert.equal(summarize('git', { subcommand: 'status' }), 'git status');
 });
+
+test('a refusal keeps its reason', () => {
+  let steps = applyAgentEvent([], { type: 'tool_call', step: 4, name: 'run_command', arguments: { command: 'format c:' } });
+  steps = applyAgentEvent(steps, { type: 'approval', step: 4, approved: false, reason: 'Refused in every mode: this formats a drive.' });
+  assert.equal(steps[0].status, 'declined');
+  assert.equal(steps[0].refused, true);
+  assert.match(steps[0].reason, /formats a drive/);
+});

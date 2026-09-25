@@ -41,6 +41,7 @@ import logging
 import re
 from typing import AsyncIterator, Dict, List, Optional
 
+from app.agent import checkpoints, safety
 from app.agent import tools as toolbox
 
 logger = logging.getLogger("agent.loop")
@@ -134,15 +135,55 @@ def parse_tool_call(text: str) -> Optional[Dict]:
     if not match:
         match = _UNCLOSED_CALL.search(text or "")
         if not match or not _ARGUMENT.search(match.group(2)):
-            return None
+            return _attribute_call(text or "")
     name = match.group(1).lower()
     arguments = {key.lower(): value for key, value in _ARGUMENT.findall(match.group(2))}
-    # Content is code and must survive exactly; everything else is a path or a
-    # command, where a stray newline is the model's formatting, not data.
     for key in list(arguments):
-        if key != "content":
+        if key in _EXACT_ARGUMENTS:
+            # Code: indentation is meaning. Only the line breaks the model put
+            # around the tag are layout. Stripping all whitespace here moved an
+            # edit's first line to column zero and broke Python indentation.
+            arguments[key] = _trim_newlines(arguments[key])
+        else:
             arguments[key] = arguments[key].strip()
     return {"name": name, "arguments": arguments, "raw": match.group(0)}
+
+
+#: Arguments that are code, where whitespace must survive.
+_EXACT_ARGUMENTS = {"content", "find", "replace"}
+
+_ATTR_TAG = re.compile(r"<([a-z_]+)((?:\s+[a-z_]+\s*=\s*(?:\"[^\"]*\"|'[^']*'))+)\s*/?>", re.IGNORECASE)
+_ATTR = re.compile(r"([a-z_]+)\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", re.IGNORECASE)
+
+
+def _trim_newlines(value: str) -> str:
+    if value.startswith("\r\n"):
+        value = value[2:]
+    elif value.startswith("\n"):
+        value = value[1:]
+    if value.endswith("\r\n"):
+        value = value[:-2]
+    elif value.endswith("\n"):
+        value = value[:-1]
+    return value
+
+
+def _attribute_call(text: str) -> Optional[Dict]:
+    """A call written as <write_file path="a.txt" content="hi">.
+
+    Small models sometimes use the tool's name as the tag and its arguments as
+    attributes. Only a real tool name counts, so ordinary HTML in an answer is
+    not mistaken for a call.
+    """
+    for match in _ATTR_TAG.finditer(text):
+        name = match.group(1).lower()
+        if name not in toolbox.TOOLS:
+            continue
+        # findall gives (name, double-quoted value, single-quoted value).
+        arguments = {key.lower(): double or single
+                     for key, double, single in _ATTR.findall(match.group(2))}
+        return {"name": name, "arguments": arguments, "raw": match.group(0)}
+    return None
 
 
 async def _ask_model(messages: List[Dict], model: str = "",
@@ -185,7 +226,9 @@ async def run(task: str, model: str = "",
               history: Optional[List[Dict]] = None,
               provider: str = "", api_key: str = "",
               root: str = "",
-              approve=None) -> AsyncIterator[Dict]:
+              approve=None,
+              mode: Optional[str] = None,
+              run_id: str = "") -> AsyncIterator[Dict]:
     """Carry out a task, reporting each step as it happens.
 
     Yields dicts the caller can show: 'message' when the agent says something,
@@ -206,6 +249,10 @@ async def run(task: str, model: str = "",
     except toolbox.ToolError as exc:
         yield {"type": "error", "message": str(exc)}
         return
+
+    prefs = safety.load()
+    allowlist = prefs.get("allowlist", [])
+    redact_secrets = prefs.get("redact_secrets", True)
 
     yield {"type": "workspace", "root": str(workspace.root)}
 
@@ -313,17 +360,44 @@ async def run(task: str, model: str = "",
                "arguments": call["arguments"], "step": step}
 
         declined = False
-        if approve is not None and call["name"] in toolbox.MUTATING:
+        refused = ""
+        if mode is not None:
+            # The owner's approval mode decides: run, ask, or refuse outright.
+            verdict = safety.decide(call["name"], call["arguments"], mode, allowlist)
+            if verdict["verdict"] == "refuse":
+                refused = verdict["reason"]
+                yield {"type": "approval", "step": step, "approved": False, "reason": refused}
+            elif verdict["verdict"] == "ask":
+                yield {"type": "approval_needed", "name": call["name"], "arguments": call["arguments"],
+                       "step": step, "reason": verdict["reason"]}
+                declined = not (approve is not None and await approve(step))
+                yield {"type": "approval", "step": step, "approved": not declined}
+        elif approve is not None and call["name"] in toolbox.MUTATING:
             yield {"type": "approval_needed", "name": call["name"],
                    "arguments": call["arguments"], "step": step}
             declined = not await approve(step)
             yield {"type": "approval", "step": step, "approved": not declined}
 
-        if declined:
+        if refused:
+            result = "Refused, and it will be refused however it is asked: %s" % refused
+        elif declined:
             result = ("The person declined this action, so it was not carried out. "
                       "Do not repeat it; choose another approach or ask what they want.")
         else:
+            if run_id and call["name"] in safety.FILE_CHANGES:
+                # The original is kept before the first write, so the whole
+                # run can be undone.
+                try:
+                    target = workspace.resolve(str(call["arguments"].get("path", "")))
+                    first = not checkpoints.changes(run_id)["exists"]
+                    checkpoints.remember(run_id, str(workspace.root), str(target))
+                    if first:
+                        yield {"type": "checkpoint", "run_id": run_id}
+                except Exception:  # noqa: BLE001 - the tool reports a bad path itself
+                    pass
             result = toolbox.execute(call["name"], call["arguments"], workspace)
+            if redact_secrets:
+                result = safety.redact(result)
         performed.append(call["name"])
         yield {"type": "tool_result", "name": call["name"],
                "result": result, "step": step}
