@@ -105,6 +105,9 @@ export default function MediaPackages({ onStatus }) {
             <div className="h-full rounded-full bg-indigo-500 transition-all"
                  style={{ width: `${install.approx_percent || 0}%` }} />
           </div>
+          {install.current_name && (
+            <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">{install.current_name}</p>
+          )}
           <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
             {gb(install.obtained_bytes)} of about {gb(install.approx_total_bytes)}
             {' · '}{install.approx_percent || 0}%

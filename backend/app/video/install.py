@@ -421,7 +421,13 @@ def status() -> dict:
                 if approx_total and _state["status"] == "running" else
                 (100 if _state["status"] == "done" else 0)
             ),
-            "current_name": _state["current_name"],
+            "current_name": (
+                "Installing the downloaded packages - %dm %02ds so far. This step has no "
+                "percentage and can take 10-20 minutes; it is still working."
+                % divmod(int(time.time() - _state["installing_since"]), 60)
+                if _state.get("installing_since") and _state["status"] == "running"
+                else _state["current_name"]
+            ),
             "current_bytes": _state["current_bytes"],
             "current_total": current_total,
             "current_percent": (
@@ -465,6 +471,12 @@ def _install(on_message: Optional[Callable[[str], None]] = None) -> None:
     def note(text: str) -> None:
         with _lock:
             _state["messages"].append(text)
+            # After the downloads pip unpacks everything - PyTorch alone is
+            # thousands of files - and prints nothing until it is done. The
+            # bar sat at 85% for many minutes and read as a hang; the step is
+            # now named, with the time it has been running (status()).
+            if text.startswith("Installing collected packages"):
+                _state["installing_since"] = time.time()
         logger.info("video install: %s", text)
         if on_message:
             on_message(text)
@@ -742,7 +754,8 @@ def start() -> dict:
         _state.update(status="running", messages=[], error=None,
                       downloaded_bytes=0, current_name=None, current_bytes=0,
                       current_total=0, restart_required=False, cached_bytes=0,
-                      phase="packages", started_at=time.time(), samples=[])
+                      phase="packages", started_at=time.time(), samples=[],
+                      installing_since=None)
 
     threading.Thread(target=_run, daemon=True).start()
     return {"started": True, "detail": "Installing. Watch /api/video/install for progress."}
