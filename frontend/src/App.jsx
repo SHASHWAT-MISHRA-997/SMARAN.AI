@@ -20,6 +20,7 @@ import ExtensionsHub from './components/ExtensionsHub';
 import SitesHub from './components/SitesHub';
 import DesktopPet from './components/DesktopPet';
 import PipCompanion from './components/PipCompanion';
+import NoticeToast from './components/NoticeToast';
 import TerminalPanel from './components/TerminalPanel';
 import SmaranDesignView from './components/SmaranDesignView';
 import ScheduledTasksView from './components/ScheduledTasksView';
@@ -808,6 +809,7 @@ const App = () => {
           rather than over it. */}
       <DesktopPet />
       <PipCompanion />
+      <NoticeToast />
 
       <TerminalPanel isOpen={isTerminalOpen} onClose={() => setIsTerminalOpen(false)} />
     </div>

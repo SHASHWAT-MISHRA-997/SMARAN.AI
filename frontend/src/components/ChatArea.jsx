@@ -7,6 +7,7 @@ import { isNativeApp, loadLink, probeHost, queueForSync, syncWithHost } from '..
 import { handleIfDeviceCommand, startBackgroundListening, stopBackgroundListening, startWakeListening, setPageListening, setPageSpeaking, takePendingQuery, takePendingWake, onDeviceEvent, moveAppToBack } from '../utils/deviceControl';
 import { heySmaranOn, setHeySmaran, WAKE_GREETING } from '../utils/wakeSetting';
 import { setSpeaking } from '../utils/speakingState';
+import { startCompanionInbox, COMMAND_EVENT, commandText, safeUrl, notify } from '../utils/companionInbox';
 import { detectCreateRequest, handOffToStudio } from '../utils/studioHandoff';
 import { speechSegments, dominantLanguage } from '../utils/speechSegments';
 import { voicePersonaRule } from '../utils/voicePersona';
@@ -2617,6 +2618,77 @@ const ChatArea = ({
     setPageSpeaking(isVoiceModeOpen && isSpeakingAudio);
     setSpeaking(isSpeakingAudio);
   }, [isVoiceModeOpen, isSpeakingAudio]);
+
+  /* Dispatch: what the paired desktop sends to this phone. Collected while
+     the app is open (utils/companionInbox) and acted on here, where the chat
+     and the voice live. The latest handlers sit in a ref so the listener is
+     registered once. */
+  const companionHandlersRef = useRef({});
+  const companionQueueRef = useRef([]);
+  const companionDrainingRef = useRef(false);
+  companionHandlersRef.current = {
+    // A second dispatched question arriving mid-answer was dropped: the chat
+    // ignores a new message while one is streaming. It now waits its turn
+    // (up to two minutes) and is asked when the answer finishes.
+    ask: (text) => {
+      companionQueueRef.current.push(text);
+      companionHandlersRef.current.drain();
+    },
+    // One at a time: the next question is sent only once the previous answer
+    // has started and finished. Two arriving together used to race - the
+    // second was sent before the first had registered as streaming.
+    drain: async () => {
+      if (companionDrainingRef.current) return;
+      companionDrainingRef.current = true;
+      const wait = (ms) => new Promise((r) => window.setTimeout(r, ms));
+      try {
+        while (companionQueueRef.current.length) {
+          for (let i = 0; i < 90 && streamingRef.current; i++) await wait(2000);
+          const next = companionQueueRef.current.shift();
+          handleSend(null, next);
+          for (let i = 0; i < 10 && !streamingRef.current; i++) await wait(300);   // let it start
+          for (let i = 0; i < 90 && streamingRef.current; i++) await wait(2000);   // and finish
+        }
+      } finally {
+        companionDrainingRef.current = false;
+      }
+    },
+    run: (command) => {
+      const text = commandText(command);
+      switch (command?.action) {
+        case 'prompt':
+          if (text) { notify(`From your computer: ${text}`); companionHandlersRef.current.ask(text); }
+          break;
+        case 'speak':
+          if (text) speakNativeText(text);
+          break;
+        case 'notify':
+        case 'message':
+          if (text) notify(text);
+          break;
+        case 'open_url': {
+          const url = safeUrl(command?.params?.url);
+          if (url) window.open(url, '_blank', 'noopener');
+          break;
+        }
+        case 'new_chat':
+          notify('Your computer started a new chat.');
+          break;
+        default:
+          break;
+      }
+    },
+  };
+  useEffect(() => {
+    if (!isNativeApp()) return undefined;
+    const onCommand = (event) => companionHandlersRef.current.run(event.detail);
+    window.addEventListener(COMMAND_EVENT, onCommand);
+    const stop = startCompanionInbox();
+    return () => {
+      window.removeEventListener(COMMAND_EVENT, onCommand);
+      stop();
+    };
+  }, []);
 
   /* The same on the computer. The wake listener below stands down while a
      call is open (the call has the microphone), so nothing could stop a long

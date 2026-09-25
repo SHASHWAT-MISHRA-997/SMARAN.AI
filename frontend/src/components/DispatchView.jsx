@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Smartphone, Send, ArrowLeft, Plus } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 
@@ -25,8 +25,12 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  // "Loading" only for the first read. The list is refreshed every six
+  // seconds, and flipping to loading each time both flashed the message and
+  // made Dispatch ignore clicks that landed during a refresh.
+  const loadedOnce = useRef(false);
   const loadDevices = useCallback(async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/companion/devices`, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) throw new Error('Device list unavailable');
@@ -37,6 +41,7 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
       setDevices([]);
       setDeviceError('Could not load paired devices. Check the connection and try again.');
     } finally {
+      loadedOnce.current = true;
       setLoading(false);
     }
   }, []);
@@ -50,7 +55,11 @@ export default function DispatchView({ onNavigate, onOpenPairing }) {
 
   const handleDispatch = async (e) => {
     e.preventDefault();
-    if (!dispatchPrompt.trim() || dispatching || loading || deviceError || !devices.length) return;
+    if (dispatching) return;
+    // Say why instead of ignoring the click.
+    if (!dispatchPrompt.trim()) { showToast('Type what to send first.'); return; }
+    if (deviceError) { showToast(deviceError); return; }
+    if (!devices.length) { showToast('No phone is paired yet. Use Pair Device first.'); return; }
     setDispatching(true);
 
     const logEntry = {
