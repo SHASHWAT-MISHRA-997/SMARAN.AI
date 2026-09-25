@@ -323,6 +323,7 @@ def _ensure_on_path() -> bool:
         # into the bundle.
         sys.path.insert(0, directory)
     _activated_directory = os.path.abspath(directory)
+    _reach_into(directory)
 
     # Compiled extensions load DLLs from beside themselves, and on Windows
     # that lookup does not follow sys.path. Without this torch imports and
@@ -336,6 +337,34 @@ def _ensure_on_path() -> bool:
                 except OSError:
                     pass
     return True
+
+
+def _reach_into(directory: str) -> None:
+    """Let packages the app already imported find their missing parts here.
+
+    Being first on sys.path only helps what is imported from now on. A
+    package the app has already loaded from the bundle (Pillow, numpy,
+    huggingface_hub, packaging...) stays the bundled copy, and PyInstaller
+    bundled only the submodules the app itself uses - so torchvision's
+    `from PIL import ImageEnhance` failed with the full Pillow sitting here.
+    Adding this directory's copy to each such package's search path lets a
+    missing submodule come from here instead of failing.
+    """
+    root = os.path.abspath(directory)
+    for name, module in list(sys.modules.items()):
+        search = getattr(module, "__path__", None)
+        if search is None:
+            continue
+        origin = getattr(module, "__file__", None) or ""
+        if origin and os.path.abspath(origin).startswith(root + os.sep):
+            continue
+        extra = os.path.join(root, *name.split("."))
+        if not os.path.isdir(extra) or extra in list(search):
+            continue
+        try:
+            search.append(extra)
+        except (AttributeError, TypeError):  # a __path__ that cannot grow
+            pass
 
 
 def _python_that_can_install() -> Optional[str]:
@@ -458,6 +487,9 @@ def remember_failure(name: str, exc: BaseException) -> str:
 def _package_error() -> Optional[str]:
     if _package_failure:
         return _package_failure
+    if "torch" not in sys.modules and _activated_directory:
+        # Whatever the app has imported since activation, reachable too.
+        _reach_into(_activated_directory)
     for name in ("torch", "torchvision", "diffusers", "transformers", "accelerate",
                  "imageio", "imageio_ffmpeg", "sentencepiece", "google.protobuf"):
         try:

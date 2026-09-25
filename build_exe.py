@@ -238,6 +238,11 @@ COLLECT_ALL = [
     # simply never cited a file the user had given it. Only visible in the
     # frozen app - from source, protobuf is on the path and this works.
     "google.protobuf",
+    # Pillow, whole. The app imports it at startup, so the bundled copy is the
+    # one the fetched image packages get - and PyInstaller had taken only the
+    # parts the app uses: torchvision stopped at "cannot import name
+    # 'ImageEnhance' from 'PIL'".
+    "PIL",
 ]
 
 # Optional heavy dependencies that ChromaDB advertises but SMARAN.AI never uses:
@@ -337,6 +342,10 @@ def build(onefile: bool = False, output_root: str = ROOT, incremental: bool = Fa
     for source, destination in _extra_binaries():
         cmd += ["--add-binary", f"{source}{sep}{destination}"]
 
+    # The whole standard library, for the packages fetched later - see the
+    # hook. A hook rather than 500 --hidden-import flags, which would take the
+    # command line close to Windows' 32K limit.
+    cmd += ["--additional-hooks-dir", os.path.join(ROOT, "packaging", "pyinstaller_hooks")]
     for module in HIDDEN_IMPORTS:
         if sys.platform.startswith("linux") and module.startswith("webview"):
             continue

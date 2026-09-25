@@ -61,3 +61,25 @@ def test_probe_says_why_instead_of_not_installed(monkeypatch):
     hw = hardware.probe()
     assert "would not load" in hw.reason and "DLL load failed" in hw.reason
     assert "not installed yet" not in hw.reason
+
+
+def test_a_package_already_imported_finds_missing_parts_in_the_fetched_copy(tmp_path, monkeypatch):
+    import importlib
+    import sys
+    import types
+
+    bundled = tmp_path / "bundle" / "smaran_fake_pkg"
+    bundled.mkdir(parents=True)
+    fetched = tmp_path / "live" / "smaran_fake_pkg"
+    fetched.mkdir(parents=True)
+    (fetched / "__init__.py").write_text("")
+    (fetched / "extra.py").write_text("VALUE = 7\n")
+
+    package = types.ModuleType("smaran_fake_pkg")
+    package.__file__ = str(bundled / "__init__.py")
+    package.__path__ = [str(bundled)]
+    monkeypatch.setitem(sys.modules, "smaran_fake_pkg", package)
+
+    install._reach_into(str(tmp_path / "live"))
+    assert importlib.import_module("smaran_fake_pkg.extra").VALUE == 7
+    monkeypatch.delitem(sys.modules, "smaran_fake_pkg.extra", raising=False)
