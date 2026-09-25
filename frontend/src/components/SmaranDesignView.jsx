@@ -191,6 +191,25 @@ function cloudKeyFor(provider) {
   }
 }
 
+/* A provider's live list is alphabetical and full of things that cannot write
+   a page - Gemini returned 44, led by "antigravity-preview" and
+   "deep-research". Keep models that write text, general ones first. */
+const NOT_FOR_PAGES = /(embed|tts|audio|image|imagen|veo|vision-only|computer-use|research|aqa|live|robotics|learnlm|guard|whisper|moderation)/i;
+export function rankCloudModels(list) {
+  const usable = list.filter((m) => !NOT_FOR_PAGES.test(m));
+  const score = (m) => {
+    const id = m.toLowerCase();
+    let s = 0;
+    if (/preview|exp|experimental/.test(id)) s += 50;           // stable before previews
+    if (/flash/.test(id)) s -= 20;                               // fast, good at HTML
+    if (/pro|70b|large|sonnet|gpt-4/.test(id)) s -= 10;
+    if (/lite|mini|nano|8b|1b|3b/.test(id)) s += 5;
+    const version = parseFloat((id.match(/(\d+(?:\.\d+)?)/) || [0, 0])[1]);
+    return s - Math.min(version, 9);                             // newer first
+  };
+  return (usable.length ? usable : list).slice().sort((a, b) => score(a) - score(b));
+}
+
 async function discoverModels() {
   const models = [];
 
@@ -234,9 +253,8 @@ async function discoverModels() {
             if (live.length) list = live;
           }
         } catch { /* keep the curated list */ }
-        list
-          .filter((model) => !EMBEDDING_HINTS.some((hint) => model.toLowerCase().includes(hint)))
-          .slice(0, 8)
+        rankCloudModels(list)
+          .slice(0, 6)
           .forEach((model) => {
             const id = `cloud:${provider}:${model}`;
             if (!models.some((x) => x.id === id)) {
