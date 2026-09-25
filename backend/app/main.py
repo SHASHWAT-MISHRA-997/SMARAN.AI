@@ -2903,7 +2903,7 @@ def call_sd_txt2img_bridge(prompt: str, aspect: str = None,
 _CLOUD_PROVIDER_ENDPOINTS = {
     "groq": "https://api.groq.com/openai/v1",
     "openrouter": "https://openrouter.ai/api/v1",
-    "huggingface": "https://router.huggingface.co/hf-inference/v1",
+    "huggingface": "https://router.huggingface.co/v1",
     "cerebras": "https://api.cerebras.ai/v1",
     "together": "https://api.together.xyz/v1",
     "deepseek": "https://api.deepseek.com/v1",
@@ -2934,6 +2934,42 @@ _CLOUD_PROVIDER_ENV_VARS = {
 }
 
 
+# Hugging Face's inference router. The old hf-inference/v1 address answers
+# "Invalid username or password" to current tokens, so every Hugging Face key -
+# fine-grained ones included - failed verification and was not saved. The
+# router's model list is public, so the token is checked with whoami instead.
+_HF_INFERENCE_PERMISSION = "inference.serverless.write"
+
+
+async def _fetch_huggingface_models(api_key: str) -> list[str]:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        who = await client.get("https://huggingface.co/api/whoami-v2",
+                               headers={"Authorization": f"Bearer {api_key}"})
+        if who.status_code == 401:
+            raise HTTPException(status_code=401, detail="Hugging Face did not accept this token. Copy it again from huggingface.co/settings/tokens.")
+        if who.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Hugging Face could not check the token ({who.status_code}).")
+        token = ((who.json().get("auth") or {}).get("accessToken") or {})
+        if token.get("role") == "fineGrained":
+            granted = set(((token.get("fineGrained") or {}).get("global")) or [])
+            if _HF_INFERENCE_PERMISSION not in granted:
+                raise HTTPException(
+                    status_code=400,
+                    detail=("This fine-grained token cannot call models. On huggingface.co/settings/tokens, "
+                            "edit it and tick \"Make calls to Inference Providers\", then save it here again."),
+                )
+        listing = await client.get("https://router.huggingface.co/v1/models",
+                                   headers={"Authorization": f"Bearer {api_key}"})
+    if listing.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Provider model list failed ({listing.status_code}).")
+    models = []
+    for m in listing.json().get("data", []):
+        outputs = ((m.get("architecture") or {}).get("output_modalities")) or ["text"]
+        if m.get("id") and "text" in outputs:
+            models.append(str(m["id"]))
+    return models
+
+
 async def _fetch_cloud_provider_models(provider: str, api_key: str) -> tuple[list[str], bool]:
     """Probe a provider with the supplied key and return only its reported model ids."""
     endpoint = _CLOUD_PROVIDER_ENDPOINTS.get(provider)
@@ -2944,6 +2980,8 @@ async def _fetch_cloud_provider_models(provider: str, api_key: str) -> tuple[lis
         headers.update({"HTTP-Referer": "http://localhost:3003", "X-Title": "SMARAN.AI"})
     if provider == "anthropic":
         headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    if provider == "huggingface":
+        return await _fetch_huggingface_models(api_key), False
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             if provider == "gemini":
@@ -4427,7 +4465,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             endpoints = {
                 'groq': 'https://api.groq.com/openai/v1',
                 'openrouter': 'https://openrouter.ai/api/v1',
-                'huggingface': 'https://router.huggingface.co/hf-inference/v1',
+                'huggingface': 'https://router.huggingface.co/v1',
                 'cerebras': 'https://api.cerebras.ai/v1',
                 'together': 'https://api.together.xyz/v1',
                 'deepseek': 'https://api.deepseek.com/v1',
@@ -7089,7 +7127,7 @@ async def compare_models_endpoint(
     endpoints = {
         "groq": "https://api.groq.com/openai/v1",
         "openrouter": "https://openrouter.ai/api/v1",
-        "huggingface": "https://router.huggingface.co/hf-inference/v1",
+        "huggingface": "https://router.huggingface.co/v1",
         "cerebras": "https://api.cerebras.ai/v1",
         "together": "https://api.together.xyz/v1",
         "deepseek": "https://api.deepseek.com/v1",
