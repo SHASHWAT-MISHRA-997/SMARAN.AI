@@ -2970,6 +2970,24 @@ async def _fetch_huggingface_models(api_key: str) -> list[str]:
     return models
 
 
+async def _fetch_replicate_models(api_key: str) -> list[str]:
+    """Replicate is for video here, not chat, and was missing from the provider
+    table - so every Replicate key failed verification as "unsupported". The
+    key is checked with /account; the list is Replicate's own text-to-video
+    collection, the models this key can use for video."""
+    headers = {"Authorization": f"Bearer {api_key}"}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        account = await client.get("https://api.replicate.com/v1/account", headers=headers)
+        if account.status_code == 401:
+            raise HTTPException(status_code=401, detail="Replicate did not accept this token. Copy it again from replicate.com/account/api-tokens.")
+        if account.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Replicate could not check the token ({account.status_code}).")
+        collection = await client.get("https://api.replicate.com/v1/collections/text-to-video", headers=headers)
+    if collection.status_code != 200:
+        return []
+    return [f"{m['owner']}/{m['name']}" for m in collection.json().get("models", []) if m.get("owner") and m.get("name")]
+
+
 async def _fetch_cloud_provider_models(provider: str, api_key: str) -> tuple[list[str], bool]:
     """Probe a provider with the supplied key and return only its reported model ids."""
     endpoint = _CLOUD_PROVIDER_ENDPOINTS.get(provider)
@@ -2982,6 +3000,8 @@ async def _fetch_cloud_provider_models(provider: str, api_key: str) -> tuple[lis
         headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
     if provider == "huggingface":
         return await _fetch_huggingface_models(api_key), False
+    if provider == "replicate":
+        return await _fetch_replicate_models(api_key), False
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             if provider == "gemini":

@@ -58,3 +58,27 @@ def test_a_classic_read_token_is_accepted(monkeypatch):
     body = {"auth": {"accessToken": {"role": "read"}}}
     monkeypatch.setattr(httpx.AsyncClient, "get", _fake(200, body, [{"id": "a/b"}]))
     assert _run(main._fetch_huggingface_models("hf_read")) == ["a/b"]
+
+
+# Replicate (video) was missing from the provider table: every key failed.
+def _fake_replicate(account_status=200, models=None):
+    async def get(self, url, **kwargs):
+        if url.endswith("/account"):
+            return httpx.Response(account_status, json={})
+        if "collections/text-to-video" in url:
+            return httpx.Response(200, json={"models": models or []})
+        raise AssertionError("unexpected " + url)
+    return get
+
+
+def test_a_rejected_replicate_token_says_so(monkeypatch):
+    monkeypatch.setattr(httpx.AsyncClient, "get", _fake_replicate(401))
+    with pytest.raises(HTTPException) as err:
+        _run(main._fetch_replicate_models("r8_bad"))
+    assert err.value.status_code == 401
+
+
+def test_a_good_replicate_token_lists_video_models(monkeypatch):
+    models = [{"owner": "wan-video", "name": "wan-2.5-t2v"}, {"owner": "google", "name": "veo-3"}, {"name": "broken"}]
+    monkeypatch.setattr(httpx.AsyncClient, "get", _fake_replicate(200, models))
+    assert _run(main._fetch_replicate_models("r8_ok")) == ["wan-video/wan-2.5-t2v", "google/veo-3"]
