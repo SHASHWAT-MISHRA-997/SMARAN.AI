@@ -240,8 +240,8 @@ def create_skill(workspace, name: str, description: str, steps: str) -> str:
         from app.agent.skill_creator import get_skill_creator
         creator = get_skill_creator()
         step_list = [s.strip() for s in steps.splitlines() if s.strip()]
-        path = creator.create_skill(name, description, step_list, triggers=[name.lower()])
-        return f"Created autonomous skill '{name}' stored at {path}."
+        skill = creator.create_skill(name, description, step_list, triggers=[name.lower()])
+        return f"Created autonomous skill '{name}' stored at {getattr(skill, 'filepath', '') or 'the skills folder'}."
     except Exception as exc:
         return f"Failed to create skill: {exc}"
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CheckCircle2, XCircle, FileText, Pencil, Terminal, GitBranch, Search, FolderTree, Loader2, ShieldQuestion, ChevronDown, ChevronRight, Brain, Camera } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import { summarize } from '../utils/agentEvents.js';
@@ -42,6 +42,17 @@ function Step({ item, runId }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const Icon = ICONS[item.name] || Terminal;
+  const waiting = item.status === 'waiting';
+
+  // A step is drawn when the agent calls the tool, and asks for approval a
+  // moment later. Opening only on first draw left the Allow button inside a
+  // collapsed card, so a run sat waiting for a decision nobody could see.
+  useEffect(() => {
+    if (waiting) {
+      setOpen(true);
+      setBusy(false);
+    }
+  }, [waiting]);
 
   const decide = async (approve) => {
     setBusy(true);
@@ -78,17 +89,18 @@ function Step({ item, runId }) {
       {open && (
         <div className="space-y-2 border-t border-zinc-800 px-3 py-2">
           <Detail name={item.name} args={item.arguments || {}} />
-          {item.status === 'waiting' && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-bold text-amber-300">SMARAN Code wants to do this. Allow it?</span>
-              <button type="button" disabled={busy} onClick={() => decide(true)} className="rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-black text-white hover:bg-emerald-500 disabled:opacity-50">Allow</button>
-              <button type="button" disabled={busy} onClick={() => decide(false)} className="rounded-lg border border-rose-500/50 px-3 py-1 text-[11px] font-black text-rose-300 hover:bg-rose-600 hover:text-white disabled:opacity-50">Deny</button>
-              {error && <span className="text-[11px] text-rose-400">{error}</span>}
-            </div>
-          )}
           {item.result != null && (
             <pre className="max-h-56 overflow-auto rounded-lg bg-black/40 p-2 text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap">{String(item.result).slice(0, 8000)}</pre>
           )}
+        </div>
+      )}
+      {/* Outside the collapsible part: a decision is never hidden. */}
+      {waiting && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-amber-500/30 px-3 py-2">
+          <span className="text-[11px] font-bold text-amber-300">SMARAN Code wants to do this. Allow it?</span>
+          <button type="button" disabled={busy} onClick={() => decide(true)} className="rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-black text-white hover:bg-emerald-500 disabled:opacity-50">Allow</button>
+          <button type="button" disabled={busy} onClick={() => decide(false)} className="rounded-lg border border-rose-500/50 px-3 py-1 text-[11px] font-black text-rose-300 hover:bg-rose-600 hover:text-white disabled:opacity-50">Deny</button>
+          {error && <span className="text-[11px] text-rose-400">{error}</span>}
         </div>
       )}
     </div>

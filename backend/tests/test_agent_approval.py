@@ -89,3 +89,58 @@ def test_saved_keys_are_used_for_cloud_providers(monkeypatch):
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
     with pytest.raises(models.ProviderError, match="No mistral key"):
         asyncio.run(models.complete([{"role": "user", "content": "hi"}], "m", "mistral"))
+
+
+def test_the_task_arrives_with_the_folder_layout(tmp_path, monkeypatch):
+    (tmp_path / "calc.py").write_text("x = 1\n")
+    seen = []
+
+    async def ask(messages, model="", provider="", api_key=""):
+        seen.append(messages[-1]["content"])
+        return "Nothing to do."
+
+    monkeypatch.setattr(loop, "_ask_model", ask)
+    collect("look", tmp_path, None)
+    assert "Files in the open folder" in seen[0] and "calc.py" in seen[0]
+
+
+def test_a_call_missing_only_its_closing_tag_is_used():
+    call = loop.parse_tool_call('<tool_call name="read_file">\n<path>calc.py</path>\n')
+    assert call and call["name"] == "read_file" and call["arguments"] == {"path": "calc.py"}
+    assert loop.parse_tool_call('<tool_call name="read_file">\n<path>calc.py') is None
+
+
+def test_a_garbled_call_is_sent_back_instead_of_ending_the_run(tmp_path, monkeypatch):
+    (tmp_path / "a.txt").write_text("hello")
+    monkeypatch.setattr(loop, "_ask_model", scripted([
+        '<tool_call name="read_file"><path',                       # unreadable
+        '<tool_call name="read_file">\n<path>a.txt</path>\n</tool_call>',
+        "Read it.",
+    ]))
+    events = collect("read a.txt", tmp_path, None)
+    results = [e for e in events if e["type"] == "tool_result"]
+    assert results and "hello" in results[0]["result"]
+    assert events[-1]["type"] == "done"
+
+
+def test_every_event_is_json(tmp_path, monkeypatch):
+    import json
+    from app.agent import skill_creator
+
+    monkeypatch.setattr(loop, "_ask_model", scripted([READ, "Listed the files."]))
+
+    class Skill:
+        filepath = str(tmp_path / "skill.md")
+
+    class Creator:
+        def extract_skill_from_session(self, **kw):
+            return {"name": "list", "description": "d", "steps": ["a"], "triggers": ["t"]}
+
+        def create_skill(self, **kw):
+            return Skill()
+
+    monkeypatch.setattr(skill_creator, "get_skill_creator", lambda: Creator())
+    events = collect("look around", tmp_path, None)
+    for event in events:
+        json.dumps(event)
+    assert any(e["type"] == "skill_created" and e["path"].endswith("skill.md") for e in events)

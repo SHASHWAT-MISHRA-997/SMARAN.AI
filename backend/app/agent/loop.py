@@ -75,6 +75,22 @@ One tool per message. You will be given the result and can then continue.
 When the work is complete, reply normally with no tool call, and summarise \
 what you changed and what you verified."""
 
+def _project_view(workspace) -> str:
+    """The folder's files, given with the task - as Claude Code and Codex do.
+
+    Without it the model guessed at paths ("src/calc.py" for a calc.py at the
+    root), spent turns on files that do not exist, and small models gave up.
+    """
+    try:
+        listing = toolbox.list_files(workspace, "")
+    except Exception:  # noqa: BLE001 - a view is a help, not a requirement
+        return ""
+    lines = listing.splitlines()
+    shown = "\n".join(lines[:200])
+    more = "\n... and %d more" % (len(lines) - 200) if len(lines) > 200 else ""
+    return "\n\nFiles in the open folder (paths are relative to it):\n" + shown + more
+
+
 def _git_rules() -> str:
     try:
         from app.agent import git_policy
@@ -101,11 +117,24 @@ _TOOL_CALL = re.compile(
 _ARGUMENT = re.compile(r"<([a-z_]+)>(.*?)</\1>", re.IGNORECASE | re.DOTALL)
 
 
+_UNCLOSED_CALL = re.compile(
+    r"<tool_call\s+name=[\"']([a-z_]+)[\"']\s*>(.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 def parse_tool_call(text: str) -> Optional[Dict]:
-    """The first tool call in a reply, or None if it is just talking."""
+    """The first tool call in a reply, or None if it is just talking.
+
+    Small local models often stop before writing </tool_call>. A call that is
+    otherwise complete - every argument tag closed - is taken as meant, rather
+    than ending the run with the raw tag printed as the answer.
+    """
     match = _TOOL_CALL.search(text or "")
     if not match:
-        return None
+        match = _UNCLOSED_CALL.search(text or "")
+        if not match or not _ARGUMENT.search(match.group(2)):
+            return None
     name = match.group(1).lower()
     arguments = {key.lower(): value for key, value in _ARGUMENT.findall(match.group(2))}
     # Content is code and must survive exactly; everything else is a path or a
@@ -205,12 +234,13 @@ async def run(task: str, model: str = "",
         {"role": "system", "content": (SYSTEM % toolbox.describe_tools()) + "\n\n" + _git_rules() + learning_context},
     ]
     messages.extend(history or [])
-    messages.append({"role": "user", "content": task})
+    messages.append({"role": "user", "content": task + _project_view(workspace)})
 
     # What was actually done, so a claim of completion can be checked against
     # it. A small model will write one file and announce it wrote three; the
     # caller should not have to take its word.
     performed: List[str] = []
+    repairs = 0
 
     for step in range(1, MAX_STEPS + 1):
         try:
@@ -220,6 +250,16 @@ async def run(task: str, model: str = "",
             return
 
         call = parse_tool_call(reply)
+
+        if call is None and "<tool_call" in (reply or "") and repairs < 3:
+            # It tried to use a tool and got the format wrong. Ending here
+            # printed a half tag as the "answer"; asking again costs one turn.
+            repairs += 1
+            messages.append({"role": "assistant", "content": reply})
+            messages.append({"role": "user", "content": (
+                "That tool call could not be read. Use exactly this shape, with every tag closed:\n"
+                '<tool_call name="read_file">\n<path>calc.py</path>\n</tool_call>')})
+            continue
 
         if call is None:
             # No tool asked for: the agent considers the work finished.
@@ -237,7 +277,7 @@ async def run(task: str, model: str = "",
                     task=task, steps_taken=step, tools_used=performed, summary=reply[:300]
                 )
                 if skill_candidate:
-                    skill_path = creator.create_skill(
+                    skill = creator.create_skill(
                         name=skill_candidate["name"],
                         description=skill_candidate["description"],
                         steps=skill_candidate["steps"],
@@ -247,7 +287,9 @@ async def run(task: str, model: str = "",
                     yield {
                         "type": "skill_created",
                         "name": skill_candidate["name"],
-                        "path": skill_path,
+                        # The file it was saved to - the object itself is not
+                        # JSON and ended the stream with a serialisation error.
+                        "path": getattr(skill, "filepath", "") or "",
                         "description": skill_candidate["description"]
                     }
 
