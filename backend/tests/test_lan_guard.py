@@ -62,3 +62,21 @@ def test_public_prefixes_do_not_leak_to_neighbours():
 def test_credentials_are_read_from_every_place_the_app_sends_them():
     scope = {"headers": [(b"cookie", b"session_token=abc")], "query_string": b"companion_token=xyz"}
     assert credentials(scope) == ("xyz", "abc")
+
+
+def test_a_cors_preflight_passes_but_the_request_after_it_is_checked():
+    reached, sent = [], []
+
+    async def app(scope, receive, send):
+        reached.append(scope["method"])
+
+    async def send(message):
+        sent.append(message)
+
+    guard = LanGuard(app, validate=lambda p, s: p == "good")
+    base = {"type": "http", "path": "/api/chat", "client": ("192.168.1.4", 5000), "query_string": b""}
+    asyncio.run(guard(dict(base, method="OPTIONS", headers=[]), None, send))
+    asyncio.run(guard(dict(base, method="POST", headers=[]), None, send))
+    asyncio.run(guard(dict(base, method="POST", headers=[(b"x-companion-token", b"good")]), None, send))
+    assert reached == ["OPTIONS", "POST"]          # preflight, then only the POST with a token
+    assert sent[0]["status"] == 401

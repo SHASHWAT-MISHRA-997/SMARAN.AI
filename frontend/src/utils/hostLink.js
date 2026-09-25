@@ -202,10 +202,11 @@ export const askHost = async (link, action, params = {}) => {
 export const pollHostCommands = async (link) => {
   if (!link?.url || !link?.token) return [];
   try {
-    const response = await fetch(
-      `${link.url}/api/companion/commands?token=${encodeURIComponent(link.token)}`,
-      { cache: 'no-store' },
-    );
+    // In a header, not the URL: URLs end up in logs.
+    const response = await fetch(`${link.url}/api/companion/commands`, {
+      cache: 'no-store',
+      headers: { 'X-Companion-Token': link.token },
+    });
     if (!response.ok) return [];
     const data = await response.json();
     return data.commands || [];

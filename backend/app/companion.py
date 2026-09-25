@@ -546,9 +546,17 @@ def queue_command(
 
 
 @router.get("/commands")
-def collect_commands(token: str = Query(...), db: Session = Depends(get_db)):
-    """Device -> desktop poll. Returns and clears anything waiting."""
-    device = _device_from_token(db, token)
+def collect_commands(request: Request, token: str = Query(""), db: Session = Depends(get_db)):
+    """Device -> desktop poll. Returns and clears anything waiting.
+
+    The token comes in the X-Companion-Token header. It used to be in the URL,
+    where it is written to access logs and proxy logs; the query form is still
+    read so phones on an older version keep working until they update.
+    """
+    presented = request.headers.get("X-Companion-Token", "").strip() or token.strip()
+    if not presented:
+        raise HTTPException(status_code=401, detail="Pair this device first.")
+    device = _device_from_token(db, presented)
     queue = _command_queues.pop(device.id, [])
     return {"commands": queue}
 

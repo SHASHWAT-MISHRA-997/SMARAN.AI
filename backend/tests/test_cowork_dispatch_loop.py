@@ -343,3 +343,12 @@ def test_the_phone_itself_is_unaffected(phone):
     res = network.post("/api/companion/from-device", json={
         "token": token, "action": "notify", "params": {"text": "still works"}})
     assert res.status_code == 200, res.text
+
+
+def test_the_phone_collects_with_the_token_in_a_header_not_the_url(phone):
+    device_id, token = phone
+    owner.post("/api/companion/dispatch", json={
+        "device_id": device_id, "action": "notify", "data": {"text": "header"}})
+    waiting = owner.get("/api/companion/commands", headers={"X-Companion-Token": token}).json()
+    assert [c["params"]["text"] for c in waiting["commands"]] == ["header"]
+    assert owner.get("/api/companion/commands").status_code == 401

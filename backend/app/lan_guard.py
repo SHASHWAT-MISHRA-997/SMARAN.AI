@@ -109,6 +109,13 @@ class LanGuard:
         client = (scope.get("client") or ("", 0))[0]
         if not guarded or client in _LOOPBACK or is_public(path):
             return await self.app(scope, receive, send)
+        # A CORS preflight. Browsers never attach credentials or custom headers
+        # to it, so demanding the pairing token here refused every preflight
+        # and the paired phone's chat failed with "Failed to fetch" before its
+        # real request was even sent. It runs no route; the request that
+        # follows it carries the token and is checked like any other.
+        if kind == "http" and scope.get("method") == "OPTIONS":
+            return await self.app(scope, receive, send)
 
         paired, session = credentials(scope)
         if (paired or session) and await run_in_threadpool(self._validate, paired, session):
