@@ -451,6 +451,8 @@ from .coding_sync import router as coding_sync_router
 app.include_router(coding_sync_router)
 from app.model_info import router as model_info_router
 app.include_router(model_info_router)
+from app.ollama_manager import router as ollama_manager_router
+app.include_router(ollama_manager_router)
 
 class ClientLog(BaseModel):
     """Something that went wrong in the page, written where it can be read.

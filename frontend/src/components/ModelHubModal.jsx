@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Search, Cpu, Download, Trash2, CheckCircle2, BarChart2, Filter, Check, Layers, RefreshCw, Key, ExternalLink, Zap, Cloud, Video, Info } from 'lucide-react';
 import ModelInfoPanel from './ModelInfoPanel';
+import OllamaManager from './OllamaManager';
 import { API_BASE } from '../context/AuthContext';
 import ModelComparisonModal from './ModelComparisonModal';
 
@@ -285,17 +286,14 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange, onSelectModel })
   const [selectedCompany, setSelectedCompany] = useState('all');
   const [selectedCapability, setSelectedCapability] = useState('all');
   const [gpuTierFilter, setGpuTierFilter] = useState('all');
-  // Opening the hub on the installed-only view shows an empty screen until
-  // something has been downloaded, which reads as though the catalog is
-  // missing. Start on the catalog and switch to installed once there is
-  // actually something installed to look at.
-  const [showDiscoverModels, setShowDiscoverModels] = useState(true);
 
   // Installing a model Ollama has but this catalogue does not.
   const [pullName, setPullName] = useState('');
   const [pullNote, setPullNote] = useState('');
   // Which model's details are open (catalogue entry or cloud model), if any.
   const [infoTarget, setInfoTarget] = useState(null);
+  // Local tab: what is on this PC, the whole Ollama library, or the curated catalogue.
+  const [localView, setLocalView] = useState('pc');
   const pullByName = () => startPull(pullName.trim());
   const startPull = async (name) => {
     if (!name) return;
@@ -337,7 +335,6 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange, onSelectModel })
       setPullNote(`Could not start: ${String(err).slice(0, 80)}`);
     }
   };
-  const pickedInitialView = useRef(false);
   const [downloadingMap, setDownloadingMap] = useState({});
 
   // Model comparison selection (up to 4 models)
@@ -583,13 +580,6 @@ Download it anyway?`)) {
     }
   };
 
-  // If this machine already has models on disk, open on those instead;
-  // otherwise the catalog stays in front so the hub is never blank.
-  useEffect(() => {
-    if (pickedInitialView.current || !catalog.length) return;
-    pickedInitialView.current = true;
-    if (catalog.some((m) => m.is_downloaded)) setShowDiscoverModels(false);
-  }, [catalog]);
 
   if (!isOpen) return null;
 
@@ -616,7 +606,6 @@ Download it anyway?`)) {
     return aliases[raw] || raw;
   };
   const filteredCatalog = catalog.filter((m) => {
-    if (!showDiscoverModels && !m.is_downloaded && !downloadingMap[m.id]) return false;
     const matchesSearch =
       (m.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (m.company || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -736,53 +725,20 @@ Download it anyway?`)) {
                of each was "Download Model Weights", with the model's name above
                the fold and no way to scroll to it. */
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-              {/* Downloading was limited to this app's catalogue, so anything
-                  Ollama published that the catalogue did not list - glm4,
-                  qwen3, deepseek-r1, and everything released after the
-                  catalogue was written - could not be installed from here at
-                  all. Ollama takes any name, so this passes one through. */}
-              <div className="p-5 border-b border-zinc-800/80 bg-zinc-900/20 shrink-0">
-                <p className="text-xs font-black text-white">Install any Ollama model by name</p>
-                <p className="mt-0.5 text-[10px] leading-4 text-zinc-500">
-                  Anything at ollama.com/library, whether or not it is in the catalogue below.
-                  Try <code className="text-zinc-400">glm4:9b</code>, <code className="text-zinc-400">qwen3:8b</code> or <code className="text-zinc-400">deepseek-r1:7b</code>.
-                  Large models need memory you may not have - a 9B fits in about 6 GB once quantised, a 700B does not fit at all.
-                </p>
-                <div className="mt-2.5 flex gap-2">
-                  <input
-                    value={pullName}
-                    onChange={(e) => setPullName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') pullByName(); }}
-                    placeholder="glm4:9b"
-                    className="min-w-0 flex-1 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-mono text-white outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={pullByName}
-                    disabled={!pullName.trim()}
-                    className="shrink-0 rounded-xl bg-indigo-600 px-3.5 py-2 text-[11px] font-black text-white transition hover:bg-indigo-500 disabled:opacity-40"
-                  >
-                    Install
+              <div className="flex flex-wrap gap-2 border-b border-zinc-800/80 bg-zinc-900/20 px-5 py-3">
+                {[['pc', 'On this PC'], ['library', 'Ollama library'], ['catalogue', 'SMARAN catalogue']].map(([id, label]) => (
+                  <button key={id} type="button" onClick={() => setLocalView(id)}
+                          className={`rounded-xl border px-3.5 py-1.5 text-[11px] font-black transition ${localView === id ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200'}`}>
+                    {label}
                   </button>
-                </div>
-                {pullNote && (
-                  <p className={`mt-2 text-[11px] ${pullNote.startsWith('Could not') || pullNote.includes('failed') ? 'text-rose-400' : 'text-indigo-300'}`}>
-                    {pullNote}
-                  </p>
-                )}
+                ))}
               </div>
-
+              {localView !== 'catalogue' && (
+                <OllamaManager view={localView} onPull={startPull} pullNote={pullNote} setModel={setModel} onClose={onClose} />
+              )}
+              {localView === 'catalogue' && (<>
               {/* Filter & Search Bar */}
               <div className="p-5 border-b border-zinc-800/80 bg-zinc-900/20 space-y-4 shrink-0">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-black text-white">{showDiscoverModels ? 'Discover downloadable models' : 'Installed local models'}</p>
-                    <p className="text-[10px] text-zinc-500 mt-0.5">Only completed local downloads reported by the backend appear in Installed view.</p>
-                  </div>
-                  <button type="button" onClick={() => setShowDiscoverModels((value) => !value)} className="px-3 py-2 rounded-xl border border-indigo-500/35 bg-indigo-500/10 text-indigo-300 text-[11px] font-black cursor-pointer">
-                    {showDiscoverModels ? 'Show installed only' : 'Discover models'}
-                  </button>
-                </div>
                 <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
                   <div className="relative w-full md:w-96">
                     <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -871,8 +827,7 @@ Download it anyway?`)) {
                   </div>
                 ) : filteredCatalog.length === 0 ? (
                   <div className="py-16 text-center text-zinc-500 text-sm font-semibold space-y-3">
-                    <p>{showDiscoverModels ? 'No models matched your search or hardware filter.' : 'No completed local model download was detected.'}</p>
-                    {!showDiscoverModels && <button type="button" onClick={() => setShowDiscoverModels(true)} className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black cursor-pointer">Browse downloadable models</button>}
+                    <p>No models matched your search or hardware filter.</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1095,6 +1050,7 @@ Download it anyway?`)) {
                   Compare Selected ({selectedForCompare.length}/4)
                 </button>
               </div>
+              </>)}
             </div>
           )}
 
