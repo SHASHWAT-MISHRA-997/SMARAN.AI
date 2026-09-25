@@ -220,7 +220,7 @@ def _register_dll_directories_once() -> None:
 
     Windows keeps every registration, duplicates included, and refuses more
     at about 32K characters in total with WinError 206, "The filename or
-    extension is too long". torch registers torch\lib on every import
+    extension is too long". torch registers torch/lib on every import
     attempt, and a failed import was retried by every status poll - so after
     a few hundred polls torch could not load at all, and the error that had
     started it was long out of sight.

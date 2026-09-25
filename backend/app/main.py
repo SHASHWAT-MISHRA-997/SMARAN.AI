@@ -768,6 +768,10 @@ app.add_middleware(
 from app.origin_guard import OriginGuard  # noqa: E402
 
 app.add_middleware(OriginGuard)
+# Off this machine, every API route needs a session or a pairing token - see
+# app/lan_guard.py for the 159 routes that did not ask for one.
+from app.lan_guard import LanGuard
+app.add_middleware(LanGuard)
 
 # Security headers middleware
 _GOOGLE_CONFIG_FILE = os.path.join(settings.DATA_DIR, "google_oauth.json")
