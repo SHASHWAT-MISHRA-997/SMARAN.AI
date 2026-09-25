@@ -35,13 +35,18 @@ def test_the_pipeline_is_loaded_without_a_text_encoder():
     )
 
 
-def test_the_encoder_is_capped_and_offloaded():
+def test_the_encoder_streams_one_block_at_a_time():
+    """The whole encoder never sits in memory: each block is loaded before it
+    runs and dropped after. accelerate's disk offload (device_map="auto" with
+    an offload folder) used to do this and now crashes torch with an access
+    violation, taking the app down - so it must not come back."""
     source = EMBEDS.read_text(encoding="utf-8")
-    for needed in ("device_map", "max_memory", "offload_folder"):
-        assert needed in source, (
-            f"{needed} is missing - without it the loader materialises the "
-            f"whole encoder at once and the process dies"
-        )
+    assert "class StreamedT5Encoder" in source
+    assert "register_forward_pre_hook" in source and "register_forward_hook" in source
+    assert "init_empty_weights" in source, "the model must be built empty, not materialised"
+    import re
+    assert not re.search(r'device_map\s*=\s*"auto"\s*,', source) and not re.search(r"offload_folder\s*=\s*\w", source), (
+        "accelerate's disk offload is back; it crashes torch_cpu.dll on this stack")
 
 
 def test_the_encoder_is_freed_before_the_pipeline_loads():
@@ -106,7 +111,7 @@ def test_the_encoding_matches_the_pipelines_own():
     differs from every other LTX caller, for no visible reason.
     """
     source = EMBEDS.read_text(encoding="utf-8")
-    assert "encoder(inputs.input_ids)[0]" in source, (
+    assert "encoder(inputs.input_ids)" in source and "encoder(inputs.input_ids, " not in source, (
         "the encoder is being called with an attention mask; the pipeline "
         "does not, and the embeddings differ if it is"
     )

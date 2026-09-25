@@ -11,10 +11,9 @@ the log. From the user's side the app simply vanished mid-render.
 
 The fix is to stop holding the whole thing at once. Two changes:
 
-  * The encoder is loaded with accelerate's disk offload and a hard cap on how
-    much RAM it may use, so weights stream from disk as each layer runs.
-    Measured on the 6 GB / 16 GB machine this was written for: 26 seconds to
-    load inside ~2.7 GB, against a segfault before.
+  * The encoder streams: each block's weights are read from disk just before
+    it runs and dropped just after (StreamedT5Encoder). accelerate's disk
+    offload did this job once and now crashes torch itself, so it is not used.
 
   * It is freed the moment the prompt is encoded, before the transformer and
     VAE are loaded at all. Peak memory becomes the larger of the two halves
@@ -42,11 +41,6 @@ logger = logging.getLogger(__name__)
 
 MAX_SEQUENCE_LENGTH = 128
 
-# How much RAM the text encoder may occupy before the rest streams from disk.
-# Low enough to leave room for everything else on a 16 GB machine; high enough
-# that the encode is not pure disk traffic.
-_ENCODER_RAM_CAP = "4GiB"
-
 _cache: dict = {}
 _cache_lock = threading.Lock()
 
@@ -55,17 +49,111 @@ _cache_lock = threading.Lock()
 _CACHE_LIMIT = 32
 
 
-def _offload_dir() -> str:
-    from app.config import settings
-
-    path = os.path.join(settings.DATA_DIR, "video", "offload")
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
 def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
+
+
+class StreamedT5Encoder:
+    """T5-XXL, one block at a time, straight from its files.
+
+    accelerate's disk offload (device_map="auto" with an offload folder) was
+    the previous answer to the encoder not fitting in RAM, and on the current
+    torch / transformers / accelerate it crashes the process with an access
+    violation inside torch_cpu.dll during the first forward pass - measured on
+    the RTX 2060 / 16 GB machine, every time. A native crash takes the whole
+    app down, so video could not be made at all.
+
+    This does the same streaming without accelerate's offload machinery: the
+    model is built empty (on the meta device), and each of its 24 blocks has
+    its weights read from the safetensors shards onto the GPU just before it
+    runs and dropped just after. Peak memory is the embedding plus one block -
+    well under a gigabyte - on a card or in RAM, whichever is used. Blocks run
+    in float32: T5 overflows in float16, and Turing cards have no fast
+    bfloat16, so float32 is both the correct and the fast choice here.
+    """
+
+    def __init__(self, repo: str):
+        import json
+        from contextlib import ExitStack
+
+        import torch
+        from accelerate import init_empty_weights
+        from huggingface_hub import snapshot_download
+        from safetensors import safe_open
+        from transformers import T5Config, T5EncoderModel
+
+        root = snapshot_download(repo, allow_patterns=["text_encoder/*"])
+        self.folder = os.path.join(root, "text_encoder")
+        with open(os.path.join(self.folder, "model.safetensors.index.json"), encoding="utf-8") as fh:
+            self.weight_map = json.load(fh)["weight_map"]
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.compute = torch.float32
+        self._files = ExitStack()
+        self._open = {}
+        self._safe_open = safe_open
+
+        config = T5Config.from_pretrained(self.folder)
+        with init_empty_weights():
+            self.model = T5EncoderModel(config)
+        self.model.eval()
+
+        # Always resident: the token embedding and the closing layer norm.
+        self._load(self.model.shared, "shared.")
+        embed = self.model.encoder.embed_tokens
+        if embed is not self.model.shared:
+            self._load(embed, "shared.", alias=True)
+        self._load(self.model.encoder.final_layer_norm, "encoder.final_layer_norm.")
+
+        self._hooks = []
+        for index, block in enumerate(self.model.encoder.block):
+            prefix = "encoder.block.%d." % index
+            self._hooks.append(block.register_forward_pre_hook(
+                lambda module, args, prefix=prefix: self._load(module, prefix)))
+            self._hooks.append(block.register_forward_hook(
+                lambda module, args, output: self._drop(module)))
+
+    def _tensor(self, key: str):
+        name = self.weight_map[key]
+        handle = self._open.get(name)
+        if handle is None:
+            handle = self._files.enter_context(
+                self._safe_open(os.path.join(self.folder, name), framework="pt", device="cpu"))
+            self._open[name] = handle
+        return handle.get_tensor(key)
+
+    @staticmethod
+    def _set(module, dotted: str, value) -> None:
+        import torch
+
+        *path, leaf = dotted.split(".")
+        for part in path:
+            module = getattr(module, part)
+        module._parameters[leaf] = torch.nn.Parameter(value, requires_grad=False)
+
+    def _load(self, module, prefix: str, alias: bool = False) -> None:
+        for name, _ in list(module.named_parameters(recurse=True)):
+            key = "shared.weight" if alias else prefix + name
+            self._set(module, name, self._tensor(key).to(device=self.device, dtype=self.compute))
+
+    def _drop(self, module) -> None:
+        import torch
+
+        for name, param in list(module.named_parameters(recurse=True)):
+            self._set(module, name, torch.empty(param.shape, dtype=param.dtype, device="meta"))
+
+    def __call__(self, input_ids):
+        out = self.model(input_ids=input_ids.to(self.device))
+        hidden = out[0] if isinstance(out, (tuple, list)) else out.last_hidden_state
+        return hidden.detach().to("cpu")
+
+    def close(self) -> None:
+        for hook in self._hooks:
+            hook.remove()
+        self._hooks = []
+        self._files.close()
+        self._open.clear()
+        self.model = None
 
 
 def encode(
@@ -103,19 +191,7 @@ def encode(
                  "which takes about a minute and keeps memory in bounds.")
 
     tokenizer = T5TokenizerFast.from_pretrained(repo, subfolder="tokenizer")
-    encoder = T5EncoderModel.from_pretrained(
-        repo,
-        subfolder="text_encoder",
-        dtype=dtype,
-        low_cpu_mem_usage=True,
-        # Without these three the loader tries to materialise 9.5 GB at once
-        # and the process dies with no traceback.
-        device_map="auto",
-        max_memory={"cpu": _ENCODER_RAM_CAP},
-        offload_folder=_offload_dir(),
-        offload_state_dict=True,
-    )
-
+    encoder = StreamedT5Encoder(repo)
     try:
         result = {}
         for name, text in (("prompt", prompt), ("negative_prompt", negative_prompt)):
@@ -130,12 +206,13 @@ def encode(
             with torch.no_grad():
                 # No attention mask here. The pipeline does not pass one
                 # either, and passing one changes the embeddings.
-                embeds = encoder(inputs.input_ids)[0]
+                embeds = encoder(inputs.input_ids)
             result["%s_embeds" % name] = embeds.to(dtype=dtype)
             result["%s_attention_mask" % name] = inputs.attention_mask.bool()
     finally:
         # Freed before the transformer and VAE are loaded. This ordering is
         # the entire point: held on to, the two together exceed the machine.
+        encoder.close()
         del encoder
         gc.collect()
         try:
