@@ -109,6 +109,14 @@ _activation_lock = threading.RLock()
 _activated_directory: Optional[str] = None
 _activation_error: Optional[str] = None
 _dll_handles: list = []
+#: Why the packages could not be loaded, once they could not. Kept for the
+#: life of the process: a native extension that failed half way through its
+#: import cannot be imported again until restart, so asking again only
+#: repeats the failure (see _register_dll_directories_once for what each
+#: repeat used to cost).
+_package_failure: Optional[str] = None
+_dll_directories: dict = {}
+_dll_register_lock = threading.Lock()
 
 _PROGRESS = re.compile(r"^Progress (\d+) of (\d+)\s*$")
 _DOWNLOADING = re.compile(r"^\s*Downloading (\S+)")
@@ -191,6 +199,59 @@ def _promote_staged() -> bool:
     return True
 
 
+class _AlreadyRegistered:
+    """What a repeat registration returns: the folder is on the list already."""
+
+    def __init__(self, path):
+        self.path = path
+
+    def close(self) -> None:
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        pass
+
+
+def _register_dll_directories_once() -> None:
+    """Make os.add_dll_directory register a folder once per process.
+
+    Windows keeps every registration, duplicates included, and refuses more
+    at about 32K characters in total with WinError 206, "The filename or
+    extension is too long". torch registers torch\lib on every import
+    attempt, and a failed import was retried by every status poll - so after
+    a few hundred polls torch could not load at all, and the error that had
+    started it was long out of sight.
+    """
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+    if getattr(os.add_dll_directory, "_registers_once", False):
+        return
+    original = os.add_dll_directory
+
+    def add_once(path):
+        key = os.path.normcase(os.path.abspath(os.fspath(path)))
+        with _dll_register_lock:
+            if key in _dll_directories:
+                return _AlreadyRegistered(path)
+            handle = original(path)
+            _dll_directories[key] = handle
+        real_close = handle.close
+
+        def close() -> None:
+            with _dll_register_lock:
+                _dll_directories.pop(key, None)
+            real_close()
+
+        handle.close = close
+        return handle
+
+    add_once._registers_once = True
+    os.add_dll_directory = add_once
+
+
 def ensure_on_path() -> bool:
     with _activation_lock:
         return _ensure_on_path()
@@ -241,6 +302,7 @@ def _ensure_on_path() -> bool:
     # the live directory yet, so this is the one point where it can be
     # replaced without fighting a DLL that Windows has already loaded.
     global _activated_directory, _activation_error
+    _register_dll_directories_once()
     directory = packages_dir()
     if _activated_directory == os.path.abspath(directory):
         return os.path.isdir(directory)
@@ -375,13 +437,39 @@ def _record_progress(total_bytes: int) -> None:
         samples.pop(0)
 
 
+def load_failure() -> Optional[str]:
+    """Why the installed packages would not load, or None."""
+    return _package_failure
+
+
+def remember_failure(name: str, exc: BaseException) -> str:
+    """Record a package that is present and would not load; returns the text.
+
+    Logged once with its traceback. It used to be dropped: the status said
+    "not installed" while the packages sat on disk, and nothing said why.
+    """
+    global _package_failure
+    if _package_failure is None:
+        _package_failure = f"{name}: {type(exc).__name__}: {exc}"
+        logger.error("The image and video packages would not load (%s)", name, exc_info=exc)
+    return _package_failure
+
+
 def _package_error() -> Optional[str]:
+    if _package_failure:
+        return _package_failure
     for name in ("torch", "torchvision", "diffusers", "transformers", "accelerate",
                  "imageio", "imageio_ffmpeg", "sentencepiece", "google.protobuf"):
         try:
             importlib.import_module(name)
+        except ModuleNotFoundError as exc:
+            if exc.name in (name, name.split(".")[0]):
+                # Simply not there (yet): cheap to ask again, and an install
+                # can still put it there.
+                return f"{name}: {exc}"
+            return remember_failure(name, exc)
         except Exception as exc:
-            return f"{name}: {exc}"
+            return remember_failure(name, exc)
     return None
 
 
@@ -401,7 +489,9 @@ def status() -> dict:
         return {
             "status": _state["status"],
             "messages": list(_state["messages"])[-40:],
-            "error": _state["error"] or _activation_error,
+            # A package that is present and will not load is an error worth
+            # showing; a directory with nothing in it yet is not.
+            "error": _state["error"] or _activation_error or (package_error if installed else None),
             "installed": package_error is None,
             "directory": packages_dir() if installed else None,
             "approx_download_gb": APPROX_DOWNLOAD_GB,

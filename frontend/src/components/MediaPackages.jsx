@@ -83,7 +83,9 @@ export default function MediaPackages({ onStatus }) {
     <div className={`${card} space-y-3 p-4 sm:p-5`}>
       <div className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-white">
         <HardDriveDownload className="h-4 w-4 text-indigo-500" />
-        The image and video packages are not installed yet
+        {install?.error && !installing
+          ? 'The image and video packages need attention'
+          : 'The image and video packages are not installed yet'}
       </div>
       {install && (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">

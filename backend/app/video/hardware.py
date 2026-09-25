@@ -84,6 +84,19 @@ def _cpu_and_ram() -> dict:
     return found
 
 
+def _not_loadable(disk_free: float, system: dict, failure: str) -> Hardware:
+    """The packages are on disk and would not load - said so, with the cause."""
+    return Hardware(
+        has_cuda=False, gpu_name="", vram_total_gb=0.0, vram_free_gb=0.0,
+        compute_capability=None, supports_bfloat16=False,
+        torch_version="", torch_is_cuda_build=False, disk_free_gb=disk_free, **system,
+        reason=(
+            f"The image and video packages are installed but would not load ({failure}). "
+            "Restart SMARAN.AI; if it stays, reinstall them from the Images or Video page."
+        ),
+    )
+
+
 def probe(model_dir: str = ".") -> Hardware:
     """Look at the machine. Never raises: an unknown answer is still an answer."""
     try:
@@ -93,9 +106,16 @@ def probe(model_dir: str = ".") -> Hardware:
     disk_free = round(free_bytes / 1024 ** 3, 1)
     system = _cpu_and_ram()
 
+    from app.video import install as _install
+
     try:
+        failure = _install.load_failure()
+        if failure:
+            raise RuntimeError(failure)
         import torch
-    except ImportError:
+    except ModuleNotFoundError as exc:
+        if exc.name != "torch":
+            return _not_loadable(disk_free, system, _install.remember_failure("torch", exc))
         return Hardware(
             has_cuda=False, gpu_name="", vram_total_gb=0.0, vram_free_gb=0.0,
             compute_capability=None, supports_bfloat16=False,
@@ -106,6 +126,9 @@ def probe(model_dir: str = ".") -> Hardware:
                 "Images or Video page."
             ),
         )
+    except Exception as exc:  # a DLL that would not load, a half-finished import
+        failure = str(exc) if _install.load_failure() else _install.remember_failure("torch", exc)
+        return _not_loadable(disk_free, system, failure)
 
     version = getattr(torch, "__version__", "")
     # A '+cpu' build cannot see the card no matter what is plugged in, and this

@@ -122,7 +122,7 @@ def test_partial_dependencies_are_not_reported_as_installed(installer, monkeypat
         if name == "diffusers":
             raise ImportError("missing dependency")
     monkeypatch.setattr(installer.importlib, "import_module", import_package)
-    assert installer._package_error() == "diffusers: missing dependency"
+    assert installer._package_error() == "diffusers: ImportError: missing dependency"
 
 
 def test_binary_load_error_is_reported_without_crashing_status(installer, monkeypatch):
