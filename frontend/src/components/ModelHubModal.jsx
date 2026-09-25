@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Search, Cpu, Download, Trash2, CheckCircle2, BarChart2, Filter, Check, Layers, RefreshCw, Key, ExternalLink, Zap, Cloud, Video } from 'lucide-react';
+import { X, Search, Cpu, Download, Trash2, CheckCircle2, BarChart2, Filter, Check, Layers, RefreshCw, Key, ExternalLink, Zap, Cloud, Video, Info } from 'lucide-react';
+import ModelInfoPanel from './ModelInfoPanel';
 import { API_BASE } from '../context/AuthContext';
 import ModelComparisonModal from './ModelComparisonModal';
 
@@ -293,8 +294,10 @@ const ModelHubModal = ({ isOpen, onClose, token, onModelChange, onSelectModel })
   // Installing a model Ollama has but this catalogue does not.
   const [pullName, setPullName] = useState('');
   const [pullNote, setPullNote] = useState('');
-  const pullByName = async () => {
-    const name = pullName.trim();
+  // Which model's details are open (catalogue entry or cloud model), if any.
+  const [infoTarget, setInfoTarget] = useState(null);
+  const pullByName = () => startPull(pullName.trim());
+  const startPull = async (name) => {
     if (!name) return;
     setPullNote(`Starting ${name}…`);
     try {
@@ -892,6 +895,14 @@ Download it anyway?`)) {
                               </span>
 
                               <button
+                                type="button"
+                                onClick={() => setInfoTarget({ kind: 'catalog', model: m })}
+                                title="Downloads, likes, format, capabilities, download options and the model card"
+                                className="ml-auto flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg border bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                              >
+                                <Info className="w-3.5 h-3.5" /> Details
+                              </button>
+                              <button
                                 onClick={() => toggleCompareSelection(m.id)}
                                 className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
                                   isCompareSelected
@@ -1210,6 +1221,7 @@ Download it anyway?`)) {
                             </div>
                             {providerErrors[provider.id] && <p className="text-[10px] font-bold text-amber-300">{providerErrors[provider.id]}</p>}
                             {providerNotices[provider.id] && <p className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-[10px] font-bold leading-relaxed text-sky-200">{providerNotices[provider.id]}</p>}
+                            <button type="button" disabled={!cloudModels[provider.id]} onClick={() => setInfoTarget({ kind: 'cloud', provider: provider.id, id: cloudModels[provider.id] })} className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-[11px] font-black text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"><Info className="w-3.5 h-3.5" /> Details of the selected model</button>
                             <button type="button" disabled={!cloudModels[provider.id]} onClick={() => { const modelId = cloudModels[provider.id]; localStorage.setItem('sm_cloud_selected_models', JSON.stringify({ provider: provider.id, model: modelId })); setModel?.(`cloud:${provider.id}:${modelId}`); onClose?.(); }} className="w-full rounded-xl border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-[11px] font-black text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50">Use selected Cloud API model in Chat</button>
                           </div>
                         )}
@@ -1239,6 +1251,14 @@ Download it anyway?`)) {
         models={selectedModelsData}
         userGpuVram={userGpuVram}
       />
+      {infoTarget && (
+        <ModelInfoPanel
+          target={infoTarget}
+          onClose={() => setInfoTarget(null)}
+          onPull={startPull}
+          pullNote={pullNote}
+        />
+      )}
     </>
   );
 };
