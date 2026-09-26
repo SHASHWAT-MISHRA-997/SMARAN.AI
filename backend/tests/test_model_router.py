@@ -90,3 +90,25 @@ def test_the_record_survives_a_restart(tmp_path, monkeypatch):
     monkeypatch.setattr(mr, "_health", {})
     monkeypatch.setattr(mr, "_loaded", False)
     assert mr.blocked("cerebras", "gpt-oss-120b") == "billing"
+
+
+def test_speech_autocomplete_and_agent_models_never_answer_text():
+    for model in ("canopylabs/orpheus-v1-english", "mistral-code-fim-latest", "deep-research-pro-preview-12-2025",
+                  "antigravity-preview-latest", "nvidia/nemotron-3.5-content-safety"):
+        assert not mr.usable_for_text(model), model
+    assert mr.usable_for_text("fimbria-7b") and mr.usable_for_text("gpt-oss-120b")
+
+
+def test_a_code_model_is_the_last_choice_for_a_question_and_newer_wins_a_tie():
+    assert mr.score("m", "codestral-2508", "search") > mr.score("g", "openai/gpt-oss-120b", "search")
+    assert mr.score("m", "codestral-2508", "code") < mr.score("m", "mistral-medium", "code")
+    assert mr.score("g", "gemini-3.8-pro", "code") < mr.score("g", "gemini-3-pro-preview", "code")
+    assert mr.score("g", "gemini-3.8-flash", "chat") == mr.score("g", "gemini-3-flash-preview", "chat")
+
+
+def test_naming_a_language_is_not_a_coding_request():
+    assert mr.classify("What changed in Python 3.14 and when is 3.15 due?", web=True) == "search"
+    assert mr.classify("What changed in Python 3.14?") == "chat"
+    assert mr.classify("write a python function to sort a list") == "code"
+    assert mr.classify("fix this exception in my react app") == "code"
+    assert mr.classify("here is the traceback, what now?") == "code"

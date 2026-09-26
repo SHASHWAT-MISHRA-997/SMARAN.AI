@@ -440,6 +440,17 @@ async def _restore_saved_provider_keys() -> None:
     """Bring this installation's saved provider keys back into the environment."""
     _load_persisted_cloud_keys()
 
+    # Each provider's model list is fetched the first time a reply needs it:
+    # 5-10 s on the first message after a start, measured. Fetch them now, in
+    # the background, so the first message does not wait for it.
+    async def _warm_model_lists() -> None:
+        try:
+            await _auto_cloud_candidates("chat")
+        except Exception as exc:  # noqa: BLE001 - the first reply fetches them instead
+            logger.info("could not prepare the cloud model lists: %s", exc)
+
+    asyncio.get_running_loop().create_task(_warm_model_lists())
+
 
 async def _warm_speech_recognition() -> None:
     """Load the speech model in the background.
@@ -3429,10 +3440,18 @@ def _research_llm(selected_model: str = ""):
             routes = await _auto_cloud_candidates("chat")
             ranked, _ = model_router.rank(routes, "chat")
             for route in ranked[:3]:
+                began = time.time()
                 try:
-                    return await complete(messages, model=route["model"], provider=route["provider"],
-                                          api_key=route["api_key"], attempts=1)
+                    answer = await complete(messages, model=route["model"], provider=route["provider"],
+                                            api_key=route["api_key"], attempts=1, quick=True)
+                    logger.info("research helper %s/%s answered in %.1f s", route["provider"], route["model"],
+                                time.time() - began)
+                    model_router.record_success(route["provider"], route["model"],
+                                                latency_ms=(time.time() - began) * 1000)
+                    return answer
                 except Exception as exc:  # noqa: BLE001 - the next model may answer
+                    logger.info("research helper %s/%s failed after %.1f s: %s", route["provider"], route["model"],
+                                time.time() - began, str(exc)[:120])
                     model_router.record_failure(route["provider"], route["model"], getattr(exc, "status", None), str(exc))
             local = selected_model if selected_model and selected_model != "auto" else ""
             if local:
@@ -4469,8 +4488,14 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
         user_content = processing_prompt
     else:
         # If user is asking about Shashwat Mishra / Developer, inject exact verified facts
-        dev_keywords = ["shashwat", "mishra", "developer", "who made you", "who created you", "who built you", "who developed you", "about developer"]
-        if not chat_req.rag_enabled and any(dk in prompt_lower for dk in dev_keywords):
+        # Only a question about who made SMARAN. A bare "developer" matched
+        # "what do developers say?" and the facts ended up pasted into a web
+        # answer about Rust and Go.
+        asks_about_maker = re.search(
+            r"\bshashwat\b|\bwho (made|created|built|developed|designed) (you|smaran)\b|"
+            r"\b(your|smaran'?s?) (developer|creator|maker|founder|author)\b|\babout (the |your )?developer\b",
+            prompt_lower)
+        if not chat_req.rag_enabled and asks_about_maker:
             user_content += (
                 "\n\n[VERIFIED AUTHORITATIVE DEVELOPER FACTS]:\n"
                 " Full Name: Shashwat Mishra\n"
@@ -5075,13 +5100,21 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                     elif provider == 'gemini':
                         system_text = "\n\n".join(str(m.get('content', '')) for m in messages_payload if m.get('role') == 'system')
                         contents = [{'role': 'model' if m.get('role') == 'assistant' else 'user', 'parts': [{'text': str(m.get('content', ''))}]} for m in messages_payload if m.get('role') in ('user', 'assistant')]
-                        payload = {'contents': contents, 'generationConfig': {'maxOutputTokens': 16384 if req_section in ('design', 'code') else 4096}}
+                        payload = {'contents': contents, 'generationConfig': {'maxOutputTokens': 16384 if req_section in ('design', 'code') else 8192}}
                         if route_task in _QUICK_TASKS and 'flash' in model.lower():
                             # Flash thinks before its first word by default: 8-9 s on
                             # a conversation or a web answer. Without it: 1.4 s.
-                            payload['generationConfig']['thinkingConfig'] = {'thinkingBudget': 0}
+                            # Gemini after 3.0 ignores a zero budget and thinks anyway
+                            # (286-310 thought tokens, 8 s, measured on 3.8 Flash);
+                            # its "low" level is the least it allows: 4.9 s.
+                            from app import model_router as _mr
+                            if _mr._version(model) > 3.0:
+                                payload['generationConfig']['thinkingConfig'] = {'thinkingLevel': 'low'}
+                            else:
+                                payload['generationConfig']['thinkingConfig'] = {'thinkingBudget': 0}
                         if system_text:
                             payload['system_instruction'] = {'parts': [{'text': system_text}]}
+                        gemini_stop = ''
                         _route_begin(provider)
                         async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                             async with client.stream('POST', f'{endpoint}/models/{model}:streamGenerateContent', params={'alt': 'sse', 'key': api_key}, json=payload) as response:
@@ -5096,8 +5129,9 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                                         continue
                                     try:
                                         event = json.loads(line[6:])
-                                        token = ''.join(part.get('text', '') for part in (((event.get('candidates') or [{}])[0].get('content') or {}).get('parts') or []))
+                                        token = ''.join(part.get('text', '') for part in (((event.get('candidates') or [{}])[0].get('content') or {}).get('parts') or []) if not part.get('thought'))
                                         usage_tokens = (event.get('usageMetadata') or {}).get('candidatesTokenCount') or usage_tokens
+                                        gemini_stop = (event.get('candidates') or [{}])[0].get('finishReason') or gemini_stop
                                     except Exception:
                                         token = ''
                                     if token:
@@ -5105,6 +5139,27 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                                         first_token_at = first_token_at or time.time()
                                         accumulated_response += token
                                         yield json.dumps({'token': token}) + '\n'
+                                logger.info('gemini %s finished: %s, %s tokens written', model, gemini_stop or 'no reason given',
+                                            usage_tokens)
+                                if gemini_stop == 'MAX_TOKENS' and len(accumulated_response) < 400:
+                                    # Thinking counts against the length limit: a
+                                    # reply can run out before it has said anything.
+                                    gemini_stop = 'THINKING_USED_THE_LENGTH'
+                                if gemini_stop and gemini_stop not in ('STOP', 'MAX_TOKENS'):
+                                    # Gemini ends a reply early for RECITATION (too
+                                    # close to a source's wording - common on web
+                                    # answers), SAFETY and the like. The cut reply
+                                    # used to end mid-sentence with no word why.
+                                    logger.info('gemini %s stopped early: %s', model, gemini_stop)
+                                    _note_route_failure(provider, model, message='stopped early: %s' % gemini_stop,
+                                                        kind='empty')
+                                    note = {'RECITATION': 'it judged the wording too close to one of its sources',
+                                            'SAFETY': 'its safety filter stopped it',
+                                            'THINKING_USED_THE_LENGTH': 'its thinking used up the length allowed for the reply',
+                                            }.get(gemini_stop, gemini_stop.lower())
+                                    cut = f'\n\n_(Gemini stopped this answer early: {note}. Ask again to get it from another model.)_'
+                                    accumulated_response += cut
+                                    yield json.dumps({'token': cut}) + '\n'
                     elif provider == 'huggingface':
                         try:
                             from huggingface_hub import InferenceClient
@@ -5190,6 +5245,12 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                             completion_tokens = max(1, round(len(accumulated_response) / 4))
                             measurement_source = 'estimated from text length'
                         writing_sec = max(0.001, finished_at - (first_token_at or route_started))
+                        if writing_sec < 0.5:
+                            # The reply came in one or two pieces, so there is no
+                            # writing time to divide by (it read 101,886 tok/s).
+                            # The rate over the whole wait is the honest figure.
+                            writing_sec = max(0.001, finished_at - route_started)
+                            measurement_source += ', arrived at once: rate over the whole reply'
                         tokens_per_sec = round(completion_tokens / writing_sec, 1)
                         first_token_ms = round(((first_token_at or finished_at) - route_started) * 1000, 1)
                         reply_metrics = {

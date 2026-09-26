@@ -123,24 +123,37 @@ def _with_focus(query: str, focus: str) -> str:
     return "%s (%s)" % (query, " OR ".join("site:%s" % s for s in sites[:6]))
 
 
+FAST_ENGINES = "yahoo,yandex,bing"
+SEARCH_TIMEOUT = 5
+
+
 def search(query: str, focus: str = "web", max_results: int = 8) -> List[Dict]:
     """Result list for one query: title, url, snippet, date if known."""
     from ddgs import DDGS
 
     rows: List[Dict] = []
-    try:
-        engine = DDGS()
-        if focus == "news":
-            for item in engine.news(query, max_results=max_results):
-                rows.append({"title": item.get("title", ""), "url": item.get("url") or item.get("href", ""),
-                             "snippet": item.get("body", ""), "date": (item.get("date") or "")[:10],
-                             "publisher": item.get("source", "")})
-        else:
-            for item in engine.text(_with_focus(query, focus), max_results=max_results):
-                rows.append({"title": item.get("title", ""), "url": item.get("href", ""),
-                             "snippet": item.get("body", "")})
-    except Exception as exc:  # noqa: BLE001 - one failed search is not the whole answer
-        logger.warning("search failed for %r: %s", query, exc)
+    # The library's "auto" order waits on Google, which times out from many
+    # connections: 10 s per search, measured. Yahoo, Yandex and Bing together
+    # answered the same queries in 1-2 s, site: filters included; "auto" is
+    # the fallback when they return nothing.
+    for backend in (FAST_ENGINES, "auto"):
+        try:
+            engine = DDGS(timeout=SEARCH_TIMEOUT)
+            if focus == "news":
+                for item in engine.news(query, max_results=max_results):
+                    rows.append({"title": item.get("title", ""), "url": item.get("url") or item.get("href", ""),
+                                 "snippet": item.get("body", ""), "date": (item.get("date") or "")[:10],
+                                 "publisher": item.get("source", "")})
+            else:
+                for item in engine.text(_with_focus(query, focus), max_results=max_results, backend=backend):
+                    rows.append({"title": item.get("title", ""), "url": item.get("href", ""),
+                                 "snippet": item.get("body", "")})
+        except Exception as exc:  # noqa: BLE001 - one failed search is not the whole answer
+            logger.info("search (%s) failed for %r: %s", backend, query, exc)
+        if rows or focus == "news":
+            break
+    if not rows:
+        logger.warning("search found nothing for %r", query)
     return [r for r in rows if r["url"].startswith(("http://", "https://")) and not _MIRROR.search(_domain(r["url"]))]
 
 
@@ -284,9 +297,11 @@ def plan_queries(question: str, history: List[Dict], mode: str, llm: Optional[LL
     try:
         queries = _json_list(llm([{"role": "user", "content": prompt}]))
     except Exception as exc:  # noqa: BLE001 - the question itself is still a query
-        logger.info("planning failed, searching the question as written: %s", exc)
+        logger.info("planning failed, splitting the question instead: %s", exc)
         queries = []
-    return [dated(q) for q in (queries or [question])][:wanted]
+    # No model to plan with (all busy or out of quota): the question split
+    # into its parts still searches more than the question alone.
+    return [dated(q) for q in (queries or decompose(question))][:wanted]
 
 
 def missing_queries(question: str, notes: str, llm: Optional[LLM], asked: List[str]) -> List[str]:
@@ -319,11 +334,20 @@ def research(question: str, *, mode: str = "quick", focus: str = "web", history:
     history = history or []
     started = time.time()
 
-    queries = plan_queries(question, history, mode, llm)
     asked: List[str] = []
     found: Dict[str, Dict] = {}          # url -> result, in the order found
     pages: Dict[str, str] = {}
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+    early = None
+    if llm is not None and settings["queries"] > 1:
+        # Planning asks a model for queries, which takes a few seconds. The
+        # question as written is searched meanwhile, so that wait is not
+        # spent doing nothing.
+        emit({"type": "research_step", "stage": "plan", "round": 1, "text": "Planning the searches",
+              "queries": [question]})
+        first_query = plan_queries(question, history, "quick", None)[0]
+        early = (first_query, pool.submit(search, first_query, focus, settings["results"]))
+    queries = plan_queries(question, history, mode, llm)
     try:
         for round_number in range(1, settings["rounds"] + 1):
             if not queries:
@@ -336,12 +360,22 @@ def research(question: str, *, mode: str = "quick", focus: str = "web", history:
                 # Timely questions also ask the news index, which has what
                 # happened this week that the web index may not yet rank.
                 jobs.append((queries[0], "news"))
-            for results in pool.map(lambda job: search(job[0], job[1], settings["results"]), jobs):
+            per_query = []
+            searched = []
+            if early is not None and round_number == 1:
+                searched.append(early[1].result())
+                asked.append(early[0])
+            searched += list(pool.map(lambda job: search(job[0], job[1], settings["results"]), jobs))
+            for results in searched:
+                urls = []
                 for row in results:
-                    found.setdefault(row["url"].split("#")[0], row)
+                    url = row["url"].split("#")[0]
+                    found.setdefault(url, row)
+                    urls.append(url)
+                per_query.append(urls)
             asked.extend(queries)
 
-            to_read = [url for url in list(found)[: settings["read"] * round_number] if url not in pages]
+            to_read = reading_list(question, per_query, found, pages, settings["read"])
             if to_read:
                 emit({"type": "research_step", "stage": "read", "round": round_number,
                       "text": "Reading %d sources" % len(to_read),
@@ -357,11 +391,35 @@ def research(question: str, *, mode: str = "quick", focus: str = "web", history:
         pool.shutdown(wait=False, cancel_futures=True)
 
     sources = _select(question, asked, found, pages, budget_chars)
-    emit({"type": "research_step", "stage": "done", "text": "Read %d of %d sources found in %.1f s"
-          % (sum(1 for s in sources if s["read"]), len(found), time.time() - started),
+    opened = sum(1 for text in pages.values() if text)
+    emit({"type": "research_step", "stage": "done", "text": "%d results, %d pages read, %d sources used - %.1f s"
+          % (len(found), opened, len(sources), time.time() - started),
           "seconds": round(time.time() - started, 1)})
     return {"sources": sources, "queries": asked, "mode": mode, "focus": focus,
             "seconds": round(time.time() - started, 1)}
+
+
+def reading_list(question: str, per_query: List[List[str]], found: Dict[str, Dict],
+                 pages: Dict[str, str], limit: int) -> List[str]:
+    """Which pages to open: the best of every query's results in turn, not
+    the first query's results alone, each list ordered by how well the title
+    and snippet match the question and how trustworthy the site is."""
+    terms = set(_terms(question))
+    def worth(url: str) -> float:
+        row = found[url]
+        words = set(_terms(row.get("title", "") + " " + row.get("snippet", "")))
+        host = _domain(url)
+        return (len(terms & words) + (1.5 if _AUTHORITY.search(host) else 0)
+                - (3 if _LOW.search(host) else 0))
+    queues = [sorted((u for u in urls if u not in pages), key=lambda u: -worth(u)) for urls in per_query]
+    chosen: List[str] = []
+    while len(chosen) < limit and any(queues):
+        for queue in queues:
+            while queue and queue[0] in chosen:
+                queue.pop(0)
+            if queue and len(chosen) < limit:
+                chosen.append(queue.pop(0))
+    return chosen
 
 
 def _select(question: str, queries: List[str], found: Dict[str, Dict], pages: Dict[str, str],
@@ -459,9 +517,14 @@ def normalise_citations(text: str) -> str:
 def verify(answer: str, sources: List[Dict]) -> Dict:
     """Citation checks after the fact (Liu et al., 2023): what is cited, and whether it holds."""
     answer = normalise_citations(answer)
+    # "...real-world traffic. [2]" - a citation after the full stop belongs
+    # to that sentence, not to a fragment of its own.
+    answer = re.sub(r"([.!?])((?:\s*\[\d{1,2}\])+)", r"\2\1", answer or "")
     valid = {src["n"]: src for src in sources}
+    # Table rows are claims too - models often cite inside the cells - so a
+    # row counts like a sentence; headings do not.
     sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", answer or "")
-                 if len(re.findall(r"[A-Za-z0-9]", s)) > 20 and not s.strip().startswith(("#", "|"))]
+                 if len(re.findall(r"[A-Za-z0-9]", s)) > 20 and not s.strip().startswith("#")]
     cited, supported, citations, invalid = 0, 0, 0, 0
     for sentence in sentences:
         numbers = [int(n) for n in re.findall(r"\[(\d{1,2})\]", sentence)]

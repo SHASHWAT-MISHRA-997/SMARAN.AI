@@ -30,6 +30,19 @@ import * as localChat from '../utils/localChat';
 import * as nativeSpeech from '../utils/nativeSpeech';
 import { speakableText } from '../utils/speakableText';
 
+/* How hard a web answer digs, and where it looks - see answer_engine.PLAN. */
+const SEARCH_MODES = [
+  { id: 'quick', label: 'Quick', hint: 'One search, five pages read - fastest.' },
+  { id: 'pro', label: 'Pro', hint: 'The question split into four searches, eight pages read.' },
+  { id: 'deep', label: 'Deep', hint: 'Up to three rounds, each searching for what is still missing - slowest, most thorough.' },
+];
+const SEARCH_FOCUSES = [
+  { id: 'web', label: 'All web' },
+  { id: 'academic', label: 'Papers' },
+  { id: 'news', label: 'News' },
+  { id: 'discussions', label: 'Forums' },
+];
+
 /* True in the packaged phone app with no computer linked: there is no backend
    at the app's own origin, so anything under /api comes back as the app's own
    HTML page. Module scope, because the message rows are their own components
@@ -1426,6 +1439,19 @@ const ChatArea = ({
   // Gemini-style Live Web Search Toggle
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(() => localStorage.getItem('sm_web_search') !== 'false');
   useEffect(() => { localStorage.setItem('sm_web_search', String(isWebSearchEnabled)); }, [isWebSearchEnabled]);
+  // How hard a web answer digs (Quick: one search; Pro: several searches and
+  // more pages; Deep: rounds that look for what is still missing) and where it
+  // looks. Both only matter while web search is on.
+  const [searchMode, setSearchMode] = useState(() => {
+    const saved = localStorage.getItem('sm_search_mode');
+    return SEARCH_MODES.some((m) => m.id === saved) ? saved : 'quick';
+  });
+  const [searchFocus, setSearchFocus] = useState(() => {
+    const saved = localStorage.getItem('sm_search_focus');
+    return SEARCH_FOCUSES.some((f) => f.id === saved) ? saved : 'web';
+  });
+  useEffect(() => { localStorage.setItem('sm_search_mode', searchMode); }, [searchMode]);
+  useEffect(() => { localStorage.setItem('sm_search_focus', searchFocus); }, [searchFocus]);
   // RAG Mode Toggle  Combination (RAG On / Direct AI Mode)
   const [isRagEnabled, setIsRagEnabled] = useState(true);
 
@@ -3719,6 +3745,8 @@ const ChatArea = ({
               model: selectedModel,
               turbo: turboMode,
               web_search: isWebSearchEnabled,
+              search_mode: searchMode,
+              search_focus: searchFocus,
               rag_enabled: isRagEnabled,
               assistant_gender: assistantGender(),
               ...getCloudRoutingPayload(),
@@ -4493,6 +4521,8 @@ const ChatArea = ({
           model: selectedModel,
           turbo: turboMode,
           web_search: isVoiceTurn ? false : isWebSearchEnabled,
+          search_mode: searchMode,
+          search_focus: searchFocus,
           // Whether RAG is on is what the toggle says, and nothing else.
           //
           // This used to also require `activeCollections.length > 0`, so with
@@ -5666,6 +5696,21 @@ const ChatArea = ({
                     </span>
                   </button>
 
+                  {isWebSearchEnabled && (
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <Globe className="w-4 h-4 text-blue-500 shrink-0" />
+                      <span className="flex-1 text-sm font-bold text-zinc-900 dark:text-zinc-100">Search</span>
+                      <select aria-label="How deep to search" value={searchMode} onChange={(e) => setSearchMode(e.target.value)}
+                              className="text-sm font-bold text-zinc-900 dark:text-zinc-100 bg-transparent outline-none">
+                        {SEARCH_MODES.map((m) => <option key={m.id} value={m.id} className="bg-white dark:bg-zinc-900">{m.label}</option>)}
+                      </select>
+                      <select aria-label="Where to search" value={searchFocus} onChange={(e) => setSearchFocus(e.target.value)}
+                              className="text-sm font-bold text-zinc-900 dark:text-zinc-100 bg-transparent outline-none">
+                        {SEARCH_FOCUSES.map((f) => <option key={f.id} value={f.id} className="bg-white dark:bg-zinc-900">{f.label}</option>)}
+                      </select>
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-3 px-4 py-3 border-t border-zinc-200 dark:border-zinc-800">
                     <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
                     <span className="flex-1 text-sm font-bold text-zinc-900 dark:text-zinc-100">Reply in</span>
@@ -5718,6 +5763,20 @@ const ChatArea = ({
               <Globe className={`w-3.5 h-3.5 ${isWebSearchEnabled ? 'animate-pulse text-blue-500' : ''}`} />
               <span>{isWebSearchEnabled ? 'Web ON' : 'Web OFF'}</span>
             </button>
+
+            {isWebSearchEnabled && (
+              <>
+                <select aria-label="How deep to search" value={searchMode} onChange={(e) => setSearchMode(e.target.value)}
+                        title={SEARCH_MODES.find((m) => m.id === searchMode)?.hint}
+                        className="h-8 px-1.5 rounded-xl text-xs font-bold bg-transparent border border-blue-500/30 text-blue-600 dark:text-blue-400 outline-none cursor-pointer shrink-0">
+                  {SEARCH_MODES.map((m) => <option key={m.id} value={m.id} title={m.hint} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">{m.label}</option>)}
+                </select>
+                <select aria-label="Where to search" value={searchFocus} onChange={(e) => setSearchFocus(e.target.value)}
+                        className="h-8 px-1.5 rounded-xl text-xs font-bold bg-transparent border border-blue-500/30 text-blue-600 dark:text-blue-400 outline-none cursor-pointer shrink-0">
+                  {SEARCH_FOCUSES.map((f) => <option key={f.id} value={f.id} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">{f.label}</option>)}
+                </select>
+              </>
+            )}
 
             {/* The Wake button stood here. It defaulted to off, so the wake
                 phrase only worked if you found the button and pressed it,

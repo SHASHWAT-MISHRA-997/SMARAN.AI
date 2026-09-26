@@ -94,17 +94,20 @@ def _post(url: str, payload: dict, headers: Dict[str, str]) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
-def _openai_style(base: str, model: str, key: str, messages: List[Dict]) -> str:
+def _openai_style(base: str, model: str, key: str, messages: List[Dict], quick: bool = False) -> str:
+    body: Dict = {"model": model, "messages": messages, "temperature": 0.2}
+    if quick and "gpt-oss" in model.lower():
+        body["reasoning_effort"] = "low"
     data = _post(
         base.rstrip("/") + "/chat/completions",
-        {"model": model, "messages": messages, "temperature": 0.2},
+        body,
         {"Authorization": "Bearer %s" % key} if key else {},
     )
     choices = data.get("choices") or []
     return (choices[0].get("message", {}).get("content", "") if choices else "").strip()
 
 
-def _gemini(model: str, key: str, messages: List[Dict]) -> str:
+def _gemini(model: str, key: str, messages: List[Dict], quick: bool = False) -> str:
     # Gemini keeps the system prompt separately and calls the assistant
     # "model", so the conversation has to be rewritten rather than passed on.
     system = "\n".join(m["content"] for m in messages if m["role"] == "system")
@@ -115,6 +118,11 @@ def _gemini(model: str, key: str, messages: List[Dict]) -> str:
     ]
     payload: Dict = {"contents": contents,
                      "generationConfig": {"temperature": 0.2}}
+    if quick and "flash" in model.lower():
+        # A few lines of JSON do not need Flash to think first (8-14 s).
+        from app.model_router import _version
+        payload["generationConfig"]["thinkingConfig"] = (
+            {"thinkingLevel": "low"} if _version(model) > 3.0 else {"thinkingBudget": 0})
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
 
@@ -191,7 +199,7 @@ def _ollama(model: str, messages: List[Dict], stop: Optional[threading.Event] = 
 
 async def complete(messages: List[Dict], model: str = "",
                    provider: str = "", api_key: str = "",
-                   attempts: int = 2) -> str:
+                   attempts: int = 2, quick: bool = False) -> str:
     """One reply. Raises with a readable reason rather than returning nothing.
 
     `attempts` is here for the orchestrator, which schedules its own backoff
@@ -214,9 +222,11 @@ async def complete(messages: List[Dict], model: str = "",
 
     def call() -> str:
         if provider in OPENAI_COMPATIBLE:
+            if quick:
+                return _openai_style(OPENAI_COMPATIBLE[provider], model, api_key, messages, quick=True)
             return _openai_style(OPENAI_COMPATIBLE[provider], model, api_key, messages)
         if provider == "gemini":
-            return _gemini(model, api_key, messages)
+            return _gemini(model, api_key, messages, quick=True) if quick else _gemini(model, api_key, messages)
         if provider == "anthropic":
             return _anthropic(model, api_key, messages)
         return _ollama(model, messages, stop)

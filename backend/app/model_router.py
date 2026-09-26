@@ -33,10 +33,19 @@ TASK_LABEL = {
     "search": "web research",
 }
 
+# Words that only come up when code is the work.
 _CODE = re.compile(
-    r"```|\b(code|coding|function|class|bug|debug|error|exception|stack ?trace|compile|refactor|"
-    r"python|javascript|typescript|java|c\+\+|c#|rust|golang|sql|regex|api|endpoint|script|"
-    r"html|css|react|node|django|flask|fastapi|docker|git|unit test|pytest)\b", re.I)
+    r"```|\b(code|coding|function|bug|debug|stack ?trace|traceback|compile|refactor|"
+    r"regex|endpoint|unit test|pytest|snippet)\b", re.I)
+# A language or tool named is code only with something to do to it: "What
+# changed in Python 3.14?" is a question about Python, not a program, and it
+# went to a code model that answered in two lines.
+_TECH = re.compile(
+    r"\b(python|javascript|typescript|java|c\+\+|c#|rust|golang|sql|api|script|"
+    r"html|css|react|node|django|flask|fastapi|docker|git)\b", re.I)
+_CODE_ACTION = re.compile(
+    r"\b(write|fix|implement|build|create|make|generate|convert|port|debug|review|"
+    r"refactor|optimi[sz]e|error|exception|class|method|install|deploy)\b", re.I)
 _REASONING = re.compile(
     r"\b(prove|proof|derive|solve|equation|calculate|compute|probability|integral|"
     r"step by step|reason|logic|puzzle|why does|how does .* work|compare|trade-?offs?|"
@@ -57,8 +66,12 @@ def classify(prompt: str, section: str = "chat", *, web: bool = False) -> str:
     text = prompt or ""
     if _VISION.search(text):
         return "vision"
-    if _CODE.search(text):
+    if _CODE.search(text) or (_TECH.search(text) and _CODE_ACTION.search(text)):
         return "code"
+    if web:
+        # Looking something up: the answer is written from sources, and a
+        # quick, careful writer serves it better than a slow reasoner.
+        return "search"
     if _REASONING.search(text):
         return "reasoning"
     if web:
@@ -82,9 +95,10 @@ PREFERENCES: Dict[str, Tuple[str, ...]] = {
                r"deepseek.*(chat|v3)", r"qwen.*coder", r"gemini-\d.*flash(?!-lite)", r"gpt-oss-120b",
                r"llama.*(70b|405b)", r"qwen.*(32b|72b|235b)"),
     "writing": (r"claude", r"gemini-\d.*(pro|flash(?!-lite))", r"gpt-(4\.1|5|4o)", r"mistral-(large|medium)",
-                r"llama.*(70b|405b)", r"deepseek.*(chat|v3)", r"qwen.*(32b|72b|235b)", r"gpt-oss"),
-    "search": (r"gemini-\d.*flash(?!-lite)", r"gemini-\d.*pro", r"llama.*(70b|405b)", r"deepseek.*chat",
-               r"gpt-oss", r"claude", r"mistral"),
+                r"gpt-oss-120b", r"llama.*(70b|405b)", r"deepseek.*(chat|v3)", r"qwen.*(32b|72b|235b)",
+                r"gpt-oss"),
+    "search": (r"gemini-\d.*flash(?!-lite)", r"gemini-\d.*pro", r"gpt-oss-120b", r"llama.*(70b|405b)",
+               r"deepseek.*chat", r"gpt-oss", r"claude", r"mistral"),
     "vision": (r"gemini", r"gpt-4o|gpt-4\.1|gpt-5", r"claude", r"llama.*(vision|scout|maverick)",
                r"qwen.*vl", r"pixtral"),
     "chat": (r"gemini-\d.*flash(?!-lite)", r"llama.*70b", r"gpt-oss-120b", r"deepseek.*chat",
@@ -94,7 +108,14 @@ PREFERENCES: Dict[str, Tuple[str, ...]] = {
 
 # Never worth sending text work to.
 _NOT_CHAT = re.compile(r"(embed|whisper|tts|audio|imagen|image|veo|guard|moderation|rerank|"
-                       r"transcri|search-preview|realtime|computer-use|aqa|live|lyria|robotics)", re.I)
+                       r"transcri|search-preview|realtime|computer-use|aqa|live|lyria|robotics|"
+                       # speech voices, fill-in-the-middle autocomplete, agents
+                       # that are not chat endpoints, and scoring/parsing models
+                       r"orpheus|playai|(?<![a-z])fim(?![a-z])|deep-research|antigravity|"
+                       r"safety|reward|nemotron-parse|nvclip|calibration)", re.I)
+
+# Models made for code: first choice for code, a poor one for a chat reply.
+_CODE_ONLY = re.compile(r"(coder|codestral|devstral|mistral-code|north-mini-code|codegemma|starcoder)", re.I)
 
 # How long each kind of failure keeps a model out.
 COOLDOWN = {
@@ -295,7 +316,24 @@ def score(provider: str, model: str, task: str) -> float:
         value += min(health.first_token_ms / 1000.0, 10.0)  # slow to start
     if task == "chat" and health.tokens_per_sec:
         value -= min(health.tokens_per_sec / 50.0, 3.0)     # fast matters most for chat
-    return value
+    if task not in ("code", "design") and _CODE_ONLY.search(model or ""):
+        value += 30.0                                       # a code model answering a question
+    if task in ("chat", "search", "writing", "vision"):
+        # For a quick answer, newer is not better: newer Gemini Flash thinks
+        # before every reply and cannot be told not to. What it has measured
+        # here (first_token_ms, above) decides between equals instead.
+        return value
+    return value - _version(model) / 100.0                 # the newer of two equals
+
+
+def _version(model: str) -> float:
+    """The family version in a model id - 3.8 in gemini-3.8-flash - or 0."""
+    found = re.search(r"-(\d+(?:\.\d+)?)(?=-|$)", (model or "").split("/")[-1])
+    try:
+        number = float(found.group(1)) if found else 0.0
+        return number if number < 20 else 0.0   # 2508 is a date, not a version
+    except ValueError:
+        return 0.0
 
 
 def rank(candidates: Iterable[dict], task: str) -> Tuple[List[dict], List[str]]:

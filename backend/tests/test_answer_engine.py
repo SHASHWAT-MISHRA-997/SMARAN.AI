@@ -96,3 +96,56 @@ def test_citations_are_checked_and_broken_ones_removed():
 def test_model_native_citations_are_read_as_numbers():
     text = "Gaming is smoother" + chr(0x3010) + "6" + chr(0x3011) + ". Security is better" + chr(0x3010) + "2" + chr(0x2020) + "L1-L4" + chr(0x3011) + "."
     assert ae.normalise_citations(text) == "Gaming is smoother[6]. Security is better[2]."
+
+
+def test_pages_are_read_from_every_query_best_first():
+    found = {u: {"title": t, "snippet": ""} for u, t in [
+        ("https://a.com/1", "unrelated"), ("https://a.com/2", "python release schedule"),
+        ("https://b.com/1", "python 3.15 release date"), ("https://pinterest.com/p", "python release")]}
+    chosen = ae.reading_list("python 3.15 release date", [["https://a.com/1", "https://a.com/2"],
+                                                           ["https://pinterest.com/p", "https://b.com/1"]],
+                             found, {}, 2)
+    assert chosen == ["https://a.com/2", "https://b.com/1"]      # one from each query, the relevant ones
+
+
+def test_a_slow_or_empty_fast_search_falls_back(monkeypatch):
+    import ddgs
+    tried = []
+
+    class Engine:
+        def __init__(self, timeout=None):
+            pass
+
+        def text(self, query, max_results=8, backend="auto"):
+            tried.append(backend)
+            if backend != "auto":
+                raise RuntimeError("No results found.")
+            return [{"title": "t", "href": "https://x.org", "body": "b"}]
+    monkeypatch.setattr(ddgs, "DDGS", Engine)
+    assert ae.search("q")[0]["url"] == "https://x.org"
+    assert tried == [ae.FAST_ENGINES, "auto"]
+
+
+def test_citations_inside_table_rows_count():
+    sources = [{"n": 1, "title": "Go vs Rust", "passages": ["Go compiles quickly and has a large talent pool."],
+                "url": "u", "domain": "d", "date": "", "snippet": "", "read": True}]
+    answer = "| Language | Why |\n|---|---|\n| Go | compiles quickly, large talent pool [1] |"
+    checked = ae.verify(answer, sources)
+    assert checked["cited_sentences"] == 1 and checked["supported_sentences"] == 1
+
+
+def test_the_question_is_searched_while_the_plan_is_written(monkeypatch):
+    searched = fake_web(monkeypatch, [{"title": "t", "snippet": "s", "url": "https://x.org"}], {})
+    steps = []
+    out = ae.research("what is new in rust 1.90", mode="pro", llm=lambda _m: '["rust 1.90 release notes"]',
+                      emit=steps.append)
+    assert searched[0][0].startswith("what is new in rust 1.90")          # before the plan's own query
+    assert "rust 1.90 release notes" in [q for q, _f in searched]
+    assert steps[0]["stage"] == "plan" and out["queries"][0].startswith("what is new")
+
+
+def test_a_citation_after_the_full_stop_belongs_to_that_sentence():
+    sources = [{"n": 2, "title": "Benchmarks", "passages": ["The gap narrows for I/O-bound services with real traffic."],
+                "url": "u", "domain": "d", "date": "", "snippet": "", "read": True}]
+    checked = ae.verify("- The gap narrows for I/O-bound services with real traffic. [2]  \n", sources)
+    assert checked["cited_sentences"] == 1 and checked["supported_sentences"] == 1
