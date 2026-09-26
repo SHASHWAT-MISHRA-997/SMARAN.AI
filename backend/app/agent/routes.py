@@ -456,31 +456,53 @@ class GatewayStartRequest(BaseModel):
 
 
 @router.get("/gateway/status")
-async def get_gateway_status():
-    """Check running status of Telegram, Discord, and Webhook gateways."""
+async def get_gateway_status(_user=Depends(get_current_user_dep)):
+    """Running state, the pairing code and owners of each bot, and the webhook
+    secret - signed-in only, since the code and secret are what grant control."""
     from app.gateway.telegram_bot import TelegramGateway
     from app.gateway.discord_bot import DiscordGateway
     from app.gateway.webhook_adapter import WebhookGateway
 
+    def bot(gw):
+        return {"running": gw.is_running(), "pair_code": gw.pairing.code if gw.is_running() else "",
+                "owners": len(gw.pairing.owners()), "name": getattr(gw, "bot_name", "")}
+
+    webhook = WebhookGateway.get_instance()
     return {
-        "telegram": {"running": TelegramGateway.get_instance().is_running()},
-        "discord": {"running": DiscordGateway.get_instance().is_running()},
-        "webhook": {"running": WebhookGateway.get_instance().is_running()},
+        "telegram": bot(TelegramGateway.get_instance()),
+        "discord": bot(DiscordGateway.get_instance()),
+        "webhook": {"running": webhook.is_running(),
+                    "secret": webhook.secret_token if webhook.is_running() else ""},
     }
 
 
+@router.post("/gateway/{platform}/unpair")
+async def unpair_gateway(platform: str, _user=Depends(get_current_user_dep)):
+    """Remove every owner of a bot; they must pair again."""
+    if platform == "telegram":
+        from app.gateway.telegram_bot import TelegramGateway as G
+    elif platform == "discord":
+        from app.gateway.discord_bot import DiscordGateway as G
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown platform: {platform}")
+    G.get_instance().pairing.forget()
+    return {"platform": platform, "owners": 0}
+
+
 @router.post("/gateway/{platform}/start")
-async def start_gateway(platform: str, req: GatewayStartRequest):
+async def start_gateway(platform: str, req: GatewayStartRequest, _user=Depends(get_current_user_dep)):
     """Start Telegram, Discord, or Webhook adapter."""
     config = req.model_dump(exclude_none=True)
     if platform == "telegram":
         from app.gateway.telegram_bot import TelegramGateway
-        ok = await TelegramGateway.get_instance().start(config)
-        return {"platform": platform, "started": ok}
+        gw = TelegramGateway.get_instance()
+        ok = await gw.start(config)
+        return {"platform": platform, "started": ok, "reason": "" if ok else gw.last_error}
     elif platform == "discord":
         from app.gateway.discord_bot import DiscordGateway
-        ok = await DiscordGateway.get_instance().start(config)
-        return {"platform": platform, "started": ok}
+        gw = DiscordGateway.get_instance()
+        ok = await gw.start(config)
+        return {"platform": platform, "started": ok, "reason": "" if ok else gw.last_error}
     elif platform == "webhook":
         from app.gateway.webhook_adapter import WebhookGateway
         ok = await WebhookGateway.get_instance().start(config)
@@ -490,7 +512,7 @@ async def start_gateway(platform: str, req: GatewayStartRequest):
 
 
 @router.post("/gateway/{platform}/stop")
-async def stop_gateway(platform: str):
+async def stop_gateway(platform: str, _user=Depends(get_current_user_dep)):
     """Stop Telegram, Discord, or Webhook adapter."""
     if platform == "telegram":
         from app.gateway.telegram_bot import TelegramGateway
@@ -513,7 +535,7 @@ async def receive_webhook(platform: str, request: Request):
     gateway = WebhookGateway.get_instance()
     if not gateway.is_running():
         raise HTTPException(status_code=503, detail="Webhook gateway is stopped")
-    if gateway.secret_token and not secrets.compare_digest(
+    if not gateway.secret_token or not secrets.compare_digest(
             request.headers.get("X-Webhook-Secret", ""), gateway.secret_token):
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
     try:

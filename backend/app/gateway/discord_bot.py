@@ -37,13 +37,20 @@ class DiscordGateway(BaseGateway):
         self._client: Optional[httpx.AsyncClient] = None
         self._last_message_id: Optional[str] = None
         self._bot_user_id: Optional[str] = None
+        self.last_error: str = ""
+        self.bot_name: str = ""
+        from app.gateway.owners import Pairing
+        self.pairing = Pairing("discord")
 
     async def start(self, config: Dict[str, Any]) -> bool:
         if self._running:
             return True
         token = config.get("token") or os.environ.get("SMARAN_DISCORD_TOKEN", "")
         if not token:
-            logger.warning("Discord Bot Token not provided.")
+            self.last_error = "Paste the bot token from the Discord Developer Portal first."
+            return False
+        if not str(config.get("default_channel_id", "") or "").strip():
+            self.last_error = "Add the Channel ID the bot should listen in (right-click the channel -> Copy Channel ID)."
             return False
 
         self._last_message_id = None
@@ -65,13 +72,15 @@ class DiscordGateway(BaseGateway):
             resp = await self._client.get("/users/@me")
             data = resp.json()
             if "id" not in data:
-                logger.error(f"Discord authentication failed: {data}")
+                self.last_error = ("Discord refused this token (%s). Reset it in the Developer Portal -> "
+                                   "Bot, and paste the new one." % (data.get("message") or resp.status_code))
                 await self.stop()
                 return False
             self._bot_user_id = data["id"]
+            self.bot_name = data.get("username", "")
             logger.info(f"Connected to Discord Bot: {data.get('username')}#{data.get('discriminator', '0')}")
-        except Exception as exc:
-            logger.error(f"Failed to connect to Discord: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = f"Could not reach Discord ({type(exc).__name__}). Check the internet connection."
             await self.stop()
             return False
 
@@ -135,7 +144,19 @@ class DiscordGateway(BaseGateway):
                             if not content:
                                 continue
 
-                            if self.allowed_users and author_id not in self.allowed_users:
+                            if not self.pairing.is_owner(author_id):
+                                # Anyone in the channel can see the bot; only owners command it.
+                                lowered = content.lower()
+                                if lowered.startswith("!smaran pair") or lowered.startswith("/pair"):
+                                    attempt = content.split()[-1]
+                                    outcome = self.pairing.try_pair(author_id, attempt)
+                                    await self.send_message(self.default_channel_id, {
+                                        "paired": "Paired. You can now give SMARAN tasks here with !smaran <task>.",
+                                        "locked": "Too many wrong codes from this account.",
+                                    }.get(outcome, "That code is not right. Check SMARAN -> Settings -> Gateway & Bots."))
+                                elif lowered.startswith("!smaran") or lowered.startswith("/ask"):
+                                    from app.gateway.owners import PRIVATE
+                                    await self.send_message(self.default_channel_id, PRIVATE.replace("/pair", "!smaran pair"))
                                 continue
 
                             await self._handle_message(self.default_channel_id, content)
@@ -156,7 +177,7 @@ class DiscordGateway(BaseGateway):
         try:
             from app.agent import loop as agent_loop
             output_parts = []
-            async for event in agent_loop.run(task=prompt):
+            async for event in agent_loop.run(task=prompt, mode="smart"):
                 if event.get("type") == "message":
                     output_parts.append(event.get("text", ""))
                 elif event.get("type") == "error":

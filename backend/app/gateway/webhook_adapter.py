@@ -35,7 +35,11 @@ class WebhookGateway(BaseGateway):
         self.default_callback_url: str = ""
 
     async def start(self, config: Dict[str, Any]) -> bool:
-        self.secret_token = config.get("secret_token", "")
+        # A secret is required: without one, any program on this computer -
+        # or a web page making a request to 127.0.0.1 - could run the agent.
+        # None given: one is made, and Settings shows it.
+        import secrets as _secrets
+        self.secret_token = (config.get("secret_token") or "").strip() or _secrets.token_urlsafe(24)
         self.default_callback_url = config.get("callback_url", "")
         self._running = True
         logger.info("Webhook Gateway enabled.")
@@ -101,7 +105,7 @@ class WebhookGateway(BaseGateway):
         try:
             from app.agent import loop as agent_loop
             output_parts = []
-            async for event in agent_loop.run(task=prompt):
+            async for event in agent_loop.run(task=prompt, mode="smart"):
                 if event.get("type") == "message":
                     output_parts.append(event.get("text", ""))
                 elif event.get("type") == "error":

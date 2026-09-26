@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -17,6 +18,27 @@ import httpx
 from app.gateway import BaseGateway
 
 logger = logging.getLogger("gateway.telegram")
+# httpx logs every request URL at INFO, and a Telegram URL carries the bot
+# token: /bot<token>/getUpdates. Kept out of the log.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+#: What a BotFather token looks like: "<bot id>:<35 characters>".
+TOKEN_SHAPE = re.compile(r"^\d{5,15}:[A-Za-z0-9_-]{30,60}$")
+
+
+def token_problem(token: str) -> str:
+    """Why this cannot be a bot token, in words a person can act on, or ''."""
+    token = (token or "").strip()
+    if not token:
+        return "Paste the bot token from @BotFather first."
+    if TOKEN_SHAPE.match(token):
+        return ""
+    if ":" not in token:
+        return ("That is not a bot token. A bot token comes from @BotFather in Telegram "
+                "(send /newbot, then copy the token) and looks like 123456789:AAE... with a colon. "
+                "The API token on gateway.telegram.org is for Telegram's paid verification-code "
+                "service and cannot run a bot.")
+    return "That does not look like a complete bot token - copy it again from @BotFather."
 
 
 class TelegramGateway(BaseGateway):
@@ -36,35 +58,39 @@ class TelegramGateway(BaseGateway):
         self._poll_task: Optional[asyncio.Task] = None
         self._client: Optional[httpx.AsyncClient] = None
         self._last_update_id: int = 0
+        self.last_error: str = ""
+        self.bot_name: str = ""
+        from app.gateway.owners import Pairing
+        self.pairing = Pairing("telegram")
 
     async def start(self, config: Dict[str, Any]) -> bool:
         if self._running:
             return True
-        token = config.get("token") or os.environ.get("SMARAN_TELEGRAM_TOKEN", "")
-        if not token:
-            logger.warning("Telegram Bot Token not provided.")
+        token = (config.get("token") or os.environ.get("SMARAN_TELEGRAM_TOKEN", "")).strip()
+        self.last_error = token_problem(token)
+        if self.last_error:
             return False
 
         self.bot_token = token
-        self.default_chat_id = str(config.get("default_chat_id", ""))
-        self.allowed_users = config.get("allowed_users", [])
-
+        self.default_chat_id = str(config.get("default_chat_id", "") or "")
         self._client = httpx.AsyncClient(
             base_url=f"https://api.telegram.org/bot{self.bot_token}",
             timeout=30.0
         )
-
         try:
             resp = await self._client.get("/getMe")
             data = resp.json()
             if not data.get("ok"):
-                logger.error(f"Telegram getMe failed: {data}")
+                # 401: Telegram does not know this token (revoked or mistyped).
+                self.last_error = ("Telegram refused this token (%s). Copy it again from @BotFather, "
+                                   "or send /token there to get the current one."
+                                   % (data.get("description") or resp.status_code))
                 await self.stop()
                 return False
-            bot_name = data.get("result", {}).get("username")
-            logger.info(f"Connected to Telegram Bot: @{bot_name}")
-        except Exception as exc:
-            logger.error(f"Failed to connect to Telegram: {exc}")
+            self.bot_name = data.get("result", {}).get("username", "")
+            logger.info("Connected to Telegram Bot: @%s", self.bot_name)
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = f"Could not reach Telegram ({type(exc).__name__}). Check the internet connection."
             await self.stop()
             return False
 
@@ -88,7 +114,7 @@ class TelegramGateway(BaseGateway):
         return True
 
     async def send_message(self, recipient_id: str, text: str) -> bool:
-        if not self._client or not self.bot_token:
+        if not self._client or not self.bot_token or not recipient_id:
             return False
         try:
             for offset in range(0, len(text), 4000):
@@ -135,12 +161,22 @@ class TelegramGateway(BaseGateway):
         if not text:
             return
 
-        if self.allowed_users and user_id not in self.allowed_users:
-            await self.send_message(chat_id, "⚠️ Unauthorized user.")
+        # Only owners command this computer. Anyone else can only pair.
+        if not self.pairing.is_owner(user_id):
+            if text.startswith("/pair"):
+                outcome = self.pairing.try_pair(user_id, text[5:].strip())
+                if outcome == "paired":
+                    if not self.default_chat_id:
+                        self.default_chat_id = chat_id
+                    await self.send_message(chat_id, "Paired. This chat now controls SMARAN on your computer. Send /help to see what I can do.")
+                elif outcome == "locked":
+                    await self.send_message(chat_id, "Too many wrong codes from this account.")
+                else:
+                    await self.send_message(chat_id, "That code is not right. Check SMARAN -> Settings -> Gateway & Bots.")
+                return
+            from app.gateway.owners import PRIVATE
+            await self.send_message(chat_id, PRIVATE)
             return
-
-        if not self.default_chat_id:
-            self.default_chat_id = chat_id
 
         if text.startswith("/start") or text.startswith("/help"):
             welcome = (
@@ -169,7 +205,9 @@ class TelegramGateway(BaseGateway):
             output_parts = []
             tools_used = []
 
-            async for event in agent_loop.run(task=prompt):
+            # Smart approval with nobody to approve: edits inside the project run,
+            # anything else that would ask is declined.
+            async for event in agent_loop.run(task=prompt, mode="smart"):
                 etype = event.get("type")
                 if etype == "message":
                     output_parts.append(event.get("text", ""))
