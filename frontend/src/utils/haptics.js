@@ -29,8 +29,8 @@ export function hapticsEnabled(storage = store()) {
 export function hapticsVolume(storage = store()) {
   try {
     const value = Number(storage?.getItem(HAPTICS_VOLUME_KEY));
-    return Number.isFinite(value) && storage?.getItem(HAPTICS_VOLUME_KEY) !== null ? Math.min(1, Math.max(0, value)) : 0.6;
-  } catch { return 0.6; }
+    return Number.isFinite(value) && storage?.getItem(HAPTICS_VOLUME_KEY) !== null ? Math.min(1, Math.max(0, value)) : 0.8;
+  } catch { return 0.8; }
 }
 
 export function setHaptics({ enabled, volume } = {}, storage = store()) {
@@ -42,20 +42,21 @@ export function setHaptics({ enabled, volume } = {}, storage = store()) {
 }
 
 /* Each sound: notes of [frequency Hz, start s, length s, peak gain], a wave
-   shape, and a vibration pattern in milliseconds for phones. Kept short and
-   soft on purpose - these play many times a minute. */
+   shape, and a vibration pattern in milliseconds for phones. Short, but loud
+   enough to hear: the first version peaked at -17 dBFS for 35 ms and people
+   heard nothing. The notes of one sound never add up past full scale, so
+   nothing crackles at 100%. */
 export const SOUNDS = {
-  tap: { wave: 'sine', notes: [[1650, 0, 0.035, 0.18]], vibrate: 8 },
-  toggle: { wave: 'triangle', notes: [[880, 0, 0.04, 0.2], [1320, 0.045, 0.05, 0.18]], vibrate: 12 },
-  send: { wave: 'sine', notes: [[660, 0, 0.06, 0.2], [990, 0.05, 0.08, 0.2]], sweep: 1.25, vibrate: 15 },
-  success: { wave: 'sine', notes: [[784, 0, 0.1, 0.22], [1175, 0.09, 0.16, 0.2]], vibrate: [12, 40, 18] },
-  error: { wave: 'square', notes: [[220, 0, 0.09, 0.12], [175, 0.11, 0.14, 0.12]], vibrate: [30, 50, 30] },
-  attention: { wave: 'sine', notes: [[988, 0, 0.12, 0.2], [988, 0.18, 0.12, 0.2]], vibrate: [20, 60, 20] },
+  tap: { wave: 'triangle', notes: [[1150, 0, 0.055, 0.5]], vibrate: 8 },
+  toggle: { wave: 'triangle', notes: [[880, 0, 0.06, 0.5], [1320, 0.06, 0.07, 0.45]], vibrate: 12 },
+  send: { wave: 'triangle', notes: [[620, 0, 0.08, 0.45], [930, 0.07, 0.11, 0.45]], sweep: 1.25, vibrate: 15 },
+  success: { wave: 'sine', notes: [[784, 0, 0.14, 0.5], [1175, 0.12, 0.22, 0.45]], vibrate: [12, 40, 18] },
+  error: { wave: 'square', notes: [[233, 0, 0.12, 0.22], [175, 0.14, 0.18, 0.22]], vibrate: [30, 50, 30] },
+  attention: { wave: 'sine', notes: [[988, 0, 0.14, 0.55], [988, 0.2, 0.14, 0.55]], vibrate: [20, 60, 20] },
 };
 
 let context = null;
 let last = { kind: '', at: 0 };
-
 function audio() {
   if (context) return context;
   const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;

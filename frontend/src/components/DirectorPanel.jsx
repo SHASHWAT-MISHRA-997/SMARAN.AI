@@ -178,6 +178,8 @@ const DirectorPanel = ({ isOpen, onClose }) => {
   const [run, setRun] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [openDiff, setOpenDiff] = useState('');
+  const [writing, setWriting] = useState(false);
   const timer = useRef(null);
   const closeButton = useRef(null);
 
@@ -190,6 +192,12 @@ const DirectorPanel = ({ isOpen, onClose }) => {
         setChosen(data.local.slice(0, 1).map((m) => m.model));
       })
       .catch((e) => setError(e.message));
+    // The folder already open in SMARAN is the likely one; typing a full
+    // Windows path from memory was the only way in.
+    fetch(`${API_BASE}/api/workspace/status`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((status) => { if (status?.root) setRoot((current) => current || status.root); })
+      .catch(() => {});
     return undefined;
   }, [isOpen]);
 
@@ -248,7 +256,23 @@ const DirectorPanel = ({ isOpen, onClose }) => {
     }
   };
 
+  const writeStaged = async () => {
+    if (!run) return;
+    setWriting(true);
+    setError('');
+    try {
+      const data = await call(`/runs/${run.id}/apply`, { method: 'POST' });
+      setRun(data.run);
+      if (data.problems?.length) setError(`Some files were not written: ${data.problems.join('; ')}`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setWriting(false);
+    }
+  };
+
   const tasks = run?.graph?.tasks || [];
+  const waiting = (run?.changes || []).filter((change) => !change.applied);
   const running = run && !['done', 'failed', 'cancelled'].includes(run.state);
   const refused = useMemo(
     () => (run?.events || []).filter((e) => e.kind === 'out-of-scope'),
@@ -401,6 +425,13 @@ const DirectorPanel = ({ isOpen, onClose }) => {
                 {running ? 'Working…' : `Run ${run.state}.`}
                 {run.error && <span className="text-rose-300"> {run.error}</span>}
               </p>
+              {/* What it is doing right now, or why it is waiting - a model
+                  that timed out and is being asked again says so here. */}
+              {running && run.events?.length > 0 && (
+                <p className={`-mt-2 text-[12px] ${run.events[run.events.length - 1].kind === 'retrying' ? 'text-amber-300' : 'text-zinc-500'}`}>
+                  {run.events[run.events.length - 1].message}
+                </p>
+              )}
 
               {tasks.length > 0 && (
                 <ul className="space-y-1.5">
@@ -442,17 +473,52 @@ const DirectorPanel = ({ isOpen, onClose }) => {
               {run.changes?.length > 0 && (
                 <section>
                   <h3 className="mb-1.5 text-xs font-semibold text-zinc-300">
-                    {run.applied ? 'Files written' : 'Staged for your review — nothing written yet'}
+                    {waiting.length ? 'Staged for your review — nothing written yet' : 'Files written'}
                   </h3>
+                  {/* "Staged for your review" used to be the end of the road:
+                      the files could be neither read nor written from here. */}
                   <ul className="space-y-1">
                     {run.changes.map((change) => (
-                      <li key={change.id} className="flex items-center gap-2 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[11px]">
-                        <span className="flex-1 truncate text-zinc-200">{change.path}</span>
-                        <span className="text-emerald-400">+{change.lines_added ?? 0}</span>
-                        <span className="text-rose-400">−{change.lines_removed ?? 0}</span>
+                      <li key={change.id} className="rounded border border-white/10 bg-black/30 font-mono text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setOpenDiff((id) => (id === change.id ? '' : change.id))}
+                          aria-expanded={openDiff === change.id}
+                          className="flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-white/5"
+                        >
+                          <span className="flex-1 truncate text-zinc-200">{change.path}</span>
+                          <span className={change.applied ? 'text-emerald-300' : 'text-amber-300'}>
+                            {change.applied ? 'written' : 'staged'}
+                          </span>
+                          <span className="text-emerald-400">+{change.lines_added ?? 0}</span>
+                          <span className="text-rose-400">−{change.lines_removed ?? 0}</span>
+                          <ChevronDown className={`h-3.5 w-3.5 text-zinc-500 ${openDiff === change.id ? 'rotate-180' : ''}`} aria-hidden="true" />
+                        </button>
+                        {openDiff === change.id && (
+                          <pre className="max-h-72 overflow-auto border-t border-white/10 px-2 py-1.5 text-[11px] leading-relaxed">
+                            {String(change.diff || '').split('\n').map((line, i) => (
+                              <div key={i} className={
+                                line.startsWith('+') && !line.startsWith('+++') ? 'text-emerald-300'
+                                  : line.startsWith('-') && !line.startsWith('---') ? 'text-rose-300'
+                                    : line.startsWith('@@') ? 'text-cyan-300' : 'text-zinc-400'
+                              }>{line || ' '}</div>
+                            ))}
+                          </pre>
+                        )}
                       </li>
                     ))}
                   </ul>
+                  {waiting.length > 0 && !running && (
+                    <button
+                      type="button"
+                      onClick={writeStaged}
+                      disabled={writing}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-black hover:bg-emerald-400 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                    >
+                      <Check className="h-4 w-4" aria-hidden="true" />
+                      {writing ? 'Writing…' : `Write these ${waiting.length} file${waiting.length === 1 ? '' : 's'}`}
+                    </button>
+                  )}
                 </section>
               )}
 

@@ -212,6 +212,18 @@ async def stream(run_id: str):
     return StreamingResponse(events(), media_type="application/x-ndjson")
 
 
+@router.post("/runs/{run_id}/apply")
+async def apply(run_id: str):
+    """Write the changes a run staged for review, once they have been read."""
+    from .run import RunError
+    run = _get(run_id)
+    try:
+        result = await asyncio.to_thread(run.apply_staged)
+    except RunError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {**result, "run": run.snapshot()}
+
+
 @router.get("/runs/{run_id}/changes")
 async def changes(run_id: str):
     """Every diff the run staged, applied or not."""

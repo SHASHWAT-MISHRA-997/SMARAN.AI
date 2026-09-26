@@ -392,3 +392,52 @@ def _reply(text):
     async def call(*_args, **_kwargs):
         return text
     return call()
+
+
+# ---- staged for review ------------------------------------------------------
+
+class ReviewSpy(Double):
+    """Records what the reviewer was shown."""
+
+    async def __call__(self, messages, candidate, timeout):
+        if "You are the reviewer" in messages[0]["content"]:
+            self.review_saw = messages[-1]["content"]
+        return await super().__call__(messages, candidate, timeout)
+
+
+def test_staged_work_is_what_the_reviewer_reads_and_writing_it_later_works():
+    double = ReviewSpy(replies={
+        "Build the page.": handoff(**{"src/ui/Player.jsx": "export default 42"}),
+        "Serve the list.": handoff(**{"server/api.py": "print('api')"}),
+    })
+    run, store = make_run(double, apply_changes=False)
+    asyncio.run(run.start())
+
+    assert run.state == "done"
+    assert store.files == {}                           # nothing written yet
+    assert "export default 42" in double.review_saw    # but the reviewer saw it
+    owners = {t.id: t.owner for t in run.graph.tasks() if t.role != "review"}
+    assert owners == {"ui": LOCAL.label, "api": LOCAL.label}
+
+    result = run.apply_staged()
+    assert sorted(result["written"]) == ["server/api.py", "src/ui/Player.jsx"]
+    assert store.files["src/ui/Player.jsx"].strip() == "export default 42"
+    assert all(c["applied"] for c in run.changes)
+    assert run.apply_staged()["written"] == []         # nothing left to write
+
+
+def test_a_model_that_fails_is_reported_while_the_run_waits():
+    calls = {"n": 0}
+
+    async def flaky(messages, candidate, timeout):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise asyncio.TimeoutError()
+        return "fine"
+
+    notices = []
+    router = Router([LOCAL], call=flaky, sleep=no_sleep)
+    completion = asyncio.run(router.complete([{"role": "user", "content": "x"}],
+                                             notify=notices.append))
+    assert completion.text == "fine"
+    assert len(notices) == 1 and "Timed out" in notices[0] and "round 1 of" in notices[0]

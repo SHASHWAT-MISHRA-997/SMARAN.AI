@@ -276,9 +276,24 @@ class Router:
                 if self._health[c.label].usable(now)]
 
     async def complete(self, messages: List[Dict], *, role: str = "feature",
-                       is_cancelled: Optional[Callable[[], bool]] = None) -> Completion:
-        """One reply, from the first candidate that manages to give one."""
+                       is_cancelled: Optional[Callable[[], bool]] = None,
+                       notify: Optional[Callable[[str], None]] = None) -> Completion:
+        """One reply, from the first candidate that manages to give one.
+
+        `notify` hears each failed attempt as it happens. Without it a model
+        that hung left the Director on "Working..." for nine minutes - three
+        rounds of a three-minute timeout - with nothing to say why.
+        """
         cancelled = is_cancelled or (lambda: False)
+
+        def failed(attempt: "Attempt") -> None:
+            if notify is not None:
+                try:
+                    notify("%s/%s: %s - round %d of %d." % (
+                        attempt.provider or "local", attempt.model, attempt.error or "failed",
+                        round_index, MAX_ATTEMPTS_PER_TASK))
+                except Exception:  # noqa: BLE001 - a report must not break the run
+                    pass
         attempts: List[Attempt] = []
         first_failure: Optional[str] = None
 
@@ -305,12 +320,14 @@ class Router:
                     attempts.append(Attempt(candidate.provider, candidate.model,
                                             False, "Timed out after %gs" % self.timeout,
                                             seconds=time.time() - started))
+                    failed(attempts[-1])
                     first_failure = first_failure or "%s timed out" % candidate.label
                     continue
                 except ProviderError as exc:
                     seconds = time.time() - started
                     attempts.append(Attempt(candidate.provider, candidate.model,
                                             False, str(exc)[:400], exc.status, seconds))
+                    failed(attempts[-1])
                     first_failure = first_failure or "%s: %s" % (candidate.label, exc)
                     if exc.rate_limited:
                         # Not a failure of the provider, a request to wait.
@@ -326,6 +343,7 @@ class Router:
                     health.failures += 1
                     attempts.append(Attempt(candidate.provider, candidate.model,
                                             False, str(exc)[:400], seconds=seconds))
+                    failed(attempts[-1])
                     first_failure = first_failure or "%s: %s" % (candidate.label, exc)
                     continue
 
@@ -337,6 +355,7 @@ class Router:
                     attempts.append(Attempt(candidate.provider, candidate.model,
                                             False, "Returned an empty reply",
                                             seconds=time.time() - started))
+                    failed(attempts[-1])
                     first_failure = first_failure or "%s returned nothing" % candidate.label
                     continue
 

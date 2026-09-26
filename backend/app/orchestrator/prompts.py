@@ -32,7 +32,8 @@ One short paragraph: what you did, and anything the reviewer should check.
 Rules for the reply:
 - Give the whole file. A partial file overwrites the rest with nothing.
 - One <file> block per file. Do not repeat a path.
-- Write only the files listed under YOUR FILES. Anything else is discarded.
+- Write only the files listed under YOUR FILES, at exactly those paths.
+  Anything else is discarded.
 - No prose outside the blocks."""
 
 _FILE_BLOCK = re.compile(
@@ -78,7 +79,11 @@ Requirements:
   tasks must never claim paths that can match the same file.
 - depends_on holds ids of tasks that must finish first. No cycles.
 - The review task has "scopes": [].
-- Prefer few, well-separated tasks over many overlapping ones."""
+- Prefer few, well-separated tasks over many overlapping ones.
+- Use exactly the file names and folders the request names. If it names
+  none, keep a small project flat at the root (index.html, style.css,
+  app.js) - the paths above are only an example of the shape, not a layout
+  to copy."""
 
 
 class PlanError(ValueError):

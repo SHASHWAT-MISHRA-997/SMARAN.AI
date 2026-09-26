@@ -365,6 +365,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
   }, []);
   const [liveModel, setLiveModel] = useState('');
   const [liveSource, setLiveSource] = useState('');
+  const [fallbackNote, setFallbackNote] = useState('');
   const [genError, setGenError] = useState('');
 
   // A page finished (or failed) while you were looking elsewhere: say so.
@@ -410,6 +411,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
             try { parsed = JSON.parse(line); } catch { continue; }
             if (parsed.error) setGenError(String(parsed.error));
             if (parsed.model_routed) setLiveModel(parsed.model_routed);
+            if (parsed.fallback_reason) setFallbackNote(`${parsed.fallback_reason} - written by ${parsed.model_routed} instead.`);
             if (parsed.token) { text += parsed.token; setResult(text); }
             if (parsed.translated_response) { text = parsed.translated_response; setResult(text); }
           }
@@ -494,6 +496,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
     setResult('');
     setLiveModel('');
     setLiveSource('');
+    setFallbackNote('');
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -603,6 +606,8 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
            and tells you nothing. */
         if (parsed.model_routed) setLiveModel(parsed.model_routed);
         if (parsed.execution_source) setLiveSource(parsed.execution_source);
+        // The model picked did not answer: say which one did, and why.
+        if (parsed.fallback_reason) setFallbackNote(`${parsed.fallback_reason} - written by ${parsed.model_routed} instead.`);
         if (parsed.token) { text += parsed.token; setResult(text); }
         if (parsed.translated_response) { text = parsed.translated_response; setResult(text); }
       };
@@ -966,6 +971,11 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                     than leaving the frame to imply success. Checked only once
                     generating has stopped, because mid-stream the body
                     legitimately has not arrived yet. */}
+                {fallbackNote && (
+                  <p className="px-4 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400 border-b border-amber-500/20 bg-amber-500/5">
+                    Your chosen model did not answer ({fallbackNote})
+                  </p>
+                )}
                 {!generating && !/<body[\s>]/i.test(firstCodeBlock(result).code) && (
                   <p className="px-4 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400 border-b border-amber-500/20 bg-amber-500/5">
                     The model stopped before it wrote the page body, so there is nothing to show

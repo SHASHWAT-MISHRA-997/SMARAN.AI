@@ -11,10 +11,10 @@ Object.defineProperty(globalThis, 'navigator', { value: { vibrate: (p) => vibrat
 
 const { haptic, hapticsEnabled, hapticsVolume, setHaptics, soundFor, SOUNDS } = await import('../src/utils/haptics.js');
 
-test('on by default at 60%, and the switch and volume are kept', () => {
+test('on by default at 80%, and the switch and volume are kept', () => {
   const s = memory();
   assert.equal(hapticsEnabled(s), true);
-  assert.equal(hapticsVolume(s), 0.6);
+  assert.equal(hapticsVolume(s), 0.8);
   setHaptics({ enabled: false, volume: 0.25 }, s);
   assert.equal(hapticsEnabled(s), false);
   assert.equal(hapticsVolume(s), 0.25);

@@ -2812,6 +2812,12 @@ const ChatArea = ({
         wakeHandlersRef.current.woke('');
       },
       onError: (message) => console.warn('Hey Jarvis:', message),
+      // The trained detector is up: the transcription fallback is the same
+      // job at many times the cost, so it stops - unless the phrase is a
+      // custom one the detector was never trained on.
+      onReady: () => {
+        if (/smaran|jarvis/i.test(wakePhrase || '')) listener.disableLocal();
+      },
     });
 
     return () => {

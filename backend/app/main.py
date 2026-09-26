@@ -3342,6 +3342,40 @@ def _note_route_success(provider: str, model: str) -> None:
 
 # Preference order for automatic cloud routing, and the kind of model to pick
 # from each provider's live catalogue. Fast, free-tier-friendly models first.
+#: How many times a reply cut off by the output limit is asked to go on.
+_CLOUD_CONTINUATIONS = 2
+_CONTINUE_PROMPT = ("You were cut off by the length limit. Continue exactly where you stopped - "
+                    "the very next character - with no repetition, no preamble and no new code fence.")
+
+
+async def _provider_refusal(response) -> str:
+    """The provider's own words for refusing - "Payment required", "rate limit" -
+    rather than a bare status code nobody can act on."""
+    try:
+        data = json.loads((await response.aread()).decode("utf-8", "replace"))
+        error = data.get("error") if isinstance(data.get("error"), dict) else data
+        message = str(error.get("message") or data.get("message") or "").strip()
+    except Exception:  # noqa: BLE001 - the status code is still worth reporting
+        message = ""
+    return ("HTTP %s - %s" % (response.status_code, message[:160])) if message else "HTTP %s" % response.status_code
+
+
+def _cloud_body(model: str, messages: list, temperature: float, section: str) -> dict:
+    """An OpenAI-style request with room for the answer that was asked for.
+
+    Design pages and code are long; 4096 tokens held a short reply but not a
+    page with its styles and scripts, least of all from a reasoning model
+    whose thinking is counted against the same limit.
+    """
+    long_form = section in ("design", "code")
+    body = {"model": model, "messages": messages, "stream": True, "temperature": temperature,
+            "max_tokens": 16384 if long_form else 4096}
+    if long_form and "gpt-oss" in model.lower():
+        # Think briefly, spend the budget on the page.
+        body["reasoning_effort"] = "low"
+    return body
+
+
 _CLOUD_AUTO_PROVIDER_ORDER = ("gemini", "groq", "cerebras", "together", "openrouter",
                               "mistral", "deepseek", "nvidia", "sambanova", "openai", "anthropic")
 _CLOUD_AUTO_MODEL_PREFERENCES = {
@@ -4656,7 +4690,7 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                         system_text = "\n\n".join(str(m.get('content', '')) for m in messages_payload if m.get('role') == 'system')
                         anthropic_messages = [{'role': m.get('role'), 'content': str(m.get('content', ''))} for m in messages_payload if m.get('role') in ('user', 'assistant')]
                         headers = {'x-api-key': api_key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json'}
-                        payload = {'model': model, 'messages': anthropic_messages, 'stream': True, 'temperature': answer_temperature, 'max_tokens': 4096}
+                        payload = {'model': model, 'messages': anthropic_messages, 'stream': True, 'temperature': answer_temperature, 'max_tokens': 16384 if req_section in ('design', 'code') else 4096}
                         if system_text:
                             payload['system'] = system_text
                         _route_begin(provider)
@@ -4682,7 +4716,7 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                     elif provider == 'gemini':
                         system_text = "\n\n".join(str(m.get('content', '')) for m in messages_payload if m.get('role') == 'system')
                         contents = [{'role': 'model' if m.get('role') == 'assistant' else 'user', 'parts': [{'text': str(m.get('content', ''))}]} for m in messages_payload if m.get('role') in ('user', 'assistant')]
-                        payload = {'contents': contents, 'generationConfig': {'maxOutputTokens': 4096}}
+                        payload = {'contents': contents, 'generationConfig': {'maxOutputTokens': 16384 if req_section in ('design', 'code') else 4096}}
                         if system_text:
                             payload['system_instruction'] = {'parts': [{'text': system_text}]}
                         _route_begin(provider)
@@ -4725,26 +4759,53 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                         if provider == 'openrouter':
                             headers.update({'HTTP-Referer': 'http://localhost:3003', 'X-Title': 'SMARAN.AI'})
                         _route_begin(provider)
-                        async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
-                            async with client.stream('POST', f'{endpoint}/chat/completions', headers=headers, json={'model': model, 'messages': messages_payload, 'stream': True, 'temperature': answer_temperature, 'max_tokens': 4096}) as response:
-                                if response.status_code != 200:
-                                    _note_route_failure(provider, model)
-                                    failures.append(f'{provider}/{model}: HTTP {response.status_code}')
-                                    continue
-                                yield json.dumps({'model_routed': model, 'execution_source': source}) + '\n'
-                                async for line in response.aiter_lines():
-                                    if line.startswith('data: '):
-                                        line = line[6:]
-                                    if not line or line == '[DONE]':
-                                        continue
-                                    try:
-                                        token = (json.loads(line).get('choices') or [{}])[0].get('delta', {}).get('content') or ''
-                                        if token:
-                                            emitted = True
-                                            accumulated_response += token
-                                            yield json.dumps({'token': token}) + '\n'
-                                    except Exception:
-                                        continue
+                        body = _cloud_body(model, messages_payload, answer_temperature, req_section)
+                        refused = False
+                        # A reply cut off by the output limit is asked to carry
+                        # on where it stopped. Design pages from reasoning models
+                        # (gpt-oss on Cerebras) always ended before <body>: the
+                        # hidden reasoning shared a 4096-token budget with the
+                        # page, and the page lost.
+                        for part in range(_CLOUD_CONTINUATIONS + 1):
+                            finish = ''
+                            async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
+                                async with client.stream('POST', f'{endpoint}/chat/completions', headers=headers, json=body) as response:
+                                    if response.status_code != 200:
+                                        if part == 0:
+                                            _note_route_failure(provider, model)
+                                            failures.append(f'{provider}/{model}: {await _provider_refusal(response)}')
+                                            refused = True
+                                        break
+                                    if part == 0:
+                                        routed = {'model_routed': model, 'execution_source': source}
+                                        if failures:
+                                            # The model picked did not answer; say which one
+                                            # did and why, instead of switching in silence.
+                                            routed['fallback_reason'] = '; '.join(failures)[:400]
+                                        yield json.dumps(routed) + '\n'
+                                    async for line in response.aiter_lines():
+                                        if line.startswith('data: '):
+                                            line = line[6:]
+                                        if not line or line == '[DONE]':
+                                            continue
+                                        try:
+                                            choice = (json.loads(line).get('choices') or [{}])[0]
+                                            finish = choice.get('finish_reason') or finish
+                                            token = choice.get('delta', {}).get('content') or ''
+                                            if token:
+                                                emitted = True
+                                                accumulated_response += token
+                                                yield json.dumps({'token': token}) + '\n'
+                                        except Exception:
+                                            continue
+                            if refused or finish != 'length' or not accumulated_response:
+                                break
+                            body = _cloud_body(model, messages_payload + [
+                                {'role': 'assistant', 'content': accumulated_response},
+                                {'role': 'user', 'content': _CONTINUE_PROMPT},
+                            ], answer_temperature, req_section)
+                        if refused:
+                            continue
                     if emitted:
                         elapsed = (time.time() - start_time) * 1000
                         elapsed_sec = elapsed / 1000
@@ -6894,6 +6955,9 @@ async def websocket_wake(websocket: WebSocket):
         await websocket.close()
         return
     detector = pc_wake.Detector()
+    # Tells the page the trained detector is live, so it can stop its own
+    # transcription-based fallback, which did the same job on the GPU.
+    await websocket.send_json({"ready": True, "phrases": ["smaran", "jarvis"]})
     try:
         while True:
             frame = await websocket.receive_bytes()

@@ -259,7 +259,7 @@ export class WakeWordListener {
    * nothing.
    */
   async _startLocal() {
-    if (this.localRunning || !this.running) return;
+    if (this.localRunning || !this.running || this.localDisabled) return;
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
       this.onError?.('This build cannot listen for the wake phrase without a speech service.');
       return;
@@ -288,15 +288,20 @@ export class WakeWordListener {
     const buffer = new Uint8Array(analyser.frequencyBinCount);
 
     let capturing = false;
+    let loud = 0;
+    let rested = 0;
     const listen = () => {
       if (!this.running || !this.localRunning) return;
       analyser.getByteFrequencyData(buffer);
       const level = buffer.reduce((a, b) => a + b, 0) / buffer.length;
-      // Above the noise floor of a normal room. Speech sits well above this;
-      // a fan or a fridge does not.
-      if (level > 18 && !capturing) {
+      // Above the noise floor of a normal room, for longer than a clatter,
+      // and not straight after the last clip: every clip is a transcription,
+      // and a noisy room used to keep one running back to back, holding the
+      // GPU at 100% and starving the chat and coding models.
+      loud = level > 18 ? loud + 1 : 0;
+      if (loud >= 2 && !capturing && Date.now() - rested > 1500) {
         capturing = true;
-        this._captureClip().finally(() => { capturing = false; });
+        this._captureClip().finally(() => { capturing = false; rested = Date.now(); });
       }
       this.levelTimer = window.setTimeout(listen, 200);
     };
@@ -324,6 +329,9 @@ export class WakeWordListener {
           const form = new FormData();
           form.append('file', blob, 'wake.webm');
           form.append('language', 'auto');
+          // The quick path: a wake phrase needs a word or two, not the
+          // careful beam search a finished recording gets.
+          form.append('live', '1');
           const res = await fetch(`${this.apiBase}/api/voice/transcribe`, {
             method: 'POST', credentials: 'include', body: form,
           });
@@ -356,6 +364,21 @@ export class WakeWordListener {
       this._startLocal();
     }
     return true;
+  }
+
+  /* The backend's own wake-word detector is listening (app/pc_wake - a model
+     trained for "Hey SMARAN"). It does the same job on the CPU for almost
+     nothing, so the transcription fallback stands down for good. */
+  disableLocal() {
+    this.localDisabled = true;
+    if (!this.localRunning) return;
+    this.localRunning = false;
+    if (this.levelTimer) { window.clearTimeout(this.levelTimer); this.levelTimer = null; }
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => { try { track.stop(); } catch {} });
+      this.stream = null;
+    }
+    if (this.audioCtx) { try { this.audioCtx.close(); } catch {} this.audioCtx = null; }
   }
 
   stop() {

@@ -33,6 +33,9 @@ def test_hey_jarvis_wakes_it_over_the_socket():
     # As this computer: the socket refuses callers that are not local or paired.
     client = TestClient(app, client=("127.0.0.1", 50123))
     with client.websocket_connect("/ws/wake") as ws:
+        # First the detector says it is live, so the page can stop its
+        # transcription fallback.
+        assert ws.receive_json() == {"ready": True, "phrases": ["smaran", "jarvis"]}
         _stream(ws, _pcm("hey_jarvis.wav"))
         message = ws.receive_json()
     assert message["wake"] == "jarvis" and message["score"] >= pc_wake.THRESHOLD
@@ -42,6 +45,7 @@ def test_hey_smaran_wakes_it_over_the_socket():
     # SMARAN's own model (tools/wakeword/train), on a voice it was not trained on.
     client = TestClient(app, client=("127.0.0.1", 50125))
     with client.websocket_connect("/ws/wake") as ws:
+        assert ws.receive_json()["ready"] is True
         _stream(ws, _pcm("hey_smaran.wav"))
         message = ws.receive_json()
     assert message["wake"] == "smaran", message

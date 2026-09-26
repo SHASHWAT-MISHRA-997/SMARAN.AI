@@ -29,7 +29,7 @@ export function toPcm16(samples) {
  * or the backend's detector is unavailable - the browser's own wake phrase
  * listener still runs alongside.
  */
-export function startPcWake({ apiBase = '', onWake, onError } = {}) {
+export function startPcWake({ apiBase = '', onWake, onError, onReady } = {}) {
   let stopped = false;
   let socket = null;
   let stream = null;
@@ -45,6 +45,7 @@ export function startPcWake({ apiBase = '', onWake, onError } = {}) {
       try {
         const message = JSON.parse(event.data);
         if (message.wake) onWake?.(message.wake);
+        else if (message.ready) onReady?.(message.phrases || []);
         else if (message.error) onError?.(message.error);
       } catch { /* not JSON: ignore */ }
     };

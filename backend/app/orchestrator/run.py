@@ -146,6 +146,10 @@ class Run:
         self.graph: Optional[TaskGraph] = None
         self.events: List[dict] = []
         self.changes: List[dict] = []   # every diff staged, applied or not
+        # What each staged file will contain. With "Write the files" off
+        # nothing reaches the disk, and the reviewer - reading the disk - said
+        # "style.css is missing" about a file the run had just made.
+        self._staged: Dict[str, str] = {}
         self._store = store
         self._router = router
         self._cancelled = False
@@ -188,6 +192,30 @@ class Run:
             "applied": self.config.apply_changes,
         }
 
+    def current(self, path: str) -> Optional[str]:
+        """A file as this run leaves it: staged if not yet written, else on disk."""
+        if path in self._staged:
+            return self._staged[path]
+        return self._store.read(path) if self._store else None
+
+    def apply_staged(self) -> dict:
+        """Write every change still waiting, after the person has read them."""
+        if self.state not in ("done", "failed"):
+            raise RunError("The run is still going; write the files once it has finished.")
+        written, problems = [], []
+        for change in self.changes:
+            if change.get("applied"):
+                continue
+            try:
+                self._store.apply(change["id"])
+                change["applied"] = True
+                written.append(change.get("path"))
+            except Exception as exc:                              # noqa: BLE001
+                problems.append("%s: %s" % (change.get("path"), exc))
+        if written:
+            self.emit("applied", "Wrote %d file(s)." % len(written), files=written)
+        return {"written": written, "problems": problems}
+
     # ---- the run ------------------------------------------------------------
 
     async def start(self) -> dict:
@@ -229,7 +257,8 @@ class Run:
         messages = prompts.decompose_prompt(
             self.config.request, files=self._store.listing(), stack=self.config.stack)
         completion = await self._router.complete(
-            messages, role="review", is_cancelled=lambda: self._cancelled)
+            messages, role="review", is_cancelled=lambda: self._cancelled,
+            notify=lambda message: self.emit("retrying", message))
 
         specification = prompts.parse_plan(completion.text)
         self.graph = build_graph(specification)
@@ -277,6 +306,8 @@ class Run:
             return
 
         task.fallback_reason = completion.fallback_reason
+        # Who did the work is the model, not the worker slot that ran it.
+        task.owner = completion.candidate.label
         if completion.fallback_reason:
             self.emit("fallback", completion.fallback_reason, task=task.id)
 
@@ -317,13 +348,14 @@ class Run:
         for scope in task.scopes:
             if any(ch in scope for ch in "*?["):
                 continue
-            body = self._store.read(scope)
+            body = self.current(scope)
             if body is not None:
                 context[scope] = body
         messages = prompts.task_prompt(task, request=self.config.request,
                                        context_files=context, completed=done)
         return await self._router.complete(messages, role=task.role,
-                                           is_cancelled=lambda: self._cancelled)
+                                           is_cancelled=lambda: self._cancelled,
+            notify=lambda message: self.emit("retrying", message))
 
     def _split_by_scope(self, task: Task, files: Dict[str, str]):
         kept, refused = {}, []
@@ -342,7 +374,7 @@ class Run:
             # describe a change that changes nothing, and rollback needs to
             # know what was there. `None` means the file did not exist, which
             # is how rollback knows to delete rather than restore.
-            before = self._store.read(path)
+            before = self.current(path)
             if before == body:
                 self.emit("unchanged", "%s was returned unchanged." % path,
                           task=task.id, path=path)
@@ -354,6 +386,7 @@ class Run:
             change = dict(change)
             change.update({"task": task.id, "applied": False, "previous": before})
             staged.append(change)
+            self._staged[path] = body
 
         self.changes.extend(staged)
         if not self.config.apply_changes:
@@ -409,7 +442,7 @@ class Run:
 
         touched: Dict[str, str] = {}
         for change in self.changes:
-            body = self._store.read(change.get("path", ""))
+            body = self.current(change.get("path", ""))
             if body is not None:
                 touched[change["path"]] = body
 
@@ -418,7 +451,8 @@ class Run:
         try:
             completion = await self._router.complete(
                 prompts.review_prompt(self.config.request, tasks, touched),
-                role="review", is_cancelled=lambda: self._cancelled)
+                role="review", is_cancelled=lambda: self._cancelled,
+            notify=lambda message: self.emit("retrying", message))
             self.review = prompts.parse_review(completion.text)
             self.review["owner"] = completion.candidate.label
         except asyncio.CancelledError:
