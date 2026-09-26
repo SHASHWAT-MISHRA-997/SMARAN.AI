@@ -4,6 +4,7 @@ import GenerationProgress, { htmlProgress } from './GenerationProgress';
 import { takeStudioPrompt } from '../utils/studioHandoff';
 import { Sparkles, Plus, Code2, ArrowUp, FileText, Smartphone, Presentation, LayoutGrid, Film, Monitor, User, Box, Search, Mail, Palette, BookOpen, ChevronDown, X, Check, RefreshCw, ArrowRight } from 'lucide-react';
 import { withImageFallback } from '../utils/designImages';
+import { haptic } from '../utils/haptics';
 
 export const DESIGN_SYSTEMS = [
   {
@@ -365,6 +366,13 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
   const [liveModel, setLiveModel] = useState('');
   const [liveSource, setLiveSource] = useState('');
   const [genError, setGenError] = useState('');
+
+  // A page finished (or failed) while you were looking elsewhere: say so.
+  const wasGenerating = useRef(false);
+  useEffect(() => {
+    if (wasGenerating.current && !generating) haptic(genError ? 'error' : 'success');
+    wasGenerating.current = generating;
+  }, [generating, genError]);
   const abortRef = useRef(null);
   const jobIdRef = useRef(null);
   // Leaving the page stops listening; the job itself keeps running on the server.

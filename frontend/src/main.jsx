@@ -7,9 +7,14 @@ import { ensureDeviceUser, getCurrentUser } from './context/AuthContext.jsx';
 import './index.css';
 import { isHandheld } from './utils/device';
 import { installCompanionFetch } from './utils/companionAuth';
+import { installHaptics } from './utils/haptics';
 
 // The paired phone proves itself on every request to its desktop, chat included.
 installCompanionFetch();
+
+// Every control answers a press with a small sound and, on a phone, a tick
+// (utils/haptics; Settings -> Appearance turns it off).
+installHaptics();
 
 // Phones and tablets get the still versions of the decorations (index.css,
 // `html.is-handheld`). Set by device, before the first render, rather than

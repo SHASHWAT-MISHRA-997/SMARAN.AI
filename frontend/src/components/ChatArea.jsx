@@ -46,6 +46,7 @@ import { Maya3DCanvas } from './CodePreviewVisualizer';
 import AgentSteps from './AgentSteps';
 import { applyAgentEvent, summarize } from '../utils/agentEvents.js';
 import { chosenVoice, continuousDictation, openMicrophone } from '../utils/voiceSettings.js';
+import { haptic } from '../utils/haptics';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
@@ -3127,6 +3128,7 @@ const ChatArea = ({
                 else if (ev.type === 'checkpoint') update((m) => ({ ...m, agentCheckpoint: ev.run_id }));
                 else if (ev.type === 'message') { text = text ? `${text}\n\n${ev.text}` : ev.text; update((m) => ({ ...m, content: text, isLoading: false })); }
                 else if (['tool_call', 'approval_needed', 'approval', 'tool_result'].includes(ev.type)) {
+                  if (ev.type === 'approval_needed') haptic('attention');
                   steps = applyAgentEvent(steps, ev);
                   const snapshot = steps;
                   update((m) => ({ ...m, agentSteps: snapshot }));
@@ -4028,6 +4030,7 @@ const ChatArea = ({
           } else if (event.type === 'error') {
             failure = event.message;
           } else if (['tool_call', 'approval_needed', 'approval', 'tool_result'].includes(event.type)) {
+            if (event.type === 'approval_needed') haptic('attention');
             steps = applyAgentEvent(steps, event);
             const snapshot = steps;
             update((m) => ({ ...m, agentSteps: snapshot }));
@@ -4046,6 +4049,7 @@ const ChatArea = ({
     const elapsed = Math.round(performance.now() - started);
     update((m) => ({ ...m, content, isLoading: false, response_time_ms: elapsed }));
     releaseSend(sendId);
+    haptic(failure ? 'error' : 'success');
 
     // The backend keeps the finished run in the conversation (it runs as a
     // job, so it is saved even if this screen is closed before it ends).
@@ -4184,6 +4188,7 @@ const ChatArea = ({
     window.dispatchEvent(new CustomEvent('smaran:session-named', {
       detail: { id: targetSessionId, title: String(userPrompt || '').trim().slice(0, 30) },
     }));
+    haptic('send');
 
     /* No backend: answer from the device itself.
      *
@@ -4513,6 +4518,7 @@ const ChatArea = ({
         )
       );
       releaseSend(mySend);
+      haptic(finalResult ? 'success' : 'error');
       window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'idle', message: '' } })), 1300);
       if (isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current) {
         const finalVoiceReply = finalResult || (selectedLanguage === 'hi' ? "मॉडल से कोई उत्तर नहीं मिला। कृपया मॉडल या API स्थिति जाँचें।" : "The selected model returned no answer. Please check its runtime or API status.");
