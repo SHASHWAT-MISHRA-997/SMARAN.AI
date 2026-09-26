@@ -37,7 +37,7 @@ MAIN = BACKEND / "app" / "main.py"
 
 def _routing_source() -> str:
     source = MAIN.read_text(encoding="utf-8")
-    start = source.index("auto_candidates = await _auto_cloud_candidates()")
+    start = source.index("auto_candidates = await _auto_cloud_candidates(")
     return source[start:start + 2000]
 
 

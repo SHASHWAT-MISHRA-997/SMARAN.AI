@@ -138,6 +138,9 @@ class ChatMessage(Base):
     references = Column(Text, nullable=True)  # JSON-serialized array of source references
     response_time_ms = Column(Float, nullable=True)
     model_used = Column(String, nullable=True)
+    # JSON: tokens, speed, first-token time, how each was measured, and the
+    # routing decision - so a reply read back later still says how it went.
+    metrics = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
 
     # Relationships

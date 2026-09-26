@@ -480,10 +480,22 @@ const parseInlineFormatting = (text) => {
   if (!text) return '';
 
   // Split regex to capture block math ($$ or \[), inline math ($ or \(), bold (**), and inline code (`)
-  const parts = text.split(/(\$\$[^$]+\$\$|\$[^$]+\$|\\\(.*?\\\)|\\\[.*?\\\]|\*\*.*?\*\*|`.*?`)/g);
+  // Links too: web answers cite their sources as [title](url), and those were
+  // printed as raw brackets. Only http(s) - a reply cannot plant javascript:.
+  const parts = text.split(/(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|\$\$[^$]+\$\$|\$[^$]+\$|\\\(.*?\\\)|\\\[.*?\\\]|\*\*.*?\*\*|`.*?`)/g);
 
   return parts.map((part, i) => {
     if (!part) return null;
+
+    const link = /^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(part);
+    if (link) {
+      return (
+        <a key={i} href={link[2]} target="_blank" rel="noopener noreferrer"
+          className="font-bold text-indigo-600 underline decoration-indigo-400/50 underline-offset-2 hover:text-indigo-500 dark:text-indigo-300 break-words">
+          {cleanPlainText(link[1])}
+        </a>
+      );
+    }
 
     // Block Math
     if ((part.startsWith('$$') && part.endsWith('$$')) || (part.startsWith('\\[') && part.endsWith('\\]'))) {
@@ -799,6 +811,10 @@ const extractBackendMeasurements = (payload = {}) => {
     response_time_ms: 'backendResponseTimeMs',
     tokens_per_sec: 'backendTokensPerSec',
     local_datetime: 'backendLocalDatetime',
+    first_token_ms: 'backendFirstTokenMs',
+    route_task: 'routeTask',
+    route_task_label: 'routeTaskLabel',
+    fallback_reason: 'fallbackReason',
   };
 
   Object.entries(fieldMap).forEach(([backendKey, messageKey]) => {
@@ -989,6 +1005,10 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
                 const responseMilliseconds = firstReportedNumber(msg.backendResponseTimeMs, msg.response_time_ms);
                 const tokenCount = firstReportedNumber(msg.backendTokenCount, msg.token_count);
                 const contextTokens = firstReportedNumber(msg.backendContextTokens, msg.total_context);
+                const firstTokenMs = firstReportedNumber(msg.backendFirstTokenMs, msg.first_token_ms);
+                const TASK_WORDS = { chat: 'conversation', code: 'coding', reasoning: 'reasoning', writing: 'long writing', design: 'a designed page', vision: 'reading an image', search: 'web research' };
+                const routeTask = msg.routeTaskLabel || TASK_WORDS[msg.routeTask || msg.route_task] || '';
+                const fallbackReason = msg.fallbackReason || msg.fallback_reason || '';
                 const responseTime = executionSeconds !== null
                                   ? `${safeToFixed(executionSeconds, 2) || "0"} s`
                                   : responseMilliseconds !== null
@@ -1002,6 +1022,7 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
                 const measurements = [
                                   ['AI model', modelName ? modelName.split('/').pop() : '—'],
                                   ['Speed', tokensPerSecond === null ? '—' : `${safeToFixed(tokensPerSecond, 1) || "0"} tok/s`],
+                                  ['First token', firstTokenMs === null ? '—' : firstTokenMs >= 1000 ? `${safeToFixed(firstTokenMs / 1000, 2)} s` : `${Math.round(firstTokenMs)} ms`],
                                   ['Response time', responseTime],
                                   ['Total tokens', tokenCount === null ? '—' : `${tokenCount}`],
                                   ['Context', formatContext],
@@ -1022,10 +1043,10 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
                         Backend-reported response measurements
                       </div>
                       <span className="text-[9px] font-mono text-zinc-500 dark:text-zinc-400 font-bold">
-                        Missing values are not estimated
+                        Missing values are shown as —; estimates say so
                       </span>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 text-[10px] font-mono">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2 text-[10px] font-mono">
                       {measurements.map(([label, value]) => (
                         <div key={label} className="min-w-0 p-2 rounded-xl bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/60 dark:border-zinc-800/80">
                           <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider block">{label}</span>
@@ -1033,6 +1054,18 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
                         </div>
                       ))}
                     </div>
+                    {/* Why this model: what the request was taken to be, and -
+                        when the one picked did not answer - what happened to it. */}
+                    {routeTask && (
+                      <p className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400">
+                        Routed for {routeTask} → <span className="font-bold text-zinc-700 dark:text-zinc-200">{modelName ? modelName.split('/').pop() : 'model'}</span>
+                      </p>
+                    )}
+                    {fallbackReason && (
+                      <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300">
+                        Answered by another model because: {fallbackReason}
+                      </p>
+                    )}
                   </div>
                 );
               })()}
@@ -2967,18 +3000,24 @@ const ChatArea = ({
     const cloud = /cloud api\s*[-–]\s*(.+)/i.exec(text);
     if (cloud) return cloud[1].trim().toUpperCase();
     if (/ollama|vllm|local/i.test(text)) return 'LOCAL';
-    return text.replace(/_/g, ' ').toUpperCase();
+    // Anything else ("provider-reported", "estimated...") says how a number
+    // was measured, not where the answer ran.
+    return '';
   };
 
-  const resolveDisplayName = (modelId) => {
+  const resolveDisplayName = (modelId, source = '') => {
     if (!modelId) return activeModelDisplay;
+    // Where it actually ran, when the backend has said: a cloud model is not
+    // LOCAL because its name is unfamiliar.
+    const ranOn = _sourceLabel(source);
+    if (ranOn && ranOn !== 'LOCAL') return `CLOUD · ${ranOn} · ${modelId}`;
     /* "LOCAL · Auto Router" was printed for the auto setting whatever ended up
        answering. On a machine with no local chat model pulled, every answer
        came from a cloud provider and the header still said LOCAL. Auto routing
        is a setting; where the answer came from is a fact, and once there is a
        fact it is the one shown. */
     if (modelId === 'auto') {
-      return 'LOCAL · Qwen 2.5 Coder 7B';
+      return 'AUTO · best model per task';
     }
     if (modelId.startsWith('cloud:')) {
       const [, provider, ...parts] = modelId.split(':');
@@ -2986,14 +3025,9 @@ const ChatArea = ({
     }
     const direct = displayMap[modelId];
     if (direct) return `LOCAL · ${direct}`;
-    const lowered = modelId.toLowerCase();
-    if (lowered.includes('kimi')) return 'LOCAL · Kimi VL A3B (Vision-Language)';
-    if (lowered.includes('qwen3') && lowered.includes('4b')) return 'LOCAL · Qwen 3 4B AWQ (Multimodal)';
-    if (lowered.includes('qwen3') && lowered.includes('8b')) return 'LOCAL · Qwen 3 8B (High Precision Reasoning)';
-    if (lowered.includes('nemotron')) return 'LOCAL · Nemotron-3 Nano 4B (NVIDIA Instruct)';
-    if (lowered.includes('phi-3.5') || lowered.includes('phi3.5')) return 'LOCAL · Phi-3.5 Vision 4.2B (Microsoft Vision)';
-    if (lowered.includes('phi-3') || lowered.includes('phi3')) return 'LOCAL · Phi-3 Mini 3.8B (Microsoft Instruct)';
-    if (lowered.includes('llama')) return 'LOCAL · Llama 3.1 8B (Core)';
+    // The name as the runtime reports it. Guessing a friendly name from a
+    // fragment called every Llama - 70B in the cloud included - "Llama 3.1
+    // 8B (Core)".
     return `LOCAL · ${modelId}`;
   };
 
@@ -3002,8 +3036,8 @@ const ChatArea = ({
   }, [selectedModel]);
 
   useEffect(() => {
-    if (lastUsedModel && lastUsedModel !== selectedModel) {
-      setActiveModelDisplay(resolveDisplayName(lastUsedModel));
+    if (lastUsedModel && (lastUsedModel !== selectedModel || lastSource)) {
+      setActiveModelDisplay(resolveDisplayName(lastUsedModel, lastSource));
     }
   }, [lastUsedModel, lastSource]);
 
@@ -4414,6 +4448,7 @@ const ChatArea = ({
                   )
                 );
               }
+              if (parsed.execution_source) setLastSource(String(parsed.execution_source).trim());
               if (parsed.model_routed) {
                 setLastUsedModel(parsed.model_routed);
                 setMessages((prev) =>

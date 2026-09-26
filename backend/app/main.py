@@ -243,6 +243,15 @@ try:
     except Exception as exc:
         logger.warning(f"ChatSession section migration skipped: {exc}")
 
+    try:
+        with engine.begin() as conn:
+            columns = [row[1] for row in conn.execute(_sql_text("PRAGMA table_info(chat_messages);")).fetchall()]
+            if columns and "metrics" not in columns:
+                conn.execute(_sql_text("ALTER TABLE chat_messages ADD COLUMN metrics TEXT;"))
+                logger.info("Migrated SQL: added metrics column to chat_messages.")
+    except Exception as exc:
+        logger.warning(f"ChatMessage metrics migration skipped: {exc}")
+
     logger.info("Migrated SQL: added security columns to users.")
 except Exception as e:
     logger.warning(f"User security columns migration skipped or partial: {e}")
@@ -1867,12 +1876,15 @@ def get_session_messages(session_id: str, db: Session = Depends(get_db), current
     if not session:
         return []
         
-    history_context = int(settings.MAX_MODEL_LEN)
+    # The window chat actually runs local models with (num_ctx, 16,384 unless
+    # hardware_config says otherwise) - not vLLM's 2048 default.
+    history_context = 16384
     try:
         hardware_path = os.path.join(settings.DATA_DIR, "hardware_config.json")
         if os.path.exists(hardware_path):
             with open(hardware_path, encoding="utf-8") as hardware_file:
-                history_context = int(json.load(hardware_file).get("max_model_len", history_context))
+                _hw = json.load(hardware_file)
+                history_context = int(_hw.get("ctx_window") or _hw.get("max_model_len") or history_context)
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         pass
 
@@ -1884,6 +1896,15 @@ def get_session_messages(session_id: str, db: Session = Depends(get_db), current
                 refs = json.loads(msg.references)
             except Exception:
                 pass
+        # How the reply went - measured when it was made, kept with it, so the
+        # numbers do not turn into dashes when the conversation is reopened.
+        measured = {}
+        if getattr(msg, "metrics", None):
+            try:
+                measured = {k: v for k, v in json.loads(msg.metrics).items()
+                            if k not in ("id", "role", "content", "created_at")}
+            except (TypeError, ValueError):
+                measured = {}
         messages.append({
             "id": msg.id,
             "role": msg.role,
@@ -1893,7 +1914,9 @@ def get_session_messages(session_id: str, db: Session = Depends(get_db), current
             "model_used": msg.model_used,
                         "total_context": history_context,
             "context_remaining": history_context,
-"created_at": msg.created_at
+"created_at": msg.created_at,
+            # Measured with the reply; wins over the defaults above.
+            **measured,
         })
     return messages
 
@@ -3296,13 +3319,9 @@ _cloud_route_failures: dict[tuple[str, str], float] = {}
 
 
 def _route_in_cooldown(provider: str, model: str) -> bool:
-    failed_at = _cloud_route_failures.get((provider, model))
-    if failed_at is None:
-        return False
-    if time.time() - failed_at >= _CLOUD_ROUTE_COOLDOWN_SECONDS:
-        _cloud_route_failures.pop((provider, model), None)
-        return False
-    return True
+    """Kept out for now - for as long as the kind of failure warrants (app.model_router)."""
+    from app import model_router
+    return model_router.blocked(provider, model) is not None
 
 
 import time as _time
@@ -3330,14 +3349,18 @@ def _route_record(provider: str, ok: bool) -> None:
         pass
 
 
-def _note_route_failure(provider: str, model: str) -> None:
+def _note_route_failure(provider: str, model: str, status: Optional[int] = None,
+                        message: str = "", kind: Optional[str] = None) -> str:
+    """Record why a route failed; how long it stays out depends on why."""
+    from app import model_router
     _route_record(provider, False)
-    _cloud_route_failures[(provider, model)] = time.time()
+    return model_router.record_failure(provider, model, status, message, kind=kind)
 
 
-def _note_route_success(provider: str, model: str) -> None:
+def _note_route_success(provider: str, model: str, **measured) -> None:
+    from app import model_router
     _route_record(provider, True)
-    _cloud_route_failures.pop((provider, model), None)
+    model_router.record_success(provider, model, **measured)
 
 
 # Preference order for automatic cloud routing, and the kind of model to pick
@@ -3346,6 +3369,19 @@ def _note_route_success(provider: str, model: str) -> None:
 _CLOUD_CONTINUATIONS = 2
 _CONTINUE_PROMPT = ("You were cut off by the length limit. Continue exactly where you stopped - "
                     "the very next character - with no repetition, no preamble and no new code fence.")
+
+
+def _routed_event(model: str, source: str, failures: list, task: str) -> str:
+    """The line that tells the screen which model is answering, for what, and -
+    when it is not the one picked - why the others did not."""
+    from app import model_router
+    routed = {'model_routed': model, 'execution_source': source,
+              'route_task': task, 'route_task_label': model_router.TASK_LABEL.get(task, task)}
+    if failures:
+        # The model picked did not answer; say which one did and why,
+        # instead of switching in silence.
+        routed['fallback_reason'] = '; '.join(failures)[:400]
+    return json.dumps(routed) + '\n'
 
 
 async def _provider_refusal(response) -> str:
@@ -3360,7 +3396,7 @@ async def _provider_refusal(response) -> str:
     return ("HTTP %s - %s" % (response.status_code, message[:160])) if message else "HTTP %s" % response.status_code
 
 
-def _cloud_body(model: str, messages: list, temperature: float, section: str) -> dict:
+def _cloud_body(model: str, messages: list, temperature: float, section: str, provider: str = "") -> dict:
     """An OpenAI-style request with room for the answer that was asked for.
 
     Design pages and code are long; 4096 tokens held a short reply but not a
@@ -3373,7 +3409,14 @@ def _cloud_body(model: str, messages: list, temperature: float, section: str) ->
     if long_form and "gpt-oss" in model.lower():
         # Think briefly, spend the budget on the page.
         body["reasoning_effort"] = "low"
+    if provider and provider not in _NO_STREAM_USAGE:
+        # The provider's own token count, so speed is measured, not guessed.
+        body["stream_options"] = {"include_usage": True}
     return body
+
+
+#: Providers that refuse the stream_options field.
+_NO_STREAM_USAGE = {"mistral", "huggingface"}
 
 
 _CLOUD_AUTO_PROVIDER_ORDER = ("gemini", "groq", "cerebras", "together", "openrouter",
@@ -3399,7 +3442,7 @@ _CLOUD_AUTO_MODEL_PREFERENCES = {
 _cloud_auto_model_cache: dict = {}
 
 
-async def _resolve_auto_cloud_models(provider: str, api_key: str, limit: int = 3) -> List[str]:
+async def _resolve_auto_cloud_models(provider: str, api_key: str, limit: int = 3, task: str = "") -> List[str]:
     """Rank usable model ids from the provider's own live catalogue.
 
     Model names change over time, so the catalogue is queried rather than
@@ -3420,6 +3463,11 @@ async def _resolve_auto_cloud_models(provider: str, api_key: str, limit: int = 3
             return []
         _cloud_auto_model_cache[cache_key] = model_ids
 
+    # Only models that write text: an embedding or speech model in the list
+    # fails the turn with a confusing error.
+    from app import model_router
+    model_ids = [m for m in model_ids if model_router.usable_for_text(m)]
+
     ranked: List[str] = []
     for pattern in _CLOUD_AUTO_MODEL_PREFERENCES.get(provider, ()):  # preferred shapes first
         matches = sorted((m for m in model_ids if re.search(pattern, m, re.I)), key=len)
@@ -3429,6 +3477,10 @@ async def _resolve_auto_cloud_models(provider: str, api_key: str, limit: int = 3
     for model in model_ids:  # anything the patterns missed, as a last resort
         if model not in ranked:
             ranked.append(model)
+    if task:
+        # The shortlist is for this kind of work: a coder for code, a
+        # reasoner for a proof. Stable sort keeps the provider order on ties.
+        ranked.sort(key=lambda m: model_router.score(provider, m, task))
 
     # A route that just failed goes to the back rather than being dropped:
     # if every model is in cooldown, a stale one still beats no reply.
@@ -3436,7 +3488,7 @@ async def _resolve_auto_cloud_models(provider: str, api_key: str, limit: int = 3
     tired = [m for m in ranked if _route_in_cooldown(provider, m)]
     return (fresh + tired)[:limit]
 
-async def _auto_cloud_candidates() -> List[dict]:
+async def _auto_cloud_candidates(task: str = "") -> List[dict]:
     """Routes derived from whichever provider keys the user has configured.
 
     Saving a key is enough: the user does not also have to hand-pick a model.
@@ -3447,9 +3499,18 @@ async def _auto_cloud_candidates() -> List[dict]:
         api_key = os.getenv(env_name, "").strip() if env_name else ""
         if not api_key:
             continue
-        for model in await _resolve_auto_cloud_models(provider, api_key):
+        # Several per provider, so the task ranking (app.model_router) has a
+        # real choice - a coder, a reasoner, a fast chat model.
+        for model in await _resolve_auto_cloud_models(provider, api_key, limit=5, task=task):
             candidates.append({"provider": provider, "model": model, "api_key": api_key})
     return candidates
+
+
+@app.get("/api/models/route-health")
+def route_health(current_user: User = Depends(get_current_user)):
+    """How each model has actually done on this machine, and which are kept out and why."""
+    from app import model_router
+    return {"models": model_router.report()}
 
 
 @app.get("/api/cloud/keys-status")
@@ -3495,6 +3556,10 @@ async def save_cloud_key_endpoint(request: Request, current_user: User = Depends
         )
     os.environ[env_name] = api_key
     _persist_cloud_key(provider, api_key)
+    # A new key: what the old one was refused for (no credit, bad key) no
+    # longer holds, so its models are eligible again straight away.
+    from app import model_router
+    model_router.forget_provider(provider)
     return {
         "status": "configured",
         "provider": provider,
@@ -4608,7 +4673,9 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
         # when a model was picked by hand. Choosing a model that the provider
         # will not serve used to end the turn with "all routes unavailable"
         # instead of quietly using one that works.
-        auto_candidates = await _auto_cloud_candidates()
+        from app import model_router as _model_router
+        auto_candidates = await _auto_cloud_candidates(_model_router.classify(
+            processing_prompt, req_section, web=bool(getattr(chat_req, 'web_search', False))))
 
         # A model the user picked by hand is not a suggestion.
         #
@@ -4651,9 +4718,12 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
             normalized_candidates = []
             seen_routes = set()
             for candidate in candidates:
-                provider = str(candidate.get('provider', '')).lower().strip()
-                model = str(candidate.get('model', '')).strip()
-                api_key = str(candidate.get('api_key', '')).strip()
+                # `or ''`, not a default: a field sent as null arrives as None,
+                # and str(None) is "None" - which went to the provider as the
+                # key, so every hand-picked cloud model answered "Wrong API Key".
+                provider = str(candidate.get('provider') or '').lower().strip()
+                model = str(candidate.get('model') or '').strip()
+                api_key = str(candidate.get('api_key') or '').strip()
                 # The key this installation holds for the provider, when the
                 # caller sent none. Keys saved in the model catalogue live here,
                 # not in the browser, so Design Studio asking for a configured
@@ -4669,22 +4739,44 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                 if provider == 'openrouter' and model != 'openrouter/free' and not model.endswith(':free'):
                     continue
                 seen_routes.add(route_key)
-                # A route that failed moments ago is parked briefly rather than
-                # retried on every single message.
-                if _route_in_cooldown(provider, model):
-                    continue
                 normalized_candidates.append((provider, model, api_key))
+
+            # Best model for this kind of work first (app.model_router): a
+            # page of HTML and a greeting no longer go to the same model just
+            # because its provider was first on a fixed list. A model picked
+            # by hand stays first - unless it is known not to answer (out of
+            # credit, key refused), in which case it is skipped at once and
+            # the reason travels with the reply.
+            from app import model_router
+            route_task = model_router.classify(processing_prompt, req_section,
+                                               web=bool(getattr(chat_req, 'web_search', False)))
+            picked = (str(chat_req.cloud_provider or '').lower().strip(), str(chat_req.cloud_model or '').strip())
+            pinned = [c for c in normalized_candidates[:1] if picked[0] and c[:2] == picked]
+            ranked, skipped = model_router.rank(
+                [{'provider': p, 'model': m, 'api_key': k} for p, m, k in normalized_candidates], route_task)
+            ranked_routes = [(c['provider'], c['model'], c['api_key']) for c in ranked]
+            if pinned and pinned[0] in ranked_routes:
+                ranked_routes.remove(pinned[0])
+                ranked_routes.insert(0, pinned[0])
+            pinned_skipped = [note for note in skipped if pinned and note.startswith('%s/%s ' % pinned[0][:2])]
+            normalized_candidates = ranked_routes
             if not normalized_candidates:
-                yield json.dumps({'error': 'No cloud provider is configured. Add a provider key in Model Catalog & Matrix, or run a local model.'}) + '\n'
+                reason = '; '.join(skipped[:3])
+                yield json.dumps({'error': ('Every configured cloud model is unavailable right now (%s). Fix the key or '
+                                            'billing in Model Catalog & Matrix, or run a local model.' % reason) if reason
+                                  else 'No cloud provider is configured. Add a provider key in Model Catalog & Matrix, or run a local model.'}) + '\n'
                 return
             # Cap the attempts so a long provider list cannot turn a single
             # message into minutes of sequential failures.
             normalized_candidates = normalized_candidates[:_CLOUD_MAX_ATTEMPTS]
-            failures = []
+            failures = list(pinned_skipped)
             for provider, model, api_key in normalized_candidates:
                 endpoint = endpoints[provider]
                 source = f'Cloud API - {provider.title()}'
                 emitted = False
+                route_started = time.time()
+                first_token_at = None
+                usage_tokens = None
                 try:
                     if provider == 'anthropic':
                         system_text = "\n\n".join(str(m.get('content', '')) for m in messages_payload if m.get('role') == 'system')
@@ -4697,20 +4789,24 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                         async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                             async with client.stream('POST', f'{endpoint}/messages', headers=headers, json=payload) as response:
                                 if response.status_code != 200:
-                                    _note_route_failure(provider, model)
-                                    failures.append(f'{provider}/{model}: HTTP {response.status_code}')
+                                    why = await _provider_refusal(response)
+                                    kind = _note_route_failure(provider, model, response.status_code, why)
+                                    failures.append(f'{provider}/{model}: {why}')
                                     continue
-                                yield json.dumps({'model_routed': model, 'execution_source': source}) + '\n'
+                                yield _routed_event(model, source, failures, route_task)
                                 async for line in response.aiter_lines():
                                     if not line.startswith('data: '):
                                         continue
                                     try:
                                         event = json.loads(line[6:])
                                         token = event.get('delta', {}).get('text', '') if event.get('type') == 'content_block_delta' else ''
+                                        if event.get('type') == 'message_delta':
+                                            usage_tokens = (event.get('usage') or {}).get('output_tokens') or usage_tokens
                                     except Exception:
                                         token = ''
                                     if token:
                                         emitted = True
+                                        first_token_at = first_token_at or time.time()
                                         accumulated_response += token
                                         yield json.dumps({'token': token}) + '\n'
                     elif provider == 'gemini':
@@ -4723,35 +4819,40 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                         async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                             async with client.stream('POST', f'{endpoint}/models/{model}:streamGenerateContent', params={'alt': 'sse', 'key': api_key}, json=payload) as response:
                                 if response.status_code != 200:
-                                    _note_route_failure(provider, model)
-                                    failures.append(f'{provider}/{model}: HTTP {response.status_code}')
+                                    why = await _provider_refusal(response)
+                                    kind = _note_route_failure(provider, model, response.status_code, why)
+                                    failures.append(f'{provider}/{model}: {why}')
                                     continue
-                                yield json.dumps({'model_routed': model, 'execution_source': source}) + '\n'
+                                yield _routed_event(model, source, failures, route_task)
                                 async for line in response.aiter_lines():
                                     if not line.startswith('data: '):
                                         continue
                                     try:
                                         event = json.loads(line[6:])
                                         token = ''.join(part.get('text', '') for part in (((event.get('candidates') or [{}])[0].get('content') or {}).get('parts') or []))
+                                        usage_tokens = (event.get('usageMetadata') or {}).get('candidatesTokenCount') or usage_tokens
                                     except Exception:
                                         token = ''
                                     if token:
                                         emitted = True
+                                        first_token_at = first_token_at or time.time()
                                         accumulated_response += token
                                         yield json.dumps({'token': token}) + '\n'
                     elif provider == 'huggingface':
                         try:
                             from huggingface_hub import InferenceClient
                             hf_client = InferenceClient(api_key=api_key)
-                            yield json.dumps({'model_routed': model, 'execution_source': source}) + '\n'
+                            yield _routed_event(model, source, failures, route_task)
                             for chunk in hf_client.chat.completions.create(model=model, messages=messages_payload, stream=True, max_tokens=4096):
                                 if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
                                     token = chunk.choices[0].delta.content or ''
                                     if token:
                                         emitted = True
+                                        first_token_at = first_token_at or time.time()
                                         accumulated_response += token
                                         yield json.dumps({'token': token}) + '\n'
                         except Exception as hf_err:
+                            _note_route_failure(provider, model, message=str(hf_err))
                             failures.append(f'huggingface/{model}: {hf_err}')
                             continue
                     else:
@@ -4759,41 +4860,43 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                         if provider == 'openrouter':
                             headers.update({'HTTP-Referer': 'http://localhost:3003', 'X-Title': 'SMARAN.AI'})
                         _route_begin(provider)
-                        body = _cloud_body(model, messages_payload, answer_temperature, req_section)
+                        body = _cloud_body(model, messages_payload, answer_temperature, req_section, provider)
                         refused = False
                         # A reply cut off by the output limit is asked to carry
                         # on where it stopped. Design pages from reasoning models
                         # (gpt-oss on Cerebras) always ended before <body>: the
                         # hidden reasoning shared a 4096-token budget with the
                         # page, and the page lost.
+                        usage_tokens_done = 0
                         for part in range(_CLOUD_CONTINUATIONS + 1):
                             finish = ''
+                            usage_tokens_done = usage_tokens or 0
                             async with httpx.AsyncClient(timeout=_CLOUD_STREAM_TIMEOUT) as client:
                                 async with client.stream('POST', f'{endpoint}/chat/completions', headers=headers, json=body) as response:
                                     if response.status_code != 200:
                                         if part == 0:
-                                            _note_route_failure(provider, model)
-                                            failures.append(f'{provider}/{model}: {await _provider_refusal(response)}')
+                                            why = await _provider_refusal(response)
+                                            _note_route_failure(provider, model, response.status_code, why)
+                                            failures.append(f'{provider}/{model}: {why}')
                                             refused = True
                                         break
                                     if part == 0:
-                                        routed = {'model_routed': model, 'execution_source': source}
-                                        if failures:
-                                            # The model picked did not answer; say which one
-                                            # did and why, instead of switching in silence.
-                                            routed['fallback_reason'] = '; '.join(failures)[:400]
-                                        yield json.dumps(routed) + '\n'
+                                        yield _routed_event(model, source, failures, route_task)
                                     async for line in response.aiter_lines():
                                         if line.startswith('data: '):
                                             line = line[6:]
                                         if not line or line == '[DONE]':
                                             continue
                                         try:
-                                            choice = (json.loads(line).get('choices') or [{}])[0]
+                                            chunk_data = json.loads(line)
+                                            if chunk_data.get('usage'):
+                                                usage_tokens = (usage_tokens_done or 0) + int(chunk_data['usage'].get('completion_tokens') or 0)
+                                            choice = (chunk_data.get('choices') or [{}])[0]
                                             finish = choice.get('finish_reason') or finish
                                             token = choice.get('delta', {}).get('content') or ''
                                             if token:
                                                 emitted = True
+                                                first_token_at = first_token_at or time.time()
                                                 accumulated_response += token
                                                 yield json.dumps({'token': token}) + '\n'
                                         except Exception:
@@ -4803,16 +4906,38 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                             body = _cloud_body(model, messages_payload + [
                                 {'role': 'assistant', 'content': accumulated_response},
                                 {'role': 'user', 'content': _CONTINUE_PROMPT},
-                            ], answer_temperature, req_section)
+                            ], answer_temperature, req_section, provider)
                         if refused:
                             continue
                     if emitted:
-                        elapsed = (time.time() - start_time) * 1000
+                        finished_at = time.time()
+                        elapsed = (finished_at - start_time) * 1000
                         elapsed_sec = elapsed / 1000
-                        approx_tokens = int(len(accumulated_response.split()) * 1.33)
-                        tokens_per_sec = round(approx_tokens / elapsed_sec, 1) if elapsed_sec > 0 else 0.0
+                        if usage_tokens:
+                            completion_tokens = int(usage_tokens)
+                            measurement_source = 'provider-reported'
+                        else:
+                            # About four characters a token for English and code.
+                            completion_tokens = max(1, round(len(accumulated_response) / 4))
+                            measurement_source = 'estimated from text length'
+                        writing_sec = max(0.001, finished_at - (first_token_at or route_started))
+                        tokens_per_sec = round(completion_tokens / writing_sec, 1)
+                        first_token_ms = round(((first_token_at or finished_at) - route_started) * 1000, 1)
+                        reply_metrics = {
+                            'token_count': completion_tokens,
+                            'tokens_per_sec': tokens_per_sec,
+                            'first_token_ms': first_token_ms,
+                            'execution_time_sec': round(elapsed_sec, 2),
+                            'token_measurement_source': measurement_source,
+                            'route_task': route_task,
+                            'fallback_reason': '; '.join(failures)[:400] if failures else '',
+                            # Not known for a cloud model; saying the local
+                            # window here would be a number that is not true.
+                            'total_context': None,
+                            'context_remaining': None,
+                        }
                         try:
-                            record_inference_metrics(approx_tokens, elapsed_sec)
+                            record_inference_metrics(completion_tokens, writing_sec)
                         except Exception:
                             pass
 
@@ -4830,7 +4955,8 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                                     content=accumulated_response,
                                     references="[]",
                                     response_time_ms=round(elapsed, 1),
-                                    model_used=model
+                                    model_used=model,
+                                    metrics=json.dumps(reply_metrics),
                                 ))
                                 db_session.add(AuditLog(
                                     user_id=current_user.id,
@@ -4860,17 +4986,20 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                         except Exception as dbe:
                             logger.error(f"Error saving cloud route chat to DB: {dbe}")
 
-                        _note_route_success(provider, model)
-                        yield json.dumps({'response_time_ms': round(elapsed, 1), 'model_routed': model, 'execution_source': source, 'token_measurement_source': source or 'cloud_estimated', 'token_count': len(accumulated_response.split()), 'prompt_tokens': len(processing_prompt.split()), 'total_context': 0, 'context_remaining': 0, 'execution_time_sec': round(elapsed_sec, 2), 'tokens_per_sec': tokens_per_sec, 'local_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) + '\n'
+                        _note_route_success(provider, model, latency_ms=round((finished_at - route_started) * 1000, 1),
+                                            first_token_ms=first_token_ms, tokens_per_sec=tokens_per_sec)
+                        yield json.dumps({'response_time_ms': round(elapsed, 1), 'model_routed': model, 'execution_source': source,
+                                          **reply_metrics, 'local_datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) + '\n'
                         return
-                    _note_route_failure(provider, model)
+                    _note_route_failure(provider, model, kind='empty')
                     failures.append(f'{provider}/{model}: empty response')
                 except Exception as exc:
                     if emitted:
                         yield json.dumps({'error': f'{source} stream interrupted after output began: {_clean_user_error(str(exc))}'}) + '\n'
                         return
-                    _note_route_failure(provider, model)
-                    failures.append(f'{provider}/{model}: connection error')
+                    timed_out = isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError))
+                    _note_route_failure(provider, model, message=str(exc), kind='timeout' if timed_out else 'server')
+                    failures.append(f'{provider}/{model}: {"timed out" if timed_out else "connection error"}')
             # Record why every route was rejected; without this the user only
             # ever sees "unavailable" and the cause cannot be diagnosed.
             logger.warning("Cloud routing failed for all candidates: " + "; ".join(failures))
@@ -5271,7 +5400,7 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                 except Exception:
                     pass
             
-            total_context = int(hw_cfg.get("max_model_len", settings.MAX_MODEL_LEN))
+            total_context = int(hw_cfg.get("ctx_window") or hw_cfg.get("max_model_len") or 16384)
             measured_total_tokens = measured_prompt_tokens + measured_completion_tokens
             context_remaining = max(0, total_context - measured_total_tokens) if measured_total_tokens else total_context
             
@@ -5344,7 +5473,16 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                     content=cleaned_response,
                     references=json.dumps(retrieved_chunks),
                     response_time_ms=round(elapsed, 1),
-                    model_used=selected_model
+                    model_used=selected_model,
+                    metrics=json.dumps({
+                        "token_count": measured_completion_tokens,
+                        "prompt_tokens": measured_prompt_tokens,
+                        "tokens_per_sec": round(tokens_per_sec, 1),
+                        "execution_time_sec": round(elapsed_sec, 2),
+                        "total_context": total_context,
+                        "context_remaining": context_remaining,
+                        "token_measurement_source": token_measurement_source,
+                    }),
                 )
                 db_session.add(ai_msg)
                 
