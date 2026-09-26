@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isChatProvider } from '../utils/providerKinds';
 import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Shield, Terminal } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import GenerationProgress from './GenerationProgress';
@@ -2951,7 +2952,7 @@ const ChatArea = ({
     let cachedModels = {};
     try { apiKeys = JSON.parse(localStorage.getItem('sm_cloud_api_keys') || '{}'); } catch  {}
     try { cachedModels = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}'); } catch  {}
-    const isEligible = (providerId, modelId) => (
+    const isEligible = (providerId, modelId) => isChatProvider(providerId) && (
       providerId !== 'openrouter' || modelId === 'openrouter/free' || modelId.endsWith(':free')
     );
     const automaticFallback = localStorage.getItem('sm_cloud_auto_fallback') !== 'false';

@@ -375,6 +375,12 @@ async def run(task: str, model: str = "",
         if mode is not None:
             # The owner's approval mode decides: run, ask, or refuse outright.
             verdict = safety.decide(call["name"], call["arguments"], mode, allowlist)
+            if mode == "smart" and verdict["verdict"] == "allow" and call["name"] in safety.FILE_CHANGES:
+                # A second opinion from Jev, when a TypeSafe key is saved. It
+                # can turn an automatic edit into a question, never the reverse.
+                caution = await asyncio.to_thread(safety.jev_caution, call["name"], call["arguments"], task)
+                if caution:
+                    verdict = {"verdict": "ask", "reason": caution}
             if verdict["verdict"] == "refuse":
                 refused = verdict["reason"]
                 yield {"type": "approval", "step": step, "approved": False, "reason": refused}

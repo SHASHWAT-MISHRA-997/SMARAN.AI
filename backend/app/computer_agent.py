@@ -214,6 +214,20 @@ def needs_owner(step: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def second_opinion(goal: str, step: Dict[str, Any]) -> Optional[str]:
+    """Jev's view, when a TypeSafe key is saved: only ever adds caution."""
+    from app import jev
+    if not jev.key():
+        return None
+    state = json.dumps({"goal": goal, "next_step": {k: step.get(k) for k in
+                        ("action", "thought", "text", "key", "name", "url")}}, ensure_ascii=False)
+    p = jev.risky(state, "Would this next step spend money, buy something, send a message or data "
+                         "to anyone, enter a password/OTP/card number, or delete or destroy data?")
+    if p is not None and p >= jev.THRESHOLD:
+        return f"Jev rates this step as risky ({p:.0%})."
+    return None
+
+
 async def act(step: Dict[str, Any], scale: float, token: str = "") -> Dict[str, Any]:
     """Carry out one step. Every desktop action carries the run's control
     session, so Stop - here, the shortcut or the tray - lands before the next."""
@@ -333,6 +347,8 @@ async def run(goal: str, emit: Emit, token: str,
             emit({"type": "question", "question": str(step.get("question") or step.get("thought") or "What next?")})
             return
         why = needs_owner(step)
+        if not why and step.get("action") in ("click", "type", "key", "open_app", "open_url"):
+            why = await asyncio.to_thread(second_opinion, goal, step)
         if why:
             emit({**base, "result": "Not done without you."})
             emit({"type": "question", "question": f"Next I would: {describe(step)}. {why} "

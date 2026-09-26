@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { isChatProvider } from '../utils/providerKinds';
 import { X, Search, Cpu, Download, Trash2, CheckCircle2, BarChart2, Filter, Check, Layers, RefreshCw, Key, ExternalLink, Zap, Cloud, Video, Info } from 'lucide-react';
 import ModelInfoPanel from './ModelInfoPanel';
 import OllamaManager from './OllamaManager';
@@ -40,18 +41,20 @@ const COMPANY_LABELS = {
   kimi: 'Moonshot AI',
 };
 
-const cloudProvider = ({ id, name, color, getKeyUrl, placeholder }) => ({
+const cloudProvider = ({ id, name, color, getKeyUrl, placeholder, purpose = '' }) => ({
   id,
   name,
   color,
-getKeyUrl,
+  getKeyUrl,
   placeholder,
-  chatCompatible: true,
+  purpose,
+  chatCompatible: isChatProvider(id),
   category: 'provider-api',
   badge: 'Provider API',
   tag: '',
   models: [],
-  description: `Connect directly to ${name} with a user-supplied API key.`,
+  // A provider that is not for chat says what it is for, before a key is saved.
+  description: purpose ? purpose.replace(/^Key saved\. /, '') : `Connect directly to ${name} with a user-supplied API key.`,
   specs: 'Models are listed only after this key passes a live provider model-list request. Pricing, quota, regions, and rate limits remain provider-controlled.',
 });
 
@@ -71,7 +74,10 @@ const CLOUD_PROVIDERS = [
   // Video, not chat. One key reaches many video models rather than one
   // company's own, which is why it is this one - and the generation is billed
   // to that account, so nothing uses it until the key is deliberately saved.
-  cloudProvider({ id: 'replicate', name: 'Replicate — video generation', color: 'from-fuchsia-500/20 via-pink-500/10 to-fuchsia-950/40 border-fuchsia-500/40 text-fuchsia-400', getKeyUrl: 'https://replicate.com/account/api-tokens', placeholder: 'r8_...' }),
+  cloudProvider({ id: 'replicate', name: 'Replicate — video generation', color: 'from-fuchsia-500/20 via-pink-500/10 to-fuchsia-950/40 border-fuchsia-500/40 text-fuchsia-400', getKeyUrl: 'https://replicate.com/account/api-tokens', placeholder: 'r8_...',
+    purpose: 'Key saved. Used by the Video page for cloud video generation - it is not a chat model.' }),
+  cloudProvider({ id: 'typesafe', name: 'TypeSafe Jev — fast safety decisions', color: 'from-lime-500/20 via-emerald-500/10 to-lime-950/40 border-lime-500/40 text-lime-400', getKeyUrl: 'https://typesafe.ai', placeholder: 'ts-...',
+    purpose: 'Key saved. Jev adds a second, fast safety check: before Computer use clicks or types, and before SMARAN Code edits a file in Smart mode, it asks Jev whether the step is risky - and asks you when it is. It never makes anything less careful, and it is not a chat model.' }),
 ];
 
 
@@ -1181,7 +1187,7 @@ Download it anyway?`)) {
                             <button type="button" disabled={!cloudModels[provider.id]} onClick={() => { const modelId = cloudModels[provider.id]; localStorage.setItem('sm_cloud_selected_models', JSON.stringify({ provider: provider.id, model: modelId })); setModel?.(`cloud:${provider.id}:${modelId}`); onClose?.(); }} className="w-full rounded-xl border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-[11px] font-black text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50">Use selected Cloud API model in Chat</button>
                           </div>
                         )}
-                        {savedKey && !provider.chatCompatible && <p className="text-[10px] font-bold text-zinc-400">Key saved. This provider is listed for direct access, but it is not connected to the chat engine yet.</p>}
+                        {savedKey && !provider.chatCompatible && <p className="text-[10px] font-bold text-zinc-400">{provider.purpose || 'Key saved. This provider is listed for direct access, but it is not connected to the chat engine yet.'}</p>}
                         {savedKey && (
                           <div className={`text-[10px] font-extrabold flex items-center gap-1 ${providerConfirmed ? 'text-emerald-400' : 'text-zinc-400'}`}>
                             <CheckCircle2 className="w-3 h-3" /> {providerConfirmed ? `Provider probe passed for ${provider.name}` : `Key stored in this browser; ${provider.name} access is not confirmed`}

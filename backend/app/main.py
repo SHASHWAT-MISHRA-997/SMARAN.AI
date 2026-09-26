@@ -2989,6 +2989,8 @@ _CLOUD_PROVIDER_ENV_VARS = {
     # Video, not chat. Kept in the same store so it is saved, restored and
     # removed the same way every other key is.
     "replicate": "REPLICATE_API_TOKEN",
+    # Decisions, not chat: a second opinion on risky steps (app/jev.py).
+    "typesafe": "TYPESAFE_API_KEY",
 }
 
 
@@ -3048,6 +3050,21 @@ async def _fetch_replicate_models(api_key: str) -> list[str]:
 
 async def _fetch_cloud_provider_models(provider: str, api_key: str) -> tuple[list[str], bool]:
     """Probe a provider with the supplied key and return only its reported model ids."""
+    # Checked before the endpoint table, which lists chat providers only: a
+    # Replicate key used to be refused as "unsupported" without being tried.
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Provider or API key is unsupported.")
+    if provider == "replicate":
+        return await _fetch_replicate_models(api_key), False
+    if provider == "typesafe":
+        from app import jev
+        try:
+            await asyncio.to_thread(jev.verify, api_key)
+        except PermissionError as exc:
+            raise HTTPException(status_code=401, detail=str(exc))
+        except ConnectionError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return ["jev-latest"], False
     endpoint = _CLOUD_PROVIDER_ENDPOINTS.get(provider)
     if not endpoint or not api_key:
         raise HTTPException(status_code=400, detail="Provider or API key is unsupported.")
@@ -3058,8 +3075,6 @@ async def _fetch_cloud_provider_models(provider: str, api_key: str) -> tuple[lis
         headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
     if provider == "huggingface":
         return await _fetch_huggingface_models(api_key), False
-    if provider == "replicate":
-        return await _fetch_replicate_models(api_key), False
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             if provider == "gemini":

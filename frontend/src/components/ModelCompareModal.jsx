@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { isChatProvider } from '../utils/providerKinds';
 import { BarChart2, Check, Copy, Key, RefreshCw, Sparkles, X, Zap } from 'lucide-react';
 
 const PROVIDERS = [
@@ -27,7 +28,7 @@ const readSavedKeys = () => {
   try {
     const parsed = JSON.parse(localStorage.getItem('sm_cloud_api_keys') || '{}');
     return Object.fromEntries(
-      Object.entries(parsed || {}).filter(([, value]) => String(value || '').trim()),
+      Object.entries(parsed || {}).filter(([provider, value]) => String(value || '').trim() && isChatProvider(provider)),
     );
   } catch {
     return {};
