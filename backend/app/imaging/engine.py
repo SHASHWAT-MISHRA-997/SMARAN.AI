@@ -177,6 +177,65 @@ def load(model_id: str = DEFAULT_MODEL,
         return pipe
 
 
+def edit(
+    prompt: str,
+    source_path: str,
+    output_path: str,
+    model_id: str = DEFAULT_MODEL,
+    strength: float = 0.6,
+    steps: int = 30,
+    guidance_scale: float = 7.0,
+    seed: Optional[int] = None,
+    negative_prompt: str = "blurry, low quality, distorted, watermark, text",
+    progress: Optional[Callable[[str], None]] = None,
+) -> dict:
+    """Change a picture by instruction: the picture is the starting point and
+    `strength` says how far the result may move from it (0.2 a light touch,
+    0.9 nearly a new picture). The image-to-image pipeline is built from the
+    one already loaded (from_pipe), so no second model is downloaded."""
+    import torch
+    from PIL import Image
+
+    model = by_id(model_id)
+    if not model:
+        raise ImageError("No image model called %r." % model_id)
+    try:
+        from diffusers import AutoPipelineForImage2Image
+    except ImportError as exc:
+        raise ImageError("The image packages are not installed: %s." % exc) from exc
+
+    try:
+        source = Image.open(source_path).convert("RGB")
+    except Exception as exc:
+        raise ImageError("That file could not be read as a picture: %s" % exc) from exc
+
+    # The model's own size, same shape as the picture, multiples of 8.
+    size = model.default_size
+    scale = size / max(source.width, source.height)
+    width = _round_to(int(source.width * scale))
+    height = _round_to(int(source.height * scale))
+    source = source.resize((width, height), Image.LANCZOS)
+
+    pipe = AutoPipelineForImage2Image.from_pipe(load(model_id, progress))
+    generator = torch.Generator(device="cpu").manual_seed(int(seed)) if seed is not None else None
+    strength = min(0.95, max(0.1, float(strength)))
+    if progress:
+        progress("Changing the picture at %dx%d, strength %.2f, %d steps." % (width, height, strength, steps))
+    try:
+        result = pipe(prompt=prompt, image=source, strength=strength, negative_prompt=negative_prompt,
+                      num_inference_steps=steps, guidance_scale=guidance_scale, generator=generator)
+    except torch.cuda.OutOfMemoryError as exc:
+        torch.cuda.empty_cache()
+        raise ImageError("The card ran out of memory at %dx%d." % (width, height)) from exc
+    except Exception as exc:
+        raise ImageError("Editing failed: %s" % exc) from exc
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
+    result.images[0].save(output_path)
+    return {"path": output_path, "width": width, "height": height, "steps": steps, "strength": strength,
+            "guidance_scale": guidance_scale, "seed": seed, "model": model_id}
+
+
 def _round_to(value: int, base: int = 8) -> int:
     return max(base, int(round(value / base)) * base)
 

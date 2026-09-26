@@ -138,13 +138,15 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
     except ImageError as exc:
         with _jobs_lock:
             _jobs[job_id].update(status="failed", error=str(exc), updated=time.time())
-    except Exception as exc:  # noqa: BLE001 - MediaError and friends, said plainly
+    except Exception as exc:  # noqa: BLE001 - every failure ends the job, said plainly
+        # There were two handlers here, and the first re-raised anything that
+        # was not a MediaError - which skips the second, so an unexpected
+        # crash left the job "running" for ever and the page spinning.
         from app.media_router import MediaError
-        if not isinstance(exc, MediaError):
-            raise
-        with _jobs_lock:
-            _jobs[job_id].update(status="failed", error=str(exc), updated=time.time())
-    except Exception as exc:
+        if isinstance(exc, MediaError):
+            with _jobs_lock:
+                _jobs[job_id].update(status="failed", error=str(exc), updated=time.time())
+            return
         logger.exception("image job %s crashed", job_id)
         with _jobs_lock:
             _jobs[job_id].update(
@@ -191,6 +193,112 @@ async def start(req: GenerateRequest):
         }
 
     threading.Thread(target=_run, args=(job_id, req, out_path), daemon=True).start()
+    return {"job_id": job_id, "status": "running", "model": req.model}
+
+
+class EditRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    #: A picture this app made (its job id), or one sent as base64.
+    source_job: Optional[str] = Field(None, pattern=r"^[a-f0-9]{12}$")
+    image_base64: Optional[str] = Field(None, max_length=16_000_000)
+    strength: float = Field(0.6, ge=0.1, le=0.95)
+    model: str = "sd15"
+    steps: int = Field(30, ge=5, le=80)
+    guidance_scale: float = Field(7.0, ge=0, le=20)
+    seed: Optional[int] = None
+
+
+MAX_EDIT_BYTES = 12 * 1024 * 1024
+
+
+def _source_for_edit(req: EditRequest, job_id: str) -> str:
+    """The picture to start from, as a file under DATA_DIR/images."""
+    import base64
+    from app.config import settings
+
+    folder = os.path.join(settings.DATA_DIR, "images")
+    os.makedirs(folder, exist_ok=True)
+    if req.source_job:
+        for extension in (".png", ".jpg"):
+            path = os.path.join(folder, req.source_job + extension)
+            if os.path.isfile(path):
+                return path
+        raise HTTPException(status_code=404, detail="That picture is no longer on this computer.")
+    if not req.image_base64:
+        raise HTTPException(status_code=400, detail="Send the picture to change.")
+    data = req.image_base64.split(",", 1)[-1]          # a data: URL or bare base64
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="That picture could not be read.") from exc
+    if len(raw) > MAX_EDIT_BYTES:
+        raise HTTPException(status_code=413, detail="That picture is over 12 MB.")
+    # A picture, checked by its first bytes rather than trusted: PNG, JPEG, WebP.
+    if not (raw.startswith(b"\x89PNG") or raw.startswith(b"\xff\xd8") or raw[8:12] == b"WEBP"):
+        raise HTTPException(status_code=400, detail="Only PNG, JPEG or WebP pictures can be changed.")
+    path = os.path.join(folder, "%s-source" % job_id)
+    with open(path, "wb") as handle:
+        handle.write(raw)
+    return path
+
+
+def _run_edit(job_id: str, req: EditRequest, source: str, out_path: str) -> None:
+    from .engine import edit
+
+    def note(message: str) -> None:
+        with _jobs_lock:
+            _jobs[job_id]["messages"].append(message)
+            _jobs[job_id]["updated"] = time.time()
+
+    started = time.time()
+    try:
+        from app import media_router
+        media_router.free_gpu_for_media(note)
+        result = edit(req.prompt, source, out_path, model_id=req.model, strength=req.strength,
+                      steps=req.steps, guidance_scale=req.guidance_scale, seed=req.seed, progress=note)
+        result = {**result, "prompt": req.prompt, "made_by": "%s (this computer)" % req.model,
+                  "where": "local", "seconds": round(time.time() - started, 1), "edited_from": req.source_job}
+        from app import cowork_prefs
+        kept = cowork_prefs.keep_artifact(out_path, "Images", req.prompt)
+        if kept:
+            result["saved_copy"] = kept
+        with _jobs_lock:
+            _jobs[job_id].update(status="completed", result=result, updated=time.time())
+    except Exception as exc:  # noqa: BLE001 - every failure ends the job, said plainly
+        if not isinstance(exc, ImageError):
+            logger.exception("image edit %s crashed", job_id)
+        with _jobs_lock:
+            _jobs[job_id].update(status="failed", error=str(exc), updated=time.time())
+    finally:
+        release()
+        if not req.source_job:
+            try:
+                os.remove(source)
+            except OSError:
+                pass
+
+
+@router.post("/edit")
+async def start_edit(req: EditRequest):
+    """Change a picture by instruction, on this computer (image-to-image).
+    Hosted editing (FLUX Kontext) is not offered: NVIDIA's accepts only its own
+    sample pictures, checked; Replicate's costs money per picture."""
+    from app.config import settings
+
+    model = by_id(req.model)
+    if not model:
+        raise HTTPException(status_code=400, detail="No image model called %r." % req.model)
+    verdict = evaluate(model, probe())
+    if not verdict["runnable"]:
+        raise HTTPException(status_code=409, detail=verdict["reason"])
+
+    job_id = uuid.uuid4().hex[:12]
+    source = _source_for_edit(req, job_id)
+    out_path = os.path.join(settings.DATA_DIR, "images", "%s.png" % job_id)
+    with _jobs_lock:
+        _jobs[job_id] = {"id": job_id, "status": "running", "messages": [], "result": None,
+                         "error": None, "started": time.time(), "updated": time.time()}
+    threading.Thread(target=_run_edit, args=(job_id, req, source, out_path), daemon=True).start()
     return {"job_id": job_id, "status": "running", "model": req.model}
 
 

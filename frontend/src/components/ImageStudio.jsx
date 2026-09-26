@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { takeStudioPrompt } from '../utils/studioHandoff';
-import { Image as ImageIcon, Loader2, AlertCircle, Download, Sparkles, ChevronDown, RefreshCw, Cpu, Cloud, Workflow } from 'lucide-react';
+import { Image as ImageIcon, Loader2, AlertCircle, Download, Sparkles, ChevronDown, RefreshCw, Cpu, Cloud, Workflow, Wand2 } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { isNativeApp } from '../utils/hostLink';
 import MediaPackages from './MediaPackages';
@@ -42,6 +42,105 @@ const POLL_MS = 1500;
 const card = 'rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60';
 const field = 'w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 '
   + 'px-3 py-2.5 text-sm text-zinc-900 dark:text-white outline-none focus:border-indigo-500';
+
+// Image-to-image on this computer: the picture is the starting point and the
+// strength says how far the result may move from it. Hosted editing is not
+// offered - NVIDIA's FLUX Kontext only takes its own sample pictures.
+const STRENGTHS = [
+  { value: 0.35, label: 'Light touch - colours, light, small details' },
+  { value: 0.6, label: 'Balanced - new style, same picture' },
+  { value: 0.8, label: 'Strong - keeps only the layout' },
+];
+
+const ChangePicture = ({ sourceJob, busy, onStart }) => {
+  const [open, setOpen] = useState(false);
+  const [instruction, setInstruction] = useState('');
+  const [strength, setStrength] = useState(0.6);
+  const [upload, setUpload] = useState(null);   // { name, data }
+  const [useOwn, setUseOwn] = useState(!sourceJob);
+  const [error, setError] = useState('');
+
+  useEffect(() => { if (!sourceJob) setUseOwn(true); }, [sourceJob]);
+
+  const pick = (file) => {
+    setError('');
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { setError('Choose a PNG, JPEG or WebP picture.'); return; }
+    if (file.size > 12 * 1024 * 1024) { setError('That picture is over 12 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => setUpload({ name: file.name, data: String(reader.result) });
+    reader.onerror = () => setError('That picture could not be read.');
+    reader.readAsDataURL(file);
+  };
+
+  const start = async (event) => {
+    event.preventDefault();
+    if (!instruction.trim() || busy) return;
+    const fromOwn = useOwn || !sourceJob;
+    if (fromOwn && !upload) { setError('Choose the picture to change first.'); return; }
+    setError('');
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/image/edit`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: instruction.trim(), strength,
+          ...(fromOwn ? { image_base64: upload.data } : { source_job: sourceJob }) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'The change could not be started.');
+      onStart(data.job_id, instruction.trim());
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+              className="flex w-full items-center justify-between gap-2 p-3 text-left">
+        <span className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-white">
+          <Wand2 className="h-4 w-4 text-indigo-500" /> Change a picture
+        </span>
+        <ChevronDown className={`h-3.5 w-3.5 text-zinc-500 transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <form onSubmit={start} className="space-y-3 border-t border-zinc-200 p-3 text-xs dark:border-zinc-800">
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Picture to change">
+            {sourceJob && (
+              <button type="button" role="radio" aria-checked={!useOwn} onClick={() => setUseOwn(false)}
+                      className={`rounded-lg border px-2.5 py-1.5 font-bold ${!useOwn ? 'border-indigo-500 text-indigo-600 dark:text-indigo-300' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700'}`}>
+                The picture above
+              </button>
+            )}
+            <label className={`cursor-pointer rounded-lg border px-2.5 py-1.5 font-bold ${useOwn ? 'border-indigo-500 text-indigo-600 dark:text-indigo-300' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700'}`}>
+              {upload ? `Your picture: ${upload.name}` : 'Choose your own picture…'}
+              <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only"
+                     onChange={(e) => { setUseOwn(true); pick(e.target.files?.[0]); }} />
+            </label>
+          </div>
+          <textarea value={instruction} onChange={(e) => setInstruction(e.target.value)} rows={2}
+                    aria-label="What to change"
+                    placeholder="Describe the result — e.g. 'the same fox as a watercolour painting at sunset'."
+                    className="w-full rounded-xl border border-zinc-300 bg-white p-2.5 text-sm text-zinc-900 outline-none focus:border-indigo-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" />
+          <label className="flex flex-wrap items-center gap-2">
+            <span className="font-bold text-zinc-600 dark:text-zinc-300">How much to change</span>
+            <select value={strength} onChange={(e) => setStrength(Number(e.target.value))} aria-label="How much to change"
+                    className="rounded-lg border border-zinc-300 bg-white px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+              {STRENGTHS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </label>
+          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            Made on this computer with Stable Diffusion 1.5 - the picture is not sent anywhere. About a minute on a 6 GB card.
+          </p>
+          {error && <p className="text-rose-600 dark:text-rose-300">{error}</p>}
+          <button type="submit" disabled={busy || !instruction.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 font-bold text-white disabled:opacity-40">
+            <Wand2 className="h-3.5 w-3.5" /> Change it
+          </button>
+        </form>
+      )}
+    </div>
+  );
+};
 
 const ImageStudio = () => {
   // This PC (private, needs the image packages and a GPU for speed) or the
@@ -447,6 +546,19 @@ const ImageStudio = () => {
               </a>
             </div>
           </div>
+        )}
+
+        {!running && (
+          <ChangePicture
+            sourceJob={finishedId}
+            busy={running}
+            onStart={(jobId, instruction) => {
+              setError('');
+              setPrompt(instruction);
+              setJob({ status: 'running', messages: ['Queued…'], id: jobId });
+              watch(jobId);
+            }}
+          />
         )}
 
         {gallery.length > 1 && (

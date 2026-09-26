@@ -4619,6 +4619,32 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
         # block, and that block returns as soon as any provider is configured
         # - so on a machine with a cloud key they were never reached and "make
         # a video of a sunset" came back as ordinary conversation.
+        #
+        # Reminders too. The app's own page sets them before it gets here
+        # (/api/desktop/intent), but anything else that talks to /api/chat -
+        # the VS Code extension, the CLI - got a model saying "Sure, I'll
+        # remind you in 1 minute" and no reminder at all. Setting, listing
+        # and cancelling a reminder touch nothing outside SMARAN, so they are
+        # done here; other desktop actions keep the page's confirmation.
+        reminder_intent = detect_desktop_intent(chat_req.prompt or "")
+        if reminder_intent and reminder_intent.get("action") in ("set_reminder", "list_reminders", "cancel_reminder"):
+            done = await DesktopAgent.execute(reminder_intent["action"], reminder_intent.get("params", {}),
+                                              confirmed=True)
+            reply = str(done.get("message") or done.get("error") or "The reminder could not be set.")
+            db_session = SessionLocal()
+            try:
+                db_session.add(ChatMessage(session_id=session.id, role="user", content=chat_req.prompt))
+                db_session.add(ChatMessage(session_id=session.id, role="assistant", content=reply,
+                                           references="[]", model_used="SMARAN reminders"))
+                db_session.commit()
+            except Exception:
+                db_session.rollback()
+            finally:
+                db_session.close()
+            yield json.dumps({"model_routed": "SMARAN reminders", "execution_source": "This computer",
+                              "route_task": "reminder", "route_task_label": "setting a reminder"}) + "\n"
+            yield json.dumps({"token": reply}) + "\n"
+            return
         if is_image_generation_request(chat_req.prompt):
             clean_prompt = clean_image_prompt(chat_req.prompt)
             # "a 4K portrait photo of a temple" says what it wants. Read it,

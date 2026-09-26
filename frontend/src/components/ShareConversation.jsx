@@ -21,8 +21,18 @@ import { device } from '../utils/devicePlugin';
 // conversation is trimmed from the start and says so.
 const MAX_SHARE_CHARS = 90000;
 
+// A web answer's [1] [2] mean nothing once copied out of the app, so its
+// numbered sources travel with it.
+const sourcesOf = (message) => {
+  let refs = message.references;
+  if (typeof refs === 'string') { try { refs = JSON.parse(refs); } catch { refs = []; } }
+  const web = Array.isArray(refs) ? refs.filter((r) => r?.url) : [];
+  if (!web.length) return '';
+  return `\n\nSources:\n${web.map((r, i) => `[${r.n || i + 1}] ${r.document_name || r.title || r.domain || ''} - ${r.url}`).join('\n')}`;
+};
+
 const formatConversation = (messages) => {
-  const turns = messages.map((m) => `${m.role === 'user' ? 'You' : 'SMARAN.AI'}:\n${m.content.trim()}`);
+  const turns = messages.map((m) => `${m.role === 'user' ? 'You' : 'SMARAN.AI'}:\n${String(m.content || '').trim()}${m.role === 'user' ? '' : sourcesOf(m)}`);
   const heading = `SMARAN.AI conversation - ${new Date().toLocaleString()}`;
   let body = turns.join('\n\n');
   if (body.length > MAX_SHARE_CHARS) {
