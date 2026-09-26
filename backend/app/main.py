@@ -8786,6 +8786,8 @@ from app.live_browser_routes import router as _live_browser_router  # noqa: E402
 app.include_router(_live_browser_router)
 from app.everyday_routes import router as _everyday_router  # noqa: E402
 app.include_router(_everyday_router)
+from app.computer_routes import router as _computer_router  # noqa: E402
+app.include_router(_computer_router)
 
 
 # Register the SPA fallback last so it cannot swallow model-storage, engine

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Globe, Loader2, AlertCircle, Square, Play, ShieldCheck, ExternalLink, X } from 'lucide-react';
+import { Globe, Loader2, AlertCircle, Square, Play, ShieldCheck, ExternalLink, X, Monitor, HelpCircle } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { isNativeApp } from '../utils/hostLink';
 
@@ -22,6 +22,15 @@ const EXAMPLES = [
   'Find three highly rated Python courses on YouTube',
 ];
 
+/* "Whole computer": the same loop over the whole screen - any app, not only
+   a browser (backend/app/computer_agent.py). It clicks and types with your
+   mouse and keyboard, so it needs Computer use on in Settings. */
+const COMPUTER_EXAMPLES = [
+  'Open Notepad and write a short note saying the build passed',
+  'Open the Calculator and work out 1234 x 56',
+  'Open Settings and tell me which Windows version this is',
+];
+
 const ACTION_LABEL = {
   open: 'Opened a page',
   click: 'Clicked',
@@ -41,6 +50,9 @@ export default function LiveBrowser() {
   const [error, setError] = useState('');
   const [enlarged, setEnlarged] = useState('');
   const endRef = useRef(null);
+  const [mode, setMode] = useState('browser');     // 'browser' | 'computer'
+  const sessionRef = useRef('');
+  const computer = mode === 'computer';
 
   useEffect(() => {
     // No computer to drive only on the phone app with nothing paired. In the
@@ -70,10 +82,10 @@ export default function LiveBrowser() {
     setError('');
     setNote('');
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/browse`, {
+      const res = await fetchWithAuth(`${API_BASE}${computer ? '/api/computer/run' : '/api/browse'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task: wanted }),
+        body: JSON.stringify(computer ? { goal: wanted } : { task: wanted }),
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
@@ -93,8 +105,20 @@ export default function LiveBrowser() {
           if (!line) continue;
           let event;
           try { event = JSON.parse(line); } catch { continue; }
-          if (event.type === 'status') setNote(event.message);
+          if (event.type === 'session') sessionRef.current = event.token;
+          else if (event.type === 'status') setNote(event.message);
+          else if (event.type === 'step' && computer) {
+            setNote('');
+            setSteps((all) => [...all, {
+              step: event.n, action: event.label, thought: event.thought,
+              result: event.result + (event.model ? ` · seen by ${event.model}${event.where && event.where !== 'local' ? ` (${event.where})` : ''}` : ''),
+              failed: event.ok === false,
+              screenshot: event.screenshot ? `data:image/jpeg;base64,${event.screenshot}` : '',
+            }]);
+          }
           else if (event.type === 'step') { setNote(''); setSteps((all) => [...all, event]); }
+          else if (event.type === 'done' && computer) setAnswer({ answer: event.summary });
+          else if (event.type === 'question') setAnswer({ answer: event.question, question: true });
           else if (event.type === 'done') setAnswer(event);
           else if (event.type === 'stopped') setNote('Stopped.');
           else if (event.type === 'error') setError(event.message);
@@ -109,22 +133,42 @@ export default function LiveBrowser() {
 
   const stop = async () => {
     setNote('Stopping after this step…');
-    try { await fetchWithAuth(`${API_BASE}/api/browse/stop`, { method: 'POST' }); } catch { /* shown by the stream */ }
+    try {
+      if (computer) {
+        await fetchWithAuth(`${API_BASE}/api/control/stop`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: sessionRef.current || undefined }),
+        });
+      } else {
+        await fetchWithAuth(`${API_BASE}/api/browse/stop`, { method: 'POST' });
+      }
+    } catch { /* shown by the stream */ }
   };
 
-  const ready = status?.available && !statusError;
+  // The whole-computer mode needs no browser; only the browser mode does.
+  const ready = !statusError && (computer ? Boolean(status) : status?.available);
 
   return (
     <div className="h-full overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto max-w-4xl space-y-5">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-black text-zinc-900 dark:text-white">
-            <Globe className="h-5 w-5 text-indigo-500" /> Live Browser
+            <Globe className="h-5 w-5 text-indigo-500" /> Live Browser &amp; Computer use
           </h1>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
             Give it a task and watch it work: SMARAN opens a browser window on your computer,
             reads pages, clicks and types, and reports what it found - every step shown below.
           </p>
+        </div>
+
+        <div className="inline-flex rounded-xl border border-zinc-300 dark:border-zinc-700 p-1" role="tablist" aria-label="What SMARAN drives">
+          {[['browser', 'Browser', Globe], ['computer', 'Whole computer', Monitor]].map(([id, label, Icon]) => (
+            <button key={id} type="button" role="tab" aria-selected={mode === id} disabled={running}
+                    onClick={() => { setMode(id); setSteps([]); setAnswer(null); setError(''); }}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${mode === id ? 'bg-indigo-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>
+              <Icon className="h-3.5 w-3.5" /> {label}
+            </button>
+          ))}
         </div>
 
         {statusError && (
@@ -134,7 +178,7 @@ export default function LiveBrowser() {
           </div>
         )}
 
-        {status && !status.available && (
+        {status && !status.available && !computer && (
           <div className={`${card} flex items-start gap-3 p-4 text-sm text-amber-700 dark:text-amber-300`}>
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <p>No Chrome, Chromium, Edge or Brave was found on this computer. Install one of them and come back.</p>
@@ -150,11 +194,13 @@ export default function LiveBrowser() {
               rows={2}
               maxLength={2000}
               disabled={running}
-              placeholder="What should it find or do? For example: find the opening hours of the Red Fort."
+              placeholder={computer
+                ? 'What should it do on this computer? For example: open Notepad and write a shopping list.'
+                : 'What should it find or do? For example: find the opening hours of the Red Fort.'}
               className={`${field} resize-y`}
             />
             <div className="flex flex-wrap gap-2">
-              {EXAMPLES.map((example) => (
+              {(computer ? COMPUTER_EXAMPLES : EXAMPLES).map((example) => (
                 <button key={example} type="button" disabled={running}
                         onClick={() => setTask(example)}
                         className="rounded-full border border-zinc-300 dark:border-zinc-700 px-3 py-1 text-[11px] text-zinc-600 dark:text-zinc-300 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-300 disabled:opacity-40 transition">
@@ -165,8 +211,9 @@ export default function LiveBrowser() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-                A fresh window with no logins, using {status.browser || 'your browser'}. It never types
-                passwords or card details, and stops before paying, sending or deleting anything.
+                {computer
+                  ? 'It uses your mouse and keyboard - hands off while it works, or press Stop. It never types passwords or OTPs, and asks you before anything about money, buying, sending or the power button.'
+                  : `A fresh window with no logins, using ${status.browser || 'your browser'}. It never types passwords or card details, and stops before paying, sending or deleting anything.`}
               </p>
               {running ? (
                 <button type="button" onClick={stop}
@@ -191,7 +238,7 @@ export default function LiveBrowser() {
                   {step.step}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-zinc-900 dark:text-white">
+                  <p className={`text-sm font-bold ${step.failed ? 'text-rose-600 dark:text-rose-300' : 'text-zinc-900 dark:text-white'}`}>
                     {ACTION_LABEL[step.action] || step.action}
                     <span className="ml-2 font-normal text-zinc-500 dark:text-zinc-400">{step.result}</span>
                   </p>
@@ -227,7 +274,9 @@ export default function LiveBrowser() {
 
         {answer && (
           <div className={`${card} border-indigo-500/40 p-4 sm:p-5`}>
-            <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-300">Answer</p>
+            <p className="mb-1 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-300">
+              {answer.question ? <><HelpCircle className="h-3.5 w-3.5" /> SMARAN needs you</> : 'Answer'}
+            </p>
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-900 dark:text-white">{answer.answer}</p>
             {answer.url && (
               <a href={answer.url} target="_blank" rel="noopener noreferrer"
