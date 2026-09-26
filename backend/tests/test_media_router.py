@@ -112,3 +112,19 @@ def test_no_seed_means_a_new_picture_each_time(tmp_path, monkeypatch):
     assert calls[0][1]["seed"] != calls[1][1]["seed"]
     media_router.generate_image("a fox", str(tmp_path / "h.png"), seed=7)
     assert calls[2][1]["seed"] == 7
+
+
+def test_a_server_error_is_tried_once_more_before_moving_on(tmp_path, monkeypatch):
+    import httpx
+    monkeypatch.setattr(media_router, "RETRY_PAUSE", 0)
+    answers = [FakeResponse(504, {"detail": "errored"}),
+               FakeResponse(200, {"artifacts": [{"base64": base64.b64encode(JPEG).decode(), "finishReason": "SUCCESS"}]})]
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: answers.pop(0))
+    made = media_router.generate_image("a fox", str(tmp_path / "r.png"))
+    assert made["where"] == "cloud" and made["made_by"] == "FLUX.1-dev (NVIDIA)"
+
+
+def test_out_of_credit_is_not_retried(tmp_path, monkeypatch):
+    calls = use_http(monkeypatch, FakeResponse(402, {"detail": "Payment required"}))
+    media_router.generate_image("a fox", str(tmp_path / "s.png"))
+    assert len([c for c in calls if "flux.1-dev" in c[0]]) == 1

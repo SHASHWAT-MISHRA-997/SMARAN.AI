@@ -47,6 +47,8 @@ CLOUD_IMAGE_MODELS = (
 NVIDIA_URL = "https://ai.api.nvidia.com/v1/genai/"
 NVIDIA_STATUS = "https://api.nvcf.nvidia.com/v2/nvcf/pexec/status/"
 CLOUD_TIMEOUT = 150
+#: Seconds before retrying a hosted model that had a server error.
+RETRY_PAUSE = 3
 
 _prefs_lock = threading.Lock()
 
@@ -216,8 +218,20 @@ def generate_image(prompt: str, out_path: str, *, width: Optional[int] = None,
         try:
             if source["kind"] == "cloud":
                 progress("Making it with %s - the prompt goes to NVIDIA." % source["label"])
-                result = _nvidia_image(source, prompt, width or 1024, height or 1024, seed,
-                                       out_path, progress)
+                try:
+                    result = _nvidia_image(source, prompt, width or 1024, height or 1024, seed,
+                                           out_path, progress)
+                except _SourceFailed as first:
+                    # NVIDIA's hosted FLUX answers 504 "errored" often, and
+                    # the same request a few seconds later often succeeds.
+                    # One quick retry for a server fault; anything else
+                    # (credit, key, a refused prompt) is final.
+                    if not (first.status and first.status >= 500):
+                        raise
+                    progress("%s had a server error; trying it once more." % source["label"])
+                    time.sleep(RETRY_PAUSE)
+                    result = _nvidia_image(source, prompt, width or 1024, height or 1024, seed,
+                                           out_path, progress)
             else:
                 progress("Making it on this computer with %s." % source["label"])
                 free_gpu_for_media(progress)
