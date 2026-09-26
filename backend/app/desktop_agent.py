@@ -703,6 +703,43 @@ DESKTOP_ACTION_CATALOG: Dict[str, Dict[str, Any]] = {
         "risk": "low", "changes_system": True, "requires_confirmation": False,
         "parameters": {"enabled": "true to enable, false to disable"}, "category": "system",
     },
+    # Everyday helpers (app/everyday.py)
+    "set_reminder": {
+        "title": "Set a reminder",
+        "description": "Remind me later: 'in 10 minutes', 'at 5 pm', 'kal subah 9 baje'.",
+        "risk": "low", "changes_system": False, "requires_confirmation": False,
+        "parameters": {"text": "What was said, including the time"}, "category": "productivity",
+    },
+    "list_reminders": {
+        "title": "List reminders",
+        "description": "Show the reminders still waiting.",
+        "risk": "read_only", "changes_system": False, "requires_confirmation": False,
+        "parameters": {}, "category": "productivity",
+    },
+    "cancel_reminder": {
+        "title": "Cancel a reminder",
+        "description": "Cancel the next reminder, or one by id.",
+        "risk": "low", "changes_system": False, "requires_confirmation": False,
+        "parameters": {"id": "Reminder id (optional)"}, "category": "productivity",
+    },
+    "clipboard_history": {
+        "title": "Clipboard history",
+        "description": "The last things copied (kept in memory only; passwords and keys are skipped).",
+        "risk": "read_only", "changes_system": False, "requires_confirmation": False,
+        "parameters": {}, "category": "productivity",
+    },
+    "clear_clipboard_history": {
+        "title": "Clear clipboard history",
+        "description": "Forget the copied items SMARAN remembers.",
+        "risk": "low", "changes_system": False, "requires_confirmation": False,
+        "parameters": {}, "category": "productivity",
+    },
+    "health_check": {
+        "title": "PC health check",
+        "description": "Why the PC is slow: processor, memory, disk and the programs using them.",
+        "risk": "read_only", "changes_system": False, "requires_confirmation": False,
+        "parameters": {}, "category": "info",
+    },
 }
 
 
@@ -1670,40 +1707,83 @@ class DesktopAgent:
 
     @staticmethod
     def _action_get_clipboard(params: Dict[str, Any]) -> Dict[str, Any]:
-        if sys.platform == "win32":
-            try:
-                result = subprocess.run(
-                    ["powershell", "-Command", "Get-Clipboard"],
-                    capture_output=True, text=True, timeout=5,
-                    creationflags=WIN_NO_WINDOW,
-                )
-                text = result.stdout.strip()
-                return {"success": True, "clipboard_text": text,
-                        "message": _preview("Clipboard: ", text, 100)}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-        return {"success": False, "error": "Clipboard access only supported on Windows."}
+        # Windows, macOS and Linux (wl-clipboard, xclip or xsel). It said
+        # "only supported on Windows" everywhere else.
+        from app import everyday
+        try:
+            text = everyday.read_clipboard().strip()
+        except Exception as e:  # noqa: BLE001
+            return {"success": False, "error": str(e)}
+        return {"success": True, "clipboard_text": text,
+                "message": _preview("Clipboard: ", text, 100) if text else "The clipboard is empty."}
 
     @staticmethod
     def _action_set_clipboard(params: Dict[str, Any]) -> Dict[str, Any]:
         text = params.get("text", "").strip()
         if not text:
             return {"success": False, "error": "No text provided."}
+        from app import everyday
+        try:
+            everyday.write_clipboard(text)
+        except Exception as e:  # noqa: BLE001
+            return {"success": False, "error": str(e)}
+        return {"success": True, "message": _preview("Copied to clipboard: ", text, 50)}
 
-        if sys.platform == "win32":
-            try:
-                subprocess.run(
-                    ["powershell", "-NoProfile", "-Command",
-                     "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())"],
-                    input=text, encoding="utf-8", check=True,
-                    capture_output=True, timeout=5,
-                    creationflags=WIN_NO_WINDOW,
-                )
-                return {"success": True,
-                        "message": _preview("Copied to clipboard: ", text, 50)}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-        return {"success": False, "error": "Clipboard access only supported on Windows."}
+    @staticmethod
+    def _action_set_reminder(params: Dict[str, Any]) -> Dict[str, Any]:
+        from app import everyday
+        said = str(params.get("text", "")).strip()
+        due = everyday.parse_when(said)
+        if due is None:
+            return {"success": False, "needs": "time",
+                    "error": "When should I remind you? Say it with a time - "
+                             "'in 10 minutes', 'at 5 pm' or 'kal subah 9 baje'."}
+        what = everyday.reminder_text(said)
+        item = everyday.reminders().add(what, due)
+        return {"success": True, "reminder": item,
+                "message": f"Okay - I'll remind you {everyday.describe_due(due)}: {what}."}
+
+    @staticmethod
+    def _action_list_reminders(params: Dict[str, Any]) -> Dict[str, Any]:
+        from app import everyday
+        items = everyday.reminders().pending()
+        if not items:
+            return {"success": True, "reminders": [], "message": "No reminders are waiting."}
+        lines = [f"- {everyday.describe_due(datetime.fromisoformat(i['due']))}: {i['text']}" for i in items[:10]]
+        return {"success": True, "reminders": items,
+                "message": f"{len(items)} reminder{'s' if len(items) != 1 else ''} waiting:\n" + "\n".join(lines)}
+
+    @staticmethod
+    def _action_cancel_reminder(params: Dict[str, Any]) -> Dict[str, Any]:
+        from app import everyday
+        gone = everyday.reminders().cancel(str(params.get("id", "")))
+        if not gone:
+            return {"success": False, "error": "There is no reminder waiting to cancel."}
+        return {"success": True, "message": f"Cancelled: {gone['text']}."}
+
+    @staticmethod
+    def _action_clipboard_history(params: Dict[str, Any]) -> Dict[str, Any]:
+        from app import everyday
+        everyday.clipboard_history.start()
+        items = everyday.clipboard_history.snapshot()
+        if not items:
+            note = everyday.clipboard_history.error or "Nothing copied since SMARAN started."
+            return {"success": True, "items": [], "message": note}
+        lines = [f"{n}. [{i['at']}] {_preview('', i['text'], 80)}" for n, i in enumerate(items[:15], 1)]
+        return {"success": True, "items": items,
+                "message": "Recently copied (passwords and keys are never kept):\n" + "\n".join(lines)}
+
+    @staticmethod
+    def _action_clear_clipboard_history(params: Dict[str, Any]) -> Dict[str, Any]:
+        from app import everyday
+        everyday.clipboard_history.clear()
+        return {"success": True, "message": "Clipboard history cleared."}
+
+    @staticmethod
+    def _action_health_check(params: Dict[str, Any]) -> Dict[str, Any]:
+        from app import everyday
+        report = everyday.health_check()
+        return {"success": True, "report": report, "message": everyday.health_message(report)}
 
     @staticmethod
     def _action_flush_dns(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -2487,6 +2567,16 @@ class DesktopAgent:
 # Intent Detection — Maps natural language to desktop actions
 # ---------------------------------------------------------------------------
 
+_EVERYDAY_INTENTS = [
+    (re.compile(r"\b(?:list|show|my|what\s+are\s+my)\s+reminders\b|\breminders?\s+(?:dikhao|batao|kya\s+hai)\b", re.I), "list_reminders"),
+    (re.compile(r"\bcancel\s+(?:the\s+|my\s+)?(?:next\s+)?reminder\b|\breminder\s+(?:cancel|hatao|band)\b", re.I), "cancel_reminder"),
+    (re.compile(r"\bclear\s+(?:the\s+)?clipboard\s+history\b|\bclipboard\s+history\s+(?:clear|saaf|hatao)\b", re.I), "clear_clipboard_history"),
+    (re.compile(r"\bclipboard\s+history\b|\bwhat\s+(?:did\s+i|have\s+i)\s+copied?\b|\bmaine\s+kya\s+copy\s+kiya\b", re.I), "clipboard_history"),
+    (re.compile(r"\b(?:why\s+is\s+(?:my\s+)?(?:pc|computer|laptop|system)\s+(?:so\s+)?(?:slow|lagging|hanging))\b"
+                r"|\b(?:pc|computer|laptop|system)\s+(?:slow|hang|lag)\s+(?:kyu|kyon|kyun)\b"
+                r"|\b(?:health\s+check|check\s+(?:my\s+)?(?:pc|computer|system)\s+health)\b", re.I), "health_check"),
+]
+
 INTENT_PATTERNS: List[Tuple[re.Pattern, str, Dict[str, str]]] = [
     # Disabling startup must precede the positive pattern it contains.
     (re.compile(r"\b(?:don'?t|do not|mat)\s+(?:start|launch|chalao)\s+(?:smaran\s*)?(?:ai\s*)?(?:with|at|pe|par)\s+(?:windows\s+)?startup\b", re.I), "set_launch_at_startup", {"enabled": "false"}),
@@ -2754,6 +2844,16 @@ def detect_desktop_intent(text: str) -> Optional[Dict[str, Any]]:
     if re.fullmatch(r"(?:what(?:'s| is) the time|what time is it|time (?:kya|kitna) (?:hua|hai|ho gaya)"
                     r"|abhi kitne baje hain|kitne baje hain)(?: now| abhi)?[.?!]*", text, re.I):
         return {"action": "get_time", "params": {}}
+
+    # Everyday helpers - before the filter below, which drops sentences that
+    # open with "why" and so dropped "why is my PC so slow". Reminders first and on the whole sentence, so
+    # "remind me to open chrome at 5" sets a reminder instead of opening Chrome.
+    refusing = re.match(r"^(?:please\s+)?(?:don['’]?t|do\s+not|never)\b", text, re.I)
+    if not refusing and re.search(r"\bremind\s+me\b|\byaad\s+dila|\breminder\s+(?:set|lagao|laga|do)\b|\bset\s+(?:a\s+)?reminder\b", text, re.I):
+        return {"action": "set_reminder", "params": {"text": text}}
+    for pattern, action_id in _EVERYDAY_INTENTS:
+        if not refusing and pattern.search(text):
+            return {"action": action_id, "params": {}}
 
     # These are conversation, not instructions to control the desktop. In
     # particular, "do not mute" previously fired the system mute key.

@@ -31,6 +31,7 @@ import DispatchView from './components/DispatchView';
 import { API_BASE, fetchWithAuth, getCurrentUser } from './context/AuthContext';
 import { isNativeApp, loadLink } from './utils/hostLink';
 import { useBackClose } from './utils/backStack';
+import ReminderAlerts from './components/ReminderAlerts';
 import * as standalone from './utils/standalone';
 import * as localChat from './utils/localChat';
 import * as usage from './utils/usage';
@@ -793,6 +794,9 @@ const App = () => {
           apiBase={API_BASE}
         />
       </ErrorBoundary>
+
+      {/* Reminders set by voice or chat, shown and spoken when they come due. */}
+      <ReminderAlerts enabled={Boolean(currentUser) && !noBackendHere()} />
 
       {/* Model Matrix & Catalog Overlay */}
       <ErrorBoundary>

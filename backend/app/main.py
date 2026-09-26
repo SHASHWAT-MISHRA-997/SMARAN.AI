@@ -329,6 +329,14 @@ async def lifespan(application: FastAPI):
     except Exception:  # noqa: BLE001
         logger.info("Desktop settings were not applied at start", exc_info=True)
     threading.Thread(target=rag_pipeline.get, name="rag-warmup", daemon=True).start()
+    # Clipboard history (memory only, secrets skipped). Not in a container:
+    # there is no desktop clipboard there to watch.
+    if not os.path.exists("/.dockerenv"):
+        try:
+            from app import everyday
+            everyday.clipboard_history.start()
+        except Exception:  # noqa: BLE001
+            logger.info("Clipboard history did not start", exc_info=True)
     await _warm_speech_recognition()
     try:
         from app.agent.scheduler import AutomationScheduler
@@ -8776,6 +8784,8 @@ app.include_router(_companion.router)
 
 from app.live_browser_routes import router as _live_browser_router  # noqa: E402
 app.include_router(_live_browser_router)
+from app.everyday_routes import router as _everyday_router  # noqa: E402
+app.include_router(_everyday_router)
 
 
 # Register the SPA fallback last so it cannot swallow model-storage, engine
