@@ -169,6 +169,7 @@ def image_sources(local_model: str = "", prefs: Optional[Dict] = None) -> List[D
     prefs = prefs or load_prefs()
     source = prefs.get("image_source", "auto")
     rows: List[Dict] = []
+    local_rows: List[Dict] = []
 
     if source in ("auto", "cloud"):
         for entry in CLOUD_IMAGE_MODELS:
@@ -187,13 +188,43 @@ def image_sources(local_model: str = "", prefs: Optional[Dict] = None) -> List[D
         ordered = ([wanted] if wanted else []) + [m for m in MODELS if m is not wanted]
         for model in ordered:
             verdict = evaluate(model, hw)
-            rows.append({"kind": "local", "provider": "local", "model": model.id,
+            local_rows.append({"kind": "local", "provider": "local", "model": model.id,
                          "label": "%s (this computer)" % (getattr(model, "display_name", "") or model.id),
                          "usable": bool(verdict.get("runnable")),
                          "why": "" if verdict.get("runnable") else verdict.get("reason", "")})
             if verdict.get("runnable"):
                 break  # the first runnable local model is the local choice
-    return rows
+    # Automatic puts this computer first only when its graphics card is strong
+    # enough to be quick; on a smaller card the cloud answers in seconds what
+    # takes this computer minutes, so the cloud goes first there.
+    if source == "auto" and local_first():
+        return local_rows + rows
+    return rows + local_rows
+
+
+STRONG_VRAM_GB = 12.0
+
+
+def hardware() -> Dict:
+    """This computer's graphics card, and what Automatic does because of it."""
+    from app.video.hardware import probe
+    hw = probe()
+    vram = float(getattr(hw, "vram_total_gb", 0) or 0)
+    gpu = getattr(hw, "gpu_name", "") or ("no graphics card found" if not vram else "graphics card")
+    strong = vram >= STRONG_VRAM_GB
+    return {"gpu": gpu, "vram_gb": round(vram, 1), "strong": strong,
+            "automatic": ("This computer first: %s has %.0f GB, enough to be quick. The cloud is the fallback."
+                          % (gpu, vram)) if strong else
+                         ("Cloud first: %s has %.0f GB, and under %.0f GB a picture takes minutes here but "
+                          "seconds in the cloud. This computer is the fallback, and 'This computer only' keeps "
+                          "everything private." % (gpu, vram, STRONG_VRAM_GB))}
+
+
+def local_first() -> bool:
+    try:
+        return hardware()["strong"]
+    except Exception:  # noqa: BLE001 - unknown hardware: the cloud is the safe first try
+        return False
 
 
 def generate_image(prompt: str, out_path: str, *, width: Optional[int] = None,

@@ -5,6 +5,7 @@ import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { isNativeApp } from '../utils/hostLink';
 import MediaPackages from './MediaPackages';
 import CloudVideo from './CloudStudio';
+import ModelLibrary from './ModelLibrary';
 
 /**
  * A screen for making short clips.
@@ -213,6 +214,7 @@ const VideoStudio = () => {
               : 'Videos rendered on this machine, from a few seconds up to an hour. Nothing is uploaded, and the weights stay on your disk once fetched. Hosted services charge per video, so they are only used when you choose one.'}
           </p>
           <VideoSources />
+          <ModelLibrary kind="video" />
         </div>
 
         <div className="inline-flex rounded-xl border border-zinc-300 dark:border-zinc-700 p-1" role="tablist" aria-label="Where the video is made">

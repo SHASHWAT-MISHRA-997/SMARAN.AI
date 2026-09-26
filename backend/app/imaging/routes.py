@@ -56,7 +56,21 @@ async def change_prefs(change: PrefsChange):
         prefs = media_router.save_prefs({"image_source": change.image_source})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"prefs": prefs, "sources": media_router.image_sources(prefs=prefs)}
+    return {"prefs": prefs, "sources": media_router.image_sources(prefs=prefs),
+            "automatic": media_router.hardware()["automatic"]}
+
+
+@router.get("/catalog")
+async def catalog():
+    """The open image models worth knowing, sourced, with whether this PC can run each."""
+    import asyncio as _asyncio
+    from app import media_catalog, media_router
+    hw = await _asyncio.to_thread(media_router.hardware)
+    card = await _asyncio.to_thread(probe)
+    verdicts = {model.id: evaluate(model, card) for model in MODELS}
+    runs_here = {key: True if v.get("runnable") else (v.get("reason") or "not enough free memory")
+                 for key, v in verdicts.items()}
+    return {**media_catalog.catalogue("image", hw["vram_gb"], runs_here), "hardware": hw}
 
 
 @router.get("/models")
@@ -73,6 +87,7 @@ async def models():
         "models": rows,
         "sources": media_router.image_sources(prefs=prefs),
         "prefs": prefs,
+        "automatic": media_router.hardware()["automatic"],
         "hardware": hw.as_dict(),
         "note": (
             "Downloads are the fp16 weights a pipeline actually fetches, not "

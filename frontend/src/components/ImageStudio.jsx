@@ -5,6 +5,7 @@ import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { isNativeApp } from '../utils/hostLink';
 import MediaPackages from './MediaPackages';
 import CloudVideo from './CloudStudio';
+import ModelLibrary from './ModelLibrary';
 
 /**
  * A screen for making pictures.
@@ -121,7 +122,7 @@ const ImageStudio = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || 'The setting was not saved.');
-      setCatalogue((current) => ({ ...current, prefs: data.prefs, sources: data.sources }));
+      setCatalogue((current) => ({ ...current, prefs: data.prefs, sources: data.sources, automatic: data.automatic }));
     } catch (err) {
       setError(err.message);
     }
@@ -308,11 +309,14 @@ const ImageStudio = () => {
                 <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Where pictures are made</span>
                 <select value={imageSource} onChange={(e) => changeSource(e.target.value)} className={`${field} w-auto`}
                         aria-label="Where pictures are made">
-                  <option value="auto">Automatic — hosted model first, this computer if not</option>
+                  <option value="auto">Automatic — fastest place for this computer</option>
                   <option value="local">This computer only — nothing is sent anywhere</option>
                   <option value="cloud">Hosted models only</option>
                 </select>
               </label>
+              {imageSource === 'auto' && catalogue?.automatic && (
+                <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">{catalogue.automatic}</p>
+              )}
               <ul className="mt-2 space-y-1 text-[11px]">
                 {sources.map((src) => (
                   <li key={`${src.kind}-${src.model}`} className="flex items-center gap-2">
@@ -323,6 +327,8 @@ const ImageStudio = () => {
                 ))}
               </ul>
             </div>
+
+            <ModelLibrary kind="image" />
 
             {/* The reason a model will not run, from the engine rather than
                 guessed here: it knows the card and the weights. */}

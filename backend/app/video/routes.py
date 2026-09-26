@@ -80,6 +80,17 @@ async def sources():
     return {"sources": await _asyncio.to_thread(media_router.video_sources)}
 
 
+@router.get("/catalog")
+async def catalog():
+    """The open video models worth knowing, sourced, with whether this PC can run each."""
+    import asyncio as _asyncio
+    from app import media_catalog, media_router
+    hw = await _asyncio.to_thread(media_router.hardware)
+    local = (await _asyncio.to_thread(media_router.video_sources))[0]
+    return {**media_catalog.catalogue("video", hw["vram_gb"], {"ltx-video-2b": True if local.get("usable") else (local.get("why") or "")}),
+            "hardware": hw}
+
+
 @router.get("/capabilities")
 async def capabilities(capability: str = "text-to-video"):
     """What this machine can run, and the reason where it cannot."""

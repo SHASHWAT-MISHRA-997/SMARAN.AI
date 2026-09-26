@@ -30,6 +30,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
     # Never unload the real Ollama's models from a test.
     monkeypatch.setattr(media_router, "free_gpu_for_media", lambda note=None: [])
+    # A small graphics card, whatever this machine really has.
+    monkeypatch.setattr(media_router, "local_first", lambda: False)
 
     import app.imaging.engine as engine
     monkeypatch.setattr(engine, "evaluate", lambda model, hw: {"runnable": True})
@@ -128,3 +130,44 @@ def test_out_of_credit_is_not_retried(tmp_path, monkeypatch):
     calls = use_http(monkeypatch, FakeResponse(402, {"detail": "Payment required"}))
     media_router.generate_image("a fox", str(tmp_path / "s.png"))
     assert len([c for c in calls if "flux.1-dev" in c[0]]) == 1
+
+
+def test_a_strong_graphics_card_puts_this_computer_first(tmp_path, monkeypatch):
+    calls = use_http(monkeypatch, FakeResponse(200, {}))
+    monkeypatch.setattr(media_router, "local_first", lambda: True)
+    kinds = [s["kind"] for s in media_router.image_sources()]
+    assert kinds[0] == "local" and "cloud" in kinds
+    made = media_router.generate_image("a fox", str(tmp_path / "a.png"))
+    assert made["where"] == "local" and calls == []
+
+
+def test_the_reason_for_the_order_is_given(monkeypatch):
+    class Card:
+        gpu_name, vram_total_gb = "RTX 2060", 6.0
+    monkeypatch.setattr("app.video.hardware.probe", lambda *a: Card())
+    small = media_router.hardware()
+    assert not small["strong"] and small["automatic"].startswith("Cloud first")
+    Card.vram_total_gb = 24.0
+    big = media_router.hardware()
+    assert big["strong"] and big["automatic"].startswith("This computer first")
+
+
+def test_the_catalogue_says_what_fits_and_invents_nothing():
+    from app import media_catalog
+    video = media_catalog.catalogue("video", 6.0)
+    by_id = {m["id"]: m for m in video["models"]}
+    assert by_id["cogvideox-2b"]["fits"] == "yes"
+    assert by_id["wan22-a14b"]["fits"] == "no" and "Replicate" in by_id["wan22-a14b"]["why"]
+    assert by_id["ltx-video-13b"]["fits"] == "unknown"          # its README gives no figure
+    assert all(m["source"] and m["repo"].startswith("https://") for m in video["models"])
+    assert {c["name"] for c in video["closed"]} >= {"Kling", "Seedance", "Runway Gen-4.5"}
+    assert media_catalog.catalogue("image", 24.0)["tier"] == "strong"
+
+
+def test_smaran_s_own_check_outranks_a_missing_figure():
+    from app import media_catalog
+    rows = {m["id"]: m for m in media_catalog.catalogue("video", 6.0, {"ltx-video-2b": True})["models"]}
+    assert rows["ltx-video-2b"]["fits"] == "yes"
+    busy = media_catalog.fit({"min_vram_gb": 5.0, "where": ["smaran"]}, 6.0, "Needs 5 GB; 2 GB is free.")
+    assert busy["fits"] == "not now" and "2 GB is free" in busy["why"]
+    assert "video" not in media_catalog.summary("image", 6.0)
