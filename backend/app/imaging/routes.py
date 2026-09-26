@@ -168,3 +168,74 @@ async def file(job_id: str):
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="That image is not on disk.")
     return FileResponse(path, media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# Cloud images (Replicate): Flux, Stable Diffusion 3.5, Qwen-Image, Seedream,
+# Ideogram, Recraft... whatever Replicate hosts for text-to-image, on your key.
+# Seconds instead of a local install and a big GPU.
+# ---------------------------------------------------------------------------
+
+class CloudImageRequest(BaseModel):
+    prompt: str = Field(..., min_length=2, max_length=2000)
+    model: str = Field("", max_length=120)
+    aspect_ratio: Optional[str] = Field(None, pattern=r"^\d{1,2}:\d{1,2}$")
+
+
+@router.get("/cloud")
+async def cloud_status():
+    import asyncio
+    from app.video import hosted
+    info = {"provider": "replicate", "configured": hosted.configured(),
+            "key_url": "https://replicate.com/account/api-tokens", "models": [], "error": ""}
+    if info["configured"]:
+        try:
+            info["models"] = await asyncio.to_thread(hosted.list_models, "text-to-image")
+        except Exception as exc:  # noqa: BLE001
+            info["error"] = str(exc)[:300]
+    return info
+
+
+def _run_cloud(job_id: str, req: CloudImageRequest, out_path: str) -> None:
+    from app.video import hosted
+
+    def note(text: str) -> None:
+        with _jobs_lock:
+            _jobs[job_id]["messages"].append(text)
+            _jobs[job_id]["updated"] = time.time()
+
+    try:
+        url = hosted.generate(req.prompt, note, model=req.model,
+                              options={"aspect_ratio": req.aspect_ratio, "output_format": "png"}, kind="image")
+        raw = out_path + ".download"
+        hosted.download(url, raw)
+        # Replicate returns webp, jpg or png; the Images page serves PNG.
+        from PIL import Image
+        with Image.open(raw) as img:
+            img.convert("RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB").save(out_path, "PNG")
+        os.remove(raw)
+        with _jobs_lock:
+            _jobs[job_id].update(status="completed", result={"path": out_path, "model": req.model, "where": "replicate"},
+                                 updated=time.time())
+    except Exception as exc:  # noqa: BLE001
+        with _jobs_lock:
+            _jobs[job_id].update(status="failed", error=str(exc)[:500], updated=time.time())
+
+
+@router.post("/cloud/generate")
+async def cloud_generate(req: CloudImageRequest):
+    from app.config import settings
+    from app.video import hosted
+    if not hosted.configured():
+        raise HTTPException(status_code=409, detail="Save a Replicate key first: Model Hub -> Cloud Provider Keys -> Replicate.")
+    if not req.model:
+        raise HTTPException(status_code=400, detail="Choose a model.")
+    job_id = uuid.uuid4().hex[:12]
+    out_dir = os.path.join(settings.DATA_DIR, "images")
+    os.makedirs(out_dir, exist_ok=True)
+    with _jobs_lock:
+        _jobs[job_id] = {"id": job_id, "status": "running", "messages": [], "result": None, "error": None,
+                         "started": time.time(), "updated": time.time(), "where": "cloud"}
+    threading.Thread(target=_run_cloud, args=(job_id, req, os.path.join(out_dir, "%s.png" % job_id)),
+                     daemon=True).start()
+    return {"job_id": job_id, "status": "running"}

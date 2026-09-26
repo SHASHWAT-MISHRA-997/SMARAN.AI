@@ -4,7 +4,7 @@ import { Film, Loader2, AlertCircle, Download, Sparkles, RefreshCw, Cpu, Cloud }
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { isNativeApp } from '../utils/hostLink';
 import MediaPackages from './MediaPackages';
-import CloudVideo from './CloudVideo';
+import CloudVideo from './CloudStudio';
 
 /**
  * A screen for making short clips.

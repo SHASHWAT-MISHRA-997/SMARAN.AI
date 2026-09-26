@@ -103,14 +103,14 @@ def check_model(name: Optional[str] = None) -> dict:
     return _call("GET", "/models/" + name)
 
 
-def list_models() -> list:
+def list_models(collection: str = "text-to-video") -> list:
     """Replicate's own text-to-video collection for this key, most-used first.
 
     Kling, Hailuo (MiniMax), Seedance (ByteDance), Wan, LTX, Veo... appear
     here when Replicate hosts them - read live, so names are never guessed."""
-    collection = _call("GET", "/collections/text-to-video")
+    listing = _call("GET", "/collections/%s" % collection)
     models = []
-    for m in collection.get("models", []):
+    for m in listing.get("models", []):
         if not m.get("owner") or not m.get("name"):
             continue
         models.append({"id": "%s/%s" % (m["owner"], m["name"]),
@@ -141,11 +141,11 @@ MAX_DOWNLOAD = 800 * 1024 * 1024
 
 
 def download(url: str, path: str) -> None:
-    """Save the finished video here: Replicate's links expire after an hour."""
+    """Save the finished file here: Replicate's links expire after an hour."""
     from urllib.parse import urlparse
     host = (urlparse(url).hostname or "").lower()
     if urlparse(url).scheme != "https" or not any(host == h[1:] or host.endswith(h) for h in _DELIVERY_HOSTS):
-        raise HostedVideoError("The video came back from an unexpected address (%s); not downloading it." % host)
+        raise HostedVideoError("The result came back from an unexpected address (%s); not downloading it." % host)
     written = 0
     with request.urlopen(request.Request(url, headers={"User-Agent": "SMARAN.AI"}), timeout=120) as resp, \
             open(path + ".part", "wb") as fh:
@@ -155,14 +155,14 @@ def download(url: str, path: str) -> None:
                 break
             written += len(chunk)
             if written > MAX_DOWNLOAD:
-                raise HostedVideoError("The video is larger than %d MB; stopped downloading." % (MAX_DOWNLOAD >> 20))
+                raise HostedVideoError("The file is larger than %d MB; stopped downloading." % (MAX_DOWNLOAD >> 20))
             fh.write(chunk)
     os.replace(path + ".part", path)
 
 
 def generate(prompt: str, on_message: Optional[Callable[[str], None]] = None,
              model: str = "", options: Optional[dict] = None,
-             should_stop: Optional[Callable[[], bool]] = None) -> str:
+             should_stop: Optional[Callable[[], bool]] = None, kind: str = "video") -> str:
     """Run one hosted generation and return the URL of the finished video.
 
     `options` (duration, aspect_ratio, resolution...) are sent only when the
@@ -215,8 +215,8 @@ def generate(prompt: str, on_message: Optional[Callable[[str], None]] = None,
             url = output[0] if isinstance(output, list) and output else output
             if not isinstance(url, str) or not url.startswith("http"):
                 raise HostedVideoError(
-                    "The model finished but did not return a video URL. It may "
-                    "not be a video model; %s is what was asked for." % name
+                    "The model finished but did not return a %s URL. It may "
+                    "not be a %s model; %s is what was asked for." % (kind, kind, name)
                 )
             return url
 
