@@ -551,8 +551,9 @@ async def start_gateway(platform: str, req: GatewayStartRequest):
     config = req.model_dump(exclude_none=True)
     if platform == "telegram":
         from app.gateway.telegram_bot import TelegramGateway
-        ok = await TelegramGateway.get_instance().start(config)
-        return {"platform": platform, "started": ok}
+        gateway = TelegramGateway.get_instance()
+        ok = await gateway.start(config)
+        return {"platform": platform, "started": ok, "reason": "" if ok else gateway.last_error}
     elif platform == "discord":
         from app.gateway.discord_bot import DiscordGateway
         ok = await DiscordGateway.get_instance().start(config)

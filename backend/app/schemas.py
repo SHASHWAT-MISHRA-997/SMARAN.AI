@@ -37,6 +37,11 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
     turbo: bool = False
     web_search: bool = False
+    #: With web_search: 'quick' (one search, fast), 'pro' (a planned set of
+    #: searches) or 'deep' (several rounds that look for what is missing).
+    search_mode: Optional[str] = None
+    #: 'web', 'academic', 'news' or 'discussions'.
+    search_focus: Optional[str] = None
     rag_enabled: bool = False
     voice_mode: bool = False  # Spoken conversation: short, proactive replies
     #: The gender of the character answering. Hindi, Gujarati, Marathi,

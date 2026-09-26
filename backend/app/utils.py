@@ -1241,6 +1241,24 @@ def get_system_telemetry(db: Session = None, active_sessions: int = 0, latency_m
 
 import httpx
 
+# Zep is an optional memory service. When it is not running - the desktop app
+# never starts it - every chat message waited two seconds to learn that again,
+# before a single word of the answer. One failure now stands for five minutes.
+_ZEP_RETRY_SECONDS = 300
+_zep_down_until = 0.0
+
+
+def _zep_available() -> bool:
+    import time as _time
+    return _time.time() >= _zep_down_until
+
+
+def _zep_failed() -> None:
+    global _zep_down_until
+    import time as _time
+    _zep_down_until = _time.time() + _ZEP_RETRY_SECONDS
+
+
 async def zep_add_message(session_id: str, role: str, content: str):
     """Asynchronously send chat messages to Zep AI Memory service."""
     zep_url = os.getenv("ZEP_URL", "http://zep-ai:8000")
@@ -1253,20 +1271,25 @@ async def zep_add_message(session_id: str, role: str, content: str):
             }
         ]
     }
+    if not _zep_available():
+        return
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=0.5)) as client:
             url = f"{zep_url.rstrip('/')}/api/v1/sessions/{session_id}/memory"
             r = await client.post(url, json=payload)
             if r.status_code != 200:
                 logger.warning(f"Zep AI memory add failed with status {r.status_code}: {r.text}")
     except Exception as e:
-        logger.warning(f"Failed to connect to Zep AI for session {session_id}: {e}")
+        _zep_failed()
+        logger.info(f"Zep AI is not reachable; not asking again for {_ZEP_RETRY_SECONDS} s ({e})")
 
 async def zep_get_history(session_id: str) -> list[dict]:
     """Retrieve sliding window memory history from Zep AI."""
     zep_url = os.getenv("ZEP_URL", "http://zep-ai:8000")
+    if not _zep_available():
+        return []
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=0.5)) as client:
             url = f"{zep_url.rstrip('/')}/api/v1/sessions/{session_id}/memory"
             r = await client.get(url)
             if r.status_code == 200:
@@ -1278,5 +1301,6 @@ async def zep_get_history(session_id: str) -> list[dict]:
                     history.append({"role": role, "content": msg.get("content", "")})
                 return history
     except Exception as e:
-        logger.warning(f"Failed to fetch history from Zep AI for session {session_id}: {e}")
+        _zep_failed()
+        logger.info(f"Zep AI is not reachable; not asking again for {_ZEP_RETRY_SECONDS} s ({e})")
     return []

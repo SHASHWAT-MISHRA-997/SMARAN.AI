@@ -7,6 +7,7 @@ and zero extra dependency requirement.
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 import os
 import time
@@ -17,6 +18,10 @@ import httpx
 from app.gateway import BaseGateway
 
 logger = logging.getLogger("gateway.telegram")
+
+
+#: What @BotFather hands out: the bot's numeric id, a colon, a 35-character secret.
+BOT_TOKEN = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{30,}$")
 
 
 class TelegramGateway(BaseGateway):
@@ -36,13 +41,26 @@ class TelegramGateway(BaseGateway):
         self._poll_task: Optional[asyncio.Task] = None
         self._client: Optional[httpx.AsyncClient] = None
         self._last_update_id: int = 0
+        #: Why the last start failed, in words someone can act on.
+        self.last_error: str = ""
 
     async def start(self, config: Dict[str, Any]) -> bool:
         if self._running:
             return True
-        token = config.get("token") or os.environ.get("SMARAN_TELEGRAM_TOKEN", "")
+        token = (config.get("token") or os.environ.get("SMARAN_TELEGRAM_TOKEN", "")).strip()
+        self.last_error = ""
         if not token:
-            logger.warning("Telegram Bot Token not provided.")
+            self.last_error = "Paste the bot token from @BotFather first."
+            return False
+        if not BOT_TOKEN.match(token):
+            # A Telegram Gateway API token (gateway.telegram.org, for sending
+            # verification codes) was the token people most often pasted here.
+            self.last_error = (
+                "That is not a bot token. A bot token comes from @BotFather in Telegram "
+                "(send /newbot) and looks like 123456789:AA... - digits, a colon, then letters. "
+                + ("The token you pasted looks like a Telegram Gateway API token from "
+                   "gateway.telegram.org, which sends verification codes and cannot run a bot."
+                   if ":" not in token else "Check that it was copied whole."))
             return False
 
         self.bot_token = token
@@ -58,13 +76,20 @@ class TelegramGateway(BaseGateway):
             resp = await self._client.get("/getMe")
             data = resp.json()
             if not data.get("ok"):
-                logger.error(f"Telegram getMe failed: {data}")
+                logger.error("Telegram getMe failed: %s", data.get("description"))
+                self.last_error = "Telegram refused the token: %s. %s" % (
+                    data.get("description") or "no reason given",
+                    "Get a fresh token from @BotFather (/token) - it may have been revoked or mistyped."
+                    if data.get("error_code") == 401 else "")
                 await self.stop()
                 return False
             bot_name = data.get("result", {}).get("username")
             logger.info(f"Connected to Telegram Bot: @{bot_name}")
         except Exception as exc:
-            logger.error(f"Failed to connect to Telegram: {exc}")
+            # The request URL carries the token; keep it out of the log.
+            reason = str(exc).replace(self.bot_token, "<token>")
+            logger.error("Failed to connect to Telegram: %s", reason)
+            self.last_error = "Could not reach Telegram (%s). Check the internet connection." % type(exc).__name__
             await self.stop()
             return False
 

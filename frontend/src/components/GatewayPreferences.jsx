@@ -68,7 +68,8 @@ export default function GatewayPreferences() {
           body: JSON.stringify({ token: tgToken.trim(), default_chat_id: tgChatId }),
         });
         if (!data.started) {
-          setMessageNotice('Failed to start Telegram Bot. Check bot token.');
+          // The backend says why - a token of the wrong kind, or Telegram's own reason.
+          setMessageNotice(data.reason || 'Failed to start Telegram Bot. Check bot token.');
         }
       }
       await fetchStatus();

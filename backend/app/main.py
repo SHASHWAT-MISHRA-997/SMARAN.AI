@@ -2626,6 +2626,38 @@ async def clear_all_user_data(
 
 
 
+_served_cache: dict = {"at": 0.0, "models": set()}
+
+
+async def _served_openai_models() -> set:
+    """Models served by local OpenAI-style servers (vLLM, LM Studio), cached briefly.
+
+    Every chat message asked each address in turn, two seconds apiece, before
+    anything else happened - six seconds of waiting on servers that are not
+    running. They are asked together now, give up on a refused connection at
+    once, and the answer holds for a minute.
+    """
+    now = time.time()
+    if now - _served_cache["at"] < 60:
+        return set(_served_cache["models"])
+
+    async def ask(base: str) -> set:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(1.5, connect=0.3)) as client:
+                response = await client.get(f"{base}/models")
+            if response.status_code == 200:
+                return {m["id"] for m in response.json().get("data", []) if m.get("id")}
+        except Exception:
+            pass
+        return set()
+
+    found: set = set()
+    for served in await asyncio.gather(*(ask(base) for base in _openai_compatible_bases())):
+        found |= served
+    _served_cache.update(at=now, models=found)
+    return set(found)
+
+
 def _openai_compatible_bases(api_url: str = "") -> list[str]:
     """Local servers that speak the OpenAI API, in the order to try them.
 
@@ -3348,6 +3380,136 @@ def _note_route_success(provider: str, model: str, **measured) -> None:
 _CLOUD_CONTINUATIONS = 2
 _CONTINUE_PROMPT = ("You were cut off by the length limit. Continue exactly where you stopped - "
                     "the very next character - with no repetition, no preamble and no new code fence.")
+
+
+_RESEARCH_MARK = "@@SMARAN_WEB_SOURCES@@"
+
+#: Work where a fast first word matters more than long deliberation.
+_QUICK_TASKS = {"chat", "search", "writing", "vision"}
+
+
+def _research_llm(selected_model: str = ""):
+    """A quick model for planning searches and suggesting follow-ups.
+
+    The best available fast chat model (app.model_router), falling back to the
+    local one. It writes a few lines of JSON, so speed matters more than size.
+    """
+    import asyncio as _asyncio
+    from app.agent.models import complete
+
+    def ask(messages):
+        async def run():
+            from app import model_router
+            routes = await _auto_cloud_candidates("chat")
+            ranked, _ = model_router.rank(routes, "chat")
+            for route in ranked[:3]:
+                try:
+                    return await complete(messages, model=route["model"], provider=route["provider"],
+                                          api_key=route["api_key"], attempts=1)
+                except Exception as exc:  # noqa: BLE001 - the next model may answer
+                    model_router.record_failure(route["provider"], route["model"], getattr(exc, "status", None), str(exc))
+            local = selected_model if selected_model and selected_model != "auto" else ""
+            if local:
+                return await complete(messages, model=local, provider="", attempts=1)
+            raise RuntimeError("no model available for planning")
+        return _asyncio.run(run())
+    return ask
+
+
+async def _run_research(plan: dict, question: str, messages_payload: list, retrieved_chunks: list,
+                        selected_model: str, chat_req):
+    """Stream the research steps, then put the numbered sources into the prompt."""
+    import queue as _queue
+    import threading as _threading
+
+    from app import answer_engine
+
+    events: "_queue.Queue" = _queue.Queue()
+    outcome: dict = {}
+    history = [m for m in messages_payload[1:-1] if m.get("role") in ("user", "assistant")]
+    llm = _research_llm(selected_model) if plan["mode"] in ("pro", "deep") else None
+
+    def work():
+        try:
+            outcome["result"] = answer_engine.research(
+                question, mode=plan["mode"], focus=plan["focus"], history=history,
+                llm=llm, emit=events.put)
+        except Exception as exc:  # noqa: BLE001 - said to the person, not swallowed
+            logger.exception("research failed")
+            outcome["error"] = str(exc)
+        finally:
+            events.put(None)
+
+    _threading.Thread(target=work, name="research", daemon=True).start()
+    while True:
+        event = await asyncio.to_thread(events.get)
+        if event is None:
+            break
+        yield json.dumps(event) + "\n"
+
+    result = outcome.get("result") or {"sources": []}
+    sources = result["sources"]
+    plan["sources"] = sources
+    if sources:
+        evidence = answer_engine.evidence_block(sources)
+    else:
+        evidence = ("(The search returned nothing usable%s. Say that current information could "
+                    "not be found; do not invent sources or facts.)"
+                    % (": " + outcome["error"] if outcome.get("error") else ""))
+    last = messages_payload[-1]
+    last["content"] = str(last.get("content", "")).replace(_RESEARCH_MARK, evidence)
+    # Numbered source cards for the screen, ahead of anything from documents.
+    retrieved_chunks[:0] = [{"document_name": src["title"], "chunk_index": src["n"], "n": src["n"],
+                             "text": src["snippet"], "url": src["url"], "domain": src["domain"],
+                             "date": src["date"], "score": 1.0} for src in sources]
+    yield json.dumps({"type": "research_sources", "mode": result.get("mode"), "focus": result.get("focus"),
+                      "queries": result.get("queries", []), "seconds": result.get("seconds"),
+                      "sources": [{k: src[k] for k in ("n", "title", "url", "domain", "date", "snippet", "read")}
+                                  for src in sources]}) + "\n"
+
+
+async def _finish_research(lines, plan: Optional[dict], question: str, session_id: str, selected_model: str):
+    """After a researched answer: fix its citations, measure them, suggest follow-ups, keep it all."""
+    answer_parts = []
+    async for line in lines:
+        if plan is not None and '"token"' in line:
+            try:
+                answer_parts.append(json.loads(line).get("token", ""))
+            except ValueError:
+                pass
+        yield line
+    if plan is None or not plan.get("sources"):
+        return
+    from app import answer_engine
+
+    sources = plan["sources"]
+    answer = "".join(answer_parts)
+    checked = answer_engine.verify(answer, sources)
+    related = await asyncio.to_thread(answer_engine.related_questions, question, answer,
+                                      _research_llm(selected_model))
+    yield json.dumps({"type": "research_check", "verification": checked, "related": related}) + "\n"
+
+    # Keep the sources, the check and the follow-ups with the saved reply, so a
+    # reopened conversation shows them too (the cloud path saved no sources).
+    try:
+        db_session = SessionLocal()
+        try:
+            saved = (db_session.query(ChatMessage)
+                     .filter(ChatMessage.session_id == session_id, ChatMessage.role == "assistant")
+                     .order_by(ChatMessage.id.desc()).first())
+            if saved:
+                metrics = json.loads(saved.metrics) if saved.metrics else {}
+                metrics.update({"verification": checked, "related": related,
+                                "research_mode": plan.get("mode"), "research_focus": plan.get("focus")})
+                saved.metrics = json.dumps(metrics)
+                saved.references = json.dumps([{"document_name": s["title"], "chunk_index": s["n"], "n": s["n"],
+                                                 "text": s["snippet"], "url": s["url"], "domain": s["domain"],
+                                                 "date": s["date"], "score": 1.0} for s in sources])
+                db_session.commit()
+        finally:
+            db_session.close()
+    except Exception as exc:  # noqa: BLE001 - the answer is already on screen
+        logger.warning("could not keep the research with the reply: %s", exc)
 
 
 def _routed_event(model: str, source: str, failures: list, task: str) -> str:
@@ -4113,7 +4275,19 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
     # Live Web Search Grounding (Gemini-Style)
     web_references = []
     has_url_in_prompt = bool(re.search(r"https?://[^\s<>\]\[\)\(]+", chat_req.prompt, re.I))
-    if getattr(chat_req, "web_search", False) or has_url_in_prompt:
+    research_plan = None
+    if getattr(chat_req, "web_search", False) and not has_url_in_prompt:
+        # app.answer_engine: search, read the pages, cite by number, check the
+        # citations, suggest follow-ups. Done at the start of the stream so
+        # every step shows while it happens; the evidence replaces this mark.
+        from app import answer_engine
+        research_plan = {
+            "mode": (getattr(chat_req, "search_mode", None) or "quick").lower(),
+            "focus": (getattr(chat_req, "search_focus", None) or "web").lower(),
+        }
+        user_content += ("\n\n" + (answer_engine.INSTRUCTIONS % datetime.now().strftime("%d %B %Y"))
+                         + "\n\nSOURCES:\n" + _RESEARCH_MARK + "\n")
+    elif getattr(chat_req, "web_search", False) or has_url_in_prompt:
         try:
             logger.info(f"Executing live web/URL extraction for: '{processing_prompt[:60]}...'")
             # On a worker thread: the search takes seconds, and on the event
@@ -4283,17 +4457,7 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
     vllm_served = set()
     ollama_installed = set(installed_models)
 
-    for vurl in _openai_compatible_bases():
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                res_m = await client.get(f"{vurl}/models")
-            if res_m.status_code == 200:
-                vllm_served.update(m["id"] for m in res_m.json().get("data", [])
-                                   if m.get("id"))
-                if vllm_served:
-                    break
-        except Exception:
-            continue
+    vllm_served.update(await _served_openai_models())
     
     available_models.update(vllm_served)
     available_models.update(ollama_installed)
@@ -4692,6 +4856,12 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
         measured_eval_duration_sec = 0.0
         token_measurement_source = "unavailable"
         
+        if research_plan is not None:
+            async for line in _run_research(research_plan, processing_prompt, messages_payload,
+                                            retrieved_chunks, selected_model, chat_req):
+                yield line
+            start_time = time.time()
+
         # Yield the source references and routed model immediately at the start of stream
         yield json.dumps({"references": retrieved_chunks, "model_routed": selected_model, "detected_language": detected_lang, "target_language": target_language}) + "\n"
 
@@ -4844,6 +5014,10 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                         system_text = "\n\n".join(str(m.get('content', '')) for m in messages_payload if m.get('role') == 'system')
                         contents = [{'role': 'model' if m.get('role') == 'assistant' else 'user', 'parts': [{'text': str(m.get('content', ''))}]} for m in messages_payload if m.get('role') in ('user', 'assistant')]
                         payload = {'contents': contents, 'generationConfig': {'maxOutputTokens': 16384 if req_section in ('design', 'code') else 4096}}
+                        if route_task in _QUICK_TASKS and 'flash' in model.lower():
+                            # Flash thinks before its first word by default: 8-9 s on
+                            # a conversation or a web answer. Without it: 1.4 s.
+                            payload['generationConfig']['thinkingConfig'] = {'thinkingBudget': 0}
                         if system_text:
                             payload['system_instruction'] = {'parts': [{'text': system_text}]}
                         _route_begin(provider)
@@ -4892,6 +5066,8 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                             headers.update({'HTTP-Referer': 'http://localhost:3003', 'X-Title': 'SMARAN.AI'})
                         _route_begin(provider)
                         body = _cloud_body(model, messages_payload, answer_temperature, req_section, provider)
+                        if route_task in _QUICK_TASKS and 'gpt-oss' in model.lower():
+                            body['reasoning_effort'] = 'low'
                         refused = False
                         # A reply cut off by the output limit is asked to carry
                         # on where it stopped. Design pages from reasoning models
@@ -5559,7 +5735,8 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
     from app import jobs as _jobs
     # The question travels with the job: it is only saved with the answer, and
     # whoever attaches mid-reply should see what is being answered.
-    job = _jobs.start("chat", stream_generator(), {"session_id": session.id,
+    job = _jobs.start("chat", _finish_research(stream_generator(), research_plan, processing_prompt,
+                                                session.id, selected_model), {"session_id": session.id,
                                                    "section": getattr(chat_req, "section", "chat") or "chat",
                                                    "task": (chat_req.prompt or "")[:4000]})
     return StreamingResponse(_jobs.follow(job), media_type="application/x-ndjson")
