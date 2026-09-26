@@ -14,7 +14,7 @@ running on your own machine.
 [![Download APK](https://img.shields.io/badge/Android-Download%20APK-ef4444?style=for-the-badge&logo=android&logoColor=white)](https://github.com/SHASHWAT-MISHRA-997/SMARAN.AI-downloads/releases/latest/download/SMARAN.AI.apk)
 [![VS Code extension](https://img.shields.io/badge/VS_Code-SMARAN.AI_Codex-00E5FF?style=for-the-badge&logo=visualstudiocode&logoColor=white&labelColor=04060f)](https://marketplace.visualstudio.com/items?itemName=ShashwatMishra.smaran-ai-codex)
 
-![Version](https://img.shields.io/badge/version-1.0.23-b91c1c)
+![Version](https://img.shields.io/badge/version-1.0.24-b91c1c)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-b91c1c)
 ![Android](https://img.shields.io/badge/Android-7.0%2B-b91c1c)
 ![Models](https://img.shields.io/badge/catalogue-63%20models-b91c1c)
@@ -173,14 +173,16 @@ A raw `docker pull`/`docker run` can see only container/VM telemetry. Real host 
 - Host telemetry bridge for Windows, macOS, and Linux; missing readings remain unavailable.
 - Responsive performance drawer/bottom sheet tested from 320 px phones through desktop viewports.
 - Plugin/skill/connector entries remain `Registered` or `Setup required` until their runtime actually initializes.
-- Web answers (1.0.21): a compound question becomes up to three searches, sources are ranked, the top pages are read, and the answer cites them as numbered [n] links with three follow-up questions.
-- Auto routing (1.0.21) orders cloud models for the task - coder models for code, thinking models for reasoning, small fast ones for quick questions - and moves past a model that is rate-limited or failing.
-- Computer use (1.0.21): Live Browser -> Whole computer. A vision model looks at the screen and one step at a time clicks, types, presses keys, scrolls and opens apps, with each step's screenshot shown and Stop always available. It needs Computer use on in Settings, an X11 session with `xdotool` on Linux, and a model that can see (local, or a saved Gemini/OpenAI key).
-- Cloud images and video (1.0.21) on your Replicate key - the model list is Replicate's own, read live - and Images can drive a ComfyUI already running on this computer, with its checkpoints or any workflow exported in API format.
-- SMARAN Code (1.0.21): runs keep going in the background while you start another task; approvals accept typed instructions; with no folder open it works in `~/SMARAN/Code` (`SMARAN_CODE_HOME` moves it).
+- Web answers (1.0.24): Quick, Pro (the question planned into four searches, eight pages read) or Deep (rounds that search for what is still missing), across the whole web, papers, news or forums. Sources are ranked, official ones first; the answer cites them as numbered [n] links, each citation is checked against its source, and three follow-up questions are offered.
+- Auto routing (1.0.24) orders cloud models for the task - coder models for code, thinking models for reasoning, small fast ones for quick questions - and moves past a model that is rate-limited or failing.
+- Computer use (1.0.24): Live Browser -> Whole computer. A vision model looks at the screen and one step at a time clicks, types, presses keys, scrolls and opens apps, with each step's screenshot shown and Stop always available. It needs Computer use on in Settings, an X11 session with `xdotool` on Linux, and a model that can see (local, or a saved Gemini/OpenAI key).
+- Cloud images and video (1.0.24) on your Replicate key - the model list is Replicate's own, read live - and Images can drive a ComfyUI already running on this computer, with its checkpoints or any workflow exported in API format.
+- SMARAN Code (1.0.24): runs keep going in the background while you start another task; approvals accept typed instructions; with no folder open it works in `~/SMARAN/Code` (`SMARAN_CODE_HOME` moves it).
 - Reminders, clipboard history (memory only, secrets skipped) and a "why is my PC slow" health check, by voice or chat.
 - Telegram and Discord bots answer only accounts paired with a one-time code from Settings; webhooks always require a secret.
 - Optional TypeSafe Jev key: a second, fast safety opinion before computer-use steps and Smart-mode edits. It can only add caution.
+- Images and video by hardware (1.0.24): Automatic makes pictures on this computer first on a 12 GB+ graphics card and in the cloud first on a smaller one, and says why. A Model library lists the open image and video models (Wan, HunyuanVideo, LTX, Mochi, CogVideoX, FLUX, SD 3.5, Qwen-Image, SANA...) with the memory each project publishes and whether this PC can run it.
+- Change a picture (1.0.24): the picture just made, or your own, restyled or altered by instruction with Stable Diffusion image-to-image on this computer; nothing is uploaded.
 
 ## Honest limitations
 
