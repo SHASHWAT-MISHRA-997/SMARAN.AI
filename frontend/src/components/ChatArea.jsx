@@ -476,14 +476,37 @@ const cleanMathFormula = (mathStr) => {
   return cleaned.trim();
 };
 
+/* Web answers cite their sources as [1], [2]... (backend/app/answer_engine.py).
+   The sources of the message being drawn are provided here, and each [n]
+   becomes a small link to that source; a number with no source stays text. */
+const CitationContext = React.createContext([]);
+
+const Citation = ({ n }) => {
+  const sources = React.useContext(CitationContext);
+  const source = sources[n - 1];
+  if (!source?.url) return `[${n}]`;
+  let host = '';
+  try { host = new URL(source.url).hostname.replace(/^www\./, ''); } catch { /* keep blank */ }
+  return (
+    <a href={source.url} target="_blank" rel="noopener noreferrer"
+       title={`${source.document_name || host} - ${host}`}
+       className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-md bg-indigo-500/15 px-1 align-super text-[9px] font-black text-indigo-600 no-underline hover:bg-indigo-500 hover:text-white dark:text-indigo-300">
+      {n}
+    </a>
+  );
+};
+
 const parseInlineFormatting = (text) => {
   if (!text) return '';
 
-  // Split regex to capture block math ($$ or \[), inline math ($ or \(), bold (**), and inline code (`)
-  const parts = text.split(/(\$\$[^$]+\$\$|\$[^$]+\$|\\\(.*?\\\)|\\\[.*?\\\]|\*\*.*?\*\*|`.*?`)/g);
+  // Split regex to capture block math ($$ or \[), inline math ($ or \(), bold (**), inline code (`) and citations [n]
+  const parts = text.split(/(\$\$[^$]+\$\$|\$[^$]+\$|\\\(.*?\\\)|\\\[.*?\\\]|\*\*.*?\*\*|`.*?`|\[\d{1,2}\](?!\())/g);
 
   return parts.map((part, i) => {
     if (!part) return null;
+
+    const cite = /^\[(\d{1,2})\]$/.exec(part);
+    if (cite) return <Citation key={i} n={Number(cite[1])} />;
 
     // Block Math
     if ((part.startsWith('$$') && part.endsWith('$$')) || (part.startsWith('\\[') && part.endsWith('\\]'))) {
@@ -962,7 +985,52 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
           ) : (
             <>
               {msg.agentSteps && <AgentSteps steps={msg.agentSteps} runId={msg.agentRunId} live={msg.isLoading} checkpoint={msg.agentCheckpoint} />}
-              <MarkdownText text={msg.content} />
+              {(() => {
+                let refs = msg.references;
+                if (typeof refs === 'string') { try { refs = JSON.parse(refs); } catch { refs = []; } }
+                const webSources = Array.isArray(refs) ? refs.filter((r) => r?.url) : [];
+                if (!webSources.length) return <MarkdownText text={msg.content} />;
+                // "**Related**" and the lines under it become buttons, not text.
+                const split = String(msg.content || '').split(/\n\s*\*{0,2}Related(?: questions)?\*{0,2}:?\s*\n/i);
+                const body = split[0];
+                const related = !msg.isLoading && split.length > 1
+                  ? split[1].split('\n').map((l) => l.replace(/^\s*[-*\d.)]+\s*/, '').trim()).filter((l) => l.length > 3).slice(0, 3)
+                  : [];
+                return (
+                  <CitationContext.Provider value={webSources}>
+                    {msg.research && (
+                      <p className="mb-2 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                        Searched {msg.research.queries?.length || 1} {msg.research.queries?.length === 1 ? 'query' : 'queries'} · {msg.research.sources} sources · read {msg.research.read} {msg.research.read === 1 ? 'page' : 'pages'}
+                      </p>
+                    )}
+                    <MarkdownText text={body} />
+                    <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Sources">
+                      {webSources.slice(0, 8).map((src, i) => {
+                        let host = '';
+                        try { host = new URL(src.url).hostname.replace(/^www\./, ''); } catch { /* keep blank */ }
+                        return (
+                          <a key={src.url} href={src.url} target="_blank" rel="noopener noreferrer" title={src.document_name}
+                             className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg border border-zinc-200 bg-white/60 px-2 py-1 text-[11px] text-zinc-600 hover:border-indigo-400 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+                            <span className="font-black text-indigo-500">{i + 1}</span>
+                            <span className="truncate">{host || src.document_name}</span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                    {related.length > 0 && (
+                      <div className="mt-3 space-y-1" aria-label="Related questions">
+                        <p className="text-[11px] font-black uppercase tracking-wider text-zinc-500">Related</p>
+                        {related.map((q) => (
+                          <button key={q} type="button" onClick={() => window.dispatchEvent(new CustomEvent('smaran:send-prompt', { detail: { prompt: q } }))}
+                                  className="block w-full rounded-lg border border-zinc-200 px-3 py-1.5 text-left text-xs text-zinc-700 hover:border-indigo-400 hover:text-indigo-600 dark:border-zinc-800 dark:text-zinc-300 dark:hover:text-indigo-300">
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </CitationContext.Provider>
+                );
+              })()}
 
               {!msg.isLoading && msg.content && (() => {
                 const firstReportedNumber = (...values) => {
@@ -4353,9 +4421,10 @@ const ChatArea = ({
               const parsed = JSON.parse(line);
               if (parsed.references) {
                 references = parsed.references;
+                const research = parsed.research || null;
                 setMessagesFor(targetSessionId, (prev) =>
                   prev.map((msg) =>
-                    msg.id === assistantMessage.id ? { ...msg, references } : msg
+                    msg.id === assistantMessage.id ? { ...msg, references, ...(research ? { research } : {}) } : msg
                   )
                 );
               }

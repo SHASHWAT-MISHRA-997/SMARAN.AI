@@ -1152,12 +1152,21 @@ def _get_or_create_device_user(db: Session, device_id: str, device_fingerprint: 
 
 def get_current_user(request: Request, db: Session = Depends(get_db), session_token: Optional[str] = Cookie(None)) -> User:
     """Get current user from session token (httpOnly cookie), Authorization header, or device headers."""
-    token = session_token
+    # Both are tried: the header first, then the cookie. The page sends
+    # "Bearer <token>" from what it remembers, which after an email/password
+    # sign-in is "Bearer undefined" - and when only the header was read, that
+    # hid the valid session cookie, the request fell through to the local
+    # owner account, and the user's own conversation answered "You do not
+    # have access to this chat session".
     auth_header = request.headers.get("Authorization", "").strip()
+    candidates = []
     if auth_header.startswith("Bearer "):
-        token = auth_header[7:].strip()
-        
-    if token:
+        candidates.append(auth_header[7:].strip())
+    if session_token:
+        candidates.append(session_token)
+    for token in candidates:
+        if not token or token in ("undefined", "null"):
+            continue
         user = db.query(User).filter(User.session_token == token).first()
         if user and user.session_expires and user.session_expires > datetime.now():
             return user
@@ -4054,11 +4063,31 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     user_content = ""
     # Live Web Search Grounding (Gemini-Style)
     web_references = []
+    research_note = None
     has_url_in_prompt = bool(re.search(r"https?://[^\s<>\]\[\)\(]+", chat_req.prompt, re.I))
     if getattr(chat_req, "web_search", False) or has_url_in_prompt:
         try:
             logger.info(f"Executing live web/URL extraction for: '{processing_prompt[:60]}...'")
-            web_results = perform_web_search(processing_prompt, max_results=5)
+            # A question (no link in it) goes through the answer engine:
+            # several focused searches, ranked sources, the top pages read,
+            # numbered citations. A link is read directly, as before.
+            answer_engine_used = False
+            if not has_url_in_prompt:
+                from app import answer_engine
+                # A cloud model has room for the pages; a small local one
+                # gets the same sources, shorter.
+                roomy = bool(chat_req.cloud_provider) or (
+                    (chat_req.model or "auto") == "auto"
+                    and any(os.getenv(v, "").strip() for v in _CLOUD_PROVIDER_ENV_VARS.values()))
+                found = await asyncio.to_thread(answer_engine.research, processing_prompt,
+                                                6, 3 if roomy else 2, 1800 if roomy else 900)
+                web_results = found["sources"]
+                answer_engine_used = bool(web_results)
+                research_note = {"queries": found["queries"],
+                                 "read": sum(1 for s in web_results if s.get("read")),
+                                 "sources": len(web_results)}
+            else:
+                web_results = perform_web_search(processing_prompt, max_results=5)
             if web_results:
                 web_str_lines = []
                 for idx, item in enumerate(web_results, 1):
@@ -4066,17 +4095,22 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
                     web_references.append({
                         "document_name": item["title"],
                         "chunk_index": idx,
-                        "text": item["snippet"],
+                        "text": item["snippet"][:600],
                         "url": item["url"],
                         "score": 1.0
                     })
-                web_context_formatted = "\n\n".join(web_str_lines)[:3000]
+                if answer_engine_used:
+                    web_context_formatted = answer_engine.context(web_results, 8000 if roomy else 3500)
+                else:
+                    web_context_formatted = "\n\n".join(web_str_lines)[:3000]
                 user_content += (
                     f"\n\n LIVE WEB SEARCH RESULTS (REAL-TIME DATA YOU MUST USE THESE)\n"
                     f"{web_context_formatted}\n"
                     f" END WEB SEARCH RESULTS\n\n"
+                    + (answer_engine.instructions(len(web_results)) + "\n" if answer_engine_used else "") +
                     f"CRITICAL INSTRUCTION: You HAVE successfully performed a live web search. The results above are REAL, LIVE, and CURRENT. "
-                    f"You MUST synthesize your answer using these web search results. Cite the source URLs. "
+                    f"You MUST synthesize your answer using these web search results. "
+                    + ("" if answer_engine_used else "Cite the source URLs. ") +
                     f"For latest/current/version questions, explicitly distinguish stable or fully released versions from development, feature, alpha, beta, RC, preview, and prerelease versions. "
                     f"Never report a future or development branch as the latest stable release. Prefer primary/official sources over secondary summaries. "
                     f"Do NOT say you cannot access the web the search has already been done for you and the results are above."
@@ -4573,7 +4607,8 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         token_measurement_source = "unavailable"
         
         # Yield the source references and routed model immediately at the start of stream
-        yield json.dumps({"references": retrieved_chunks, "model_routed": selected_model, "detected_language": detected_lang, "target_language": target_language}) + "\n"
+        yield json.dumps({"references": retrieved_chunks, "model_routed": selected_model, "detected_language": detected_lang, "target_language": target_language,
+                          **({"research": research_note} if research_note else {})}) + "\n"
 
         # Explicit cloud route with free-only provider/model fallback. Never
         # silently falls back to a paid OpenRouter route or to local inference.
