@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { takeStudioPrompt } from '../utils/studioHandoff';
-import { Film, Loader2, AlertCircle, Download, Sparkles, RefreshCw } from 'lucide-react';
+import { Film, Loader2, AlertCircle, Download, Sparkles, RefreshCw, Cpu, Cloud } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { isNativeApp } from '../utils/hostLink';
 import MediaPackages from './MediaPackages';
+import CloudVideo from './CloudVideo';
 
 /**
  * A screen for making short clips.
@@ -33,6 +34,15 @@ const field = 'w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-
 
 
 const VideoStudio = () => {
+  // Where the clip is made: this PC (private, slow on small cards) or the
+  // cloud (Replicate, minutes). Remembered on this device.
+  const [engine, setEngine] = useState(() => {
+    try { return localStorage.getItem('smaran.video.engine') === 'cloud' ? 'cloud' : 'local'; } catch { return 'local'; }
+  });
+  const chooseEngine = (id) => {
+    setEngine(id);
+    try { localStorage.setItem('smaran.video.engine', id); } catch { /* private mode */ }
+  };
   const [install, setInstall] = useState(null);
   const [capability, setCapability] = useState(null);
   const [suggested, setSuggested] = useState(null);
@@ -173,11 +183,23 @@ const VideoStudio = () => {
             <Film className="h-5 w-5 text-indigo-500" /> Video
           </h1>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Videos rendered on this machine, from a few seconds up to an hour. Nothing is uploaded, and the
-            weights stay on your disk once fetched.
+            {engine === 'cloud'
+              ? 'Made on Replicate with your key - Kling, Hailuo, Seedance, Wan, LTX and more. Minutes, not hours; billed to your account.'
+              : 'Videos rendered on this machine, from a few seconds up to an hour. Nothing is uploaded, and the weights stay on your disk once fetched.'}
           </p>
         </div>
 
+        <div className="inline-flex rounded-xl border border-zinc-300 dark:border-zinc-700 p-1" role="tablist" aria-label="Where the video is made">
+          {[['local', 'This PC', Cpu], ['cloud', 'Cloud (faster)', Cloud]].map(([id, label, Icon]) => (
+            <button key={id} type="button" role="tab" aria-selected={engine === id} onClick={() => chooseEngine(id)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${engine === id ? 'bg-indigo-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>
+              <Icon className="h-3.5 w-3.5" /> {label}
+            </button>
+          ))}
+        </div>
+
+        {engine === 'cloud' && <CloudVideo />}
+        {engine === 'local' && (<>
         {loadError && (
           <div className={`${card} flex items-start gap-3 p-4 text-sm text-amber-700 dark:text-amber-300`}>
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -320,6 +342,7 @@ const VideoStudio = () => {
             </div>
           </div>
         )}
+        </>)}
       </div>
     </div>
   );
