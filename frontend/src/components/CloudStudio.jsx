@@ -15,12 +15,17 @@ const POLL_MS = 2500;
 const KINDS = {
   video: { base: '/api/video', file: '/api/video/file', ext: 'mp4', noun: 'video', names: 'Kling, Hailuo, Seedance, Wan, LTX',
            placeholder: 'Describe the clip: subject, action, camera, light. For example: a red kite over Jaipur at sunrise, slow drone shot.' },
+  comfy: { base: '/api/image/comfy', jobs: '/api/image', file: '/api/image/file', ext: 'png', noun: 'image', names: 'your ComfyUI checkpoints',
+           placeholder: 'Describe the picture. ComfyUI on this computer makes it with the checkpoint you choose - or with your own workflow below.' },
   image: { base: '/api/image', file: '/api/image/file', ext: 'png', noun: 'image', names: 'Flux, Stable Diffusion 3.5, Qwen-Image, Seedream, Ideogram',
            placeholder: 'Describe the picture: subject, style, light, framing. For example: a watercolour of a Varanasi ghat at dawn.' },
 };
 
 export default function CloudVideo({ onOpenModelHub, kind = 'video' }) {
   const K = KINDS[kind] || KINDS.video;
+  const comfy = kind === 'comfy';
+  const jobsBase = K.jobs || K.base;
+  const [workflow, setWorkflow] = useState('');
   const [info, setInfo] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [model, setModel] = useState('');
@@ -32,9 +37,9 @@ export default function CloudVideo({ onOpenModelHub, kind = 'video' }) {
   const timer = useRef(null);
 
   useEffect(() => {
-    fetchWithAuth(`${API_BASE}${K.base}/cloud`)
+    fetchWithAuth(`${API_BASE}${K.base}${comfy ? '' : '/cloud'}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((data) => { setInfo(data); setModel((m) => m || data.models?.[0]?.id || data.model || ''); })
+      .then((data) => { setInfo(comfy ? { ...data, configured: data.running } : data); setModel((m) => m || data.models?.[0]?.id || data.model || ''); })
       .catch(() => setLoadError('Could not reach SMARAN on this computer.'));
     return () => window.clearTimeout(timer.current);
   }, []);
@@ -42,7 +47,7 @@ export default function CloudVideo({ onOpenModelHub, kind = 'video' }) {
   const watch = useCallback((id) => {
     const tick = async () => {
       try {
-        const res = await fetchWithAuth(`${API_BASE}${K.base}/job/${id}`);
+        const res = await fetchWithAuth(`${API_BASE}${jobsBase}/job/${id}`);
         const record = await res.json();
         setJob({ ...record, id });
         if (record.status === 'running') timer.current = window.setTimeout(tick, POLL_MS);
@@ -58,9 +63,9 @@ export default function CloudVideo({ onOpenModelHub, kind = 'video' }) {
     setError('');
     setJob({ status: 'running', messages: ['Sending to Replicate…'] });
     try {
-      const res = await fetchWithAuth(`${API_BASE}${K.base}/cloud/generate`, {
+      const res = await fetchWithAuth(`${API_BASE}${K.base}${comfy ? '' : '/cloud'}/generate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(kind === 'video' ? { prompt: prompt.trim(), model, duration: Number(duration), aspect_ratio: aspect } : { prompt: prompt.trim(), model, aspect_ratio: aspect }),
+        body: JSON.stringify(kind === 'video' ? { prompt: prompt.trim(), model, duration: Number(duration), aspect_ratio: aspect } : { prompt: prompt.trim(), model, aspect_ratio: aspect, ...(comfy ? { workflow } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `The ${K.noun} could not be started.`);
@@ -68,10 +73,20 @@ export default function CloudVideo({ onOpenModelHub, kind = 'video' }) {
     } catch (err) { setJob(null); setError(err.message); }
   };
 
-  const stop = () => job?.id && kind === 'video' && fetchWithAuth(`${API_BASE}${K.base}/job/${job.id}/stop`, { method: 'POST' }).catch(() => {});
+  const stop = () => job?.id && kind !== 'image' && fetchWithAuth(`${API_BASE}${jobsBase}/job/${job.id}/stop`, { method: 'POST' }).catch(() => {});
 
   if (loadError) return <p className={`${card} p-4 text-sm text-amber-600`}>{loadError}</p>;
   if (!info) return <p className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Checking Replicate…</p>;
+
+  if (comfy && !info.configured) {
+    return (
+      <div className={`${card} space-y-2 p-4 text-sm`}>
+        <p className="font-bold text-zinc-900 dark:text-white">ComfyUI is not running on this computer</p>
+        <p className="text-zinc-500">{info.error} SMARAN uses the ComfyUI you already have - its checkpoints (Flux, SD 3.5, SDXL...) and any workflow you export from it. Nothing leaves this computer.</p>
+        <a href="https://github.com/comfyanonymous/ComfyUI" target="_blank" rel="noopener noreferrer" className="inline-block rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white">Get ComfyUI</a>
+      </div>
+    );
+  }
 
   if (!info.configured) {
     return (
@@ -112,18 +127,29 @@ export default function CloudVideo({ onOpenModelHub, kind = 'video' }) {
           </label>
           <div className="flex items-end">
             {running ? (
-              <button type="button" onClick={stop} disabled={kind !== 'video'} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/50 px-4 py-2 text-sm font-bold text-rose-500">
+              <button type="button" onClick={stop} disabled={kind === 'image'} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/50 px-4 py-2 text-sm font-bold text-rose-500">
                 <Square className="h-4 w-4" /> Stop
               </button>
             ) : (
-              <button type="submit" disabled={!prompt.trim() || !model} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
-                <Play className="h-4 w-4" /> Make it in the cloud
+              <button type="submit" disabled={!prompt.trim() || (!model && !workflow.trim())} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
+                <Play className="h-4 w-4" /> {comfy ? 'Make it in ComfyUI' : 'Make it in the cloud'}
               </button>
             )}
           </div>
         </div>
-        {info.error && <p className="text-[11px] text-amber-600">{info.error}</p>}
-        <p className="flex items-center gap-1.5 text-[11px] text-zinc-500"><Cloud className="h-3.5 w-3.5" /> Settings are sent only to models that take them. Billed to your Replicate account.</p>
+        {comfy && (
+          <details className="text-xs">
+            <summary className="cursor-pointer font-bold text-zinc-500">Use my own ComfyUI workflow (optional)</summary>
+            <p className="my-1 text-[11px] text-zinc-500">In ComfyUI: Workflow -&gt; Export (API). Paste it here and write {'{{prompt}}'} where the prompt goes. Any nodes - ControlNet, IP-Adapter, LoRA, upscalers.</p>
+            <textarea value={workflow} onChange={(e) => setWorkflow(e.target.value)} rows={4} disabled={running}
+                      placeholder='{"6": {"class_type": "CLIPTextEncode", "inputs": {"text": "{{prompt}}", ...}}, ...}'
+                      className={`${field} font-mono text-[11px]`} />
+          </details>
+        )}
+        {info.error && !comfy && <p className="text-[11px] text-amber-600">{info.error}</p>}
+        <p className="flex items-center gap-1.5 text-[11px] text-zinc-500"><Cloud className="h-3.5 w-3.5" /> {comfy
+          ? `ComfyUI at ${info.url}${info.device ? ` on ${info.device}` : ''} - nothing leaves this computer.`
+          : 'Settings are sent only to models that take them. Billed to your Replicate account.'}</p>
       </form>
 
       {job && (

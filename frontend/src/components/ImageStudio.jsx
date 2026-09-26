@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { takeStudioPrompt } from '../utils/studioHandoff';
-import { Image as ImageIcon, Loader2, AlertCircle, Download, Sparkles, ChevronDown, RefreshCw, Cpu, Cloud } from 'lucide-react';
+import { Image as ImageIcon, Loader2, AlertCircle, Download, Sparkles, ChevronDown, RefreshCw, Cpu, Cloud, Workflow } from 'lucide-react';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import { isNativeApp } from '../utils/hostLink';
 import MediaPackages from './MediaPackages';
@@ -46,7 +46,7 @@ const ImageStudio = () => {
   // This PC (private, needs the image packages and a GPU for speed) or the
   // cloud (Replicate: Flux, SD 3.5, Qwen-Image... in seconds). Remembered.
   const [engine, setEngine] = useState(() => {
-    try { return localStorage.getItem('smaran.image.engine') === 'cloud' ? 'cloud' : 'local'; } catch { return 'local'; }
+    try { const saved = localStorage.getItem('smaran.image.engine'); return ['cloud', 'comfy'].includes(saved) ? saved : 'local'; } catch { return 'local'; }
   });
   const chooseEngine = (id) => {
     setEngine(id);
@@ -193,14 +193,16 @@ const ImageStudio = () => {
             <ImageIcon className="h-5 w-5 text-indigo-500" /> Images
           </h1>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {engine === 'cloud'
+            {engine === 'comfy'
+              ? 'Made by the ComfyUI on this computer - its checkpoints, or any workflow you export from it.'
+              : engine === 'cloud'
               ? 'Made on Replicate with your key - Flux, Stable Diffusion 3.5, Qwen-Image, Seedream and more, in seconds. Billed to your account.'
               : 'Pictures made on this machine. Nothing is sent to a service, and the model files stay on your disk once downloaded.'}
           </p>
         </div>
 
         <div className="inline-flex rounded-xl border border-zinc-300 dark:border-zinc-700 p-1" role="tablist" aria-label="Where the picture is made">
-          {[['local', 'This PC', Cpu], ['cloud', 'Cloud (faster)', Cloud]].map(([id, label, Icon]) => (
+          {[['local', 'This PC', Cpu], ['comfy', 'ComfyUI', Workflow], ['cloud', 'Cloud (faster)', Cloud]].map(([id, label, Icon]) => (
             <button key={id} type="button" role="tab" aria-selected={engine === id} onClick={() => chooseEngine(id)}
                     className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${engine === id ? 'bg-indigo-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'}`}>
               <Icon className="h-3.5 w-3.5" /> {label}
@@ -209,6 +211,7 @@ const ImageStudio = () => {
         </div>
 
         {engine === 'cloud' && <CloudVideo kind="image" />}
+        {engine === 'comfy' && <CloudVideo kind="comfy" />}
         {engine === 'local' && (<>
         {loadError && (
           <div className={`${card} flex items-start gap-3 p-4 text-sm text-amber-700 dark:text-amber-300`}>
