@@ -36,6 +36,8 @@ some of them and quietly fail for the rest.
 
 from __future__ import annotations
 
+import asyncio
+
 import json
 import logging
 import re
@@ -104,9 +106,18 @@ _FINISHED = re.compile(r"\b(all (the )?tests pass|tests? (now )?pass(es|ed)?|tas
 
 
 def _decision(value) -> tuple:
-    """(approved, note) from whatever the approver returned: a bool or {"approve", "note"}."""
+    """(approved, note) from whatever the approver returned.
+
+    A bool, {"approve", "note"}, or (approved, note). A tuple read as a plain
+    truth value is always "yes" - (False, "no") included - so each shape is
+    taken apart explicitly: a refusal must never become an approval.
+    """
     if isinstance(value, dict):
         return bool(value.get("approve")), str(value.get("note") or "").strip()[:2000]
+    if isinstance(value, (tuple, list)):
+        approved = bool(value[0]) if len(value) > 0 else False
+        note = str(value[1] or "").strip()[:2000] if len(value) > 1 else ""
+        return approved, note
     return bool(value), ""
 
 
@@ -433,6 +444,12 @@ async def run(task: str, model: str = "",
                 live = safety.load()
                 current_mode, current_allow = live["approval_mode"], live["allowlist"]
             verdict = safety.decide(call["name"], call["arguments"], current_mode, current_allow)
+            if current_mode == "smart" and verdict["verdict"] == "allow" and call["name"] in safety.FILE_CHANGES:
+                # A second opinion from Jev, when a TypeSafe key is saved. It
+                # can turn an automatic edit into a question, never the reverse.
+                caution = await asyncio.to_thread(safety.jev_caution, call["name"], call["arguments"], task)
+                if caution:
+                    verdict = {"verdict": "ask", "reason": caution}
             if verdict["verdict"] == "refuse":
                 refused = verdict["reason"]
                 yield {"type": "approval", "step": step, "approved": False, "reason": refused}
@@ -452,6 +469,9 @@ async def run(task: str, model: str = "",
 
         if refused:
             result = "Refused, and it will be refused however it is asked: %s" % refused
+        elif declined and note:
+            result = ("The person declined this action, so it was not carried out, "
+                      "and told you instead:\n%s\nDo what they said." % note)
         elif declined:
             result = ("The person declined this action, so it was not carried out. "
                       "Do not repeat it; choose another approach or ask what they want.")
@@ -469,7 +489,10 @@ async def run(task: str, model: str = "",
                         yield {"type": "checkpoint", "run_id": run_id}
                 except Exception:  # noqa: BLE001 - the tool reports a bad path itself
                     pass
-            result = toolbox.execute(call["name"], call["arguments"], workspace)
+            # In a thread: a command can take minutes, and run on the event
+            # loop it froze the whole server - the Allow button included, so
+            # the next approval could never arrive and the run looked stuck.
+            result = await asyncio.to_thread(toolbox.execute, call["name"], call["arguments"], workspace)
             if redact_secrets:
                 result = safety.redact(result)
             if note:

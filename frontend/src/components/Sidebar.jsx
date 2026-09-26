@@ -1109,11 +1109,17 @@ const Sidebar = ({
       {sidebarDesktop}
       {mobileSidebar}
       {memoryModal}
-      <ModelHubModal
-        isOpen={isModelHubOpen}
-        onClose={() => setIsModelHubOpen(false)}
-        token={token}
-      />
+      {/* Only when nobody above owns it. The app passes its own open state
+          and draws the hub itself, so this one opened as well - two hubs
+          stacked, each loading the model list, and the wheel scrolling the
+          one underneath. */}
+      {externalModelHubOpen === undefined && (
+        <ModelHubModal
+          isOpen={isModelHubOpen}
+          onClose={() => setIsModelHubOpen(false)}
+          token={token}
+        />
+      )}
     </>
   );
 };

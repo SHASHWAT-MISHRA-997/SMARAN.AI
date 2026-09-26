@@ -103,8 +103,71 @@ def check_model(name: Optional[str] = None) -> dict:
     return _call("GET", "/models/" + name)
 
 
-def generate(prompt: str, on_message: Optional[Callable[[str], None]] = None) -> str:
-    """Run one hosted generation and return the URL of the finished video."""
+def list_models(collection: str = "text-to-video") -> list:
+    """Replicate's own text-to-video collection for this key, most-used first.
+
+    Kling, Hailuo (MiniMax), Seedance (ByteDance), Wan, LTX, Veo... appear
+    here when Replicate hosts them - read live, so names are never guessed."""
+    listing = _call("GET", "/collections/%s" % collection)
+    models = []
+    for m in listing.get("models", []):
+        if not m.get("owner") or not m.get("name"):
+            continue
+        models.append({"id": "%s/%s" % (m["owner"], m["name"]),
+                       "description": (m.get("description") or "")[:200],
+                       "runs": m.get("run_count") or 0})
+    models.sort(key=lambda m: -m["runs"])
+    return models
+
+
+def input_fields(details: dict) -> set:
+    """The input names a model accepts, from its published schema."""
+    try:
+        schema = details["latest_version"]["openapi_schema"]["components"]["schemas"]["Input"]["properties"]
+        return set(schema)
+    except (KeyError, TypeError):
+        return {"prompt"}
+
+
+def cancel(prediction_id: str) -> None:
+    try:
+        _call("POST", "/predictions/%s/cancel" % prediction_id)
+    except Exception:  # noqa: BLE001 - it may already be over
+        pass
+
+
+_DELIVERY_HOSTS = (".replicate.delivery", ".replicate.com")
+MAX_DOWNLOAD = 800 * 1024 * 1024
+
+
+def download(url: str, path: str) -> None:
+    """Save the finished file here: Replicate's links expire after an hour."""
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    if urlparse(url).scheme != "https" or not any(host == h[1:] or host.endswith(h) for h in _DELIVERY_HOSTS):
+        raise HostedVideoError("The result came back from an unexpected address (%s); not downloading it." % host)
+    written = 0
+    with request.urlopen(request.Request(url, headers={"User-Agent": "SMARAN.AI"}), timeout=120) as resp, \
+            open(path + ".part", "wb") as fh:
+        while True:
+            chunk = resp.read(1 << 20)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > MAX_DOWNLOAD:
+                raise HostedVideoError("The file is larger than %d MB; stopped downloading." % (MAX_DOWNLOAD >> 20))
+            fh.write(chunk)
+    os.replace(path + ".part", path)
+
+
+def generate(prompt: str, on_message: Optional[Callable[[str], None]] = None,
+             model: str = "", options: Optional[dict] = None,
+             should_stop: Optional[Callable[[], bool]] = None, kind: str = "video") -> str:
+    """Run one hosted generation and return the URL of the finished video.
+
+    `options` (duration, aspect_ratio, resolution...) are sent only when the
+    chosen model's schema has that input - models differ, and an unknown
+    field is an error on some of them."""
     def note(text: str) -> None:
         logger.info("hosted video: %s", text)
         if on_message:
@@ -117,11 +180,16 @@ def generate(prompt: str, on_message: Optional[Callable[[str], None]] = None) ->
             "your account and the prompt goes to Replicate."
         )
 
-    name = model_name()
+    name = (model or "").strip() or model_name()
     details = check_model(name)
     note("Using %s on Replicate." % name)
+    accepted = input_fields(details)
+    inputs = {"prompt": prompt}
+    for key, value in (options or {}).items():
+        if key in accepted and value not in (None, ""):
+            inputs[key] = value
 
-    started = _call("POST", "/models/%s/predictions" % name, {"input": {"prompt": prompt}})
+    started = _call("POST", "/models/%s/predictions" % name, {"input": inputs})
     prediction_id = started.get("id")
     if not prediction_id:
         raise HostedVideoError("Replicate accepted the request without returning an id.")
@@ -132,6 +200,9 @@ def generate(prompt: str, on_message: Optional[Callable[[str], None]] = None) ->
     last_status = ""
     while time.time() < deadline:
         time.sleep(3)
+        if should_stop and should_stop():
+            cancel(prediction_id)
+            raise HostedVideoError("Stopped. The run on Replicate was cancelled.")
         record = _call("GET", "/predictions/" + prediction_id)
         status = record.get("status", "")
         if status != last_status:
@@ -144,8 +215,8 @@ def generate(prompt: str, on_message: Optional[Callable[[str], None]] = None) ->
             url = output[0] if isinstance(output, list) and output else output
             if not isinstance(url, str) or not url.startswith("http"):
                 raise HostedVideoError(
-                    "The model finished but did not return a video URL. It may "
-                    "not be a video model; %s is what was asked for." % name
+                    "The model finished but did not return a %s URL. It may "
+                    "not be a %s model; %s is what was asked for." % (kind, kind, name)
                 )
             return url
 

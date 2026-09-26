@@ -173,6 +173,14 @@ A raw `docker pull`/`docker run` can see only container/VM telemetry. Real host 
 - Host telemetry bridge for Windows, macOS, and Linux; missing readings remain unavailable.
 - Responsive performance drawer/bottom sheet tested from 320 px phones through desktop viewports.
 - Plugin/skill/connector entries remain `Registered` or `Setup required` until their runtime actually initializes.
+- Web answers (1.0.21): a compound question becomes up to three searches, sources are ranked, the top pages are read, and the answer cites them as numbered [n] links with three follow-up questions.
+- Auto routing (1.0.21) orders cloud models for the task - coder models for code, thinking models for reasoning, small fast ones for quick questions - and moves past a model that is rate-limited or failing.
+- Computer use (1.0.21): Live Browser -> Whole computer. A vision model looks at the screen and one step at a time clicks, types, presses keys, scrolls and opens apps, with each step's screenshot shown and Stop always available. It needs Computer use on in Settings, an X11 session with `xdotool` on Linux, and a model that can see (local, or a saved Gemini/OpenAI key).
+- Cloud images and video (1.0.21) on your Replicate key - the model list is Replicate's own, read live - and Images can drive a ComfyUI already running on this computer, with its checkpoints or any workflow exported in API format.
+- SMARAN Code (1.0.21): runs keep going in the background while you start another task; approvals accept typed instructions; with no folder open it works in `~/SMARAN/Code` (`SMARAN_CODE_HOME` moves it).
+- Reminders, clipboard history (memory only, secrets skipped) and a "why is my PC slow" health check, by voice or chat.
+- Telegram and Discord bots answer only accounts paired with a one-time code from Settings; webhooks always require a secret.
+- Optional TypeSafe Jev key: a second, fast safety opinion before computer-use steps and Smart-mode edits. It can only add caution.
 
 ## Honest limitations
 
@@ -184,6 +192,8 @@ A raw `docker pull`/`docker run` can see only container/VM telemetry. Real host 
 - Static model-catalog descriptions and historical benchmark metadata are not presented as runtime measurements.
 - Saved custom connectors are not active until a real protocol/authentication handshake is implemented and succeeds.
 - Docker Desktop has its own licence terms; larger commercial organizations should review them before deployment.
+- Computer use is driven by whatever vision model is available; small local models misplace clicks more often than large ones. It does not work on Wayland, which blocks other programs from capturing the screen and sending input.
+- Cloud images and video are billed by Replicate to the key's account, and prompts go to Replicate. Very large open models (Wan 2.2 14B, HunyuanVideo, FLUX.2) need far more GPU memory than a 6 GB card; use the cloud or ComfyUI for them.
 
 ## SMARAN.AI Codex — the VS Code extension
 

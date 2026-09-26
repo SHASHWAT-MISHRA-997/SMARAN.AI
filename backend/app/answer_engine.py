@@ -68,6 +68,41 @@ Emit = Callable[[Dict], None]
 LLM = Callable[[List[Dict]], str]
 
 
+# Reference and official sources, and the farms that rank well but say
+# little (from the parallel Perplexity-style work on this code).
+_AUTHORITY = re.compile(
+    r"(\.gov(\.[a-z]{2})?$|\.edu$|\.ac\.[a-z]{2}$|wikipedia\.org$|who\.int$|un\.org$|"
+    r"docs\.|developer\.|learn\.microsoft\.com$|python\.org$|mozilla\.org$|w3\.org$|ietf\.org$|"
+    r"arxiv\.org$|nature\.com$|sciencedirect\.com$|nih\.gov$|github\.com$|reuters\.com$|apnews\.com$|"
+    r"bbc\.(com|co\.uk)$|thehindu\.com$|pib\.gov\.in$|rbi\.org\.in$|isro\.gov\.in$)", re.I)
+_LOW = re.compile(r"(pinterest\.|quora\.com$|answers\.com$|ehow\.com$|slideshare\.net$|"
+                  r"scribd\.com$|coursehero\.com$|brainly\.)", re.I)
+
+
+
+def decompose(query: str) -> List[str]:
+    """The query plus up to two focused parts when it asks several things."""
+    q = re.sub(r"\s+", " ", (query or "").strip())
+    parts: List[str] = []
+    vs = re.split(r"\s+(?:vs\.?|versus|or|compared (?:to|with))\s+", q, maxsplit=1, flags=re.I)
+    if len(vs) == 2 and all(len(p.split()) <= 8 for p in vs):
+        # "Compare A vs B": search each side on its own, then together.
+        head = re.sub(r"^(?:compare|difference between)\s+", "", vs[0], flags=re.I)
+        parts = [head.strip(" ?"), vs[1].strip(" ?")]
+    elif q.count("?") >= 2:
+        parts = [p.strip() + "?" for p in q.split("?") if len(p.split()) >= 3][:2]
+    elif re.search(r"\s+and\s+(?:also\s+)?(?:what|how|why|when|where|who|which|is|are|does|do|can|will|should)\b", q, re.I):
+        pieces = re.split(r"\s+and\s+(?:also\s+)?(?=(?:what|how|why|when|where|who|which|is|are|does|do|can|will|should)\b)",
+                          q, maxsplit=1, flags=re.I)
+        parts = [p.strip(" ?") for p in pieces if len(p.split()) >= 3]
+    out = [q]
+    for p in parts:
+        if p and p.lower() != q.lower() and p not in out:
+            out.append(p)
+    return out[:3]
+
+
+
 # ---------------------------------------------------------------------------
 # Searching and reading
 # ---------------------------------------------------------------------------
@@ -231,14 +266,14 @@ def is_timely(question: str) -> bool:
 
 def plan_queries(question: str, history: List[Dict], mode: str, llm: Optional[LLM]) -> List[str]:
     """Search queries for the question: the question itself, or a model's short plan."""
-    wanted = PLAN[mode]["queries"]
+    wanted = PLAN[mode]["queries"] if llm is not None else 3
     context = "\n".join("%s: %s" % (m["role"], str(m["content"])[:300]) for m in history[-4:])
     if llm is None or wanted <= 1:
         if history and len(question.split()) < 6:
             # A short follow-up ("and its price?") searched alone finds nothing.
             last_user = next((m["content"] for m in reversed(history) if m["role"] == "user"), "")
             return [dated(("%s %s" % (str(last_user)[:120], question)).strip())]
-        return [dated(question)]
+        return [dated(q) for q in decompose(question)]
     prompt = (
         "Plan a web search. Write %d short, specific search-engine queries that together find "
         "everything needed to answer the question well. Make each query stand alone (resolve "
@@ -363,7 +398,17 @@ def _select(question: str, queries: List[str], found: Dict[str, Dict], pages: Di
     def official(url: str) -> int:
         labels = _domain(url).split(".")
         return 1 if any(term in labels[:-1] for term in official_terms) else 0
-    order = sorted((url for url in found if url in chosen), key=lambda u: -official(u))
+    def standing(url: str) -> int:
+        host = _domain(url)
+        return official(url) * 2 + (1 if _AUTHORITY.search(host) else 0) - (2 if _LOW.search(host) else 0)
+    order, per_site = [], {}
+    for url in sorted((u for u in found if u in chosen), key=lambda u: -standing(u)):
+        # At most two sources from one site, so one site cannot be every citation.
+        site = _domain(url)
+        if per_site.get(site, 0) >= 2:
+            continue
+        per_site[site] = per_site.get(site, 0) + 1
+        order.append(url)
     sources = []
     for number, url in enumerate(order[:12], 1):
         row = found[url]

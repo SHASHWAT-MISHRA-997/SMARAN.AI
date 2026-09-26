@@ -230,3 +230,23 @@ def redact(text: str) -> str:
     for pattern in _SECRETS:
         out = pattern.sub("[REDACTED]", out)
     return out
+
+
+def jev_caution(name: str, arguments: Dict, task: str = "") -> Optional[str]:
+    """Why Jev thinks this file change should be seen first, or None.
+
+    Only consulted in smart mode for edits that would otherwise run, and only
+    when a TypeSafe key is saved. Failure of any kind is "no opinion"."""
+    from app import jev
+    if not jev.key():
+        return None
+    content = str(arguments.get("content") or arguments.get("replace") or "")[:4000]
+    state = json.dumps({"task": task[:1000], "tool": name, "path": arguments.get("path", ""),
+                        "removes": str(arguments.get("find", ""))[:2000], "writes": content},
+                       ensure_ascii=False)
+    p = jev.risky(state, "Could this file change weaken security (auth, permissions, secrets, "
+                         "input checks), delete or overwrite important work, or run something "
+                         "harmful? Answer yes only if it plausibly could.")
+    if p is not None and p >= jev.THRESHOLD:
+        return "Jev rates this change as risky (%d%%), so it is shown first." % round(p * 100)
+    return None

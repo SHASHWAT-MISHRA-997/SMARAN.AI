@@ -33,6 +33,7 @@ export function applyAgentEvent(steps, event) {
         status: event.approved ? 'running' : 'declined',
         reason: event.reason || list[i].reason || '',
         refused: Boolean(event.reason && !event.approved),
+        note: event.note || list[i].note || '',
       };
     }
   } else if (event.type === 'tool_result') {

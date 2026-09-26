@@ -92,7 +92,7 @@ def test_a_note_with_deny_reaches_the_model(tmp_path, monkeypatch):
         return {"approve": False, "note": "name it greeting.txt"}
 
     collect("write hello", tmp_path, deny)
-    assert "They said: name it greeting.txt" in seen[-1]
+    assert "name it greeting.txt" in seen[-1] and "declined" in seen[-1]
     assert not (tmp_path / "hello.txt").exists()
 
 
@@ -232,3 +232,81 @@ def test_an_edit_written_on_one_line_with_escaped_breaks_keeps_its_lines():
     assert call["arguments"]["find"] == "def f():\n    return 1"
     # A real escape inside a string literal is left as it is.
     assert call["arguments"]["replace"] == 'print("a' + slash + 'nb")'
+def test_what_the_person_types_with_a_refusal_reaches_the_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(loop, "_ask_model", scripted([WRITE, "Understood."]))
+
+    async def refuse_with_note(step, *call):
+        return {"approve": False, "note": "call it greeting.txt instead"}
+
+    events = collect("write hello", tmp_path, refuse_with_note)
+    assert not (tmp_path / "hello.txt").exists()
+    result = next(e for e in events if e["type"] == "tool_result")["result"]
+    assert "greeting.txt" in result
+    assert next(e for e in events if e["type"] == "approval")["note"] == "call it greeting.txt instead"
+
+
+def test_what_the_person_types_with_an_allow_reaches_the_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(loop, "_ask_model", scripted([WRITE, "Done."]))
+
+    async def allow_with_note(step, *call):
+        return {"approve": True, "note": "then add a test"}
+
+    events = collect("write hello", tmp_path, allow_with_note)
+    assert (tmp_path / "hello.txt").read_text() == "hi"
+    result = next(e for e in events if e["type"] == "tool_result")["result"]
+    assert "then add a test" in result
+
+
+def test_the_route_passes_the_typed_message(tmp_path):
+    from app.agent import routes
+
+    async def go():
+        future = asyncio.get_running_loop().create_future()
+        routes._approvals["abcdefgh5678:2"] = {"future": future, "name": "write_file", "arguments": {}}
+        await routes.agent_approve(routes.ApprovalDecision(
+            run_id="abcdefgh5678", step=2, approve=False, note="  use pytest  "))
+        return future.result()
+
+    assert asyncio.run(go()) == {"approve": False, "note": "use pytest"}
+
+
+def test_a_slow_command_does_not_freeze_the_server(tmp_path, monkeypatch):
+    """The tool runs in a thread: the event loop keeps answering meanwhile."""
+    import time
+    from app.agent import tools as toolbox
+
+    monkeypatch.setattr(loop, "_ask_model", scripted([READ, "Listed."]))
+    real = toolbox.execute
+
+    def slow(*a, **k):
+        time.sleep(0.4)
+        return real(*a, **k)
+
+    monkeypatch.setattr(toolbox, "execute", slow)
+    ticks = []
+
+    async def go():
+        async def ticker():
+            for _ in range(6):
+                ticks.append(1)
+                await asyncio.sleep(0.05)
+        t = asyncio.create_task(ticker())
+        events = [e async for e in loop.run("look", root=str(tmp_path))]
+        await t
+        return events
+
+    asyncio.run(go())
+    assert len(ticks) >= 5
+
+
+def test_no_open_folder_uses_the_projects_folder(tmp_path, monkeypatch):
+    from app.agent import tools as toolbox
+    monkeypatch.setenv("SMARAN_CODE_HOME", str(tmp_path / "projects"))
+    ws = toolbox.workspace_for("")
+    assert str(ws.root).endswith("projects")
+
+
+def test_every_shape_of_refusal_is_a_refusal():
+    for refusal in (False, {"approve": False, "note": "no"}, (False, "no"), [False], ()):
+        assert loop._decision(refusal)[0] is False, refusal
+    assert loop._decision((True, "go on")) == (True, "go on")

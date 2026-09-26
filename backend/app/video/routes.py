@@ -476,3 +476,76 @@ async def job(job_id: str):
     if not record:
         raise HTTPException(status_code=404, detail="No such job.")
     return record
+
+
+# ---------------------------------------------------------------------------
+# Cloud video (Replicate): Kling, Hailuo, Seedance, Wan, LTX... on your key.
+# hosted.py had it all and nothing called it - the Video page only ever
+# rendered on this PC.
+# ---------------------------------------------------------------------------
+
+class CloudRequest(BaseModel):
+    prompt: str = Field(..., min_length=3, max_length=2000)
+    model: str = Field("", max_length=120)
+    duration: Optional[int] = Field(None, ge=1, le=60)
+    aspect_ratio: Optional[str] = Field(None, pattern=r"^\d{1,2}:\d{1,2}$")
+    resolution: Optional[str] = Field(None, pattern=r"^\d{3,4}p$")
+
+
+@router.get("/cloud")
+async def cloud_status():
+    import asyncio
+    from . import hosted
+    info = hosted.status()
+    info["models"], info["error"] = [], ""
+    if info["configured"]:
+        try:
+            info["models"] = await asyncio.to_thread(hosted.list_models)
+        except Exception as exc:  # noqa: BLE001 - shown, the page still works
+            info["error"] = str(exc)[:300]
+    return info
+
+
+def _run_cloud(job_id: str, req: CloudRequest, out_path: str) -> None:
+    from . import hosted
+
+    def note(text: str) -> None:
+        with _jobs_lock:
+            _jobs[job_id]["messages"].append(text)
+            _jobs[job_id]["updated"] = time.time()
+
+    def stopping() -> bool:
+        with _jobs_lock:
+            return bool(_jobs[job_id].get("stop_requested"))
+
+    try:
+        options = {"duration": req.duration, "aspect_ratio": req.aspect_ratio, "resolution": req.resolution}
+        url = hosted.generate(req.prompt, note, model=req.model, options=options, should_stop=stopping)
+        note("Finished on Replicate; saving the video here.")
+        hosted.download(url, out_path)
+        with _jobs_lock:
+            _jobs[job_id].update(status="completed", result={"path": out_path, "model": req.model or hosted.model_name(),
+                                                            "where": "replicate"})
+    except Exception as exc:  # noqa: BLE001 - the words are the point
+        with _jobs_lock:
+            _jobs[job_id].update(status="stopped" if stopping() else "failed", error=str(exc)[:500])
+    finally:
+        with _jobs_lock:
+            _jobs[job_id]["updated"] = time.time()
+
+
+@router.post("/cloud/generate")
+async def cloud_generate(req: CloudRequest):
+    from app.config import settings
+    from . import hosted
+    if not hosted.configured():
+        raise HTTPException(status_code=409, detail="Save a Replicate key first: Model Hub -> Cloud Provider Keys -> Replicate.")
+    job_id = uuid.uuid4().hex[:12]
+    out_dir = os.path.join(settings.DATA_DIR, "video")
+    os.makedirs(out_dir, exist_ok=True)
+    with _jobs_lock:
+        _jobs[job_id] = {"id": job_id, "status": "running", "messages": [], "result": None, "error": None,
+                         "started": time.time(), "updated": time.time(), "where": "cloud"}
+    threading.Thread(target=_run_cloud, args=(job_id, req, os.path.join(out_dir, "%s.mp4" % job_id)),
+                     daemon=True).start()
+    return {"job_id": job_id, "status": "running"}

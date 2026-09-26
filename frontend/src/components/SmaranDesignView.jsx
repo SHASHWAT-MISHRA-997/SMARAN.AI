@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { isChatProvider } from '../utils/providerKinds';
 import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import GenerationProgress, { htmlProgress } from './GenerationProgress';
 import { takeStudioPrompt } from '../utils/studioHandoff';
@@ -242,7 +243,7 @@ async function discoverModels() {
     const statusRes = await fetchWithAuth(`${API_BASE}/api/cloud/keys-status`);
     if (statusRes.ok) {
       const { configured_providers: configured = [] } = await statusRes.json();
-      for (const provider of configured) {
+      for (const provider of configured.filter(isChatProvider)) {
         let list = CURATED_CLOUD_MODELS[provider] || [];
         try {
           const res = await fetchWithAuth(`${API_BASE}/api/cloud/models`, {
@@ -275,6 +276,7 @@ async function discoverModels() {
 
     Object.entries(keys).forEach(([provider, keyVal]) => {
       if (!keyVal || !keyVal.trim()) return; // No key saved for this provider
+      if (!isChatProvider(provider)) return; // video or decisions, not pages
       const providerList = (Array.isArray(byProvider[provider]) && byProvider[provider].length > 0)
         ? byProvider[provider]
         : (CURATED_CLOUD_MODELS[provider] || []);

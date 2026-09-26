@@ -338,6 +338,14 @@ async def lifespan(application: FastAPI):
     except Exception:  # noqa: BLE001
         logger.info("Desktop settings were not applied at start", exc_info=True)
     threading.Thread(target=rag_pipeline.get, name="rag-warmup", daemon=True).start()
+    # Clipboard history (memory only, secrets skipped). Not in a container:
+    # there is no desktop clipboard there to watch.
+    if not os.path.exists("/.dockerenv"):
+        try:
+            from app import everyday
+            everyday.clipboard_history.start()
+        except Exception:  # noqa: BLE001
+            logger.info("Clipboard history did not start", exc_info=True)
     await _warm_speech_recognition()
     try:
         from app.agent.scheduler import AutomationScheduler
@@ -1157,15 +1165,18 @@ _PLACEHOLDER_TITLES = {"", "New Conversation", "New Coding Task", "New chat", "D
 
 def get_current_user(request: Request, db: Session = Depends(get_db), session_token: Optional[str] = Cookie(None)) -> User:
     """Get current user from session token (httpOnly cookie), Authorization header, or device headers."""
-    # Try each credential offered, header first. A screen that has no token in
-    # memory sends "Bearer undefined"; that used to replace a perfectly good
-    # sign-in cookie, fall through to the device account, and get the owner a
-    # 403 on their own conversation.
-    candidates = []
+    # Both are tried: the header first, then the cookie. The page sends
+    # "Bearer <token>" from what it remembers, which after an email/password
+    # sign-in is "Bearer undefined" - and when only the header was read, that
+    # hid the valid session cookie, the request fell through to the local
+    # owner account, and the user's own conversation answered "You do not
+    # have access to this chat session".
     auth_header = request.headers.get("Authorization", "").strip()
+    candidates = []
     if auth_header.startswith("Bearer "):
         candidates.append(auth_header[7:].strip())
-    candidates.append(session_token)
+    if session_token:
+        candidates.append(session_token)
     for token in candidates:
         if not token or token in ("undefined", "null"):
             continue
@@ -3049,6 +3060,8 @@ _CLOUD_PROVIDER_ENV_VARS = {
     # Video, not chat. Kept in the same store so it is saved, restored and
     # removed the same way every other key is.
     "replicate": "REPLICATE_API_TOKEN",
+    # Decisions, not chat: a second opinion on risky steps (app/jev.py).
+    "typesafe": "TYPESAFE_API_KEY",
 }
 
 
@@ -3108,6 +3121,21 @@ async def _fetch_replicate_models(api_key: str) -> list[str]:
 
 async def _fetch_cloud_provider_models(provider: str, api_key: str) -> tuple[list[str], bool]:
     """Probe a provider with the supplied key and return only its reported model ids."""
+    # Checked before the endpoint table, which lists chat providers only: a
+    # Replicate key used to be refused as "unsupported" without being tried.
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Provider or API key is unsupported.")
+    if provider == "replicate":
+        return await _fetch_replicate_models(api_key), False
+    if provider == "typesafe":
+        from app import jev
+        try:
+            await asyncio.to_thread(jev.verify, api_key)
+        except PermissionError as exc:
+            raise HTTPException(status_code=401, detail=str(exc))
+        except ConnectionError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return ["jev-latest"], False
     endpoint = _CLOUD_PROVIDER_ENDPOINTS.get(provider)
     if not endpoint or not api_key:
         raise HTTPException(status_code=400, detail="Provider or API key is unsupported.")
@@ -3118,8 +3146,6 @@ async def _fetch_cloud_provider_models(provider: str, api_key: str) -> tuple[lis
         headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
     if provider == "huggingface":
         return await _fetch_huggingface_models(api_key), False
-    if provider == "replicate":
-        return await _fetch_replicate_models(api_key), False
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             if provider == "gemini":
@@ -3633,6 +3659,8 @@ async def _auto_cloud_candidates(task: str = "") -> List[dict]:
     """Routes derived from whichever provider keys the user has configured.
 
     Saving a key is enough: the user does not also have to hand-pick a model.
+    `task` (app.model_router.classify) shapes each provider's shortlist, so a
+    coder, a reasoner or a fast chat model is in it when the work needs one.
     """
     candidates: List[dict] = []
     for provider in _CLOUD_AUTO_PROVIDER_ORDER:
@@ -4301,7 +4329,7 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                     web_references.append({
                         "document_name": item["title"],
                         "chunk_index": idx,
-                        "text": item["snippet"],
+                        "text": item["snippet"][:600],
                         "url": item["url"],
                         "score": 1.0
                     })
@@ -9256,6 +9284,10 @@ app.include_router(_companion.router)
 
 from app.live_browser_routes import router as _live_browser_router  # noqa: E402
 app.include_router(_live_browser_router)
+from app.everyday_routes import router as _everyday_router  # noqa: E402
+app.include_router(_everyday_router)
+from app.computer_routes import router as _computer_router  # noqa: E402
+app.include_router(_computer_router)
 
 
 # Register the SPA fallback last so it cannot swallow model-storage, engine

@@ -92,7 +92,10 @@ def test_gateway_failed_auth_closes_client(gateway_type, monkeypatch):
     monkeypatch.setattr(httpx, 'AsyncClient', client)
     async def scenario():
         gateway = gateway_type()
-        assert not await gateway.start({'token': 'invalid'})
+        # Well-formed, so it reaches the server and is refused there.
+        assert not await gateway.start({'token': '123456789:AAEhBP0av28abcdefghijklmnopqrstuvwxyz',
+                                        'default_channel_id': '112233445566778899'})
+        assert gateway.last_error
         assert clients[0].is_closed
         assert gateway._client is None
         assert not gateway.is_running()

@@ -73,7 +73,36 @@ _MAC = [
 ]
 # On Linux the names differ by distribution and packaging; `which` settles it.
 _LINUX = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
-          "microsoft-edge", "microsoft-edge-stable", "brave-browser"]
+          "microsoft-edge", "microsoft-edge-stable", "brave-browser", "brave",
+          "vivaldi-stable", "vivaldi", "opera"]
+# Installed but not on PATH: snap when /snap/bin is missing from a desktop
+# session's PATH, and vendor packages that live under /opt.
+_LINUX_PATHS = ["/snap/bin/chromium", "/usr/lib/chromium/chromium", "/usr/lib/chromium-browser/chromium-browser",
+                "/opt/google/chrome/chrome", "/opt/microsoft/msedge/msedge",
+                "/opt/brave.com/brave/brave", "/opt/vivaldi/vivaldi"]
+
+
+def _playwright_chromium() -> Optional[str]:
+    """A Chromium that Playwright downloaded, if there is one - any platform."""
+    roots = [os.getenv("PLAYWRIGHT_BROWSERS_PATH", "")]
+    home = os.path.expanduser("~")
+    roots += [os.path.join(home, ".cache", "ms-playwright"),
+              os.path.join(os.getenv("LOCALAPPDATA", ""), "ms-playwright") if os.getenv("LOCALAPPDATA") else "",
+              os.path.join(home, "Library", "Caches", "ms-playwright")]
+    inner = {"win32": [r"chrome-win\chrome.exe", r"chrome-win64\chrome.exe"],
+             "darwin": ["chrome-mac/Chromium.app/Contents/MacOS/Chromium"]}.get(
+                 sys.platform, ["chrome-linux/chrome", "chrome-linux64/chrome"])
+    for root in filter(None, roots):
+        if not os.path.isdir(root):
+            continue
+        for entry in sorted(os.listdir(root), reverse=True):
+            if not entry.startswith("chromium-"):
+                continue
+            for rel in inner:
+                path = os.path.join(root, entry, rel)
+                if os.path.isfile(path):
+                    return path
+    return None
 
 
 def find_browser() -> Optional[str]:
@@ -83,18 +112,20 @@ def find_browser() -> Optional[str]:
         return override
     if sys.platform == "win32":
         local = os.getenv("LOCALAPPDATA", "")
-        extra = [os.path.join(local, r"Google\Chrome\Application\chrome.exe")] if local else []
+        # Per-user installs - the default for Chrome and Brave without admin.
+        extra = [os.path.join(local, r"Google\Chrome\Application\chrome.exe"),
+                 os.path.join(local, r"BraveSoftware\Brave-Browser\Application\brave.exe")] if local else []
         for path in extra + _WINDOWS:
             if os.path.isfile(path):
                 return path
-        return None
+        return _playwright_chromium()
     if sys.platform == "darwin":
-        return next((p for p in _MAC if os.path.isfile(p)), None)
+        return next((p for p in _MAC if os.path.isfile(p)), None) or _playwright_chromium()
     for name in _LINUX:
         found = shutil.which(name)
         if found:
             return found
-    return None
+    return next((p for p in _LINUX_PATHS if os.path.isfile(p)), None) or _playwright_chromium()
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +231,7 @@ class LiveBrowser:
     def start(self) -> None:
         executable = find_browser()
         if not executable:
-            raise Refused("No Chrome, Edge or Brave was found on this computer. Install one "
+            raise Refused("No Chrome, Chromium, Edge or Brave was found on this computer. Install one "
                           "of them to use live browsing.")
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
@@ -215,6 +246,16 @@ class LiveBrowser:
             "--disable-sync", "--disable-features=Translate,OptimizationHints",
             "--window-size=1280,900", "--new-window", "about:blank",
         ]
+        if sys.platform.startswith("linux"):
+            # No screen to draw on - WSL without a GUI, a server, SSH - and a
+            # windowed browser exits at once. Headless still reads, clicks and
+            # types, and the screenshots below are how you watch it.
+            if not (os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY")):
+                args.insert(1, "--headless=new")
+            # Chromium refuses to start as root without this (containers,
+            # some WSL setups).
+            if hasattr(os, "geteuid") and os.geteuid() == 0:
+                args.insert(1, "--no-sandbox")
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
         self.process = subprocess.Popen(args, stdout=subprocess.DEVNULL,
                                         stderr=subprocess.DEVNULL, creationflags=flags)

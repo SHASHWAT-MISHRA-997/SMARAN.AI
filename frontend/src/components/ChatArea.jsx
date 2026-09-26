@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isChatProvider } from '../utils/providerKinds';
 import { ChevronDown, Send, FileText, Check, Copy, ArrowDown, Bot, Sparkles, User, X, Upload, Plus, LayoutDashboard, Globe, FolderOpen, Brain, Boxes, Trash2, Eye, Code2, ExternalLink, RefreshCw, Cpu, Zap, Gauge, Timer, Mic, Volume2, VolumeX, Smartphone, Laptop, GitBranch, PictureInPicture2, Shield, Terminal } from 'lucide-react';
 import { API_BASE } from '../context/AuthContext';
 import GenerationProgress from './GenerationProgress';
@@ -47,6 +48,7 @@ import AgentSteps from './AgentSteps';
 import { applyAgentEvent, summarize } from '../utils/agentEvents.js';
 import { chosenVoice, continuousDictation, openMicrophone } from '../utils/voiceSettings.js';
 import { haptic } from '../utils/haptics';
+import { applyResearchEvent, isResearchEvent } from '../utils/researchEvents';
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
@@ -476,13 +478,33 @@ const cleanMathFormula = (mathStr) => {
   return cleaned.trim();
 };
 
+/* Web answers cite their sources as [1], [2]... (backend/app/answer_engine.py).
+   The sources of the message being drawn are provided here, and each [n]
+   becomes a small link to that source; a number with no source stays text. */
+const CitationContext = React.createContext([]);
+
+const Citation = ({ n }) => {
+  const sources = React.useContext(CitationContext);
+  const source = sources[n - 1];
+  if (!source?.url) return `[${n}]`;
+  let host = '';
+  try { host = new URL(source.url).hostname.replace(/^www\./, ''); } catch { /* keep blank */ }
+  return (
+    <a href={source.url} target="_blank" rel="noopener noreferrer"
+       title={`${source.document_name || host} - ${host}`}
+       className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-md bg-indigo-500/15 px-1 align-super text-[9px] font-black text-indigo-600 no-underline hover:bg-indigo-500 hover:text-white dark:text-indigo-300">
+      {n}
+    </a>
+  );
+};
+
 const parseInlineFormatting = (text) => {
   if (!text) return '';
 
-  // Split regex to capture block math ($$ or \[), inline math ($ or \(), bold (**), and inline code (`)
-  // Links too: web answers cite their sources as [title](url), and those were
-  // printed as raw brackets. Only http(s) - a reply cannot plant javascript:.
-  const parts = text.split(/(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|\$\$[^$]+\$\$|\$[^$]+\$|\\\(.*?\\\)|\\\[.*?\\\]|\*\*.*?\*\*|`.*?`)/g);
+  // Split regex to capture block math ($$ or \[), inline math ($ or \(), bold (**), inline code (`) and citations [n]
+  // Links too ([title](url), http(s) only - a reply cannot plant javascript:),
+  // and web citations [n], which become numbered source badges.
+  const parts = text.split(/(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|\$\$[^$]+\$\$|\$[^$]+\$|\\\(.*?\\\)|\\\[.*?\\\]|\*\*.*?\*\*|`.*?`|\[\d{1,2}\](?!\())/g);
 
   return parts.map((part, i) => {
     if (!part) return null;
@@ -496,6 +518,8 @@ const parseInlineFormatting = (text) => {
         </a>
       );
     }
+    const cite = /^\[(\d{1,2})\]$/.exec(part);
+    if (cite) return <Citation key={i} n={Number(cite[1])} />;
 
     // Block Math
     if ((part.startsWith('$$') && part.endsWith('$$')) || (part.startsWith('\\[') && part.endsWith('\\]'))) {
@@ -978,7 +1002,78 @@ const MessageRowImpl = ({ msg, onReuse, onEdit, onDelete, isSpeakingAudio, stopS
           ) : (
             <>
               {msg.agentSteps && <AgentSteps steps={msg.agentSteps} runId={msg.agentRunId} live={msg.isLoading} checkpoint={msg.agentCheckpoint} />}
-              <MarkdownText text={msg.content} />
+              {/* What the web research is doing, while it does it - searching,
+                  which pages are being read - instead of a silent wait. */}
+              {msg.isLoading && !msg.content && msg.researchSteps?.length > 0 && (
+                <ul className="mb-2 space-y-1 text-[11px] text-zinc-500 dark:text-zinc-400" aria-label="Research steps">
+                  {msg.researchSteps.map((step) => (
+                    <li key={`${step.stage}-${step.round || 1}`} className="flex flex-wrap items-center gap-1.5">
+                      <span className={`h-1.5 w-1.5 rounded-full ${step.stage === 'done' ? 'bg-emerald-500' : 'animate-pulse bg-indigo-500'}`} />
+                      <span className="font-semibold text-zinc-700 dark:text-zinc-200">{step.text}</span>
+                      {step.queries?.length > 0 && <span className="truncate">— {step.queries.join(' · ')}</span>}
+                      {step.sources?.length > 0 && <span className="truncate">— {step.sources.map((src) => src.domain).join(', ')}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {(() => {
+                let refs = msg.references;
+                if (typeof refs === 'string') { try { refs = JSON.parse(refs); } catch { refs = []; } }
+                const webSources = Array.isArray(refs) ? refs.filter((r) => r?.url) : [];
+                if (!webSources.length) return <MarkdownText text={msg.content} />;
+                // "**Related**" and the lines under it become buttons, not text.
+                const split = String(msg.content || '').split(/\n\s*\*{0,2}Related(?: questions)?\*{0,2}:?\s*\n/i);
+                const body = split[0];
+                const related = Array.isArray(msg.related) && msg.related.length ? msg.related.slice(0, 3)
+                  : !msg.isLoading && split.length > 1
+                  ? split[1].split('\n').map((l) => l.replace(/^\s*[-*\d.)]+\s*/, '').trim()).filter((l) => l.length > 3).slice(0, 3)
+                  : [];
+                return (
+                  <CitationContext.Provider value={webSources}>
+                    {msg.research && (
+                      <p className="mb-2 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                        Searched {msg.research.queries?.length || 1} {msg.research.queries?.length === 1 ? 'query' : 'queries'} · {msg.research.sources} sources · read {msg.research.read} {msg.research.read === 1 ? 'page' : 'pages'}
+                      </p>
+                    )}
+                    <MarkdownText text={body} />
+                    <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Sources">
+                      {webSources.slice(0, 8).map((src, i) => {
+                        let host = '';
+                        try { host = new URL(src.url).hostname.replace(/^www\./, ''); } catch { /* keep blank */ }
+                        return (
+                          <a key={src.url} href={src.url} target="_blank" rel="noopener noreferrer" title={src.document_name}
+                             className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg border border-zinc-200 bg-white/60 px-2 py-1 text-[11px] text-zinc-600 hover:border-indigo-400 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+                            <span className="font-black text-indigo-500">{i + 1}</span>
+                            <span className="truncate">{host || src.document_name}</span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                    {/* The citations checked after the answer (Liu et al., 2023):
+                        how many sentences carry one, and how many of those the
+                        cited pages actually support. Measured, not assumed. */}
+                    {msg.verification && msg.verification.cited_sentences > 0 && (
+                      <p className="mt-2 text-[10px] font-mono text-zinc-500 dark:text-zinc-400">
+                        Citations checked: {msg.verification.cited_sentences} of {msg.verification.sentences} sentences cited
+                        {msg.verification.citation_support !== null && msg.verification.citation_support !== undefined
+                          ? ` · ${Math.round(msg.verification.citation_support * 100)}% match their sources` : ''}
+                        {msg.verification.invalid_citations ? ` · ${msg.verification.invalid_citations} broken removed` : ''}
+                      </p>
+                    )}
+                    {related.length > 0 && (
+                      <div className="mt-3 space-y-1" aria-label="Related questions">
+                        <p className="text-[11px] font-black uppercase tracking-wider text-zinc-500">Related</p>
+                        {related.map((q) => (
+                          <button key={q} type="button" onClick={() => window.dispatchEvent(new CustomEvent('smaran:send-prompt', { detail: { prompt: q } }))}
+                                  className="block w-full rounded-lg border border-zinc-200 px-3 py-1.5 text-left text-xs text-zinc-700 hover:border-indigo-400 hover:text-indigo-600 dark:border-zinc-800 dark:text-zinc-300 dark:hover:text-indigo-300">
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </CitationContext.Provider>
+                );
+              })()}
 
               {!msg.isLoading && msg.content && (() => {
                 const firstReportedNumber = (...values) => {
@@ -2963,7 +3058,7 @@ const ChatArea = ({
     let cachedModels = {};
     try { apiKeys = JSON.parse(localStorage.getItem('sm_cloud_api_keys') || '{}'); } catch  {}
     try { cachedModels = JSON.parse(localStorage.getItem('sm_cloud_provider_models') || '{}'); } catch  {}
-    const isEligible = (providerId, modelId) => (
+    const isEligible = (providerId, modelId) => isChatProvider(providerId) && (
       providerId !== 'openrouter' || modelId === 'openrouter/free' || modelId.endsWith(':free')
     );
     const automaticFallback = localStorage.getItem('sm_cloud_auto_fallback') !== 'false';
@@ -3173,6 +3268,8 @@ const ChatArea = ({
                   const snapshot = steps;
                   update((m) => ({ ...m, agentSteps: snapshot }));
                 }
+              } else if (isResearchEvent(ev)) {
+                update((m) => applyResearchEvent(m, ev));
               } else if (ev.token) {
                 text += ev.token;
                 update((m) => ({ ...m, content: text, isLoading: false }));
@@ -4447,6 +4544,10 @@ const ChatArea = ({
                     msg.id === assistantMessage.id ? { ...msg, references } : msg
                   )
                 );
+              }
+              if (isResearchEvent(parsed)) {
+                setMessages((prev) => prev.map((msg) => (msg.id === assistantMessage.id ? applyResearchEvent(msg, parsed) : msg)));
+                continue;
               }
               if (parsed.execution_source) setLastSource(String(parsed.execution_source).trim());
               if (parsed.model_routed) {

@@ -36,6 +36,35 @@ export default function GatewayPreferences() {
     }
   };
 
+  const unpair = async (platform) => {
+    if (!window.confirm('Remove everyone paired with this bot? They will need a new code to use it again.')) return;
+    try {
+      await agentSettingsRequest(`/gateway/${platform}/unpair`, { method: 'POST' });
+      await fetchStatus();
+    } catch (err) {
+      setMessageNotice(err.message || String(err));
+    }
+  };
+
+  /* Only paired people can command the bot: it runs SMARAN on this computer. */
+  const Pairing = ({ platform, info, command }) => (info?.running ? (
+    <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3 text-[11px] space-y-1.5">
+      <p className="font-semibold text-emerald-600 dark:text-emerald-300">
+        Connected{info.name ? ` as @${info.name}` : ''} · {info.owners
+          ? `${info.owners} paired ${info.owners === 1 ? 'person' : 'people'}`
+          : 'nobody paired yet'}
+      </p>
+      <p className="text-zinc-600 dark:text-zinc-300">
+        Only paired people can give it tasks. To pair, send the bot:{' '}
+        <code className="select-all rounded bg-zinc-200 dark:bg-zinc-800 px-1.5 py-0.5 font-mono text-[12px] font-bold">{command} {info.pair_code}</code>
+        {' '}— the code works once and changes after use.
+      </p>
+      {info.owners > 0 && (
+        <button type="button" onClick={() => unpair(platform)} className="text-rose-500 hover:underline">Remove paired people</button>
+      )}
+    </div>
+  ) : null);
+
   const fetchStatus = async () => {
     setLoading(true);
     try {
@@ -68,8 +97,7 @@ export default function GatewayPreferences() {
           body: JSON.stringify({ token: tgToken.trim(), default_chat_id: tgChatId }),
         });
         if (!data.started) {
-          // The backend says why - a token of the wrong kind, or Telegram's own reason.
-          setMessageNotice(data.reason || 'Failed to start Telegram Bot. Check bot token.');
+          setMessageNotice(data.reason || 'Telegram did not start. Check the bot token from @BotFather.');
         }
       }
       await fetchStatus();
@@ -94,7 +122,7 @@ export default function GatewayPreferences() {
           body: JSON.stringify({ token: dcToken.trim(), default_channel_id: dcChannelId }),
         });
         if (!data.started) {
-          setMessageNotice('Failed to start Discord Bot. Check token & channel.');
+          setMessageNotice(data.reason || 'Discord did not start. Check the token and channel.');
         }
       }
       await fetchStatus();
@@ -174,6 +202,13 @@ export default function GatewayPreferences() {
             />
           </div>
         </div>
+        <Pairing platform="telegram" info={status.telegram} command="/pair" />
+        {!status.telegram?.running && (
+          <p className="text-[11px] text-zinc-500">
+            Get the token from <b>@BotFather</b> in Telegram: send <code>/newbot</code>, choose a name, and copy the token it gives
+            (it looks like <code>123456789:AAE…</code>). The API token on gateway.telegram.org is a different, paid service and will not work here.
+          </p>
+        )}
       </div>
 
       {/* Discord Section */}
@@ -227,6 +262,7 @@ export default function GatewayPreferences() {
             />
           </div>
         </div>
+        <Pairing platform="discord" info={status.discord} command="!smaran pair" />
       </div>
 
       {/* Webhook Endpoint */}
@@ -237,11 +273,16 @@ export default function GatewayPreferences() {
           {webhookBusy ? 'Please wait…' : status.webhook?.running ? 'Disable webhook' : 'Enable webhook'}
         </button>
         <p className="text-[11px] text-zinc-500">
-          Send HTTP POST payloads with <code>{`{"prompt": "..."}`}</code> while enabled to trigger agent runs from scripts or CI/CD pipelines. If configured, pass the secret in the X-Webhook-Secret header:
+          Send HTTP POST payloads with <code>{`{"prompt": "..."}`}</code> while enabled to trigger agent runs from scripts or CI/CD pipelines. Every request must carry the secret below in the X-Webhook-Secret header:
         </p>
         <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-950 font-mono text-[11px] text-indigo-500 select-all border border-zinc-200 dark:border-zinc-800">
           {API_BASE || window.location.origin}/api/agent/gateway/webhook/generic
         </div>
+        {status.webhook?.running && status.webhook.secret && (
+          <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-950 font-mono text-[11px] text-emerald-600 dark:text-emerald-300 select-all border border-zinc-200 dark:border-zinc-800">
+            X-Webhook-Secret: {status.webhook.secret}
+          </div>
+        )}
       </div>
     </div>
   );
