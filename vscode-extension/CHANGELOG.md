@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.22.1
 
 **"ollama" works as Ollama's name in settings.** Ollama's provider id is
 empty, and `"smaran.provider": "ollama"` written by hand made the model list
