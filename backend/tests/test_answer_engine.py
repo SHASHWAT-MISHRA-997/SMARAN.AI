@@ -91,3 +91,8 @@ def test_citations_are_checked_and_broken_ones_removed():
     checked = ae.verify(answer, sources)
     assert checked["cited_sentences"] == 2 and checked["invalid_citations"] == 1
     assert checked["supported_sentences"] >= 1
+
+
+def test_model_native_citations_are_read_as_numbers():
+    text = "Gaming is smoother" + chr(0x3010) + "6" + chr(0x3011) + ". Security is better" + chr(0x3010) + "2" + chr(0x2020) + "L1-L4" + chr(0x3011) + "."
+    assert ae.normalise_citations(text) == "Gaming is smoother[6]. Security is better[2]."

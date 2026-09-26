@@ -93,8 +93,8 @@ PREFERENCES: Dict[str, Tuple[str, ...]] = {
 }
 
 # Never worth sending text work to.
-_NOT_CHAT = re.compile(r"(embed|whisper|tts|audio|imagen|image-|veo|guard|moderation|rerank|"
-                       r"transcri|search-preview|realtime|computer-use|aqa|live)", re.I)
+_NOT_CHAT = re.compile(r"(embed|whisper|tts|audio|imagen|image|veo|guard|moderation|rerank|"
+                       r"transcri|search-preview|realtime|computer-use|aqa|live|lyria|robotics)", re.I)
 
 # How long each kind of failure keeps a model out.
 COOLDOWN = {

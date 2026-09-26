@@ -3538,6 +3538,22 @@ async def _finish_research(lines, plan: Optional[dict], question: str, session_i
         logger.warning("could not keep the research with the reply: %s", exc)
 
 
+def _plain_failures(failures: list) -> str:
+    """'gemini/x: HTTP 429 - You exceeded your current quota, please check your plan...'
+    becomes 'gemini/x: out of credit or quota' - what happened, not the provider's paragraph."""
+    from app import model_router
+    out = []
+    for entry in failures:
+        route, _, why = str(entry).partition(": ")
+        match = re.match(r"HTTP (\d{3})(?: - (.*))?", why)
+        if match:
+            why = model_router.plain_reason(model_router.failure_kind(int(match.group(1)), match.group(2) or ""))
+        elif why.startswith("skipped: "):
+            why = why[len("skipped: "):]
+        out.append("%s: %s" % (route.split("/")[-1], why[:80]))
+    return "; ".join(out)[:400]
+
+
 def _routed_event(model: str, source: str, failures: list, task: str) -> str:
     """The line that tells the screen which model is answering, for what, and -
     when it is not the one picked - why the others did not."""
@@ -3547,7 +3563,7 @@ def _routed_event(model: str, source: str, failures: list, task: str) -> str:
     if failures:
         # The model picked did not answer; say which one did and why,
         # instead of switching in silence.
-        routed['fallback_reason'] = '; '.join(failures)[:400]
+        routed['fallback_reason'] = _plain_failures(failures)
     return json.dumps(routed) + '\n'
 
 
@@ -4997,9 +5013,27 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                 return
             # Cap the attempts so a long provider list cannot turn a single
             # message into minutes of sequential failures.
-            normalized_candidates = normalized_candidates[:_CLOUD_MAX_ATTEMPTS]
             failures = list(pinned_skipped)
+            # A provider that says the account is out of quota or refuses the
+            # key will say it for every model: its other models are skipped for
+            # this reply. Four Gemini models in a row answered "exceeded your
+            # quota" one after another, and the reply ended with nothing.
+            dead_providers: dict = {}
+            attempts = 0
+            previous = None
             for provider, model, api_key in normalized_candidates:
+                if previous is not None:
+                    kept_out = model_router.blocked(*previous)
+                    if kept_out in ("billing", "auth"):
+                        dead_providers.setdefault(previous[0], model_router.plain_reason(kept_out))
+                previous = (provider, model)
+                if provider in dead_providers:
+                    continue
+                # Cap the attempts so a long provider list cannot turn a single
+                # message into minutes of sequential failures.
+                if attempts >= _CLOUD_MAX_ATTEMPTS:
+                    break
+                attempts += 1
                 endpoint = endpoints[provider]
                 source = f'Cloud API - {provider.title()}'
                 emitted = False
@@ -5165,7 +5199,7 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                             'execution_time_sec': round(elapsed_sec, 2),
                             'token_measurement_source': measurement_source,
                             'route_task': route_task,
-                            'fallback_reason': '; '.join(failures)[:400] if failures else '',
+                            'fallback_reason': _plain_failures(failures) if failures else '',
                             # Not known for a cloud model; saying the local
                             # window here would be a number that is not true.
                             'total_context': None,
@@ -5261,8 +5295,14 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
 
             detail = '; '.join(_explain(f) for f in failures[:4]) or 'no cloud provider is configured'
             more = f' (and {len(failures) - 4} more)' if len(failures) > 4 else ''
-            yield json.dumps({'error': f'No cloud model could answer. {detail}{more}. Add or fix the provider key in Model Catalog & Matrix, or run a local model instead.'}) + '\n'
-            return
+            # A model on this computer can still answer: say why the cloud did
+            # not, and carry on to it instead of ending the reply with an error.
+            if selected_model and selected_model in available_models:
+                yield json.dumps({'fallback_reason': f'No cloud model could answer ({detail}{more}), '
+                                                     f'so it was answered on this computer by {selected_model}.'}) + '\n'
+            else:
+                yield json.dumps({'error': f'No cloud model could answer. {detail}{more}. Add or fix the provider key in Model Catalog & Matrix, or run a local model instead.'}) + '\n'
+                return
         if file_count_intent:
             exact_count = f"You uploaded {session_file_count} files in this chat."
             yield json.dumps({"token": exact_count}) + "\n"

@@ -446,8 +446,19 @@ INSTRUCTIONS = (
 )
 
 
+def normalise_citations(text: str) -> str:
+    """Citations in the shape the model used, as [n].
+
+    gpt-oss cites in its own style - U+3010 n U+3011, sometimes with a dagger
+    and line range after the number - which the screen showed as plain text
+    and the checks below did not count.
+    """
+    return re.sub(r"\u3010(\d{1,2})(?:\u2020[^\u3011]*)?\u3011", r"[\1]", text or "")
+
+
 def verify(answer: str, sources: List[Dict]) -> Dict:
     """Citation checks after the fact (Liu et al., 2023): what is cited, and whether it holds."""
+    answer = normalise_citations(answer)
     valid = {src["n"]: src for src in sources}
     sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", answer or "")
                  if len(re.findall(r"[A-Za-z0-9]", s)) > 20 and not s.strip().startswith(("#", "|"))]

@@ -179,7 +179,10 @@ const MarkdownText = ({ text }) => {
     thinkMatches.push(thinkMatch[1]);
   }
   // Strip out all think blocks so they don't bleed into the main markdown
-  const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  // gpt-oss cites as U+3010 n U+3011 (sometimes with a dagger and line range);
+  // read as [n] so it becomes a source badge like every other citation.
+  const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/【(\d{1,2})(?:†[^】]*)?】/g, '[$1]').trim();
   // Handle partial/open <think> block still streaming (no closing tag yet)
   const hasOpenThink = /<think>/i.test(text) && !/<\/think>/i.test(text);
   const openThinkContent = hasOpenThink
