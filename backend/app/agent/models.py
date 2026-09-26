@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import urllib.error
 import urllib.request
 from typing import Dict, List, Optional
@@ -142,16 +143,50 @@ def _anthropic(model: str, key: str, messages: List[Dict]) -> str:
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
 
 
-def _ollama(model: str, messages: List[Dict]) -> str:
+# Ollama runs a model with a 4096-token window unless told otherwise, and cuts
+# a longer conversation from the front without a word - which is where the
+# instructions are. A run a few steps in no longer knew how to call a tool or
+# that it must not repeat itself, and a small model went round in circles.
+# The same size chat asks for (main.py), because each different size makes
+# Ollama reload the model: switching between Chat and Code would pay for it.
+AGENT_CONTEXT = 16384
+
+
+def _ollama(model: str, messages: List[Dict], stop: Optional[threading.Event] = None) -> str:
     from app.config import settings
 
-    data = _post(
+    # Streamed, so the time limit is "nothing new for TIMEOUT seconds" rather
+    # than "the whole answer within TIMEOUT": on a laptop GPU a long answer
+    # legitimately takes minutes and was cut off while it was still writing.
+    request = urllib.request.Request(
         settings.OLLAMA_URL.rstrip("/") + "/api/chat",
-        {"model": model, "messages": messages, "stream": False,
-         "options": {"temperature": 0.2, "num_predict": 2048}},
-        {},
+        data=json.dumps({"model": model, "messages": messages, "stream": True,
+                         "options": {"temperature": 0.2, "num_predict": 2048,
+                                     "num_ctx": AGENT_CONTEXT,
+                                     # A tool call ends the turn. Small models
+                                     # kept writing after it - once for 2048
+                                     # tokens, six minutes on a laptop GPU.
+                                     "stop": ["</tool_call>"]}}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
     )
-    return (data.get("message") or {}).get("content", "").strip()
+    parts: List[str] = []
+    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        for line in response:
+            if stop is not None and stop.is_set():
+                break  # closing the connection makes Ollama stop too
+            if not line.strip():
+                continue
+            chunk = json.loads(line.decode("utf-8"))
+            if chunk.get("error"):
+                raise ProviderError("The local model stopped: %s" % str(chunk["error"])[:300])
+            parts.append((chunk.get("message") or {}).get("content", ""))
+            if chunk.get("done"):
+                break
+    text = "".join(parts).strip()
+    # Ollama leaves the stop text out; put the closing tag back.
+    if "<tool_call" in text and "</tool_call>" not in text:
+        text += "\n</tool_call>"
+    return text
 
 
 async def complete(messages: List[Dict], model: str = "",
@@ -172,6 +207,11 @@ async def complete(messages: List[Dict], model: str = "",
             raise ProviderError("No %s key is saved on this computer. Add one in Model Hub -> Cloud Provider Keys."
                                 % provider, kind="http")
 
+    # Set when the run is stopped: the request runs on a worker thread that
+    # cancelling the run cannot reach, and Ollama kept generating for a run
+    # nobody was waiting on - with the next run queued behind it.
+    stop = threading.Event()
+
     def call() -> str:
         if provider in OPENAI_COMPATIBLE:
             return _openai_style(OPENAI_COMPATIBLE[provider], model, api_key, messages)
@@ -179,7 +219,7 @@ async def complete(messages: List[Dict], model: str = "",
             return _gemini(model, api_key, messages)
         if provider == "anthropic":
             return _anthropic(model, api_key, messages)
-        return _ollama(model, messages)
+        return _ollama(model, messages, stop)
 
     # Providers go busy. Gemini answered 503 "experiencing high demand" in the
     # middle of a run here, after the work was already done, and the run ended
@@ -191,7 +231,11 @@ async def complete(messages: List[Dict], model: str = "",
     last = max(1, attempts)
     for attempt in range(1, last + 1):
         try:
-            return await asyncio.to_thread(call)
+            try:
+                return await asyncio.to_thread(call)
+            except asyncio.CancelledError:
+                stop.set()
+                raise
 
         except urllib.error.HTTPError as exc:
             if attempt < last and exc.code in RETRYABLE:

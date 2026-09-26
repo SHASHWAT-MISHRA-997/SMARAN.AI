@@ -3,6 +3,7 @@ import { API_BASE, fetchWithAuth } from '../context/AuthContext';
 import GenerationProgress, { htmlProgress } from './GenerationProgress';
 import { takeStudioPrompt } from '../utils/studioHandoff';
 import { Sparkles, Plus, Code2, ArrowUp, FileText, Smartphone, Presentation, LayoutGrid, Film, Monitor, User, Box, Search, Mail, Palette, BookOpen, ChevronDown, X, Check, RefreshCw, ArrowRight } from 'lucide-react';
+import { withImageFallback } from '../utils/designImages';
 
 export const DESIGN_SYSTEMS = [
   {
@@ -304,6 +305,8 @@ async function discoverModels() {
 }
 
 const LAST_DESIGN_KEY = 'sm_design_last';
+/** The page still being made on the server, to pick up after leaving Design. */
+const DESIGN_JOB_KEY = 'sm_design_job';
 
 /** The last finished design, so it is still here after leaving the page. */
 function lastDesign() {
@@ -363,7 +366,58 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
   const [liveSource, setLiveSource] = useState('');
   const [genError, setGenError] = useState('');
   const abortRef = useRef(null);
+  const jobIdRef = useRef(null);
+  // Leaving the page stops listening; the job itself keeps running on the server.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Back on the page with a page still being made (or just finished): replay
+  // it from the start and follow it to the end.
+  useEffect(() => {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(DESIGN_JOB_KEY) || 'null'); } catch { saved = null; }
+    if (!saved?.id || abortRef.current) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    jobIdRef.current = saved.id;
+    setGenerating(true);
+    setGenError('');
+    if (saved.prompt) setPrompt(saved.prompt);
+    (async () => {
+      try {
+        const res = await fetchWithAuth(`${API_BASE}/api/jobs/${saved.id}/stream?offset=0`, { signal: controller.signal });
+        if (!res.ok || !res.body) { localStorage.removeItem(DESIGN_JOB_KEY); return; }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let text = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            let parsed;
+            try { parsed = JSON.parse(line); } catch { continue; }
+            if (parsed.error) setGenError(String(parsed.error));
+            if (parsed.model_routed) setLiveModel(parsed.model_routed);
+            if (parsed.token) { text += parsed.token; setResult(text); }
+            if (parsed.translated_response) { text = parsed.translated_response; setResult(text); }
+          }
+        }
+        localStorage.removeItem(DESIGN_JOB_KEY);
+      } catch (err) {
+        if (err?.name !== 'AbortError') setGenError(err?.message || 'Could not pick the page up again.');
+      } finally {
+        if (abortRef.current === controller) {
+          setGenerating(false);
+          abortRef.current = null;
+        }
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => { discoverModels().then(setModels).catch(() => {}); }, []);
 
   const systemDropdownRef = useRef(null);
@@ -507,7 +561,9 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
-        setGenError(`The engine returned ${res.status}. Check the model in Settings and try again.`);
+        // The server says why; a bare status code left people guessing.
+        const why = await res.json().then((d) => (typeof d?.detail === 'string' ? d.detail : '')).catch(() => '');
+        setGenError(why || `The engine returned ${res.status}. Check the model in Settings and try again.`);
         return;
       }
 
@@ -519,6 +575,13 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
       const consumeLine = (line) => {
         if (!line.trim()) return;
         const parsed = JSON.parse(line);
+        if (parsed.type === 'job') {
+          // The page runs on the server as a job: remembered, so leaving this
+          // screen and coming back picks it up instead of losing it.
+          jobIdRef.current = parsed.job_id;
+          localStorage.setItem(DESIGN_JOB_KEY, JSON.stringify({ id: parsed.job_id, prompt }));
+          return;
+        }
         if (parsed.error) {
           engineError = true;
           setGenError(String(parsed.error));
@@ -551,6 +614,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
         }
       }
       if (!text.trim() && !engineError) setGenError('The engine returned nothing. Try again, or pick a different model.');
+      localStorage.removeItem(DESIGN_JOB_KEY);
     } catch (err) {
       if (err?.name !== 'AbortError') {
         setGenError(err?.message || 'Could not reach the local engine.');
@@ -563,7 +627,13 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
     }
   };
 
-  const stopGenerating = () => abortRef.current?.abort();
+  // Stop means stop: the job on the server too, not only this screen listening.
+  const stopGenerating = () => {
+    const jobId = jobIdRef.current;
+    if (jobId) fetchWithAuth(`${API_BASE}/api/jobs/${jobId}/cancel`, { method: 'POST' }).catch(() => {});
+    localStorage.removeItem(DESIGN_JOB_KEY);
+    abortRef.current?.abort();
+  };
   const categories = ['All', 'Web', 'Mobile', 'Presentation', 'Docs', 'Design', 'Visuals'];
 
   const filteredTemplates = DESIGN_TEMPLATES.filter((t) => {
@@ -840,7 +910,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                   <button
                     type="button"
                     onClick={() => {
-                      const code = firstCodeBlock(result)?.code || result;
+                      const code = withImageFallback(firstCodeBlock(result)?.code || result);
                       const url = URL.createObjectURL(new Blob([code], { type: 'text/html' }));
                       const link = document.createElement('a');
                       link.href = url;
@@ -856,7 +926,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                 <button
                   type="button"
                   onClick={() => {
-                    abortRef.current?.abort();
+                    stopGenerating();
                     abortRef.current = null;
                     setGenerating(false);
                     setResult('');
@@ -898,7 +968,7 @@ export default function SmaranDesignView({ onEnsureSession, onOpenTerminal }) {
                 <iframe
                   title="Design preview"
                   sandbox="allow-scripts"
-                  srcDoc={firstCodeBlock(result).code}
+                  srcDoc={withImageFallback(firstCodeBlock(result).code)}
                   className="w-full h-[520px] bg-white"
                 />
               </>

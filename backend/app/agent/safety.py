@@ -38,7 +38,9 @@ MODES = ("manual", "smart", "off")
 DEFAULTS = {"approval_mode": "smart", "allowlist": [], "redact_secrets": True}
 _lock = threading.Lock()
 
-READ_ONLY = {"list_files", "read_file", "search", "search_memory", "web_search"}
+READ_ONLY = {"list_files", "read_file", "search", "search_memory", "web_search", "read_process",
+             # Stopping only ever ends a process this agent started itself.
+             "stop_process"}
 FILE_CHANGES = {"write_file", "edit_file"}
 
 #: Files whose change should always be seen by a person, even in smart mode.
@@ -169,7 +171,7 @@ def decide(name: str, arguments: Dict, mode: Optional[str] = None,
     mode = mode or prefs.get("approval_mode", "smart")
     allowlist = allowlist if allowlist is not None else prefs.get("allowlist", [])
     command = ""
-    if name == "run_command":
+    if name in ("run_command", "start_process"):
         command = str(arguments.get("command", ""))
     elif name == "git":
         command = "git " + str(arguments.get("subcommand", ""))

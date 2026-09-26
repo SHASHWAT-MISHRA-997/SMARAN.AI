@@ -61,6 +61,9 @@ what is in them.
 the person asked for the work, not a description of it.
 - Check what you did. Run the tests, run the file, read it back. If something \
 failed, the output will say so - fix it and try again.
+- Fix the code, not the tests. Do not edit, weaken or delete a test to make it pass unless the person asked for that.
+- Run tests the way they are written: files of plain `def test_...` functions with `assert` are pytest (`python -m pytest -q`), not unittest.
+- If a step fails, do not repeat it unchanged. Read again, change the approach, or say what is blocking you.
 - Stop when it is actually done, and say what you changed.
 
 To use a tool, emit exactly this and nothing after it in that message:
@@ -90,6 +93,21 @@ def _project_view(workspace) -> str:
     shown = "\n".join(lines[:200])
     more = "\n... and %d more" % (len(lines) - 200) if len(lines) > 200 else ""
     return "\n\nFiles in the open folder (paths are relative to it):\n" + shown + more
+
+
+NL = chr(10)
+
+# A reply that announces work instead of finishing it.
+_ANNOUNCED = re.compile(r"\b(let'?s|let me|i will|i'll|next,? i|now i)\b", re.I)
+_FINISHED = re.compile(r"\b(all (the )?tests pass|tests? (now )?pass(es|ed)?|task is (done|complete)|"
+                       r"(have|has) been fixed|is now fixed|i have (made|fixed|changed))\b", re.I)
+
+
+def _decision(value) -> tuple:
+    """(approved, note) from whatever the approver returned: a bool or {"approve", "note"}."""
+    if isinstance(value, dict):
+        return bool(value.get("approve")), str(value.get("note") or "").strip()[:2000]
+    return bool(value), ""
 
 
 def _git_rules() -> str:
@@ -143,7 +161,7 @@ def parse_tool_call(text: str) -> Optional[Dict]:
             # Code: indentation is meaning. Only the line breaks the model put
             # around the tag are layout. Stripping all whitespace here moved an
             # edit's first line to column zero and broke Python indentation.
-            arguments[key] = _trim_newlines(arguments[key])
+            arguments[key] = _trim_newlines(_real_line_breaks(arguments[key]))
         else:
             arguments[key] = arguments[key].strip()
     return {"name": name, "arguments": arguments, "raw": match.group(0)}
@@ -154,6 +172,25 @@ _EXACT_ARGUMENTS = {"content", "find", "replace"}
 
 _ATTR_TAG = re.compile(r"<([a-z_]+)((?:\s+[a-z_]+\s*=\s*(?:\"[^\"]*\"|'[^']*'))+)\s*/?>", re.IGNORECASE)
 _ATTR = re.compile(r"([a-z_]+)\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", re.IGNORECASE)
+
+
+# A written-out line break used as layout: backslash-n followed by
+# indentation, another one, or the end of the value.
+_ESCAPED_BREAK = re.compile(r"(?:\\r)?\\n(?=[ \t]|\\n|\\r|$)")
+
+
+def _real_line_breaks(value: str) -> str:
+    """Small models write the code for an edit as one line with backslash-n in it.
+
+    Taken literally, a function header, backslash-n and its indented docstring
+    went into the file as one line with a backslash in it and broke the module.
+    Only a value with no real line break of its own is touched, and only
+    escapes used as layout - so a one-line print("a" backslash-n "b") in real
+    code is left alone.
+    """
+    if chr(10) in value or not _ESCAPED_BREAK.search(value):
+        return value
+    return _ESCAPED_BREAK.sub(chr(10), value)
 
 
 def _trim_newlines(value: str) -> str:
@@ -289,6 +326,10 @@ async def run(task: str, model: str = "",
     # caller should not have to take its word.
     performed: List[str] = []
     repairs = 0
+    nudges = 0
+    # The same call with the same outcome, again and again: a small model
+    # stuck on one failing edit made it seventeen times and burned every step.
+    repeats: Dict[str, int] = {}
 
     for step in range(1, max_steps + 1):
         try:
@@ -307,6 +348,21 @@ async def run(task: str, model: str = "",
             messages.append({"role": "user", "content": (
                 "That tool call could not be read. Use exactly this shape, with every tag closed:\n"
                 '<tool_call name="read_file">\n<path>calc.py</path>\n</tool_call>')})
+            continue
+
+        if call is None and nudges < 2 and _ANNOUNCED.search(reply or "") and not _FINISHED.search(reply or ""):
+            # It said what it was about to do - "Let's fix this function" -
+            # and stopped there. Small models do this often; taking it as the
+            # end left the task half done with a message promising more.
+            nudges += 1
+            yield {"type": "message", "text": reply}
+            messages.append({"role": "assistant", "content": reply})
+            messages.append({"role": "user", "content": (
+                "You described the next step but did not do it. Nothing in a code block is run, "
+                "and file contents you have not read with a tool are guesses. Do the step now, "
+                "with a tool call in exactly this shape and nothing after it:" + NL + NL +
+                '<tool_call name="read_file">' + NL + "<path>path/to/file.py</path>" + NL + "</tool_call>" + NL + NL +
+                "If the whole task is already finished and checked, say so and summarise.")})
             continue
 
         if call is None:
@@ -350,6 +406,12 @@ async def run(task: str, model: str = "",
             except Exception as exc:
                 logger.debug("Post-task learning loop skipped: %s", exc)
 
+            if not performed:
+                # Said to be finished without a single tool used: nothing was
+                # read, changed or run, whatever the reply says.
+                yield {"type": "message", "text": (
+                    "Note: SMARAN Code did not read, change or run anything - the model answered "
+                    "without using its tools. Try again, or choose a stronger model.")}
             yield {"type": "done", "steps": step, "tools_used": performed}
             return
 
@@ -362,28 +424,39 @@ async def run(task: str, model: str = "",
 
         declined = False
         refused = ""
+        note = ""
         if mode is not None:
             # The owner's approval mode decides: run, ask, or refuse outright.
-            verdict = safety.decide(call["name"], call["arguments"], mode, allowlist)
+            # "live" reads it now, so a change made during the run applies.
+            current_mode, current_allow = mode, allowlist
+            if mode == "live":
+                live = safety.load()
+                current_mode, current_allow = live["approval_mode"], live["allowlist"]
+            verdict = safety.decide(call["name"], call["arguments"], current_mode, current_allow)
             if verdict["verdict"] == "refuse":
                 refused = verdict["reason"]
                 yield {"type": "approval", "step": step, "approved": False, "reason": refused}
             elif verdict["verdict"] == "ask":
                 yield {"type": "approval_needed", "name": call["name"], "arguments": call["arguments"],
                        "step": step, "reason": verdict["reason"]}
-                declined = not (approve is not None and await approve(step))
-                yield {"type": "approval", "step": step, "approved": not declined}
+                decision = await approve(step, call["name"], call["arguments"]) if approve is not None else False
+                approved, note = _decision(decision)
+                declined = not approved
+                yield {"type": "approval", "step": step, "approved": approved, "note": note}
         elif approve is not None and call["name"] in toolbox.MUTATING:
             yield {"type": "approval_needed", "name": call["name"],
                    "arguments": call["arguments"], "step": step}
-            declined = not await approve(step)
-            yield {"type": "approval", "step": step, "approved": not declined}
+            approved, note = _decision(await approve(step, call["name"], call["arguments"]))
+            declined = not approved
+            yield {"type": "approval", "step": step, "approved": approved, "note": note}
 
         if refused:
             result = "Refused, and it will be refused however it is asked: %s" % refused
         elif declined:
             result = ("The person declined this action, so it was not carried out. "
                       "Do not repeat it; choose another approach or ask what they want.")
+            if note:
+                result += " They said: " + note
         else:
             if run_id and call["name"] in safety.FILE_CHANGES:
                 # The original is kept before the first write, so the whole
@@ -399,9 +472,23 @@ async def run(task: str, model: str = "",
             result = toolbox.execute(call["name"], call["arguments"], workspace)
             if redact_secrets:
                 result = safety.redact(result)
+            if note:
+                result += "\n\nThe person allowed this and added: " + note
         performed.append(call["name"])
+        again = json.dumps([call["name"], call["arguments"], result[:500]], sort_keys=True, default=str)
+        repeats[again] = repeats.get(again, 0) + 1
+        if repeats[again] == 2:
+            result += ("\n\nYou have made this exact call before and got this exact result. "
+                       "Doing it again will not change anything: read the file, use different "
+                       "text, try another approach, or stop and say what is blocking you.")
         yield {"type": "tool_result", "name": call["name"],
                "result": result, "step": step}
+        if repeats[again] >= 3:
+            yield {"type": "error", "message": (
+                "Stopped: it kept repeating the same %s with the same result, so carrying on "
+                "would only use up steps. What was done so far is kept (and can be undone). "
+                "Try a clearer instruction or a stronger model." % call["name"])}
+            return
 
         # The arrow back. Without these two lines this is the old extension.
         messages.append({"role": "assistant", "content": reply})

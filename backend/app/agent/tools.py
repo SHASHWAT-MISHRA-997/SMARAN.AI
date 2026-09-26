@@ -207,6 +207,47 @@ def run_command(workspace, command: str) -> str:
             raise ToolError("The command could not start: %s" % exc) from exc
 
 
+def start_process(workspace, command: str) -> str:
+    """Start a server, watcher or anything that keeps running, in the background."""
+    from app.agent import git_policy, processes
+    from app.agent.safety import refusal
+    why = refusal(command)
+    if why:
+        return "Refused: this %s." % why
+    try:
+        command = git_policy.apply(command)
+        started = processes.start(command, str(workspace.root))
+    except (git_policy.GitRefused, RuntimeError, OSError) as exc:
+        return "Could not start: %s" % exc
+    import time
+    time.sleep(3)   # long enough for most servers to print their address or an error
+    first = processes.read(started["id"])
+    state = "still running" if first["running"] else "already exited with code %s" % first["exit_code"]
+    return _clip("Started as process %s (%s). Output so far:\n%s\n\nUse read_process to see more and "
+                 "stop_process when finished." % (started["id"], state, first["output"] or "(nothing yet)"))
+
+
+def read_process(workspace, process_id: str) -> str:
+    """What a background process has printed, and whether it is still running."""
+    from app.agent import processes
+    try:
+        info = processes.read(int(str(process_id).strip()))
+    except (KeyError, ValueError) as exc:
+        return str(exc)
+    state = "running for %ss" % info["seconds"] if info["running"] else "exited with code %s" % info["exit_code"]
+    return _clip("Process %s is %s. Latest output:\n%s" % (info["id"], state, info["output"] or "(nothing)"))
+
+
+def stop_process(workspace, process_id: str) -> str:
+    """Stop a background process and everything it started."""
+    from app.agent import processes
+    try:
+        info = processes.stop(int(str(process_id).strip()))
+    except (KeyError, ValueError) as exc:
+        return str(exc)
+    return _clip("Stopped process %s. Last output:\n%s" % (info["id"], info["output"][-1500:] or "(nothing)"))
+
+
 def web_search(workspace, query: str) -> str:
     """Search the live web: titles, addresses and a snippet of each result."""
     from app.web_search import perform_web_search
@@ -310,7 +351,13 @@ TOOLS: Dict[str, tuple] = {
     "search":           (search,           ["query"],
                          "Find which files contain a piece of text."),
     "run_command":      (run_command,      ["command"],
-                         "Run a shell command in the workspace inside sandbox and read output."),
+                         "Run a shell command that finishes (tests, builds, installs) and read its output."),
+    "start_process":    (start_process,    ["command"],
+                         "Start something that keeps running - a dev server, `python app.py`, a watcher - in the background."),
+    "read_process":     (read_process,     ["process_id"],
+                         "Read what a background process has printed and whether it is still running."),
+    "stop_process":     (stop_process,     ["process_id"],
+                         "Stop a background process."),
     "git":              (git,              ["subcommand"],
                          "Run a git command, for example: status, add -A, commit -m \"...\", push."),
     "web_search":       (web_search,       ["query"],
@@ -330,7 +377,7 @@ TOOLS: Dict[str, tuple] = {
 #: Tools that change something. Listed so the caller can decide which of them
 #: need a person to agree first - writing a file and reading one are not the
 #: same kind of act.
-MUTATING = {"write_file", "edit_file", "run_command", "git", "restore_snapshot"}
+MUTATING = {"write_file", "edit_file", "run_command", "git", "restore_snapshot", "start_process", "stop_process"}
 
 
 def describe_tools() -> str:

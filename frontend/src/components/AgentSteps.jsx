@@ -41,6 +41,7 @@ function Step({ item, runId }) {
   const [open, setOpen] = useState(item.status === 'waiting');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
   const Icon = ICONS[item.name] || Terminal;
   const waiting = item.status === 'waiting';
 
@@ -62,7 +63,7 @@ function Step({ item, runId }) {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ run_id: runId, step: item.step, approve }),
+        body: JSON.stringify({ run_id: runId, step: item.step, approve, note: note.trim() }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
     } catch (e) {
@@ -100,9 +101,17 @@ function Step({ item, runId }) {
       {/* Outside the collapsible part: a decision is never hidden. */}
       {waiting && (
         <div className="flex flex-wrap items-center gap-2 border-t border-amber-500/30 px-3 py-2">
-          <span className="text-[11px] font-bold text-amber-300">SMARAN Code wants to do this. Allow it?{item.reason ? ` (${item.reason})` : ''}</span>
-          <button type="button" disabled={busy} onClick={() => decide(true)} className="rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-black text-white hover:bg-emerald-500 disabled:opacity-50">Allow</button>
-          <button type="button" disabled={busy} onClick={() => decide(false)} className="rounded-lg border border-rose-500/50 px-3 py-1 text-[11px] font-black text-rose-300 hover:bg-rose-600 hover:text-white disabled:opacity-50">Deny</button>
+          <span className="w-full text-[11px] font-bold text-amber-300">SMARAN Code wants to do this. Allow it?{item.reason ? ` (${item.reason})` : ''}</span>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !busy) decide(!note.trim()); }}
+            placeholder="Optional: tell SMARAN what to do instead, or what to add…"
+            aria-label="Instructions for SMARAN Code"
+            className="min-w-0 flex-1 rounded-lg border border-amber-500/30 bg-black/30 px-2 py-1 text-[11px] text-zinc-100 outline-none focus:border-amber-400"
+          />
+          <button type="button" disabled={busy} onClick={() => decide(true)} className="rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-black text-white hover:bg-emerald-500 disabled:opacity-50">{note.trim() ? 'Allow + note' : 'Allow'}</button>
+          <button type="button" disabled={busy} onClick={() => decide(false)} className="rounded-lg border border-rose-500/50 px-3 py-1 text-[11px] font-black text-rose-300 hover:bg-rose-600 hover:text-white disabled:opacity-50">{note.trim() ? 'Do this instead' : 'Deny'}</button>
           {error && <span className="text-[11px] text-rose-400">{error}</span>}
         </div>
       )}

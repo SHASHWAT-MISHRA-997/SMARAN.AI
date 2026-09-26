@@ -1142,14 +1142,24 @@ def _get_or_create_device_user(db: Session, device_id: str, device_fingerprint: 
             db.refresh(user)
     return user
 
+# What a conversation is called before anyone has said anything in it.
+_PLACEHOLDER_TITLES = {"", "New Conversation", "New Coding Task", "New chat", "Design Session"}
+
+
 def get_current_user(request: Request, db: Session = Depends(get_db), session_token: Optional[str] = Cookie(None)) -> User:
     """Get current user from session token (httpOnly cookie), Authorization header, or device headers."""
-    token = session_token
+    # Try each credential offered, header first. A screen that has no token in
+    # memory sends "Bearer undefined"; that used to replace a perfectly good
+    # sign-in cookie, fall through to the device account, and get the owner a
+    # 403 on their own conversation.
+    candidates = []
     auth_header = request.headers.get("Authorization", "").strip()
     if auth_header.startswith("Bearer "):
-        token = auth_header[7:].strip()
-        
-    if token:
+        candidates.append(auth_header[7:].strip())
+    candidates.append(session_token)
+    for token in candidates:
+        if not token or token in ("undefined", "null"):
+            continue
         user = db.query(User).filter(User.session_token == token).first()
         if user and user.session_expires and user.session_expires > datetime.now():
             return user
@@ -2526,6 +2536,30 @@ async def update_cowork_settings(payload: dict, current_user: User = Depends(get
     return {**prefs, "browsers": {b: cowork_prefs.browser_available(b) for b in cowork_prefs.BROWSERS}}
 
 
+@app.get("/api/jobs")
+async def list_jobs(session_id: Optional[str] = None, kind: Optional[str] = None,
+                    current_user: User = Depends(get_current_user)):
+    """Replies, runs and pages being made in the background - to attach to after switching away."""
+    from app import jobs
+    return {"jobs": jobs.listing(session_id=session_id, kind=kind)}
+
+
+@app.get("/api/jobs/{job_id}/stream")
+async def follow_job(job_id: str, offset: int = 0, current_user: User = Depends(get_current_user)):
+    """Everything the job has produced from `offset`, then live until it ends."""
+    from app import jobs
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="That job has finished and been cleared, or never existed.")
+    return StreamingResponse(jobs.follow(job, offset), media_type="application/x-ndjson")
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, current_user: User = Depends(get_current_user)):
+    from app import jobs
+    return {"cancelled": jobs.cancel(job_id)}
+
+
 @app.get("/api/desktop/settings")
 async def get_desktop_settings(current_user: User = Depends(get_current_user)):
     """Settings -> General (Desktop), with what is actually in effect."""
@@ -3531,6 +3565,17 @@ async def transcribe_audio_endpoint(
 
 @app.post("/api/chat")
 async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """A chat turn. Seen by /api/jobs from the moment it is asked (app/jobs.py)."""
+    from app import jobs as _jobs
+    waiting = _jobs.preparing("chat", {"session_id": chat_req.session_id, "task": (chat_req.prompt or "")[:4000]})
+    try:
+        return await _chat_turn(chat_req, db, current_user)
+    finally:
+        # By now the reply is a job of its own, or it failed and there is none.
+        _jobs.prepared(waiting)
+
+
+async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
     # Web Search and strict uploaded-file RAG are intentionally separate modes.
     # If an older frontend sends both flags, explicit Web ON wins so the live
     # internet request is never blocked by the document-only RAG gate.
@@ -3578,6 +3623,13 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             raise HTTPException(status_code=403, detail="Forbidden: You do not have access to this chat session.")
         if getattr(session, "section", None) != req_section:
             session.section = req_section
+            session_changed = True
+        # "New chat" creates the conversation before anything is said in it,
+        # so it was left with the button's placeholder for a title and the
+        # sidebar filled with rows that all read "New Conversation". The first
+        # message names it, as it does for a conversation created right here.
+        if (session.title or "").strip() in _PLACEHOLDER_TITLES and chat_req.prompt.strip():
+            session.title = chat_req.prompt.strip()[:30]
             session_changed = True
         if session_changed:
             db.commit()
@@ -3986,7 +4038,10 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
     if getattr(chat_req, "web_search", False) or has_url_in_prompt:
         try:
             logger.info(f"Executing live web/URL extraction for: '{processing_prompt[:60]}...'")
-            web_results = perform_web_search(processing_prompt, max_results=5)
+            # On a worker thread: the search takes seconds, and on the event
+            # loop it froze every other request meanwhile - pressing New chat
+            # during a Web ON reply did nothing for several seconds.
+            web_results = await asyncio.to_thread(perform_web_search, processing_prompt, max_results=5)
             if web_results:
                 web_str_lines = []
                 for idx, item in enumerate(web_results, 1):
@@ -4176,7 +4231,14 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         # do not present it as a verified local installation.
         selected_model = chat_req.cloud_model
 
-    vision_keywords = ["image", "photo", "picture", "screenshot", "analyze this image", "what's in this", "describe the image", "read this image", "look at this"]
+    # Only a question about a picture needs a vision model. The bare words -
+    # "image", "photo", "picture" - refused "a portfolio for a wedding
+    # photographer" and "a page with an image gallery" with a 409 in Design
+    # Studio, though neither asks anyone to look at anything.
+    vision_keywords = ["analyze this image", "analyse this image", "what's in this image", "what is in this image",
+                       "what's in this photo", "what's in this picture", "describe the image", "describe this image",
+                       "describe this photo", "describe this picture", "read this image", "read this screenshot",
+                       "look at this image", "look at this photo", "look at this screenshot", "in this screenshot"]
     # Asking for a picture to be *made* is not asking for one to be read.
     #
     # These keywords are the same words a generation request is built from, so
@@ -5262,7 +5324,15 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
             logger.error(f"Stream error: {e}")
             yield json.dumps({"error": f"Streaming interruption occurred: {_clean_user_error(str(e))}"}) + "\n"
 
-    return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+    # Run as a job (app/jobs.py): leaving the conversation no longer stops the
+    # reply half way - it finishes and is saved, and the page can attach again.
+    from app import jobs as _jobs
+    # The question travels with the job: it is only saved with the answer, and
+    # whoever attaches mid-reply should see what is being answered.
+    job = _jobs.start("chat", stream_generator(), {"session_id": session.id,
+                                                   "section": getattr(chat_req, "section", "chat") or "chat",
+                                                   "task": (chat_req.prompt or "")[:4000]})
+    return StreamingResponse(_jobs.follow(job), media_type="application/x-ndjson")
 
 class SherpaOnnxRequest(BaseModel):
     text: str

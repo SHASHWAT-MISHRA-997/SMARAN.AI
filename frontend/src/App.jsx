@@ -345,6 +345,20 @@ const App = () => {
   async function handleCreateSession({ switchView = true, section = activeSection } = {}) {
     const isIsolated = switchView === false;
     const sessionSection = section || activeSection;
+    /* Pressing New on a conversation nobody has written in yet made another
+       empty one each time, and the sidebar filled with identical "New
+       Conversation" rows. A conversation keeps its placeholder title only
+       until its first message, so the open one is reused while it still has
+       it. */
+    if (!isIsolated && sessionSection === activeSection) {
+      const open = (Array.isArray(sessions) ? sessions : []).find((s) => s && s.id === activeSessionId);
+      const unused = open && ['New Conversation', 'New Coding Task'].includes((open.title || '').trim())
+        && !(open.message_count > 0);
+      if (unused) {
+        setActiveView('chat');
+        return open;
+      }
+    }
     if (noBackendHere()) {
       const created = {
         id: `local-${Date.now()}`,
@@ -478,6 +492,24 @@ const App = () => {
       return true;
     }
   };
+
+  // A conversation still called "New Conversation" takes its first message
+  // as its name (ChatArea announces it; the server stores the same).
+  useEffect(() => {
+    const placeholder = new Set(['', 'New Conversation', 'New Coding Task', 'New chat', 'Design Session']);
+    const named = (event) => {
+      const { id, title } = event.detail || {};
+      if (!id || !title) return;
+      const rename = (list) => (Array.isArray(list) ? list : []).map((s) => (
+        s && s.id === id && placeholder.has((s.title || '').trim()) ? { ...s, title } : s));
+      setSessions(rename);
+      if (noBackendHere() || String(id).startsWith('local-')) {
+        try { localChat.saveSessions(rename(localChat.loadSessions())); } catch { /* keep the screen's copy */ }
+      }
+    };
+    window.addEventListener('smaran:session-named', named);
+    return () => window.removeEventListener('smaran:session-named', named);
+  }, []);
 
   const handleRenameSession = async (id, newTitle) => {
     if (!newTitle || !newTitle.trim()) return;

@@ -39,6 +39,9 @@ class AgentRequest(BaseModel):
     root: str = ""
     # Code mode's "Ask for approval": every change waits for the person.
     ask_for_approval: bool = False
+    # The conversation the run belongs to: the backend saves the finished run
+    # there, so it is kept even if nobody is looking when it ends.
+    session_id: Optional[str] = Field(None, max_length=64)
     # manual | smart | off. Left empty, the saved setting is used; the older
     # ask_for_approval flag still means manual.
     approval_mode: Optional[str] = None
@@ -88,9 +91,10 @@ async def get_safety(_user=Depends(get_current_user_dep)):
 async def put_safety(update: SafetyUpdate, _user=Depends(get_current_user_dep)):
     from app.agent import safety
     try:
-        return {"preferences": safety.save(update.model_dump(exclude_none=True))}
+        prefs = safety.save(update.model_dump(exclude_none=True))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    return {"preferences": prefs, "released": settle_for_mode()}
 
 
 @router.get("/runs")
@@ -147,23 +151,79 @@ async def agent_plan(request: AgentRequest):
 
 
 #: Decisions a running agent is waiting for, keyed "run_id:step".
-_approvals: Dict[str, "asyncio.Future"] = {}
+#: Decisions a running agent is waiting for, keyed "run_id:step", with the
+#: call itself so a change of approval mode can settle them.
+_approvals: Dict[str, Dict[str, Any]] = {}
 
 
 class ApprovalDecision(BaseModel):
     run_id: str = Field(..., min_length=8, max_length=64)
     step: int = Field(..., ge=1, le=1000)
     approve: bool
+    # What to do instead, or anything to add - told to the agent with the decision.
+    note: str = Field("", max_length=2000)
 
 
 @router.post("/approve")
 async def agent_approve(decision: ApprovalDecision):
-    """Allow or refuse the change a running agent is waiting on."""
-    future = _approvals.get(f"{decision.run_id}:{decision.step}")
-    if future is None or future.done():
+    """Allow or refuse the change a running agent is waiting on, optionally with instructions."""
+    pending = _approvals.get(f"{decision.run_id}:{decision.step}")
+    if pending is None or pending["future"].done():
         raise HTTPException(status_code=404, detail="Nothing is waiting for that decision.")
-    future.set_result(decision.approve)
+    pending["future"].set_result({"approve": decision.approve, "note": decision.note.strip()})
     return {"ok": True, "approved": decision.approve}
+
+
+def _save_run(session_id: str, task: str, said: List[str], steps: List[str], failure: str, model: str) -> None:
+    """Keep a finished run in its conversation, like any chat turn."""
+    from app.database import SessionLocal
+    from app.models import ChatMessage, ChatSession
+
+    text = "\n\n".join(t for t in said if t).strip() or ("" if failure else "Done.")
+    if failure:
+        text = (text + "\n\n" if text else "") + "**Stopped:** " + failure
+    if steps:
+        text += "\n\n**Steps:** " + ", ".join(steps)
+    db = SessionLocal()
+    try:
+        session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+        if not session:
+            return
+        # A task started from "New coding task" is otherwise listed under that
+        # placeholder forever; the task itself is the better name.
+        if (session.title or "").strip() in ("", "New Coding Task", "New Conversation") and task.strip():
+            session.title = task.strip()[:30]
+        db.add(ChatMessage(session_id=session_id, role="user", content=task[:200000]))
+        db.add(ChatMessage(session_id=session_id, role="assistant", content=text[:200000],
+                           model_used=(model or "auto")[:200]))
+        db.commit()
+    except Exception:  # noqa: BLE001 - saving must never break the run
+        db.rollback()
+        logger.exception("could not save the run to its conversation")
+    finally:
+        db.close()
+
+
+def settle_for_mode() -> int:
+    """After the approval mode changes, release waiting steps the new mode allows.
+
+    A run used to keep the mode it started with, so switching to Off while a
+    step waited changed nothing and the run stayed stuck on Allow/Deny.
+    """
+    from app.agent import safety
+    prefs = safety.load()
+    settled = 0
+    for pending in list(_approvals.values()):
+        if pending["future"].done():
+            continue
+        verdict = safety.decide(pending["name"], pending["arguments"], prefs["approval_mode"], prefs["allowlist"])
+        if verdict["verdict"] == "allow":
+            pending["future"].set_result({"approve": True, "note": "", "by_mode": prefs["approval_mode"]})
+            settled += 1
+        elif verdict["verdict"] == "refuse":
+            pending["future"].set_result({"approve": False, "note": verdict["reason"]})
+            settled += 1
+    return settled
 
 
 @router.post("/run")
@@ -172,39 +232,60 @@ async def agent_run(request: AgentRequest):
     run_id = secrets.token_urlsafe(12)
     from app.agent import safety
 
-    mode = request.approval_mode or ("manual" if request.ask_for_approval else safety.load()["approval_mode"])
-    if mode not in safety.MODES:
+    # "live": each step follows the mode as it is set now, so switching the
+    # Approval button during a run takes effect on the next step. A caller
+    # may still pin one (the editor extension does).
+    mode = request.approval_mode or ("manual" if request.ask_for_approval else "live")
+    if mode not in safety.MODES + ("live",):
         raise HTTPException(status_code=400, detail="Approval mode is manual, smart or off.")
 
-    async def approve(step: int) -> bool:
+    async def approve(step: int, name: str = "", arguments: Optional[dict] = None) -> dict:
         future = asyncio.get_running_loop().create_future()
-        _approvals[f"{run_id}:{step}"] = future
+        _approvals[f"{run_id}:{step}"] = {"future": future, "name": name, "arguments": arguments or {}}
         try:
-            # Ten minutes to decide; silence is a no.
-            return bool(await asyncio.wait_for(future, timeout=600))
+            # Thirty minutes to decide; silence is a no.
+            return await asyncio.wait_for(future, timeout=1800)
         except asyncio.TimeoutError:
-            return False
+            return {"approve": False, "note": "No decision was made in 30 minutes."}
         finally:
             _approvals.pop(f"{run_id}:{step}", None)
 
     async def stream():
         yield json.dumps({"type": "run", "id": run_id, "mode": mode}) + "\n"
+        said: List[str] = []
+        steps: List[str] = []
+        failure = ""
         try:
             async for event in loop.run(request.task, request.model, request.history,
                                         request.provider, request.api_key,
                                         request.root,
                                         approve=approve, mode=mode, run_id=run_id):
+                kind = event.get("type")
+                if kind == "message":
+                    said.append(event.get("text", ""))
+                elif kind == "tool_call":
+                    steps.append(event.get("name", ""))
+                elif kind == "error":
+                    failure = event.get("message", "")
                 yield json.dumps(event) + "\n"
         except Exception as exc:  # noqa: BLE001
             logger.exception("agent run failed")
-            yield json.dumps({"type": "error", "message": str(exc)[:300]}) + "\n"
+            failure = str(exc)[:300]
+            yield json.dumps({"type": "error", "message": failure}) + "\n"
         finally:
             for key in [k for k in _approvals if k.startswith(run_id + ":")]:
-                future = _approvals.pop(key, None)
-                if future and not future.done():
-                    future.set_result(False)
+                pending = _approvals.pop(key, None)
+                if pending and not pending["future"].done():
+                    pending["future"].set_result({"approve": False, "note": "The run ended."})
+            if request.session_id:
+                _save_run(request.session_id, request.task, said, steps, failure, request.model)
 
-    return StreamingResponse(stream(), media_type="application/x-ndjson")
+    # A job (app/jobs.py): switching conversations or starting another task
+    # no longer stops this run; the page can attach to it again.
+    from app import jobs
+    job = jobs.start("agent", stream(), {"session_id": request.session_id or None, "run_id": run_id,
+                                         "root": request.root, "task": request.task[:200]})
+    return StreamingResponse(jobs.follow(job), media_type="application/x-ndjson")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

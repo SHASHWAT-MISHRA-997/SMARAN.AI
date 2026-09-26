@@ -135,3 +135,14 @@ def test_nothing_else_builds_an_upload_path_from_a_relative_default():
         if "uploads" in rendered and 'getenv("DATA_DIR", "./data")' in rendered:
             offenders.append(rendered[:90])
     assert not offenders, "upload paths still built from a relative default: %r" % offenders
+
+
+def test_mentioning_a_photo_is_not_asking_to_see_one():
+    """'A portfolio for a wedding photographer' was refused with a 409 in Design Studio."""
+    import ast
+    source = (BACKEND / "app" / "main.py").read_text(encoding="utf-8")
+    start = source.index("vision_keywords = [")
+    keywords = ast.literal_eval(source[start + len("vision_keywords = "):source.index("]", start) + 1])
+    prompt = "a one-page portfolio for a wedding photographer with an image gallery and pictures"
+    assert not any(k in prompt for k in keywords)
+    assert any(k in "please describe this image for me" for k in keywords)

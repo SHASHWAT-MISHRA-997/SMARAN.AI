@@ -2901,6 +2901,17 @@ const ChatArea = ({
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const streamingRef = useRef(false);
+  // Which send owns the busy state, and which conversation it belongs to.
+  // Switching to another conversation detaches from a reply in progress - it
+  // keeps running on the server as a job - instead of refusing to switch.
+  const sendIdRef = useRef(0);
+  const streamSessionRef = useRef(null);
+  const releaseSend = (id) => {
+    if (sendIdRef.current !== id) return;      // a detached send: not ours to release
+    setStreaming(false);
+    streamingRef.current = false;
+    streamSessionRef.current = null;
+  };
   const incomingQueueRef = useRef([]);
   const typewriterTimerRef = useRef(null);
 
@@ -3017,7 +3028,17 @@ const ChatArea = ({
     // that send created the session. Loading its (empty) history here is what
     // erased the first message. The guard inside fetchMessages covers the
     // request already in the air; this avoids making a pointless one at all.
-    if (streamingRef.current) return;
+    if (streamingRef.current) {
+      const owner = streamSessionRef.current;
+      if (owner === 'pending' || owner === activeSessionId) return;
+      // Another conversation was opened while a reply was still coming. Let
+      // that reply finish in the background (the server keeps it running and
+      // saves it) and show the conversation that was asked for.
+      sendIdRef.current += 1;
+      setStreaming(false);
+      streamingRef.current = false;
+      streamSessionRef.current = null;
+    }
     if (activeSessionId) {
       fetchMessages();
     } else {
@@ -3028,6 +3049,101 @@ const ChatArea = ({
   useEffect(() => {
     fetchUploadedFiles();
   }, [activeCollections, token, activeSessionId]);
+
+  /* Opening a conversation whose reply or Code run is still going: show it
+   * live again. It kept running on the server after this screen switched away
+   * (app/jobs.py); here it is replayed from the start and followed until it
+   * ends, then the saved conversation is loaded. */
+  const attachedJobsRef = useRef(new Set());
+  const openSessionRef = useRef(activeSessionId);
+  const preparingShownRef = useRef(null);
+  openSessionRef.current = activeSessionId;
+  const attachRunningJobs = async (sessionId) => {
+    if (!sessionId || noBackend()) return;
+    let listed = [];
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs?session_id=${encodeURIComponent(sessionId)}`, {
+        credentials: 'include', headers: { Authorization: `Bearer ${token}` },
+      });
+      listed = res.ok ? ((await res.json()).jobs || []) : [];
+    } catch { return; }
+    if (openSessionRef.current !== sessionId) return;
+    const running = listed.filter((j) => !j.done && j.id);
+    const waitingId = `preparing-${sessionId}`;
+    /* A reply still being prepared - searching the web, reading documents -
+       has no job to follow yet. Say so, and look again shortly, instead of
+       showing the question with nothing coming. */
+    if (!running.length && listed.some((j) => j.preparing)) {
+      preparingShownRef.current = sessionId;
+      const task = (listed.find((j) => j.preparing)?.meta?.task) || '';
+      setMessages((prev) => (prev.some((m) => m.id === waitingId) ? prev
+        : [...prev, ...(task ? [{ id: `${waitingId}-q`, role: 'user', content: task }] : []),
+          { id: waitingId, role: 'assistant', content: '', isLoading: true }]));
+      setTimeout(() => {
+        if (openSessionRef.current === sessionId && !streamingRef.current) attachRunningJobs(sessionId);
+      }, 2000);
+      return;
+    }
+    if (preparingShownRef.current === sessionId) {
+      preparingShownRef.current = null;
+      setMessages((prev) => prev.filter((m) => m.id !== waitingId && m.id !== `${waitingId}-q`));
+      // Preparing ended with no job left running: it finished (or failed)
+      // between two looks, and what was saved is the answer.
+      if (!running.length) {
+        if (!streamingRef.current) fetchMessages();
+        return;
+      }
+    }
+    for (const job of running) {
+      if (attachedJobsRef.current.has(job.id)) continue;
+      attachedJobsRef.current.add(job.id);
+      const id = `job-${job.id}`;
+      const isAgent = job.kind === 'agent';
+      setMessages((prev) => [...prev,
+        ...(job.meta?.task ? [{ id: `${id}-q`, role: 'user', content: job.meta.task }] : []),
+        { id, role: 'assistant', content: '', isLoading: true, agentSteps: isAgent ? [] : undefined, live: true }]);
+      const update = (fn) => setMessages((prev) => prev.map((m) => (m.id === id ? fn(m) : m)));
+      (async () => {
+        let text = '';
+        let steps = [];
+        try {
+          const res = await fetch(`${API_BASE}/api/jobs/${job.id}/stream?offset=0`, {
+            credentials: 'include', headers: { Authorization: `Bearer ${token}` },
+          });
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder('utf-8');
+          let buffer = '';
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              let ev;
+              try { ev = JSON.parse(line); } catch { continue; }
+              if (isAgent) {
+                if (ev.type === 'run') update((m) => ({ ...m, agentRunId: ev.id }));
+                else if (ev.type === 'checkpoint') update((m) => ({ ...m, agentCheckpoint: ev.run_id }));
+                else if (ev.type === 'message') { text = text ? `${text}\n\n${ev.text}` : ev.text; update((m) => ({ ...m, content: text, isLoading: false })); }
+                else if (['tool_call', 'approval_needed', 'approval', 'tool_result'].includes(ev.type)) {
+                  steps = applyAgentEvent(steps, ev);
+                  const snapshot = steps;
+                  update((m) => ({ ...m, agentSteps: snapshot }));
+                }
+              } else if (ev.token) {
+                text += ev.token;
+                update((m) => ({ ...m, content: text, isLoading: false }));
+              }
+            }
+          }
+        } catch { /* the saved conversation below is the answer */ }
+        attachedJobsRef.current.delete(job.id);
+        // Finished: what the server saved is the record.
+        if (!streamingRef.current) fetchMessages();
+      })();
+    }
+  };
 
   const fetchMessages = async () => {
     // With no backend the conversation lives on the device.
@@ -3058,6 +3174,7 @@ const ChatArea = ({
         if (streamingRef.current) return;
         setMessages(asList(data));
         setTimeout(scrollToBottom, 50);
+        attachRunningJobs(activeSessionId);
       }
     } catch (err) {
       console.error(err);
@@ -3856,7 +3973,7 @@ const ChatArea = ({
    * The model is whatever is selected - a local Ollama model, or a cloud one
    * (the backend uses the key saved on this machine; one kept only in this
    * browser is passed along). */
-  const runCodeAgent = async ({ userPrompt, assistantId, sessionId }) => {
+  const runCodeAgent = async ({ userPrompt, assistantId, sessionId, sendId }) => {
     const started = performance.now();
     const cloud = getCloudRoutingPayload();
     const local = selectedModel && !selectedModel.startsWith('cloud:') && selectedModel !== 'auto' ? selectedModel : '';
@@ -3882,7 +3999,9 @@ const ChatArea = ({
           api_key: cloud.cloud_api_key || '',
           root: workspaceStatus?.root || '',
           history,
-          approval_mode: approvalMode,
+          session_id: sessionId || undefined,
+          // No mode sent: the backend follows the Approval button as it is at
+          // each step, so switching it during a run takes effect.
         }),
       });
       if (!res.ok || !res.body) throw new Error(`SMARAN Code could not start (HTTP ${res.status}).`);
@@ -3921,28 +4040,15 @@ const ChatArea = ({
 
     const changed = steps.filter((s) => s.status === 'done' && ['write_file', 'edit_file'].includes(s.name))
       .map((s) => s.arguments?.path).filter(Boolean);
-    const actions = steps.map((s) => `- ${s.status === 'declined' ? '~~' : ''}${summarize(s.name, s.arguments)}${s.status === 'declined' ? '~~ (declined)' : ''}`);
     let content = said || (failure ? '' : 'Done.');
     if (failure) content = `${content ? `${content}\n\n` : ''}**Stopped:** ${failure}`;
     if (changed.length) content += `\n\n**Files changed:** ${[...new Set(changed)].map((p) => `\`${p}\``).join(', ')}`;
     const elapsed = Math.round(performance.now() - started);
     update((m) => ({ ...m, content, isLoading: false, response_time_ms: elapsed }));
-    setStreaming(false);
-    streamingRef.current = false;
+    releaseSend(sendId);
 
-    // Kept in the conversation like any other turn - steps as a list.
-    if (sessionId) {
-      const record = actions.length ? `${content}\n\n**Steps:**\n${actions.join('\n')}` : content;
-      fetch(`${API_BASE}/api/chat/sessions/${sessionId}/messages`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ messages: [
-          { role: 'user', content: userPrompt },
-          { role: 'assistant', content: record, model_used: cloud.cloud_model || local || 'auto', response_time_ms: elapsed },
-        ] }),
-      }).catch(() => {});
-    }
+    // The backend keeps the finished run in the conversation (it runs as a
+    // job, so it is saved even if this screen is closed before it ends).
   };
 
   const handleSend = async (e, directPrompt = null, isVoicePrompt = false) => {
@@ -4032,6 +4138,8 @@ const ChatArea = ({
        sent. `setStreaming` stays where it was; it drives the UI, and only this
        ref is read by the guards. */
     streamingRef.current = true;
+    const mySend = ++sendIdRef.current;
+    streamSessionRef.current = activeSessionId || 'pending';
 
     let targetSessionId = activeSessionId;
     if (!targetSessionId) {
@@ -4039,6 +4147,7 @@ const ChatArea = ({
       targetSessionId = created?.id
         || ('session_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
     }
+    if (sendIdRef.current === mySend) streamSessionRef.current = targetSessionId;
 
     if (translateTimerRef.current) {
       clearTimeout(translateTimerRef.current);
@@ -4070,6 +4179,11 @@ const ChatArea = ({
 
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setTimeout(scrollToBottom, 50);
+    // The first message names the conversation; the sidebar hears it here
+    // rather than waiting for the next reload (the server saves the same name).
+    window.dispatchEvent(new CustomEvent('smaran:session-named', {
+      detail: { id: targetSessionId, title: String(userPrompt || '').trim().slice(0, 30) },
+    }));
 
     /* No backend: answer from the device itself.
      *
@@ -4122,7 +4236,7 @@ const ChatArea = ({
      * tests and reads the output, step by step, each step shown as it
      * happens. With "Ask for approval" on, every change waits for Allow. */
     if (activeSection === 'code' && workspaceStatus?.open && !isVoiceTurn) {
-      await runCodeAgent({ userPrompt, assistantId: assistantMessage.id, sessionId: targetSessionId });
+      await runCodeAgent({ userPrompt, assistantId: assistantMessage.id, sessionId: targetSessionId, sendId: mySend });
       return;
     }
 
@@ -4166,8 +4280,7 @@ const ChatArea = ({
                     : msg
                 )
               );
-              setStreaming(false);
-              streamingRef.current = false;
+              releaseSend(mySend);
               window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'waiting', message: 'Your approval is needed' } }));
               if (isVoicePrompt && isVoiceModeOpen) {
                 speakText(`Confirmation required for ${execData.title || action}. Please confirm on your screen.`);
@@ -4201,8 +4314,7 @@ const ChatArea = ({
                     : msg
                 )
               );
-              setStreaming(false);
-              streamingRef.current = false;
+              releaseSend(mySend);
               window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'waving', message: 'Done!' } }));
               if (isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current) {
                 speakText(execData.message || 'Done, sir.');
@@ -4400,8 +4512,7 @@ const ChatArea = ({
             : msg
         )
       );
-      setStreaming(false);
-      streamingRef.current = false;
+      releaseSend(mySend);
       window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'idle', message: '' } })), 1300);
       if (isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current) {
         const finalVoiceReply = finalResult || (selectedLanguage === 'hi' ? "मॉडल से कोई उत्तर नहीं मिला। कृपया मॉडल या API स्थिति जाँचें।" : "The selected model returned no answer. Please check its runtime or API status.");

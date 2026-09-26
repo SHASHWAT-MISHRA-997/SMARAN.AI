@@ -92,6 +92,58 @@ class CommandResult:
         return f"exit code {self.returncode}\n{self.output}"
 
 
+def run_tree(command: str, cwd: str, env: Optional[Dict], timeout: float,
+             max_bytes: int, creationflags: int = 0) -> "CommandResult":
+    """Run a shell command; on timeout stop it and everything it started.
+
+    subprocess.run with pipes waited forever when a command started a server:
+    on a timeout it killed only the shell, the server kept the pipe open, and
+    reading the output never finished - the agent sat on one step for half an
+    hour. Output goes to files instead, which nobody can hold open against us,
+    and the whole process tree is killed when time runs out.
+    """
+    import psutil
+
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        try:
+            proc = subprocess.Popen(command, shell=True, cwd=cwd, env=env, stdout=out, stderr=err,
+                                    stdin=subprocess.DEVNULL, creationflags=creationflags)
+        except OSError as exc:
+            return CommandResult(-1, "", str(exc))
+        timed_out = False
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            kill_tree(proc.pid)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+        texts = []
+        for handle in (out, err):
+            handle.seek(0)
+            texts.append(handle.read(max_bytes).decode("utf-8", errors="replace"))
+        return CommandResult(-1 if timed_out else proc.returncode, texts[0], texts[1], timed_out=timed_out)
+
+
+def kill_tree(pid: int) -> None:
+    """Stop a process and every process it started."""
+    import psutil
+
+    try:
+        parent = psutil.Process(pid)
+    except psutil.Error:
+        return
+    family = parent.children(recursive=True) + [parent]
+    for proc in family:
+        try:
+            proc.kill()
+        except psutil.Error:
+            pass
+    psutil.wait_procs(family, timeout=5)
+
+
 class Sandbox:
     """Manages sandboxed command execution with NemoClaw-style protections."""
 
@@ -149,20 +201,7 @@ class Sandbox:
     def _run_direct(self, command: str, cwd: str,
                     env: Optional[Dict]) -> CommandResult:
         """Run without any sandboxing."""
-        try:
-            result = subprocess.run(
-                command, shell=True, cwd=cwd, capture_output=True,
-                text=True, timeout=self.config.timeout_seconds, env=env,
-            )
-            return CommandResult(
-                returncode=result.returncode,
-                stdout=result.stdout[:self.config.max_output_bytes],
-                stderr=result.stderr[:self.config.max_output_bytes],
-            )
-        except subprocess.TimeoutExpired:
-            return CommandResult(0, "", "", timed_out=True)
-        except OSError as exc:
-            return CommandResult(-1, "", str(exc))
+        return run_tree(command, cwd, env, self.config.timeout_seconds, self.config.max_output_bytes)
 
     def _run_permissive(self, command: str, cwd: str,
                         env: Optional[Dict]) -> CommandResult:
@@ -170,22 +209,7 @@ class Sandbox:
         run_env = dict(os.environ)
         if env:
             run_env.update(env)
-
-        try:
-            result = subprocess.run(
-                command, shell=True, cwd=cwd, capture_output=True,
-                text=True, timeout=self.config.timeout_seconds,
-                env=run_env,
-            )
-            return CommandResult(
-                returncode=result.returncode,
-                stdout=result.stdout[:self.config.max_output_bytes],
-                stderr=result.stderr[:self.config.max_output_bytes],
-            )
-        except subprocess.TimeoutExpired:
-            return CommandResult(0, "", "", timed_out=True)
-        except OSError as exc:
-            return CommandResult(-1, "", str(exc))
+        return run_tree(command, cwd, run_env, self.config.timeout_seconds, self.config.max_output_bytes)
 
     def _run_strict(self, command: str, cwd: str,
                     env: Optional[Dict]) -> CommandResult:
@@ -221,28 +245,10 @@ class Sandbox:
         if env:
             run_env.update(env)
 
-        try:
-            # On Windows, use CREATE_NO_WINDOW to prevent popups
-            kwargs: Dict[str, Any] = {
-                "shell": True, "cwd": cwd, "capture_output": True,
-                "text": True, "timeout": self.config.timeout_seconds,
-                "env": run_env,
-            }
-            if sys.platform == "win32":
-                kwargs["creationflags"] = (
-                    subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-                )
-
-            result = subprocess.run(command, **kwargs)
-            return CommandResult(
-                returncode=result.returncode,
-                stdout=result.stdout[:self.config.max_output_bytes],
-                stderr=result.stderr[:self.config.max_output_bytes],
-            )
-        except subprocess.TimeoutExpired:
-            return CommandResult(0, "", "", timed_out=True)
-        except OSError as exc:
-            return CommandResult(-1, "", str(exc))
+        # CREATE_NO_WINDOW on Windows: no console window flashing up.
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0  # type: ignore[attr-defined]
+        return run_tree(command, cwd, run_env, self.config.timeout_seconds,
+                        self.config.max_output_bytes, creationflags=flags)
 
     # ── Snapshots ───────────────────────────────────────────────────────
 
