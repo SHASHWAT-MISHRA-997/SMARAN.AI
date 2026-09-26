@@ -488,6 +488,7 @@ export function describeOutcome(command, result) {
       if (command.app) {
         // Spotify will not let another app start a song; it opens on the
         // search with the song on top. Said as it is, not as "playing".
+        if (ok && result?.mode === 'search' && result?.offeredSettings) return `Opened ${command.query} in ${command.app}. ${command.app} won't let another app press play, so I'm opening Accessibility - switch on SMARAN.AI there once, and from then on I'll start songs myself.`;
         if (ok && result?.mode === 'search') return `Opened ${command.query} in ${command.app}. Tap it to play - or turn on SMARAN.AI in Android's Accessibility settings, and I'll press play for you.`;
         if (ok) return command.query ? `Playing ${command.query} on ${command.app}.` : `Opening ${command.app}.`;
         return `${command.app} isn't installed on this phone.`;

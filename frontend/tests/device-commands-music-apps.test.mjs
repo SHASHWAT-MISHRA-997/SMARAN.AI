@@ -38,6 +38,13 @@ test('what it says back names the app, and says so when it is missing', () => {
   assert.equal(describeOutcome(cmd, { opened: false, reason: 'not-installed' }), "Spotify isn't installed on this phone.");
 });
 
+test('the first time play cannot be pressed, it says it is opening the switch', () => {
+  const cmd = { action: 'music', query: 'kesariya', app: 'Spotify' };
+  const said = describeOutcome(cmd, { opened: true, mode: 'search', needsAccessibility: true, offeredSettings: true });
+  assert.match(said, /opening Accessibility/);
+  assert.match(said, /start songs myself/);
+});
+
 // Real control of whatever is playing - pause, resume, next, volume - and a
 // song with no service named plays on YouTube rather than reaching the model.
 test('media controls are commands, instantly', () => {

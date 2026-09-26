@@ -222,6 +222,15 @@ export async function runDeviceCommand(command) {
         break;
       case 'music':
         result = await device.playMusic({ query: command.query || '', app: command.app || '' });
+        // Spotify opened on the song but will not start it for another app;
+        // SMARAN presses play through its accessibility service. The first
+        // time that is off, take the person straight to the switch instead of
+        // telling them where to look - once, not on every song.
+        if (result?.needsAccessibility && !offeredAccessibility()) {
+          markAccessibilityOffered();
+          setTimeout(() => { device.openAccessibilitySettings().catch(() => {}); }, 2500);
+          result = { ...result, offeredSettings: true };
+        }
         break;
       case 'media':
         // Pressing pause is not a reason to shrink the app into a window.
@@ -284,6 +293,14 @@ export async function runDeviceCommand(command) {
  *
  * @returns {Promise<{spoken: string, floated: boolean}|null>}
  */
+const ACCESSIBILITY_OFFERED = 'smaran.a11yOffered';
+function offeredAccessibility() {
+  try { return localStorage.getItem(ACCESSIBILITY_OFFERED) === '1'; } catch { return false; }
+}
+function markAccessibilityOffered() {
+  try { localStorage.setItem(ACCESSIBILITY_OFFERED, '1'); } catch { /* private mode */ }
+}
+
 export async function handleIfDeviceCommand(utterance) {
   if (!isNativeApp()) {
     // The desktop page still knows the time; the model does not.

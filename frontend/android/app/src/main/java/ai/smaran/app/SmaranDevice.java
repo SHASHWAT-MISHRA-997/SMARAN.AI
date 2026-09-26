@@ -184,6 +184,18 @@ public class SmaranDevice extends Plugin {
         call.resolve(new JSObject().put("listening", listening));
     }
 
+    /** Whether SMARAN's accessibility service is on (it presses play and Skip ad). */
+    @PluginMethod
+    public void accessibilityStatus(PluginCall call) {
+        call.resolve(new JSObject().put("enabled", SmaranAccessibility.enabled()));
+    }
+
+    /** Android's Accessibility page, where SMARAN.AI is switched on. */
+    @PluginMethod
+    public void openAccessibilitySettings(PluginCall call) {
+        call.resolve(new JSObject().put("opened", SmaranAccessibility.openSettings(getContext())));
+    }
+
     /** Press the Skip button on an ad, if the accessibility service is on. */
     @PluginMethod
     public void skipAd(PluginCall call) {
@@ -355,9 +367,12 @@ public class SmaranDevice extends Plugin {
                 .put("opened", true).put("mode", tapped ? "play" : "search")));
             return;
         }
+        boolean search = DeviceActions.opensSearch(pkg, query);
         call.resolve(ok
             ? new JSObject().put("opened", true)
-                .put("mode", DeviceActions.opensSearch(pkg, query) ? "search" : "play")
+                .put("mode", search ? "search" : "play")
+                // Said so the page can offer the switch that makes it play.
+                .put("needsAccessibility", search && !SmaranAccessibility.enabled())
             : new JSObject().put("opened", false)
                 .put("reason", pkg != null ? "not-installed" : "no-music-app"));
     }
