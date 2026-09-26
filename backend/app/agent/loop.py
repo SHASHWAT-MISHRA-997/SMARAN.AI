@@ -36,6 +36,8 @@ some of them and quietly fail for the rest.
 
 from __future__ import annotations
 
+import asyncio
+
 import json
 import logging
 import re
@@ -222,6 +224,13 @@ async def plan(task: str, model: str = "", provider: str = "",
     )
 
 
+def _answer(decision) -> tuple:
+    """(allowed, note) from an approver - which may answer a plain bool."""
+    if isinstance(decision, tuple):
+        return bool(decision[0]), str(decision[1] or "").strip()
+    return bool(decision), ""
+
+
 async def run(task: str, model: str = "",
               history: Optional[List[Dict]] = None,
               provider: str = "", api_key: str = "",
@@ -362,6 +371,7 @@ async def run(task: str, model: str = "",
 
         declined = False
         refused = ""
+        note = ""
         if mode is not None:
             # The owner's approval mode decides: run, ask, or refuse outright.
             verdict = safety.decide(call["name"], call["arguments"], mode, allowlist)
@@ -371,16 +381,21 @@ async def run(task: str, model: str = "",
             elif verdict["verdict"] == "ask":
                 yield {"type": "approval_needed", "name": call["name"], "arguments": call["arguments"],
                        "step": step, "reason": verdict["reason"]}
-                declined = not (approve is not None and await approve(step))
-                yield {"type": "approval", "step": step, "approved": not declined}
+                allowed, note = _answer(await approve(step)) if approve is not None else (False, "")
+                declined = not allowed
+                yield {"type": "approval", "step": step, "approved": allowed, "note": note}
         elif approve is not None and call["name"] in toolbox.MUTATING:
             yield {"type": "approval_needed", "name": call["name"],
                    "arguments": call["arguments"], "step": step}
-            declined = not await approve(step)
-            yield {"type": "approval", "step": step, "approved": not declined}
+            allowed, note = _answer(await approve(step))
+            declined = not allowed
+            yield {"type": "approval", "step": step, "approved": allowed, "note": note}
 
         if refused:
             result = "Refused, and it will be refused however it is asked: %s" % refused
+        elif declined and note:
+            result = ("The person declined this action, so it was not carried out, "
+                      "and told you instead:\n%s\nDo what they said." % note)
         elif declined:
             result = ("The person declined this action, so it was not carried out. "
                       "Do not repeat it; choose another approach or ask what they want.")
@@ -396,9 +411,14 @@ async def run(task: str, model: str = "",
                         yield {"type": "checkpoint", "run_id": run_id}
                 except Exception:  # noqa: BLE001 - the tool reports a bad path itself
                     pass
-            result = toolbox.execute(call["name"], call["arguments"], workspace)
+            # In a thread: a command can take minutes, and run on the event
+            # loop it froze the whole server - the Allow button included, so
+            # the next approval could never arrive and the run looked stuck.
+            result = await asyncio.to_thread(toolbox.execute, call["name"], call["arguments"], workspace)
             if redact_secrets:
                 result = safety.redact(result)
+            if note:
+                result += "\n\nThe person allowed this and added:\n%s" % note
         performed.append(call["name"])
         yield {"type": "tool_result", "name": call["name"],
                "result": result, "step": step}

@@ -41,6 +41,9 @@ function Step({ item, runId }) {
   const [open, setOpen] = useState(item.status === 'waiting');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Said with the decision - "yes, but call it utils.py", "no, write a test
+  // first". Allow and Deny alone left no way to steer the run.
+  const [note, setNote] = useState('');
   const Icon = ICONS[item.name] || Terminal;
   const waiting = item.status === 'waiting';
 
@@ -62,9 +65,10 @@ function Step({ item, runId }) {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ run_id: runId, step: item.step, approve }),
+        body: JSON.stringify({ run_id: runId, step: item.step, approve, message: note.trim() }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+      setNote('');
     } catch (e) {
       setError(e.message);
       setBusy(false);
@@ -101,10 +105,27 @@ function Step({ item, runId }) {
       {waiting && (
         <div className="flex flex-wrap items-center gap-2 border-t border-amber-500/30 px-3 py-2">
           <span className="text-[11px] font-bold text-amber-300">SMARAN Code wants to do this. Allow it?{item.reason ? ` (${item.reason})` : ''}</span>
-          <button type="button" disabled={busy} onClick={() => decide(true)} className="rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-black text-white hover:bg-emerald-500 disabled:opacity-50">Allow</button>
-          <button type="button" disabled={busy} onClick={() => decide(false)} className="rounded-lg border border-rose-500/50 px-3 py-1 text-[11px] font-black text-rose-300 hover:bg-rose-600 hover:text-white disabled:opacity-50">Deny</button>
+          <button type="button" disabled={busy || !runId} onClick={() => decide(true)} className="rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-black text-white hover:bg-emerald-500 disabled:opacity-50">Allow</button>
+          <button type="button" disabled={busy || !runId} onClick={() => decide(false)} className="rounded-lg border border-rose-500/50 px-3 py-1 text-[11px] font-black text-rose-300 hover:bg-rose-600 hover:text-white disabled:opacity-50">Deny</button>
+          {!runId && <span className="text-[11px] text-rose-400">The run has not said who it is yet - wait a second.</span>}
           {error && <span className="text-[11px] text-rose-400">{error}</span>}
+          <input
+            type="text"
+            value={note}
+            disabled={busy}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends it with Allow; Shift+Enter with Deny ("do this instead").
+              if (e.key === 'Enter') { e.preventDefault(); decide(!e.shiftKey); }
+            }}
+            placeholder="Optional: tell it what to change or do instead (Enter = Allow, Shift+Enter = Deny)"
+            aria-label="Instructions to send with your decision"
+            className="w-full rounded-lg border border-amber-500/30 bg-black/30 px-2.5 py-1.5 text-[12px] text-zinc-100 placeholder:text-zinc-500 focus:border-amber-400 focus:outline-none"
+          />
         </div>
+      )}
+      {item.note && (
+        <p className="border-t border-zinc-800 px-3 py-1.5 text-[11px] text-zinc-300">You said: {item.note}</p>
       )}
     </div>
   );

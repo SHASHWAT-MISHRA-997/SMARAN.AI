@@ -57,12 +57,23 @@ const noBackendHere = () => isNativeApp() && !loadLink()?.url;
  */
 const needsModel = () => isNativeApp() && !loadLink()?.url && !standalone.isReady();
 
+/** Mounted from the first visit on; hidden, not destroyed, when not in front. */
+function KeepAlive({ active, seen, children }) {
+  if (!seen && !active) return null;
+  return <div className={active ? 'contents' : 'hidden'} aria-hidden={!active}>{children}</div>;
+}
+
 const App = () => {
   // Strict Auth state — gated strictly by GoogleAuthGate; must sign in with Google
   const [currentUser, setCurrentUser] = useState(() => getSavedGoogleUser());
 
   // Navigation & View state
   const [activeView, setActiveView] = useState('chat');
+  // Every view opened so far; those wrapped in KeepAlive stay mounted.
+  const [visitedViews, setVisitedViews] = useState(() => new Set(['chat']));
+  useEffect(() => {
+    setVisitedViews((prev) => (prev.has(activeView) ? prev : new Set(prev).add(activeView)));
+  }, [activeView]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isModelHubOpen, setIsModelHubOpen] = useState(false);
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
@@ -116,6 +127,9 @@ const App = () => {
     if (typeof window !== 'undefined') localStorage.setItem('sm_active_section', section);
     setActiveSessionId(null);
     fetchSessions(section);
+    // Chat and Code are both the conversation view; from Images or Design the
+    // tab changed the list but left you looking at the other page.
+    setActiveView('chat');
   };
 
   /* The pinned layout follows the window, not the button.
@@ -211,7 +225,7 @@ const App = () => {
       open_settings: () => setIsSettingsOpen((prev) => !prev),
       toggle_panel: () => setShowRightPanel((prev) => !prev),
       toggle_terminal: () => setIsTerminalOpen((prev) => !prev),
-      voice_speak: () => window.dispatchEvent(new CustomEvent('smaran:toggle-voice')),
+      voice_speak: () => { setActiveView('chat'); window.dispatchEvent(new CustomEvent('smaran:toggle-voice')); },
       stop_control: () => fetch(`${API_BASE}/api/control/stop`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}',
       }).catch(() => {}),
@@ -686,7 +700,12 @@ const App = () => {
           </div>
         )}
 
-        {activeView === 'chat' && (
+        {/* Views with work that runs for a while - a conversation, a design,
+            an image or a video - stay mounted once opened and are only hidden
+            when you move elsewhere. Unmounting them threw away whatever they
+            were in the middle of: a Design Studio job was gone by the time you
+            came back to it. */}
+        <KeepAlive active={activeView === 'chat'} seen={visitedViews.has('chat')}>
           <ChatArea
             token={currentUser?.session_token}
             currentUser={currentUser}
@@ -704,21 +723,21 @@ const App = () => {
             activeSection={activeSection}
             onSectionChange={handleSectionChange}
           />
-        )}
-        
-        {activeView === 'design' && (
+        </KeepAlive>
+
+        <KeepAlive active={activeView === 'design'} seen={visitedViews.has('design')}>
           <SmaranDesignView
             onClose={() => setActiveView('chat')}
             onNavigate={handleNavigate}
             onEnsureSession={handleCreateSession}
             onOpenTerminal={() => setIsTerminalOpen(true)}
           />
-        )}
+        </KeepAlive>
         {activeView === 'collections' && (
           <CollectionManager />
         )}
-        {activeView === 'images' && <ImageStudio />}
-        {activeView === 'videos' && <VideoStudio />}
+        <KeepAlive active={activeView === 'images'} seen={visitedViews.has('images')}><ImageStudio /></KeepAlive>
+        <KeepAlive active={activeView === 'videos'} seen={visitedViews.has('videos')}><VideoStudio /></KeepAlive>
         {activeView === 'browser' && <LiveBrowser />}
         {activeView === 'plugins' && <ExtensionsHub embedded />}
         {activeView === 'scheduled' && !isHandheld() && (

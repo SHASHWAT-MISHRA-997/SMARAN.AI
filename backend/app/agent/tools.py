@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import subprocess
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("agent.tools")
@@ -80,11 +81,20 @@ def workspace_for(root: str = ""):
     from app.workspace.core import workspace
 
     if not workspace.describe().get("open"):
-        raise ToolError(
-            "No folder is open, so there is nothing to work in. Open one first "
-            "- the interface has 'Open a folder' above the message box."
-        )
+        # No folder open: work in SMARAN's own projects folder rather than
+        # refuse. Refusing is why a coding task with nothing open came back as
+        # a chat reply - Code and Chat looked the same. SMARAN_CODE_HOME moves
+        # it (to another drive, say).
+        return workspace_for(str(default_projects_folder()))
     return workspace
+
+
+def default_projects_folder() -> Path:
+    """Where SMARAN Code works when no folder has been opened; created on use."""
+    configured = os.environ.get("SMARAN_CODE_HOME", "").strip()
+    folder = Path(configured).expanduser() if configured else Path.home() / "SMARAN" / "Code"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
 
 
 def list_files(workspace, path: str = "") -> str:

@@ -1189,6 +1189,29 @@ const ChatArea = ({
   activeSection = 'code',
 }) => {
   const [messages, setMessages] = useState([]);
+  /* Runs keep going when you leave them.
+   *
+   * There used to be one run at a time, owned by whatever conversation was on
+   * screen: while it streamed, "New coding task" and every other conversation
+   * refused to open (the history loader bailed out so it would not erase the
+   * reply), and a second task had to wait for the first. Now each run writes
+   * to its own conversation. The one on screen updates state as before; one
+   * you have left is kept here, still being written, and is shown again the
+   * moment you go back to it. */
+  const runningRef = useRef(new Set());            // conversations with a run in flight
+  const parkedRef = useRef(new Map());             // their messages while off screen
+  const visibleSessionRef = useRef(activeSessionId);
+  const setMessagesFor = (sessionId, updater) => {
+    if (!sessionId || sessionId === visibleSessionRef.current) {
+      setMessages(updater);
+      return;
+    }
+    const before = parkedRef.current.get(sessionId) || [];
+    parkedRef.current.set(sessionId, typeof updater === 'function' ? updater(before) : updater);
+  };
+  /** The conversation's messages, wherever they are kept right now. */
+  const messagesOf = (sessionId) => (!sessionId || sessionId === visibleSessionRef.current
+    ? messagesRef.current : (parkedRef.current.get(sessionId) || []));
   const [input, setInput] = useState('');
   // SMARAN Code's approval mode - manual, smart or off - kept by the backend
   // (/api/agent/safety) so every place that runs the agent agrees.
@@ -2901,8 +2924,24 @@ const ChatArea = ({
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const streamingRef = useRef(false);
-  const incomingQueueRef = useRef([]);
-  const typewriterTimerRef = useRef(null);
+  // Set from the moment a send claims the conversation until it knows which
+  // conversation that is - a new one is created on the first message.
+  const claimingRef = useRef(false);
+  /** A run has started (on) or ended (off) in this conversation. */
+  const markRunning = (sessionId, on) => {
+    if (sessionId) {
+      if (on) runningRef.current.add(sessionId);
+      else runningRef.current.delete(sessionId);
+    }
+    if (!sessionId || sessionId === visibleSessionRef.current) {
+      setStreaming(on);
+      streamingRef.current = on;
+    }
+    if (!on && sessionId && sessionId !== visibleSessionRef.current) {
+      // Finished off screen: the server has the conversation now.
+      parkedRef.current.delete(sessionId);
+    }
+  };
 
   const getCloudRoutingPayload = () => {
     if (!selectedModel?.startsWith('cloud:')) return {};
@@ -3013,11 +3052,29 @@ const ChatArea = ({
   }, [token, selectedModel]);
 
   useEffect(() => {
+    const previous = visibleSessionRef.current;
+    visibleSessionRef.current = activeSessionId;
     // A send in flight owns the conversation; the id only just changed because
     // that send created the session. Loading its (empty) history here is what
     // erased the first message. The guard inside fetchMessages covers the
     // request already in the air; this avoids making a pointless one at all.
-    if (streamingRef.current) return;
+    if (claimingRef.current) return;
+    // A send that just created this conversation already moved here.
+    if (previous === activeSessionId && runningRef.current.has(activeSessionId)) return;
+    // Leaving a conversation that is still working: keep what it has so far,
+    // it goes on being written off screen.
+    if (previous && previous !== activeSessionId && runningRef.current.has(previous)) {
+      parkedRef.current.set(previous, messagesRef.current);
+    }
+    const running = !!activeSessionId && runningRef.current.has(activeSessionId);
+    setStreaming(running);
+    streamingRef.current = running;
+    if (running) {
+      setMessages(parkedRef.current.get(activeSessionId) || []);
+      parkedRef.current.delete(activeSessionId);
+      setTimeout(scrollToBottom, 50);
+      return;
+    }
     if (activeSessionId) {
       fetchMessages();
     } else {
@@ -3030,6 +3087,7 @@ const ChatArea = ({
   }, [activeCollections, token, activeSessionId]);
 
   const fetchMessages = async () => {
+    const wanted = activeSessionId;
     // With no backend the conversation lives on the device.
     if (noBackend()) {
       setMessages(localChat.loadMessages(activeSessionId));
@@ -3055,7 +3113,9 @@ const ChatArea = ({
            wiping both. The composer cleared, the welcome screen stayed up, and
            nothing else happened: a new user's first ever message, silently
            swallowed. */
-        if (streamingRef.current) return;
+        if (streamingRef.current || claimingRef.current) return;
+        // Answered after you moved to another conversation: not this one's.
+        if (wanted !== visibleSessionRef.current) return;
         setMessages(asList(data));
         setTimeout(scrollToBottom, 50);
       }
@@ -3402,6 +3462,9 @@ const ChatArea = ({
 
   const handleEditMessage = async (msgId, newText) => {
     if (!newText || !newText.trim() || streaming) return;
+    const editSession = activeSessionId;
+    const queue = [];
+    let typer = null;
     try {
       // 1. Send edit request to backend API
       const resp = await fetch(`${API_BASE}/api/chat/messages/${msgId}`, {
@@ -3424,12 +3487,11 @@ const ChatArea = ({
 
       if (messagesResp.ok) {
         const updatedMsgs = await messagesResp.json();
-        setMessages(updatedMsgs);
+        setMessagesFor(editSession, updatedMsgs);
 
         // 3. Trigger chat stream using the edited user text, and clearing current input field
-        setStreaming(true);
-        streamingRef.current = true;
-        incomingQueueRef.current = [];
+        markRunning(editSession, true);
+        queue.length = 0;
 
         // Set up the loading assistant message chunk
         const assistantMessage = {
@@ -3442,7 +3504,7 @@ const ChatArea = ({
         };
 
         // Append the assistant loading bubble to messages
-        setMessages((prev) => [...prev, assistantMessage]);
+        setMessagesFor(editSession, (prev) => [...prev, assistantMessage]);
         setTimeout(scrollToBottom, 50);
 
         // Fetch streaming response from chat endpoint
@@ -3491,7 +3553,7 @@ const ChatArea = ({
                   const parsed = JSON.parse(line);
                   if (parsed.references) {
                     references = parsed.references;
-                    setMessages((prev) =>
+                    setMessagesFor(editSession, (prev) =>
                       prev.map((msg) =>
                         msg.id === assistantMessage.id ? { ...msg, references } : msg
                       )
@@ -3508,7 +3570,7 @@ const ChatArea = ({
                   if (reportedSource) setLastSource(reportedSource.trim());
                   if (parsed.model_routed) {
                     setLastUsedModel(parsed.model_routed);
-                    setMessages((prev) =>
+                    setMessagesFor(editSession, (prev) =>
                       prev.map((msg) =>
                         msg.id === assistantMessage.id ? { ...msg, model_used: parsed.model_routed } : msg
                       )
@@ -3517,13 +3579,13 @@ const ChatArea = ({
                   const tokenStr = parsed.token || parsed.error;
                   if (tokenStr) {
                     accumulatedResponse += tokenStr;
-                    incomingQueueRef.current.push(tokenStr);
+                    queue.push(tokenStr);
 
-                    if (!typewriterTimerRef.current) {
+                    if (!typer) {
                       const processQueue = () => {
-                        if (incomingQueueRef.current.length > 0) {
-                          const nextToken = incomingQueueRef.current.shift();
-                          setMessages((prev) =>
+                        if (queue.length > 0) {
+                          const nextToken = queue.shift();
+                          setMessagesFor(editSession, (prev) =>
                             prev.map((msg) =>
                               msg.id === assistantMessage.id
                                 ? { ...msg, content: (msg.content || '') + nextToken }
@@ -3531,9 +3593,9 @@ const ChatArea = ({
                             )
                           );
                           setTimeout(scrollToBottom, 20);
-                          typewriterTimerRef.current = setTimeout(processQueue, 15);
+                          typer = setTimeout(processQueue, 15);
                         } else {
-                          typewriterTimerRef.current = null;
+                          typer = null;
                         }
                       };
                       processQueue();
@@ -3542,7 +3604,7 @@ const ChatArea = ({
                   // Preserve only measurements explicitly supplied by the backend.
                   const backendMeasurements = extractBackendMeasurements(parsed);
                   if (backendMeasurements.hasPayload) {
-                    setMessages((prev) =>
+                    setMessagesFor(editSession, (prev) =>
                       prev.map((msg) =>
                         msg.id === assistantMessage.id
                           ? {
@@ -3564,28 +3626,28 @@ const ChatArea = ({
 
           // Complete typewriter queue flush if any
           const flushQueue = () => {
-            if (incomingQueueRef.current.length > 0) {
-              const remaining = incomingQueueRef.current.join('');
-              setMessages((prev) =>
+            if (queue.length > 0) {
+              const remaining = queue.join('');
+              setMessagesFor(editSession, (prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessage.id
                     ? { ...msg, content: (msg.content || '') + remaining }
                     : msg
                 )
               );
-              incomingQueueRef.current = [];
+              queue.length = 0;
             }
           };
           flushQueue();
 
-          setMessages((prev) =>
+          setMessagesFor(editSession, (prev) =>
             prev.map((msg) =>
               msg.id === assistantMessage.id ? { ...msg, isLoading: false } : msg
             )
           );
         } catch (streamErr) {
           console.error(streamErr);
-          setMessages((prev) =>
+          setMessagesFor(editSession, (prev) =>
             prev.map((msg) =>
               msg.id === assistantMessage.id
                 ? { ...msg, content: (msg.content || '') + `\n[Streaming Error: ${streamErr.message}]`, isLoading: false }
@@ -3593,8 +3655,7 @@ const ChatArea = ({
             )
           );
         } finally {
-          setStreaming(false);
-          streamingRef.current = false;
+          markRunning(editSession, false);
         }
       }
     } catch (err) {
@@ -3739,10 +3800,9 @@ const ChatArea = ({
     let model = standalone.getModel();
 
     const fail = (text) => {
-      setMessages((prev) => prev.map((m) =>
+      setMessagesFor(sessionId, (prev) => prev.map((m) =>
         m.id === assistantId ? { ...m, content: text, isLoading: false } : m));
-      setStreaming(false);
-      streamingRef.current = false;
+      markRunning(sessionId, false);
       /* The voice screen is a separate surface and it only ever learned about
          replies through the backend path. On a phone answering from the
          device, nothing was ever handed to it - so Speak sat on "Waiting for
@@ -3787,7 +3847,7 @@ const ChatArea = ({
         signal: controller.signal,
         onToken: (chunk) => {
           sofar += chunk;
-          setMessages((prev) => prev.map((m) =>
+          setMessagesFor(sessionId, (prev) => prev.map((m) =>
             m.id === assistantId ? { ...m, content: sofar, isLoading: false } : m));
         },
       });
@@ -3795,12 +3855,12 @@ const ChatArea = ({
       if (!sofar.trim()) {
         sofar = 'The model returned an empty reply. Try again, or pick a '
           + 'different model in Settings.';
-        setMessages((prev) => prev.map((m) =>
+        setMessagesFor(sessionId, (prev) => prev.map((m) =>
           m.id === assistantId ? { ...m, content: sofar, isLoading: false } : m));
       }
 
       // Kept on the device, so the conversation is still here tomorrow.
-      localChat.saveMessages(sessionId, messagesRef.current.map((m) =>
+      localChat.saveMessages(sessionId, messagesOf(sessionId).map((m) =>
         (m.id === assistantId ? { ...m, content: sofar, isLoading: false } : m)));
 
       /* Queued for the paired computer.
@@ -3834,15 +3894,14 @@ const ChatArea = ({
         fail(error?.message || 'That request could not be completed.');
         return;
       }
-      setMessages((prev) => prev.map((m) =>
+      setMessagesFor(sessionId, (prev) => prev.map((m) =>
         m.id === assistantId
           ? { ...m, content: sofar || 'Stopped.', isLoading: false }
           : m));
       if (spoken) setVoiceAiResponse(sofar || 'Stopped.');
     } finally {
       directAbortRef.current = null;
-      setStreaming(false);
-      streamingRef.current = false;
+      markRunning(sessionId, false);
       window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'idle' } }));
       setTimeout(scrollToBottom, 60);
     }
@@ -3864,7 +3923,7 @@ const ChatArea = ({
       .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content && !m.isLoading)
       .slice(-8)
       .map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) }));
-    const update = (fn) => setMessages((prev) => prev.map((m) => (m.id === assistantId ? fn(m) : m)));
+    const update = (fn) => setMessagesFor(sessionId, (prev) => prev.map((m) => (m.id === assistantId ? fn(m) : m)));
     update((m) => ({ ...m, agentSteps: [], agentRunId: null, content: '' }));
 
     let said = '';
@@ -3927,8 +3986,9 @@ const ChatArea = ({
     if (changed.length) content += `\n\n**Files changed:** ${[...new Set(changed)].map((p) => `\`${p}\``).join(', ')}`;
     const elapsed = Math.round(performance.now() - started);
     update((m) => ({ ...m, content, isLoading: false, response_time_ms: elapsed }));
-    setStreaming(false);
-    streamingRef.current = false;
+    markRunning(sessionId, false);
+    // The character's "working" bubble ends with the run, as it does for chat.
+    window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: failure ? 'failed' : 'idle', message: '' } }));
 
     // Kept in the conversation like any other turn - steps as a list.
     if (sessionId) {
@@ -4031,6 +4091,7 @@ const ChatArea = ({
        history fetch could start, come back empty, and erase the message being
        sent. `setStreaming` stays where it was; it drives the UI, and only this
        ref is read by the guards. */
+    claimingRef.current = true;
     streamingRef.current = true;
 
     let targetSessionId = activeSessionId;
@@ -4038,6 +4099,9 @@ const ChatArea = ({
       const created = await onEnsureSession?.();
       targetSessionId = created?.id
         || ('session_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
+      // It is about to be the one on screen; its run writes there, not to
+      // the parked copies kept for conversations you have left.
+      visibleSessionRef.current = targetSessionId;
     }
 
     if (translateTimerRef.current) {
@@ -4048,9 +4112,11 @@ const ChatArea = ({
     setInput('');
     // Collapse the composer back to a single row once the message is sent.
     if (composerRef.current) composerRef.current.style.height = 'auto';
-    setStreaming(true);
-    streamingRef.current = true;
-    incomingQueueRef.current = [];
+    markRunning(targetSessionId, true);
+    claimingRef.current = false;
+    // This run's own typing queue: another conversation may be answering too.
+    const queue = [];
+    let typer = null;
 
     const userMessage = {
       id: Date.now(),
@@ -4068,7 +4134,7 @@ const ChatArea = ({
       isLoading: true,
     };
 
-    setMessages((prev) => [...prev, userMessage, assistantMessage]);
+    setMessagesFor(targetSessionId, (prev) => [...prev, userMessage, assistantMessage]);
     setTimeout(scrollToBottom, 50);
 
     /* No backend: answer from the device itself.
@@ -4121,7 +4187,10 @@ const ChatArea = ({
      * agent loop (/api/agent/run): it reads the files, edits them, runs the
      * tests and reads the output, step by step, each step shown as it
      * happens. With "Ask for approval" on, every change waits for Allow. */
-    if (activeSection === 'code' && workspaceStatus?.open && !isVoiceTurn) {
+    // With no folder open the agent works in SMARAN's own projects folder
+    // (the backend picks it), so Code is always the agent - it used to fall
+    // through to a plain chat reply, which is why Code looked like Chat.
+    if (activeSection === 'code' && !isVoiceTurn) {
       await runCodeAgent({ userPrompt, assistantId: assistantMessage.id, sessionId: targetSessionId });
       return;
     }
@@ -4154,7 +4223,7 @@ const ChatArea = ({
             const execData = await execRes.json();
             if (execData.requires_confirmation) {
               const confirmMsg = `⚠️ **J.A.R.V.I.S. Confirmation Required**\n\n**Action:** ${execData.title || action}\n${execData.description || ''}\n\n*This system modification requires your explicit approval.*`;
-              setMessages((prev) =>
+              setMessagesFor(targetSessionId, (prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessage.id
                     ? {
@@ -4166,8 +4235,7 @@ const ChatArea = ({
                     : msg
                 )
               );
-              setStreaming(false);
-              streamingRef.current = false;
+              markRunning(targetSessionId, false);
               window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'waiting', message: 'Your approval is needed' } }));
               if (isVoicePrompt && isVoiceModeOpen) {
                 speakText(`Confirmation required for ${execData.title || action}. Please confirm on your screen.`);
@@ -4194,15 +4262,14 @@ const ChatArea = ({
                 replyContent += `\n\n**Top Running Applications:**\n` +
                   execData.apps.slice(0, 10).map(a => `- ⚡ **${a.name}** (PID: ${a.pid} | RAM: ${a.memory_mb} MB | CPU: ${a.cpu_percent}%)`).join('\n');
               }
-              setMessages((prev) =>
+              setMessagesFor(targetSessionId, (prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessage.id
                     ? { ...msg, content: replyContent, isLoading: false }
                     : msg
                 )
               );
-              setStreaming(false);
-              streamingRef.current = false;
+              markRunning(targetSessionId, false);
               window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'waving', message: 'Done!' } }));
               if (isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current) {
                 speakText(execData.message || 'Done, sir.');
@@ -4285,7 +4352,7 @@ const ChatArea = ({
               const parsed = JSON.parse(line);
               if (parsed.references) {
                 references = parsed.references;
-                setMessages((prev) =>
+                setMessagesFor(targetSessionId, (prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id ? { ...msg, references } : msg
                   )
@@ -4293,7 +4360,7 @@ const ChatArea = ({
               }
               if (parsed.model_routed) {
                 setLastUsedModel(parsed.model_routed);
-                setMessages((prev) =>
+                setMessagesFor(targetSessionId, (prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id ? { ...msg, modelUsed: parsed.model_routed } : msg
                   )
@@ -4301,7 +4368,7 @@ const ChatArea = ({
               }
               const backendMeasurements = extractBackendMeasurements(parsed);
               if (backendMeasurements.hasPayload) {
-                setMessages((prev) =>
+                setMessagesFor(targetSessionId, (prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id
                       ? { ...msg, ...backendMeasurements.messagePatch }
@@ -4316,28 +4383,28 @@ const ChatArea = ({
               if (parsed.translated_response && selectedLanguage !== 'en') {
                 fullResponseText = parsed.translated_response;
                 displayedResponse = parsed.translated_response;
-                setMessages((prev) =>
+                setMessagesFor(targetSessionId, (prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id
                       ? { ...msg, content: parsed.translated_response, originalContent: parsed.original_response || fullResponseText }
                       : msg
                   )
                 );
-                if (typewriterTimerRef.current) {
-                  clearInterval(typewriterTimerRef.current);
-                  typewriterTimerRef.current = null;
+                if (typer) {
+                  clearInterval(typer);
+                  typer = null;
                 }
               }
               if (parsed.token) {
                 if (!fullResponseText) window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'review', message: 'Answering…' } }));
                 fullResponseText += parsed.token;
-                incomingQueueRef.current.push(parsed.token);
-                if (!typewriterTimerRef.current) {
-                  typewriterTimerRef.current = setInterval(() => {
-                    if (incomingQueueRef.current.length > 0) {
-                      const next = incomingQueueRef.current.shift();
+                queue.push(parsed.token);
+                if (!typer) {
+                  typer = setInterval(() => {
+                    if (queue.length > 0) {
+                      const next = queue.shift();
                       displayedResponse += next;
-                      setMessages((prev) =>
+                      setMessagesFor(targetSessionId, (prev) =>
                         prev.map((msg) =>
                           msg.id === assistantMessage.id
                             ? { ...msg, content: displayedResponse, isLoading: false }
@@ -4345,9 +4412,9 @@ const ChatArea = ({
                         )
                       );
                       scrollToBottom();
-                    } else if (!streamingRef.current) {
-                      clearInterval(typewriterTimerRef.current);
-                      typewriterTimerRef.current = null;
+                    } else if (!runningRef.current.has(targetSessionId)) {
+                      clearInterval(typer);
+                      typer = null;
                     }
                   }, 12);
                 }
@@ -4356,7 +4423,7 @@ const ChatArea = ({
                 const visibleError = `Request failed: ${parsed.error}`;
                 fullResponseText += visibleError;
                 displayedResponse += visibleError;
-                setMessages((prev) =>
+                setMessagesFor(targetSessionId, (prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessage.id
                       ? { ...msg, content: displayedResponse, isLoading: false }
@@ -4376,7 +4443,7 @@ const ChatArea = ({
       const errMsg = `Request failed: ${err.message || 'Unable to communicate with the AI model.'}`;
       fullResponseText = errMsg;
       displayedResponse = errMsg;
-      setMessages((prev) =>
+      setMessagesFor(targetSessionId, (prev) =>
         prev.map((msg) =>
           msg.id === assistantMessage.id
             ? { ...msg, content: errMsg, isLoading: false }
@@ -4384,24 +4451,23 @@ const ChatArea = ({
         )
       );
     } finally {
-      if (typewriterTimerRef.current) {
-        clearInterval(typewriterTimerRef.current);
-        typewriterTimerRef.current = null;
+      if (typer) {
+        clearInterval(typer);
+        typer = null;
       }
       const finalResult = fullResponseText.trim() || displayedResponse.trim();
-      incomingQueueRef.current = [];
+      queue.length = 0;
       const fallbackNotice = selectedLanguage === 'hi'
         ? "मॉडल से कोई उत्तर प्राप्त नहीं हुआ। कृपया पुनः प्रयास करें या मॉडल की स्थिति जांचें।"
         : "No response was returned by the model. Please check the model status and retry.";
-      setMessages((prev) =>
+      setMessagesFor(targetSessionId, (prev) =>
         prev.map((msg) =>
           msg.id === assistantMessage.id
             ? { ...msg, content: finalResult || msg.content || fallbackNotice, isLoading: false }
             : msg
         )
       );
-      setStreaming(false);
-      streamingRef.current = false;
+      markRunning(targetSessionId, false);
       window.setTimeout(() => window.dispatchEvent(new CustomEvent('smaran:pet-state', { detail: { state: 'idle', message: '' } })), 1300);
       if (isVoiceModeOpenRef.current && voiceSession === voiceSessionRef.current) {
         const finalVoiceReply = finalResult || (selectedLanguage === 'hi' ? "मॉडल से कोई उत्तर नहीं मिला। कृपया मॉडल या API स्थिति जाँचें।" : "The selected model returned no answer. Please check its runtime or API status.");

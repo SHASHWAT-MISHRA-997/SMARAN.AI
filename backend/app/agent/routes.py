@@ -154,6 +154,10 @@ class ApprovalDecision(BaseModel):
     run_id: str = Field(..., min_length=8, max_length=64)
     step: int = Field(..., ge=1, le=1000)
     approve: bool
+    # What the person typed with the decision: "yes, but name it utils.py",
+    # "no - add a test first". The agent is given it word for word. Allow and
+    # Deny alone gave no way to steer a run short of stopping it.
+    message: str = Field("", max_length=4000)
 
 
 @router.post("/approve")
@@ -162,7 +166,7 @@ async def agent_approve(decision: ApprovalDecision):
     future = _approvals.get(f"{decision.run_id}:{decision.step}")
     if future is None or future.done():
         raise HTTPException(status_code=404, detail="Nothing is waiting for that decision.")
-    future.set_result(decision.approve)
+    future.set_result((decision.approve, decision.message.strip()))
     return {"ok": True, "approved": decision.approve}
 
 
@@ -176,14 +180,15 @@ async def agent_run(request: AgentRequest):
     if mode not in safety.MODES:
         raise HTTPException(status_code=400, detail="Approval mode is manual, smart or off.")
 
-    async def approve(step: int) -> bool:
+    async def approve(step: int):
+        """(allowed, what the person said with it)."""
         future = asyncio.get_running_loop().create_future()
         _approvals[f"{run_id}:{step}"] = future
         try:
             # Ten minutes to decide; silence is a no.
-            return bool(await asyncio.wait_for(future, timeout=600))
+            return await asyncio.wait_for(future, timeout=600)
         except asyncio.TimeoutError:
-            return False
+            return (False, "")
         finally:
             _approvals.pop(f"{run_id}:{step}", None)
 
@@ -202,7 +207,7 @@ async def agent_run(request: AgentRequest):
             for key in [k for k in _approvals if k.startswith(run_id + ":")]:
                 future = _approvals.pop(key, None)
                 if future and not future.done():
-                    future.set_result(False)
+                    future.set_result((False, ""))
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 

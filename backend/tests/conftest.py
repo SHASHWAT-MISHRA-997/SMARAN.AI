@@ -20,3 +20,9 @@ def measured_rtx2060(monkeypatch):
         torch_version="fixture", torch_is_cuda_build=True,
         disk_free_gb=100.0, ram_total_gb=16.0, ram_free_gb=8.0,
     )
+
+
+@pytest.fixture(autouse=True)
+def _code_home_in_tmp(tmp_path, monkeypatch):
+    """SMARAN Code's no-folder fallback lands in a temp folder, never the real home."""
+    monkeypatch.setenv("SMARAN_CODE_HOME", str(tmp_path / "smaran-code"))

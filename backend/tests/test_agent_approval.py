@@ -73,7 +73,7 @@ def test_the_route_resolves_a_waiting_decision():
         return out, future.result()
 
     out, decided = asyncio.run(go())
-    assert out["approved"] and decided is True
+    assert out["approved"] and decided == (True, "")
     with pytest.raises(Exception):
         asyncio.run(routes.agent_approve(routes.ApprovalDecision(run_id="nothing-waits", step=1, approve=True)))
 
@@ -144,3 +144,77 @@ def test_every_event_is_json(tmp_path, monkeypatch):
     for event in events:
         json.dumps(event)
     assert any(e["type"] == "skill_created" and e["path"].endswith("skill.md") for e in events)
+
+
+def test_what_the_person_types_with_a_refusal_reaches_the_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(loop, "_ask_model", scripted([WRITE, "Understood."]))
+
+    async def refuse_with_note(step):
+        return (False, "call it greeting.txt instead")
+
+    events = collect("write hello", tmp_path, refuse_with_note)
+    assert not (tmp_path / "hello.txt").exists()
+    result = next(e for e in events if e["type"] == "tool_result")["result"]
+    assert "greeting.txt" in result
+    assert next(e for e in events if e["type"] == "approval")["note"] == "call it greeting.txt instead"
+
+
+def test_what_the_person_types_with_an_allow_reaches_the_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(loop, "_ask_model", scripted([WRITE, "Done."]))
+
+    async def allow_with_note(step):
+        return (True, "then add a test")
+
+    events = collect("write hello", tmp_path, allow_with_note)
+    assert (tmp_path / "hello.txt").read_text() == "hi"
+    result = next(e for e in events if e["type"] == "tool_result")["result"]
+    assert "then add a test" in result
+
+
+def test_the_route_passes_the_typed_message(tmp_path):
+    from app.agent import routes
+
+    async def go():
+        future = asyncio.get_running_loop().create_future()
+        routes._approvals["abcdefgh5678:2"] = future
+        await routes.agent_approve(routes.ApprovalDecision(
+            run_id="abcdefgh5678", step=2, approve=False, message="  use pytest  "))
+        return future.result()
+
+    assert asyncio.run(go()) == (False, "use pytest")
+
+
+def test_a_slow_command_does_not_freeze_the_server(tmp_path, monkeypatch):
+    """The tool runs in a thread: the event loop keeps answering meanwhile."""
+    import time
+    from app.agent import tools as toolbox
+
+    monkeypatch.setattr(loop, "_ask_model", scripted([READ, "Listed."]))
+    real = toolbox.execute
+
+    def slow(*a, **k):
+        time.sleep(0.4)
+        return real(*a, **k)
+
+    monkeypatch.setattr(toolbox, "execute", slow)
+    ticks = []
+
+    async def go():
+        async def ticker():
+            for _ in range(6):
+                ticks.append(1)
+                await asyncio.sleep(0.05)
+        t = asyncio.create_task(ticker())
+        events = [e async for e in loop.run("look", root=str(tmp_path))]
+        await t
+        return events
+
+    asyncio.run(go())
+    assert len(ticks) >= 5
+
+
+def test_no_open_folder_uses_the_projects_folder(tmp_path, monkeypatch):
+    from app.agent import tools as toolbox
+    monkeypatch.setenv("SMARAN_CODE_HOME", str(tmp_path / "projects"))
+    ws = toolbox.workspace_for("")
+    assert str(ws.root).endswith("projects")
