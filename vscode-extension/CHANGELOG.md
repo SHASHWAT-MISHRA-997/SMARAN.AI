@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+**"ollama" works as Ollama's name in settings.** Ollama's provider id is
+empty, and `"smaran.provider": "ollama"` written by hand made the model list
+fail with "not a provider this knows" while chat through it worked. Both
+names now mean Ollama. A new test runs chat and the model list against
+stand-ins for Ollama and LM Studio on every build.
+
 ## 2.22.0
 
 **A live preview beside the editor, that updates as the agent works.** The

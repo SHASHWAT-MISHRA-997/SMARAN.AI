@@ -276,6 +276,10 @@ export async function listModels(
         case 'lmstudio':
             return openAiStyleModels(lmStudioUrl.replace(/\/+$/, ''), '', 'LM Studio');
 
+        // Ollama's id is the empty string; "ollama" written by hand in
+        // settings.json is the same thing, and failed here with "not a
+        // provider this knows" while chat through it worked.
+        case 'ollama':
         case '': {
             const { status, body } = await get(`${ollamaUrl.replace(/\/+$/, '')}/api/tags`);
             if (status !== 200) {
