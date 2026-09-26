@@ -137,7 +137,7 @@ export default function LiveBrowser() {
         {status && !status.available && (
           <div className={`${card} flex items-start gap-3 p-4 text-sm text-amber-700 dark:text-amber-300`}>
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>No Chrome, Edge or Brave was found on this computer. Install one of them and come back.</p>
+            <p>No Chrome, Chromium, Edge or Brave was found on this computer. Install one of them and come back.</p>
           </div>
         )}
 
