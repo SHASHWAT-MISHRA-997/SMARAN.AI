@@ -3391,20 +3391,69 @@ async def _resolve_auto_cloud_models(provider: str, api_key: str, limit: int = 3
     tired = [m for m in ranked if _route_in_cooldown(provider, m)]
     return (fresh + tired)[:limit]
 
-async def _auto_cloud_candidates() -> List[dict]:
+#: What a task needs, and the model-name shapes that serve it best, best first.
+#: Matched against each provider's own live catalogue, so nothing is assumed
+#: to exist. A route that is rate-limited or failing is parked (cooldown) and
+#: the next one answers - the order below only decides who is asked first.
+_TASK_MODEL_HINTS = {
+    "code": (r"coder|codestral|devstral", r"qwen-?3|qwen2\.5", r"deepseek-(chat|v3)", r"gpt-oss-120b",
+             r"kimi|glm-4", r"gemini-\d+(\.\d+)?-pro", r"llama-?3\.3-70b|llama-4-maverick"),
+    "reasoning": (r"gemini-\d+(\.\d+)?-pro", r"deepseek-r1|reasoner", r"qwq|thinking|reason",
+                  r"gpt-oss-120b", r"qwen-?3", r"llama-?3\.3-70b|llama-4-maverick", r"^o\d"),
+    # (?<![a-z]) so "gemini" is not read as "mini".
+    "quick": (r"flash-lite|instant|(?<![a-z0-9])8b|(?<![a-z])mini|small|(?<![a-z])lite", r"flash"),
+}
+
+
+def _task_kind(prompt: str) -> str:
+    """'code', 'reasoning', 'quick' or 'general' - enough to order the routes."""
+    p = (prompt or "").lower()
+    if re.search(r"```|\b(code|function|class|bug|debug|error|exception|stack ?trace|refactor|compile|"
+                 r"python|javascript|typescript|java|c\+\+|rust|golang|sql|html|css|react|api|regex|script)\b", p):
+        return "code"
+    if re.search(r"\b(prove|proof|derive|solve|equation|calculate|step by step|why does|reason|logic|"
+                 r"puzzle|compare .* and|analy[sz]e|strategy|plan)\b", p) or len(p) > 900:
+        return "reasoning"
+    if len(p) < 50 and not re.search(r"\b(explain|write|essay|detail|story|report|history)\b", p):
+        return "quick"
+    return "general"
+
+
+def _order_for_task(candidates: List[dict], kind: str) -> List[dict]:
+    """Stable reorder: the task's best shapes first, provider order otherwise."""
+    hints = _TASK_MODEL_HINTS.get(kind)
+    if not hints:
+        return candidates
+
+    def rank(c):
+        model = c["model"]
+        cooling = _route_in_cooldown(c["provider"], model)
+        for i, pattern in enumerate(hints):
+            if re.search(pattern, model, re.I):
+                return (cooling, i)
+        return (cooling, len(hints))
+    return sorted(candidates, key=rank)
+
+
+async def _auto_cloud_candidates(prompt: str = "") -> List[dict]:
     """Routes derived from whichever provider keys the user has configured.
 
     Saving a key is enough: the user does not also have to hand-pick a model.
+    With the prompt, the routes are ordered for the task: a coder model for
+    code, a thinking model for reasoning, a fast small one for a quick
+    question - each provider's list is taken wider so those can be found.
     """
+    kind = _task_kind(prompt) if prompt else "general"
     candidates: List[dict] = []
     for provider in _CLOUD_AUTO_PROVIDER_ORDER:
         env_name = _CLOUD_PROVIDER_ENV_VARS.get(provider)
         api_key = os.getenv(env_name, "").strip() if env_name else ""
         if not api_key:
             continue
-        for model in await _resolve_auto_cloud_models(provider, api_key):
-            candidates.append({"provider": provider, "model": model, "api_key": api_key})
-    return candidates
+        limit = 3 if kind == "general" else 8
+        for model in await _resolve_auto_cloud_models(provider, api_key, limit=limit):
+            candidates.append({"provider": provider, "model": model, "api_key": api_key, "task": kind})
+    return _order_for_task(candidates, kind)
 
 
 @app.get("/api/cloud/keys-status")
@@ -4535,7 +4584,7 @@ async def chat_interaction(chat_req: ChatRequest, db: Session = Depends(get_db),
         # when a model was picked by hand. Choosing a model that the provider
         # will not serve used to end the turn with "all routes unavailable"
         # instead of quietly using one that works.
-        auto_candidates = await _auto_cloud_candidates()
+        auto_candidates = await _auto_cloud_candidates(chat_req.prompt)
 
         # A model the user picked by hand is not a suggestion.
         #
