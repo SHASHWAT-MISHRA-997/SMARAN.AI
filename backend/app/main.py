@@ -2979,32 +2979,11 @@ def call_sd_txt2img_bridge(prompt: str, aspect: str = None,
                                             aspect=aspect, target=target)
             return f"![Generated Image](/api/static/{filename})"
         except Exception as local_err:
-            logger.warning("In-process local image generator failed (%s). Engaging high-fidelity online synthesis fallback.", local_err)
-            import urllib.parse
-            import uuid
-            w, h = 1024, 1024
-            if aspect == "16:9":
-                w, h = 1280, 720
-            elif aspect == "9:16":
-                w, h = 720, 1280
-            elif aspect == "4:3":
-                w, h = 1024, 768
-            elif aspect == "3:4":
-                w, h = 768, 1024
-            encoded_prompt = urllib.parse.quote(prompt.strip() or "high quality digital artwork")
-            online_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={w}&height={h}&nologo=true&enhance=true"
-            try:
-                os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-                img_res = requests.get(online_url, timeout=30)
-                if img_res.ok and len(img_res.content) > 1000:
-                    filename = f"gen_{uuid.uuid4().hex[:12]}.png"
-                    target_path = os.path.join(settings.UPLOAD_DIR, filename)
-                    with open(target_path, "wb") as f:
-                        f.write(img_res.content)
-                    return f"![Generated Image](/api/static/{filename})"
-            except Exception as online_err:
-                logger.error("Online image save failed: %s", online_err)
-            return f"![Generated Image]({online_url})"
+            # This used to send the prompt to a free third-party site and show
+            # its picture under "Creating your image on this device". Nothing
+            # leaves this machine without saying so: hosted generation is
+            # app.media_router, named in the reply when it is used.
+            raise RuntimeError("the local image engine failed: %s" % local_err) from local_err
 
 
 _CLOUD_PROVIDER_ENDPOINTS = {
@@ -4417,6 +4396,56 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
             from app.local_image import read_image_options
 
             clean_prompt, want_aspect, want_target = read_image_options(clean_prompt)
+
+            from app import media_router
+            first = next((src for src in media_router.image_sources() if src["usable"]), None)
+            if first and first["kind"] == "cloud":
+                sizes = {"16:9": (1344, 768), "9:16": (768, 1344), "4:3": (1152, 896),
+                         "3:4": (896, 1152), "1:1": (1024, 1024)}
+                width, height = sizes.get(want_aspect or "1:1", (1024, 1024))
+                yield json.dumps({"token": "Making your image with %s - the prompt is sent to "
+                                           "NVIDIA to draw it.\n\n" % first["label"]}) + "\n"
+                os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+                target = os.path.join(settings.UPLOAD_DIR, "gen_%s.png" % uuid.uuid4().hex[:12])
+                cloud_prefs = {"image_source": "cloud"}
+                try:
+                    loop = asyncio.get_running_loop()
+                    made = await loop.run_in_executor(None, lambda: media_router.generate_image(
+                        clean_prompt, target, width=width, height=height, prefs=cloud_prefs))
+                except Exception as cloud_error:  # noqa: BLE001 - this machine may still draw it
+                    made = None
+                    if media_router.load_prefs().get("image_source") == "cloud":
+                        yield json.dumps({"token": "Image generation failed: %s" % cloud_error}) + "\n"
+                        return
+                    yield json.dumps({"token": "The hosted model could not make it (%s). "
+                                               "Making it on this computer instead.\n\n" % cloud_error}) + "\n"
+                if made:
+                    filename = os.path.basename(made["path"])
+                    img_tag = "![Generated Image](/api/static/%s)" % filename
+                    summary = "Made by %s in %.1f s, %dx%d." % (made["made_by"], made["seconds"],
+                                                                 made["width"], made["height"])
+                    db_session = SessionLocal()
+                    try:
+                        db_session.add(ChatMessage(session_id=session.id, role="user", content=chat_req.prompt))
+                        db_session.add(ChatMessage(session_id=session.id, role="assistant",
+                                                   content=summary + "\n\n" + img_tag, references="[]",
+                                                   model_used=made["model"],
+                                                   response_time_ms=made["seconds"] * 1000))
+                        db_session.commit()
+                    except Exception:
+                        db_session.rollback()
+                    finally:
+                        db_session.close()
+                    yield json.dumps({"model_routed": made["model"], "execution_source": "Cloud API - Nvidia",
+                                      "route_task": "image", "route_task_label": "making an image"}) + "\n"
+                    yield json.dumps({"token": summary + "\n\n" + img_tag}) + "\n"
+                    return
+            elif media_router.load_prefs().get("image_source") == "cloud":
+                reasons = "; ".join("%s: %s" % (src["label"], src["why"]) for src in media_router.image_sources())
+                yield json.dumps({"token": "No hosted image model can run right now - %s. "
+                                           "Allow this computer in Images settings, or fix the key." % reasons}) + "\n"
+                return
+
             shape = plan_image(available_model(), want_aspect or "1:1")
             yield json.dumps({"token": "Creating your image on this device: "
                                        "%dx%d, %d steps.\n\n"
@@ -4448,6 +4477,8 @@ async def _chat_turn(chat_req: ChatRequest, db: Session, current_user: User):
                              exc_info=True)
             try:
                 loop = asyncio.get_running_loop()
+                # The chat model holds most of the card; the picture needs it.
+                await loop.run_in_executor(None, media_router.free_gpu_for_media)
                 img_tag = await loop.run_in_executor(
                     None, call_sd_txt2img_bridge, clean_prompt,
                     want_aspect, want_target)

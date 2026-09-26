@@ -33,13 +33,30 @@ _jobs_lock = threading.Lock()
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
-    model: str = Field("sd15")
+    #: "auto" lets app.media_router pick - NVIDIA-hosted FLUX or this machine,
+    #: as Settings allow. A local model id makes it here, with that model.
+    model: str = Field("auto")
     width: Optional[int] = Field(None, ge=256, le=1536)
     height: Optional[int] = Field(None, ge=256, le=1536)
     steps: int = Field(28, ge=1, le=100)
     guidance_scale: float = Field(7.0, ge=0, le=20)
     seed: Optional[int] = None
     negative_prompt: Optional[str] = None
+
+
+class PrefsChange(BaseModel):
+    image_source: str
+
+
+@router.put("/prefs")
+async def change_prefs(change: PrefsChange):
+    """Automatic, local only, or cloud only - where pictures may be made."""
+    from app import media_router
+    try:
+        prefs = media_router.save_prefs({"image_source": change.image_source})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"prefs": prefs, "sources": media_router.image_sources(prefs=prefs)}
 
 
 @router.get("/models")
@@ -50,8 +67,12 @@ async def models():
     for model in MODELS:
         verdict = evaluate(model, hw)
         rows.append({**model.as_dict(), **verdict})
+    from app import media_router
+    prefs = media_router.load_prefs()
     return {
         "models": rows,
+        "sources": media_router.image_sources(prefs=prefs),
+        "prefs": prefs,
         "hardware": hw.as_dict(),
         "note": (
             "Downloads are the fp16 weights a pipeline actually fetches, not "
@@ -81,7 +102,16 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
         )
         if req.negative_prompt:
             kwargs["negative_prompt"] = req.negative_prompt
-        result = generate(**kwargs)
+        if req.model == "auto":
+            from app import media_router
+            result = media_router.generate_image(
+                req.prompt, out_path, width=req.width, height=req.height,
+                guidance_scale=req.guidance_scale, seed=req.seed,
+                negative_prompt=req.negative_prompt, progress=note)
+        else:
+            from app import media_router
+            media_router.free_gpu_for_media(note)
+            result = generate(**kwargs)
         # A copy in Settings -> Cowork's files folder, where it can be found.
         from app import cowork_prefs
         final = result.get("path", out_path) if isinstance(result, dict) else out_path
@@ -91,6 +121,12 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
         with _jobs_lock:
             _jobs[job_id].update(status="completed", result=result, updated=time.time())
     except ImageError as exc:
+        with _jobs_lock:
+            _jobs[job_id].update(status="failed", error=str(exc), updated=time.time())
+    except Exception as exc:  # noqa: BLE001 - MediaError and friends, said plainly
+        from app.media_router import MediaError
+        if not isinstance(exc, MediaError):
+            raise
         with _jobs_lock:
             _jobs[job_id].update(status="failed", error=str(exc), updated=time.time())
     except Exception as exc:
@@ -108,14 +144,20 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
 async def start(req: GenerateRequest):
     from app.config import settings
 
-    model = by_id(req.model)
-    if not model:
-        raise HTTPException(status_code=400, detail="No image model called %r." % req.model)
+    if req.model == "auto":
+        from app import media_router
+        if not any(s["usable"] for s in media_router.image_sources()):
+            reasons = "; ".join("%s: %s" % (s["label"], s["why"]) for s in media_router.image_sources())
+            raise HTTPException(status_code=409, detail="No image source can run right now - %s." % reasons)
+    else:
+        model = by_id(req.model)
+        if not model:
+            raise HTTPException(status_code=400, detail="No image model called %r." % req.model)
 
-    # Refuse before starting rather than failing minutes in, and say why.
-    verdict = evaluate(model, probe())
-    if not verdict["runnable"]:
-        raise HTTPException(status_code=409, detail=verdict["reason"])
+        # Refuse before starting rather than failing minutes in, and say why.
+        verdict = evaluate(model, probe())
+        if not verdict["runnable"]:
+            raise HTTPException(status_code=409, detail=verdict["reason"])
 
     job_id = uuid.uuid4().hex[:12]
     out_dir = os.path.join(settings.DATA_DIR, "images")
@@ -164,7 +206,9 @@ async def file(job_id: str):
 
     if not re.fullmatch(r"[a-f0-9]{12}", job_id):
         raise HTTPException(status_code=404, detail="No such image.")
-    path = os.path.join(settings.DATA_DIR, "images", "%s.png" % job_id)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="That image is not on disk.")
-    return FileResponse(path, media_type="image/png")
+    # PNG from this machine, JPEG from NVIDIA - whichever was made.
+    for extension, media_type in ((".png", "image/png"), (".jpg", "image/jpeg")):
+        path = os.path.join(settings.DATA_DIR, "images", job_id + extension)
+        if os.path.isfile(path):
+            return FileResponse(path, media_type=media_type)
+    raise HTTPException(status_code=404, detail="That image is not on disk.")

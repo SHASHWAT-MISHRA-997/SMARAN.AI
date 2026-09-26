@@ -71,8 +71,14 @@ const ImageStudio = () => {
       // Default to the first model this machine can actually run, rather than
       // the first in the list - otherwise the form opens pre-set to something
       // that refuses.
+      // Automatic when anything can make a picture - the hosted model or this
+      // machine, as Settings allow; otherwise the first local model, so the
+      // screen says what it would need.
+      const anySource = (data.sources || []).some((src) => src.usable);
       const usable = (data.models || []).find((m) => m.runnable) || (data.models || [])[0];
-      if (usable) {
+      if (anySource) {
+        setModel('auto');
+      } else if (usable) {
         setModel(usable.id);
         if (usable.default_size) {
           setSize({ label: 'Square', width: usable.default_size, height: usable.default_size, hint: '1:1' });
@@ -88,7 +94,28 @@ const ImageStudio = () => {
   useEffect(() => { loadModels(); }, [loadModels]);
   useEffect(() => () => window.clearTimeout(polling.current), []);
 
-  const chosen = (catalogue?.models || []).find((m) => m.id === model);
+  const sources = catalogue?.sources || [];
+  const firstSource = sources.find((src) => src.usable);
+  const chosen = model === 'auto'
+    ? { id: 'auto', runnable: Boolean(firstSource),
+        reason: sources.map((src) => `${src.label}: ${src.why}`).join('; ') || 'No source is allowed.' }
+    : (catalogue?.models || []).find((m) => m.id === model);
+  const imageSource = catalogue?.prefs?.image_source || 'auto';
+
+  const changeSource = async (value) => {
+    setError('');
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/image/prefs`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_source: value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'The setting was not saved.');
+      setCatalogue((current) => ({ ...current, prefs: data.prefs, sources: data.sources }));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
   // Already on screen when the next request is spoken.
   useEffect(() => {
@@ -115,6 +142,7 @@ const ImageStudio = () => {
             height: record.result?.height,
             seed: record.result?.seed,
             model: record.result?.model,
+            ext: String(record.result?.path || '').toLowerCase().endsWith('.jpg') ? 'jpg' : 'png',
           }, ...all].slice(0, 24));
           return;
         }
@@ -183,8 +211,10 @@ const ImageStudio = () => {
             <ImageIcon className="h-5 w-5 text-indigo-500" /> Images
           </h1>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Pictures made on this machine. Nothing is sent to a service, and
-            the model files stay on your disk once downloaded.
+            Automatic picks the best source that can answer: a hosted model
+            when you allow it (your prompt is sent to that service), otherwise
+            this computer, where nothing leaves the machine. Every picture says
+            which one made it.
           </p>
         </div>
 
@@ -223,6 +253,9 @@ const ImageStudio = () => {
               <label className="block">
                 <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-zinc-500">Model</span>
                 <select value={model} onChange={(e) => setModel(e.target.value)} className={field}>
+                  <option value="auto" disabled={!firstSource}>
+                    Automatic — best available{firstSource ? ` (now: ${firstSource.label})` : ' — nothing can run'}
+                  </option>
                   {(catalogue.models || []).map((m) => (
                     <option key={m.id} value={m.id} disabled={!m.runnable}>
                       {m.display_name}{m.runnable ? '' : ' — cannot run here'}
@@ -245,6 +278,29 @@ const ImageStudio = () => {
               </label>
             </div>
 
+            {/* Where Automatic may make a picture, and what each source is
+                doing right now - usable, or why not. */}
+            <div className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+              <label className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Where pictures are made</span>
+                <select value={imageSource} onChange={(e) => changeSource(e.target.value)} className={`${field} w-auto`}
+                        aria-label="Where pictures are made">
+                  <option value="auto">Automatic — hosted model first, this computer if not</option>
+                  <option value="local">This computer only — nothing is sent anywhere</option>
+                  <option value="cloud">Hosted models only</option>
+                </select>
+              </label>
+              <ul className="mt-2 space-y-1 text-[11px]">
+                {sources.map((src) => (
+                  <li key={`${src.kind}-${src.model}`} className="flex items-center gap-2">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${src.usable ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
+                    <span className="font-bold text-zinc-700 dark:text-zinc-200">{src.label}</span>
+                    <span className="text-zinc-500">{src.usable ? (src.kind === 'cloud' ? 'ready — prompt goes to NVIDIA' : 'ready — stays on this computer') : src.why}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
             {/* The reason a model will not run, from the engine rather than
                 guessed here: it knows the card and the weights. */}
             {chosen && !chosen.runnable && (
@@ -252,7 +308,7 @@ const ImageStudio = () => {
                 {chosen.reason}
               </p>
             )}
-            {chosen?.runnable && (
+            {chosen?.runnable && model !== 'auto' && (
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                 {chosen.download_gb ? `About ${chosen.download_gb} GB downloads the first time it is used. ` : ''}
                 {chosen.notes || ''}
@@ -324,7 +380,8 @@ const ImageStudio = () => {
               {(job.messages || []).slice(-6).map((line, i) => <li key={i}>{line}</li>)}
             </ul>
             <p className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">
-              The first run of a model downloads its weights, which can take a while.
+              A hosted model answers in seconds. On this computer, the first run of a model
+              downloads its weights, which can take a while.
             </p>
           </div>
         )}
@@ -345,10 +402,17 @@ const ImageStudio = () => {
                   `${latest.result?.width}×${latest.result?.height}`,
                   latest.result?.seed === null || latest.result?.seed === undefined
                     ? null : `seed ${latest.result.seed}`,
-                  latest.result?.model,
+                  latest.result?.made_by || latest.result?.model,
+                  latest.result?.seconds ? `${latest.result.seconds} s` : null,
                 ].filter(Boolean).join(' · ')}
+                {latest.result?.fallback_reason && (
+                  <span className="mt-1 block text-amber-600 dark:text-amber-300">
+                    Not the first choice: {latest.result.fallback_reason}
+                  </span>
+                )}
               </span>
-              <a href={`${API_BASE}/api/image/file/${finishedId}`} download={`smaran-${finishedId}.png`}
+              <a href={`${API_BASE}/api/image/file/${finishedId}`}
+                 download={`smaran-${finishedId}.${String(latest.result?.path || '').toLowerCase().endsWith('.jpg') ? 'jpg' : 'png'}`}
                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-bold dark:border-zinc-700">
                 <Download className="h-3.5 w-3.5" /> Save
               </a>

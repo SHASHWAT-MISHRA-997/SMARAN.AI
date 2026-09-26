@@ -72,6 +72,14 @@ class GenerateRequest(BaseModel):
     seed: Optional[int] = None
 
 
+@router.get("/sources")
+async def sources():
+    """Where a video can be made, which of those cost money, and why any is unavailable."""
+    import asyncio as _asyncio
+    from app import media_router
+    return {"sources": await _asyncio.to_thread(media_router.video_sources)}
+
+
 @router.get("/capabilities")
 async def capabilities(capability: str = "text-to-video"):
     """What this machine can run, and the reason where it cannot."""
@@ -319,6 +327,12 @@ def _run(job_id: str, req: GenerateRequest, out_path: str) -> None:
         # An estimate is a courtesy; failing to produce one must never stop the
         # generation the user actually asked for.
         logger.warning("video job %s: could not estimate duration", job_id, exc_info=True)
+
+    try:
+        from app import media_router
+        media_router.free_gpu_for_media(note)
+    except Exception:  # noqa: BLE001 - freeing memory is a help, not a requirement
+        pass
 
     try:
         from .continuity import plan_sequence

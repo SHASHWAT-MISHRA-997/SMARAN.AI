@@ -32,6 +32,31 @@ const field = 'w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-
   + 'px-3 py-2.5 text-sm text-zinc-900 dark:text-white outline-none focus:border-indigo-500';
 
 
+/* Where a video can be made, which of those charge money, and why any is not
+   available - read from the backend, not assumed. */
+const VideoSources = () => {
+  const [sources, setSources] = useState(null);
+  useEffect(() => {
+    fetchWithAuth(`${API_BASE}/api/video/sources`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setSources(data?.sources || null))
+      .catch(() => setSources(null));
+  }, []);
+  if (!sources?.length) return null;
+  return (
+    <ul className="mt-2 space-y-1 text-[11px]" aria-label="Where videos can be made">
+      {sources.map((src) => (
+        <li key={src.label} className="flex flex-wrap items-center gap-2">
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${src.usable ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
+          <span className="font-bold text-zinc-700 dark:text-zinc-200">{src.label}</span>
+          {src.paid && <span className="rounded bg-amber-500/15 px-1 text-[10px] font-bold text-amber-600 dark:text-amber-300">paid</span>}
+          <span className="text-zinc-500">{src.usable ? 'ready' : src.why}</span>
+        </li>
+      ))}
+    </ul>
+  );
+};
+
 const VideoStudio = () => {
   const [install, setInstall] = useState(null);
   const [capability, setCapability] = useState(null);
@@ -174,8 +199,10 @@ const VideoStudio = () => {
           </h1>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
             Videos rendered on this machine, from a few seconds up to an hour. Nothing is uploaded, and the
-            weights stay on your disk once fetched.
+            weights stay on your disk once fetched. Hosted video services charge per video, so they are
+            listed but only used when you set one up.
           </p>
+          <VideoSources />
         </div>
 
         {loadError && (

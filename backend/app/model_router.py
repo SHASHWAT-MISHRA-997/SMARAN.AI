@@ -134,6 +134,7 @@ def plain_reason(kind: str) -> str:
         "server": "the provider had an error",
         "timeout": "it did not answer in time",
         "empty": "it answered with nothing",
+        "refused": "its safety filter declined this prompt",
     }.get(kind, "it failed")
 
 
